@@ -8,7 +8,7 @@
       "category": "analysis",
       "summary": "对输入图层做缓冲区分析。",
       "keywords": ["buffer", "缓冲", "缓冲区", "距离"],
-      "model_card": "Use analysis.buffer to create a buffer feature class. Arguments: input_layer, distance, output_name, output_workspace optional when MXD is unsaved.",
+      "model_card": "Use analysis.buffer to create a buffer feature class. Arguments: input_layer, distance, output_name, output_workspace optional when MXD is unsaved. output_workspace may be a folder or a .gdb path.",
       "parameters_schema": {
         "type": "object",
         "required": ["input_layer", "distance", "output_name"],
@@ -27,7 +27,7 @@
       "category": "analysis",
       "summary": "用裁剪图层裁剪输入图层。",
       "keywords": ["clip", "裁剪"],
-      "model_card": "Use analysis.clip to clip input features by clip features. Arguments: input_layer, clip_layer, output_name, output_workspace optional when MXD is unsaved.",
+      "model_card": "Use analysis.clip to clip input features by clip features. Arguments: input_layer, clip_layer, output_name, output_workspace optional when MXD is unsaved. output_workspace may be a folder or a .gdb path.",
       "parameters_schema": {
         "type": "object",
         "required": ["input_layer", "clip_layer", "output_name"],
@@ -46,7 +46,7 @@
       "category": "analysis",
       "summary": "对多个图层做相交分析。",
       "keywords": ["intersect", "相交分析", "叠加"],
-      "model_card": "Use analysis.intersect to intersect multiple input layers. Arguments: input_layers, output_name, output_workspace optional when MXD is unsaved.",
+      "model_card": "Use analysis.intersect to intersect multiple input layers. Arguments: input_layers, output_name, output_workspace optional when MXD is unsaved. output_workspace may be a folder or a .gdb path.",
       "parameters_schema": {
         "type": "object",
         "required": ["input_layers", "output_name"],
@@ -65,7 +65,7 @@
       "category": "analysis",
       "summary": "按字段融合要素。",
       "keywords": ["dissolve", "融合", "按字段合并"],
-      "model_card": "Use analysis.dissolve to dissolve features. Arguments: input_layer, output_name, dissolve_fields optional, output_workspace optional when MXD is unsaved.",
+      "model_card": "Use analysis.dissolve to dissolve features. Arguments: input_layer, output_name, dissolve_fields optional, output_workspace optional when MXD is unsaved. output_workspace may be a folder or a .gdb path.",
       "parameters_schema": {
         "type": "object",
         "required": ["input_layer", "output_name"],
@@ -84,7 +84,7 @@
       "category": "analysis",
       "summary": "投影转换图层。",
       "keywords": ["project", "投影", "坐标转换"],
-      "model_card": "Use analysis.project to project a layer. Arguments: input_layer, output_name, spatial_reference, output_workspace optional when MXD is unsaved.",
+      "model_card": "Use analysis.project to project a layer. Arguments: input_layer, output_name, spatial_reference, output_workspace optional when MXD is unsaved. output_workspace may be a folder or a .gdb path.",
       "parameters_schema": {
         "type": "object",
         "required": ["input_layer", "output_name", "spatial_reference"],
@@ -103,7 +103,7 @@
       "category": "analysis",
       "summary": "执行空间连接。",
       "keywords": ["spatial join", "空间连接"],
-      "model_card": "Use analysis.spatial_join for ArcPy SpatialJoin_analysis. Arguments: target_layer, join_layer, output_name, output_workspace optional when MXD is unsaved.",
+      "model_card": "Use analysis.spatial_join for ArcPy SpatialJoin_analysis. Arguments: target_layer, join_layer, output_name, output_workspace optional when MXD is unsaved. output_workspace may be a folder or a .gdb path.",
       "parameters_schema": {
         "type": "object",
         "required": ["target_layer", "join_layer", "output_name"],

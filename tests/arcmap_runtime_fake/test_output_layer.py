@@ -1,6 +1,7 @@
 import importlib.util
 import pathlib
 import sys
+import tempfile
 import types
 import unittest
 
@@ -57,6 +58,28 @@ class OutputLayerTests(unittest.TestCase):
         self.assertEqual(calls["refresh_toc"], 1)
         self.assertEqual(calls["refresh_view"], 1)
         self.assertTrue(result["already_visible"])
+
+    def test_output_workspace_folder_creates_default_gdb(self):
+        calls = {"created": []}
+
+        fake_arcpy = types.SimpleNamespace()
+        fake_arcpy.Exists = lambda path: False
+
+        def create_file_gdb(folder, name):
+            calls["created"].append((folder, name))
+
+        fake_arcpy.CreateFileGDB_management = create_file_gdb
+        sys.modules["arcpy"] = fake_arcpy
+
+        spec = importlib.util.spec_from_file_location("common_output_workspace", COMMON_PATH)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = module.output_feature_class({"mxd_path": ""}, "nanjing_buffer", directory)
+
+        self.assertTrue(output.endswith(r"ArcMapAI_Output.gdb\nanjing_buffer"))
+        self.assertEqual(calls["created"][0][1], "ArcMapAI_Output.gdb")
 
 
 class FakeLayer(object):

@@ -99,6 +99,33 @@ class WorkflowStore:
             ).fetchall()
         return [_row_to_dict(row) for row in rows]
 
+    def latest_clarification(self, max_age_seconds: int = 1800) -> Optional[Dict[str, Any]]:
+        clarifications = self.recent_clarifications(max_age_seconds=max_age_seconds, limit=10)
+        return clarifications[0] if clarifications else None
+
+    def recent_clarifications(self, max_age_seconds: int = 1800, limit: int = 10) -> List[Dict[str, Any]]:
+        cutoff = time.time() - max_age_seconds
+        with self._connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, status, command, context_hash, workflow_json, selected_operations_json, created_at, updated_at, result_json
+                FROM workflows
+                WHERE status = 'draft' AND updated_at >= ?
+                ORDER BY updated_at DESC
+                LIMIT ?
+                """,
+                (cutoff, limit)
+            ).fetchall()
+        clarifications = []
+        for row in rows:
+            item = _row_to_dict(row)
+            if item["workflow"].get("action") == "clarify":
+                clarifications.append(item)
+                continue
+            if item["workflow"].get("action") in ("execute", "unsupported"):
+                break
+        return clarifications
+
     def clear_workflows(self) -> Dict[str, Any]:
         with self._connection() as conn:
             conn.execute("DELETE FROM workflows")

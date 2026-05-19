@@ -74,7 +74,7 @@
       "category": "selection",
       "summary": "导出图层当前已选要素为新要素类。",
       "keywords": ["export selected", "导出选择", "导出选中"],
-      "model_card": "Use selection.export_selected_features to export selected features. Arguments: layer, output_name, output_workspace optional when MXD is unsaved.",
+      "model_card": "Use selection.export_selected_features to export selected features. Arguments: layer, output_name, output_workspace optional when MXD is unsaved. output_workspace may be a folder or a .gdb path.",
       "parameters_schema": {
         "type": "object",
         "required": ["layer", "output_name"],

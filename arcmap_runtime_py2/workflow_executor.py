@@ -75,6 +75,9 @@ def _validate_arguments(step_id, arguments, schema):
 
 def _call_executor(executor_path, context, arguments, step_outputs):
     module_name, function_name = executor_path.rsplit(".", 1)
+    if module_name.startswith("operations."):
+        common = importlib.import_module("operations.common")
+        reload(common)
     module = importlib.import_module(module_name)
     module = reload(module)
     function = getattr(module, function_name)

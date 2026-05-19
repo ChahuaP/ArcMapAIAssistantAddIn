@@ -237,6 +237,77 @@ class RouterAndValidatorTests(unittest.TestCase):
         row = self._plan_with_fake_client(client, "给 nanjing 做 10 米缓冲区，输出到 D:/data/out.gdb", _context(is_saved=False))
         self.assertEqual(row["workflow"]["action"], "execute")
 
+    def test_planner_continues_latest_clarification_answer(self):
+        client = FakeDeepSeekClient({
+            "action": "execute",
+            "summary": "将对 nanjing 生成 2 千米缓冲区，输出到 D 盘。",
+            "steps": [
+                {
+                    "id": "step_1",
+                    "operation": "analysis.buffer",
+                    "arguments": {
+                        "input_layer": "nanjing",
+                        "distance": "2 Kilometers",
+                        "output_name": "nanjing_buffer_2km",
+                        "output_workspace": "D:\\"
+                    },
+                    "reason": "生成缓冲区"
+                }
+            ]
+        })
+        with tempfile.TemporaryDirectory() as directory:
+            store = WorkflowStore(pathlib.Path(directory) / "workflows.sqlite")
+            store.create_draft(
+                "给南京创建2km的缓冲区",
+                "hash",
+                {"action": "clarify", "summary": "请告诉我输出到哪个文件夹或 GDB。", "steps": []},
+                []
+            )
+            planner = Planner(catalog=self.catalog, router=self.router, client=client, store=store)
+            row = planner.plan("输出到d盘", _context(is_saved=False))
+
+        self.assertEqual(row["workflow"]["action"], "execute")
+        self.assertIn("给南京创建2km的缓冲区", client.messages[-1]["content"])
+        self.assertIn("用户补充", client.messages[-1]["content"])
+
+    def test_planner_skips_orphan_output_location_clarification(self):
+        client = FakeDeepSeekClient({
+            "action": "execute",
+            "summary": "将对 nanjing 生成 2 千米缓冲区，输出到 D 盘。",
+            "steps": [
+                {
+                    "id": "step_1",
+                    "operation": "analysis.buffer",
+                    "arguments": {
+                        "input_layer": "nanjing",
+                        "distance": "2 Kilometers",
+                        "output_name": "nanjing_buffer_2km",
+                        "output_workspace": "D:\\"
+                    },
+                    "reason": "生成缓冲区"
+                }
+            ]
+        })
+        with tempfile.TemporaryDirectory() as directory:
+            store = WorkflowStore(pathlib.Path(directory) / "workflows.sqlite")
+            store.create_draft(
+                "给南京创建2km的缓冲区",
+                "hash",
+                {"action": "clarify", "summary": "这个操作会生成新数据，但当前输出位置还不明确。请告诉我输出到哪个文件夹或 GDB。", "steps": []},
+                []
+            )
+            store.create_draft(
+                "输出到d盘",
+                "hash",
+                {"action": "clarify", "summary": "请问您想输出什么内容？例如导出地图为PDF、导出图层属性表为CSV，或者导出选中的要素？", "steps": []},
+                []
+            )
+            planner = Planner(catalog=self.catalog, router=self.router, client=client, store=store)
+            row = planner.plan("输出到d盘", _context(is_saved=False))
+
+        self.assertEqual(row["workflow"]["action"], "execute")
+        self.assertIn("给南京创建2km的缓冲区", client.messages[-1]["content"])
+
     def test_planner_rejects_open_attribute_table_as_unsupported(self):
         client = FakeDeepSeekClient({
             "action": "execute",

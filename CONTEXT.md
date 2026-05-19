@@ -1,8 +1,8 @@
 # CONTEXT
 
-当前任务：按产品逻辑重做上下文同步、通用追问和输出图层去重。
+当前任务：修复追问续答和显式输出目录执行问题。
 
-上次位置：Add-in 已重新打包并安装为 1.2；本机网关已重启为 `0.8.7`；Extension 自动同步已回退。
+上次位置：Add-in 已重新打包并安装为 1.2；本机网关已重启为 `0.8.8`；Extension 自动同步已回退。
 
 近期关键决定与原因：
 - 使用 ArcMap Python Add-in 原生结构：`config.xml` + `Install/*.py` + `.esriaddin`，因为这是 ArcMap 可直接加载的插件格式。
@@ -45,7 +45,7 @@
 - 启动网关、规划前、执行前都不再向网关同步上下文；规划只使用网关里最近一次地图快照。
 - 保存 MXD 不再参与执行上下文 hash；用户从未保存变成已保存后，已审批任务不会仅因保存路径变化被拒绝。
 - 写数据能否执行仍以 ArcGIS 端执行前二次读取为准：当前 MXD 已保存才允许输出到同级 `ArcMapAI_Output.gdb`。
-- Gateway、Web 前端和 `open_web.py` 版本号统一升到 `0.8.7`。
+- Gateway、Web 前端和 `open_web.py` 版本号统一升到 `0.8.8`。
 - ArcGIS runtime 现在只向版本正确的网关自动同步；如果检测到旧网关，会先停掉旧 8765 监听进程再启动新网关。
 - `open_web.py` 也会检测旧网关版本；版本不一致时自动重启网关，避免网页误显示“无需重启”。
 - 新增版本一致性测试，防止 `APP_VERSION`、`EXPECTED_GATEWAY_VERSION`、`EXPECTED_APP_VERSION` 再次脱节。
@@ -55,7 +55,10 @@
 - 右侧改成“任务队列”：只显示可执行任务；追问/不支持留在聊天中；任务卡支持确认发送、删除、执行步骤、技术详情。
 - 写数据任务不再一律要求保存 MXD；如果当前 MXD 未保存且输出位置不明确，Planner 返回追问，要求用户说明输出文件夹或 GDB。
 - Planner 的追问逻辑已通用化：缺必要参数、图层不存在/重名、字段不存在、输出位置不明确都会转成 `clarify`。
+- Planner 支持最近追问续答：上一条是 `clarify` 时，类似“输出到 D 盘”的短回答会并回原始任务重新规划，而不是当成全新任务。
+- Planner 会跳过由旧 bug 产生的孤立追问；例如“输出到 D 盘”被错误问成“想输出什么内容”后，再次输入输出位置仍会回到更早的缓冲区任务。
 - 分析/导出类操作支持显式 `output_workspace` 或 `output_folder`；MXD 已保存时仍可默认输出到 MXD 同级目录。
+- `output_workspace` 支持普通文件夹和 `.gdb` 路径；普通文件夹会使用或创建其中的 `ArcMapAI_Output.gdb`。
 - 输出图层添加改为去重：如果 ArcMap 已因地理处理自动把输出加到 TOC，runtime 不再重复 `AddLayer`。
 - AI 规划允许返回 `execute`、`clarify`、`unsupported`，不再要求用户输入完全匹配操作名。
 - 模型返回 `action=buffer/run/执行` 且步骤合法时，planner 会规范为 `execute`，避免 “Workflow action must be execute, clarify, or unsupported.”。
@@ -149,3 +152,6 @@
 - `python .\ArcMapAIAssistantAddIn\makeaddin.py`：通过，Add-in 包内 `config.xml` 为 1.2，`<Extensions />`，无 `AutoSyncExtension`，无 Button `image` 属性
 - `.\packaging\install.ps1`：通过，已覆盖用户 AddIns 目录
 - `Invoke-RestMethod http://127.0.0.1:8765/health`：通过，返回 `app_version=0.8.7`
+- `python -m unittest discover -s tests -p "test_*.py" -v`：通过，32 个测试
+- `python -c "import ast, pathlib; ast.parse(...)"`：通过，37 个 Python 文件语法解析正常
+- `Invoke-RestMethod http://127.0.0.1:8765/health`：通过，返回 `app_version=0.8.8`

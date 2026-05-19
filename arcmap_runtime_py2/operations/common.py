@@ -65,9 +65,13 @@ def find_layer(context, layer_value):
 
 def output_gdb(context, output_workspace=None):
     if output_workspace:
-        gdb = _text(output_workspace)
-        if not gdb.lower().endswith(u".gdb"):
-            raise OperationError(u"Output workspace must be a file geodatabase: %s" % gdb)
+        workspace = _text(output_workspace)
+        if workspace.lower().endswith(u".gdb"):
+            gdb = workspace
+        else:
+            if not os.path.isdir(workspace):
+                raise OperationError(u"Output folder not found: %s" % workspace)
+            gdb = os.path.join(workspace, "ArcMapAI_Output.gdb")
         folder = os.path.dirname(gdb)
         name = os.path.basename(gdb)
         if not folder or not os.path.isdir(folder):

@@ -48,6 +48,7 @@ class Planner:
         self.store = store or WorkflowStore()
 
     def plan(self, command: str, context: Dict[str, Any]) -> Dict[str, Any]:
+        command = self._effective_command(command)
         local_workflow = _local_workflow(command)
         if local_workflow is not None:
             row = self.store.create_draft(command, context_hash(context), local_workflow, [])
@@ -83,6 +84,12 @@ class Planner:
             "workflow": workflow
         })
         return row
+
+    def _effective_command(self, command: str) -> str:
+        for clarification in self.store.recent_clarifications():
+            if _looks_like_clarification_answer(command, clarification):
+                return clarification["command"] + "\n用户补充：" + command
+        return command
 
     def _messages(self, command: str, context: Dict[str, Any], selected_cards: List[Dict[str, Any]]) -> List[Dict[str, str]]:
         stable_catalog_payload = json.dumps(selected_cards, ensure_ascii=False, sort_keys=True)
@@ -248,6 +255,37 @@ def _closest_candidates(value: str, names: List[str]) -> List[str]:
     if matches:
         return matches[:5]
     return names[:5]
+
+
+def _looks_like_clarification_answer(command: str, clarification: Dict[str, Any]) -> bool:
+    text = (command or "").strip()
+    if not text:
+        return False
+    summary = clarification["workflow"].get("summary", "")
+    operation_words = ("缓冲", "裁剪", "相交", "融合", "投影", "导出", "选择", "缩放", "添加", "刷新")
+    has_operation = any(word in text for word in operation_words)
+    lowered = text.lower()
+    location_markers = ("输出", "保存", "存到", "放到", "文件夹", "gdb", ":\\", ":/", "盘")
+    if any(marker in summary for marker in ("输出到哪个", "哪个文件夹", "哪个 GDB", "哪个GDB", "输出位置")):
+        return any(marker in lowered for marker in location_markers) and not has_operation
+    if any(marker in summary for marker in ("想输出什么内容", "输出什么内容", "导出什么")):
+        content_words = ("地图", "pdf", "png", "csv", "属性表", "表", "要素", "图层")
+        return any(word in lowered for word in content_words) and not has_operation
+    if any(marker in summary for marker in ("哪个图层", "哪一个图层", "使用哪个图层", "没有“")):
+        return not any(marker in lowered for marker in location_markers) and not has_operation
+    if any(marker in summary for marker in ("哪个字段", "字段名", "没有字段")):
+        return not any(marker in lowered for marker in location_markers) and not has_operation
+    if len(text) <= 40:
+        return not has_operation
+    markers = (
+        "输出", "保存", "存到", "放到", "文件夹", "gdb", ":\\", ":/", "盘",
+        "用", "选择", "是", "不是", "就这个", "这个", "字段", "图层"
+    )
+    if any(marker in lowered for marker in markers):
+        return True
+    if any(marker in summary for marker in ("输出", "图层", "字段", "参数", "哪个", "哪一个")):
+        return not any(word in text for word in operation_words)
+    return False
 
 
 def normalize_step(step: Dict[str, Any], catalog: OperationCatalog | None = None) -> None:
