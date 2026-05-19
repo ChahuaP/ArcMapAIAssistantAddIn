@@ -8,6 +8,12 @@ import re
 import arcpy
 
 
+try:
+    unicode
+except NameError:
+    unicode = str
+
+
 SAFE_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
@@ -57,10 +63,22 @@ def find_layer(context, layer_value):
     return layers[index]
 
 
-def output_gdb(context):
+def output_gdb(context, output_workspace=None):
+    if output_workspace:
+        gdb = _text(output_workspace)
+        if not gdb.lower().endswith(u".gdb"):
+            raise OperationError(u"Output workspace must be a file geodatabase: %s" % gdb)
+        folder = os.path.dirname(gdb)
+        name = os.path.basename(gdb)
+        if not folder or not os.path.isdir(folder):
+            raise OperationError(u"Output workspace folder not found: %s" % folder)
+        if not arcpy.Exists(gdb):
+            arcpy.CreateFileGDB_management(folder, name)
+        return gdb
+
     mxd_path = context.get("mxd_path")
     if not mxd_path:
-        raise OperationError("Save the MXD before writing output.")
+        raise OperationError(u"当前 MXD 未保存。请指定输出 GDB，或先保存 MXD。")
     folder = os.path.dirname(mxd_path)
     gdb = os.path.join(folder, "ArcMapAI_Output.gdb")
     if not arcpy.Exists(gdb):
@@ -68,10 +86,16 @@ def output_gdb(context):
     return gdb
 
 
-def output_folder(context):
+def output_directory(context, output_folder=None):
+    if output_folder:
+        folder = _text(output_folder)
+        if not os.path.isdir(folder):
+            raise OperationError(u"Output folder not found: %s" % folder)
+        return folder
+
     mxd_path = context.get("mxd_path")
     if not mxd_path:
-        raise OperationError("Save the MXD before writing output.")
+        raise OperationError(u"当前 MXD 未保存。请指定输出文件夹，或先保存 MXD。")
     folder = os.path.join(os.path.dirname(mxd_path), "ArcMapAI_Output")
     if not os.path.isdir(folder):
         os.makedirs(folder)
@@ -84,8 +108,8 @@ def safe_output_name(name):
     return name
 
 
-def output_feature_class(context, output_name):
-    gdb = output_gdb(context)
+def output_feature_class(context, output_name, output_workspace=None):
+    gdb = output_gdb(context, output_workspace)
     name = safe_output_name(output_name)
     path = os.path.join(gdb, name)
     if arcpy.Exists(path):
@@ -93,8 +117,8 @@ def output_feature_class(context, output_name):
     return path
 
 
-def output_file(context, output_name, extension):
-    folder = output_folder(context)
+def output_file(context, output_name, extension, output_folder=None):
+    folder = output_directory(context, output_folder)
     name = safe_output_name(output_name)
     path = os.path.join(folder, name + extension)
     if os.path.exists(path):
@@ -105,9 +129,13 @@ def output_file(context, output_name, extension):
 def add_output_layer(path):
     mxd = current_mxd()
     df = active_data_frame(mxd)
+    if _layer_source_exists(mxd, df, path):
+        refresh()
+        return {"already_visible": True}
     layer = arcpy.mapping.Layer(path)
     arcpy.mapping.AddLayer(df, layer, "TOP")
     refresh()
+    return {"added": True}
 
 
 def refresh():
@@ -139,6 +167,28 @@ def _csv_value(value):
 def _text(value):
     if isinstance(value, unicode):
         return value
-    if isinstance(value, str):
+    if isinstance(value, bytes):
         return value.decode("utf-8", "replace")
     return unicode(value)
+
+
+def _layer_source_exists(mxd, df, path):
+    expected = _normalize_path(path)
+    for layer in arcpy.mapping.ListLayers(mxd, "", df):
+        source = _safe_data_source(layer)
+        if source and _normalize_path(source) == expected:
+            return True
+    return False
+
+
+def _safe_data_source(layer):
+    try:
+        if layer.supports("DATASOURCE"):
+            return layer.dataSource
+    except Exception:
+        pass
+    return None
+
+
+def _normalize_path(path):
+    return os.path.normcase(os.path.normpath(_text(path)))

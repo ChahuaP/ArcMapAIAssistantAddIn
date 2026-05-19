@@ -33,7 +33,7 @@ def execute(workflow_row, context):
         operation = operations[operation_id]
         arguments = step["arguments"]
         _validate_arguments(step["id"], arguments, operation["parameters_schema"])
-        _validate_write_policy(operation, context)
+        _validate_write_policy(operation, context, arguments)
         result = _call_executor(operation["executor"], context, arguments, step_outputs)
         step_outputs[step["id"]] = result
         results.append({"step_id": step["id"], "operation": operation_id, "result": result})
@@ -53,9 +53,12 @@ def _load_operations():
     return operations
 
 
-def _validate_write_policy(operation, context):
-    if operation["side_effects"] == "writes_data" and not context.get("is_saved"):
-        raise WorkflowExecutionError("This workflow writes output. Save the MXD before executing.")
+def _validate_write_policy(operation, context, arguments):
+    if operation["side_effects"] != "writes_data" or context.get("is_saved"):
+        return
+    if arguments.get("output_workspace") or arguments.get("output_folder"):
+        return
+    raise WorkflowExecutionError(u"当前 MXD 未保存。请先说明输出位置，或保存 MXD 后重新生成任务。")
 
 
 def _validate_arguments(step_id, arguments, schema):

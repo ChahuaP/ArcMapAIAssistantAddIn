@@ -32,7 +32,7 @@ def clear_selection(context, arguments, step_outputs):
 
 def export_selected_features(context, arguments, step_outputs):
     layer = common.find_layer(context, arguments["layer"])
-    output = common.output_feature_class(context, arguments["output_name"])
+    output = common.output_feature_class(context, arguments["output_name"], arguments.get("output_workspace"))
     arcpy.CopyFeatures_management(layer, output)
     common.add_output_layer(output)
     return {"output": output}

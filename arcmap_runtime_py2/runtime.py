@@ -23,14 +23,6 @@ reload(workflow_executor)
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 OPEN_WEB_CMD = os.path.join(REPO_ROOT, "OpenAssistantWeb.cmd")
 CREATE_NO_WINDOW = 0x08000000
-AUTO_SYNC_MIN_INTERVAL_SECONDS = 2.0
-AUTO_SYNC_GATEWAY_CHECK_INTERVAL_SECONDS = 10.0
-AUTO_SYNC_GATEWAY_TIMEOUT_SECONDS = 0.25
-
-_last_auto_sync_at = 0.0
-_last_auto_sync_hash = None
-_last_gateway_check_at = 0.0
-_last_gateway_available = False
 
 
 def show_message(text):
@@ -47,22 +39,14 @@ def open_web():
 
 def start_gateway():
     gateway_client.ensure_running()
-    _sync_context(force=True, start_gateway=False, show_confirmation=False)
     health = gateway_client.health()
     show_message(u"本地网关已启动：%s 个能力。" % health.get("operation_count"))
 
 
 def sync_context():
-    _sync_context(force=True, start_gateway=True, show_confirmation=False)
+    gateway_client.ensure_running()
+    _sync_current_context()
     show_message(u"已同步当前 ArcMap 上下文。")
-
-
-def auto_sync_context(event_name=None):
-    try:
-        return _sync_context(force=False, start_gateway=False, show_confirmation=False, event_name=event_name)
-    except Exception:
-        _log_event(u"auto_sync.failed", event_name)
-        return False
 
 
 def handle_command(command_text):
@@ -78,6 +62,7 @@ def handle_command(command_text):
             show_message(u"请在输入框输入：/key 你的DeepSeekKey。保存后输入框会自动清空。")
         elif command_text == "/open" or command_text == "/config":
             gateway_client.ensure_running()
+            _sync_current_context()
             open_web()
             show_message(u"已打开 Web 控制台。")
         elif command_text == "/start":
@@ -101,7 +86,7 @@ def handle_command(command_text):
 
 def open_assistant():
     gateway_client.ensure_running()
-    _sync_context(force=True, start_gateway=False, show_confirmation=False)
+    _sync_current_context()
     open_web()
 
 
@@ -116,9 +101,10 @@ def _save_key(api_key):
 
 
 def _plan(command_text):
-    context = context_reader.read_context()
-    gateway_client.sync_context(context)
-    _remember_synced_context(context)
+    stored = gateway_client.current_context()
+    if not stored:
+        raise RuntimeError(u"还没有地图上下文。请先点击“助手”或“同步”。")
+    context = stored["value"]
     response = gateway_client.plan(command_text, context)
     workflow = response["workflow"]
     open_web()
@@ -156,55 +142,21 @@ def _execute_pending():
         gateway_client.execution_result(workflow_id, "failed", result)
         raise
 
+    try:
+        updated_context = _sync_current_context()
+        result["context_hash"] = updated_context.get("context_hash")
+    except Exception as exc:
+        result["context_sync_warning"] = _exception_text(exc)
+        _log_event(u"context_sync_after_success.failed", _exception_text(exc))
+
     gateway_client.execution_result(workflow_id, "succeeded", result)
     show_message(u"工作流执行完成：%s" % result.get("summary", "succeeded"))
 
 
-def _sync_context(force, start_gateway, show_confirmation, event_name=None):
-    if start_gateway:
-        gateway_client.ensure_running()
-    elif not _gateway_available_for_auto_sync():
-        return False
-
-    now = time.time()
-    if not force and now - _last_auto_sync_at < AUTO_SYNC_MIN_INTERVAL_SECONDS:
-        return False
-
+def _sync_current_context():
     context = context_reader.read_context()
-    context_hash = context.get("context_hash")
-    if not force and context_hash and context_hash == _last_auto_sync_hash:
-        return False
-
     gateway_client.sync_context(context)
-    _remember_synced_context(context)
-    if show_confirmation:
-        show_message(u"已同步当前 ArcMap 上下文。")
-    return True
-
-
-def _gateway_available_for_auto_sync():
-    global _last_gateway_check_at
-    global _last_gateway_available
-
-    now = time.time()
-    if now - _last_gateway_check_at < AUTO_SYNC_GATEWAY_CHECK_INTERVAL_SECONDS:
-        return _last_gateway_available
-
-    _last_gateway_check_at = now
-    _last_gateway_available = gateway_client.is_compatible(timeout=AUTO_SYNC_GATEWAY_TIMEOUT_SECONDS)
-    return _last_gateway_available
-
-
-def _remember_synced_context(context):
-    global _last_auto_sync_at
-    global _last_auto_sync_hash
-    global _last_gateway_check_at
-    global _last_gateway_available
-
-    _last_auto_sync_at = time.time()
-    _last_auto_sync_hash = context.get("context_hash")
-    _last_gateway_check_at = _last_auto_sync_at
-    _last_gateway_available = True
+    return context
 
 
 def _log_event(kind, detail=None):

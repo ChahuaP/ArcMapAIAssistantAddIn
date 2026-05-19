@@ -172,6 +172,71 @@ class RouterAndValidatorTests(unittest.TestCase):
         row = self._plan_with_fake_client(client, "刷新地图")
         self.assertTrue(row["workflow"]["steps"][0]["reason"])
 
+    def test_planner_clarifies_output_location_when_unsaved_mxd_writes_data(self):
+        client = FakeDeepSeekClient({
+            "action": "execute",
+            "summary": "将对 nanjing 生成 10 米缓冲区。",
+            "steps": [
+                {
+                    "id": "step_1",
+                    "operation": "analysis.buffer",
+                    "arguments": {
+                        "input_layer": "nanjing",
+                        "distance": "10 Meters",
+                        "output_name": "nanjing_buffer_10m"
+                    },
+                    "reason": "生成缓冲区"
+                }
+            ]
+        })
+        row = self._plan_with_fake_client(client, "给 nanjing 做 10 米缓冲区", _context(is_saved=False))
+        self.assertEqual(row["workflow"]["action"], "clarify")
+        self.assertEqual(row["workflow"]["steps"], [])
+        self.assertIn("输出", row["workflow"]["summary"])
+
+    def test_planner_clarifies_unknown_layer(self):
+        client = FakeDeepSeekClient({
+            "action": "execute",
+            "summary": "将对 beijing 生成 10 米缓冲区。",
+            "steps": [
+                {
+                    "id": "step_1",
+                    "operation": "analysis.buffer",
+                    "arguments": {
+                        "input_layer": "beijing",
+                        "distance": "10 Meters",
+                        "output_name": "beijing_buffer_10m"
+                    },
+                    "reason": "生成缓冲区"
+                }
+            ]
+        })
+        row = self._plan_with_fake_client(client, "给 beijing 做 10 米缓冲区", _context(is_saved=True))
+        self.assertEqual(row["workflow"]["action"], "clarify")
+        self.assertEqual(row["workflow"]["steps"], [])
+        self.assertIn("nanjing", row["workflow"]["summary"])
+
+    def test_planner_allows_unsaved_mxd_when_output_workspace_is_explicit(self):
+        client = FakeDeepSeekClient({
+            "action": "execute",
+            "summary": "将对 nanjing 生成 10 米缓冲区。",
+            "steps": [
+                {
+                    "id": "step_1",
+                    "operation": "analysis.buffer",
+                    "arguments": {
+                        "input_layer": "nanjing",
+                        "distance": "10 Meters",
+                        "output_name": "nanjing_buffer_10m",
+                        "output_workspace": "D:/data/out.gdb"
+                    },
+                    "reason": "生成缓冲区"
+                }
+            ]
+        })
+        row = self._plan_with_fake_client(client, "给 nanjing 做 10 米缓冲区，输出到 D:/data/out.gdb", _context(is_saved=False))
+        self.assertEqual(row["workflow"]["action"], "execute")
+
     def test_planner_rejects_open_attribute_table_as_unsupported(self):
         client = FakeDeepSeekClient({
             "action": "execute",
@@ -189,11 +254,27 @@ class RouterAndValidatorTests(unittest.TestCase):
         self.assertEqual(row["workflow"]["action"], "unsupported")
         self.assertEqual(row["workflow"]["steps"], [])
 
-    def _plan_with_fake_client(self, client, command):
+    def _plan_with_fake_client(self, client, command, context=None):
         with tempfile.TemporaryDirectory() as directory:
             store = WorkflowStore(pathlib.Path(directory) / "workflows.sqlite")
             planner = Planner(catalog=self.catalog, router=self.router, client=client, store=store)
-            return planner.plan(command, {"layers": [], "is_saved": True})
+            return planner.plan(command, context or _context(is_saved=True))
+
+
+def _context(is_saved=True):
+    return {
+        "is_saved": is_saved,
+        "layers": [
+            {
+                "layer_ref": "layer:0",
+                "name": "nanjing",
+                "longName": "nanjing",
+                "fields": [{"name": "OBJECTID"}, {"name": "NAME"}],
+                "selected_count": 0,
+                "geometry_type": "Polygon"
+            }
+        ]
+    }
 
 
 if __name__ == "__main__":

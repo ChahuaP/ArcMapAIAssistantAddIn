@@ -646,7 +646,7 @@
         <div class="panel-head">
           <div class="panel-title">
             <h2>对话</h2>
-            <p id="status" class="chat-status">页面会自动同步地图快照和任务状态。</p>
+            <p id="status" class="chat-status">页面会自动刷新地图快照和任务状态。</p>
           </div>
           <button class="danger small" onclick="clearConversation()">清空对话</button>
         </div>
@@ -748,7 +748,7 @@
   </div>
 
   <script>
-    const EXPECTED_GATEWAY_VERSION = '0.8.6';
+    const EXPECTED_GATEWAY_VERSION = '0.8.7';
     const POLL_INTERVAL_MS = 2500;
     const HEALTH_INTERVAL_MS = 10000;
     let lastHealthCheck = 0;
@@ -1058,7 +1058,7 @@
         <div class="task-meta">${escapeHtml(shortCommand(item.command))}</div>
         ${item.status === 'approved_for_arcmap' ? '<div class="task-note">已发送到 ArcGIS。请回到 ArcGIS 工具栏点击“执行任务”。</div>' : ''}
         ${failedMessage(item)}
-        ${requiresSavedMap(item.workflow) ? '<div class="task-note warn">这个任务会写出新数据。请先保存 MXD，否则 ArcGIS 会拒绝执行。</div>' : ''}
+        ${writesData(item.workflow) ? '<div class="task-note warn">这个任务会写出新数据。若当前 MXD 未保存，需要在对话中说明输出文件夹或 GDB。</div>' : ''}
       `;
       const actions = document.createElement('div');
       actions.className = 'button-row';
@@ -1093,7 +1093,7 @@
       return '<ol class="task-meta">' + steps.map(step => `<li>${escapeHtml(step.reason || step.operation)}</li>`).join('') + '</ol>';
     }
 
-    function requiresSavedMap(workflow) {
+    function writesData(workflow) {
       return (workflow.steps || []).some(step => [
         'analysis.buffer',
         'analysis.clip',

@@ -56,6 +56,8 @@ class OperationCatalog:
                 "required": schema.get("required", []),
                 "properties": schema.get("properties", {})
             },
+            "context_requirements": operation.get("context_requirements", {}),
             "side_effects": operation["side_effects"],
+            "output_policy": operation.get("output_policy", {}),
             "examples": operation.get("examples", [])[:2]
         }

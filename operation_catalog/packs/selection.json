@@ -74,16 +74,16 @@
       "category": "selection",
       "summary": "导出图层当前已选要素为新要素类。",
       "keywords": ["export selected", "导出选择", "导出选中"],
-      "model_card": "Use selection.export_selected_features to export selected features to ArcMapAI_Output.gdb. Arguments: layer, output_name.",
+      "model_card": "Use selection.export_selected_features to export selected features. Arguments: layer, output_name, output_workspace optional when MXD is unsaved.",
       "parameters_schema": {
         "type": "object",
         "required": ["layer", "output_name"],
-        "properties": {"layer": {"type": "string"}, "output_name": {"type": "string"}},
+        "properties": {"layer": {"type": "string"}, "output_name": {"type": "string"}, "output_workspace": {"type": "string"}},
         "additionalProperties": false
       },
-      "context_requirements": {"requires_layers": true, "requires_saved_mxd": true},
+      "context_requirements": {"requires_layers": true, "requires_output_location_when_unsaved": true},
       "side_effects": "writes_data",
-      "output_policy": {"writes_output": true, "workspace": "ArcMapAI_Output.gdb", "overwrite": false},
+      "output_policy": {"writes_output": true, "workspace": "mxd_default_or_output_workspace", "overwrite": false},
       "executor": "operations.selection_ops.export_selected_features",
       "examples": [{"user": "导出 roads 选中的要素", "arguments": {"layer": "roads", "output_name": "roads_selected"}}]
     }

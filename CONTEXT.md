@@ -1,8 +1,8 @@
 # CONTEXT
 
-当前任务：修复旧网关继续使用旧上下文 hash 导致 ArcGIS 执行一直误报“地图结构已变化”。
+当前任务：按产品逻辑重做上下文同步、通用追问和输出图层去重。
 
-上次位置：本机旧网关 `0.8.5` 已停止并重启为 `0.8.6`；自动同步 Extension 保持生效。
+上次位置：Add-in 已重新打包并安装为 1.2；本机网关已重启为 `0.8.7`；Extension 自动同步已回退。
 
 近期关键决定与原因：
 - 使用 ArcMap Python Add-in 原生结构：`config.xml` + `Install/*.py` + `.esriaddin`，因为这是 ArcMap 可直接加载的插件格式。
@@ -40,13 +40,12 @@
 - ArcGIS runtime 弹框和失败结果不再使用 `str(exc)`，改为安全 Unicode 转换。
 - 图层匹配去掉 `str(layer_value)`，避免以后中文图层名触发同类 ASCII 编码问题。
 - ArcMap Add-in `config.xml` 升到 0.9，并移除四个按钮的 `image` 属性；工具栏按钮改为纯文字 caption：启动网关、打开助手、同步上下文、执行任务。
-- ArcMap Add-in `config.xml` 升到 1.1，新增 `AutoSyncExtension`，监听打开/新建 MXD、地图内容变化、图层增删排序、坐标系变化和编辑保存相关事件。
-- 自动同步只在本地网关已运行时静默执行；不会因为 ArcMap 事件自动拉起网关，避免打开 ArcMap 时卡顿。
-- 自动同步有 2 秒同步防抖、10 秒网关检查缓存和 0.25 秒网关探测超时；重复上下文 hash 不重复上传。
-- “打开助手”和“启动网关”会主动读取并同步一次当前 ArcGIS 上下文，减少用户手点“同步”的需要。
+- ArcMap Add-in `config.xml` 升到 1.2，并回退 `AutoSyncExtension`；不再监听 ArcMap 地图事件自动同步。
+- 当前同步策略：打开助手时同步一次；用户点“同步”时同步一次；执行成功后重新读取 ArcGIS 上下文并同步一次。
+- 启动网关、规划前、执行前都不再向网关同步上下文；规划只使用网关里最近一次地图快照。
 - 保存 MXD 不再参与执行上下文 hash；用户从未保存变成已保存后，已审批任务不会仅因保存路径变化被拒绝。
 - 写数据能否执行仍以 ArcGIS 端执行前二次读取为准：当前 MXD 已保存才允许输出到同级 `ArcMapAI_Output.gdb`。
-- Gateway、Web 前端和 `open_web.py` 版本号统一升到 `0.8.6`。
+- Gateway、Web 前端和 `open_web.py` 版本号统一升到 `0.8.7`。
 - ArcGIS runtime 现在只向版本正确的网关自动同步；如果检测到旧网关，会先停掉旧 8765 监听进程再启动新网关。
 - `open_web.py` 也会检测旧网关版本；版本不一致时自动重启网关，避免网页误显示“无需重启”。
 - 新增版本一致性测试，防止 `APP_VERSION`、`EXPECTED_GATEWAY_VERSION`、`EXPECTED_APP_VERSION` 再次脱节。
@@ -54,7 +53,10 @@
 - Gateway 新增 `GET /api/capabilities`，能力弹窗从 operation catalog 动态读取 24 个能力，不手写能力清单。
 - `open_web.py` 网页缓存参数更新为 `0.8.5-modal-workbench`。
 - 右侧改成“任务队列”：只显示可执行任务；追问/不支持留在聊天中；任务卡支持确认发送、删除、执行步骤、技术详情。
-- 写数据任务卡提前提示“请先保存 MXD”，因为输出写到 MXD 同级 `ArcMapAI_Output.gdb`。
+- 写数据任务不再一律要求保存 MXD；如果当前 MXD 未保存且输出位置不明确，Planner 返回追问，要求用户说明输出文件夹或 GDB。
+- Planner 的追问逻辑已通用化：缺必要参数、图层不存在/重名、字段不存在、输出位置不明确都会转成 `clarify`。
+- 分析/导出类操作支持显式 `output_workspace` 或 `output_folder`；MXD 已保存时仍可默认输出到 MXD 同级目录。
+- 输出图层添加改为去重：如果 ArcMap 已因地理处理自动把输出加到 TOC，runtime 不再重复 `AddLayer`。
 - AI 规划允许返回 `execute`、`clarify`、`unsupported`，不再要求用户输入完全匹配操作名。
 - 模型返回 `action=buffer/run/执行` 且步骤合法时，planner 会规范为 `execute`，避免 “Workflow action must be execute, clarify, or unsupported.”。
 - System prompt 禁止把 `selected_operations`、`catalog_index`、JSON/schema 等内部字段暴露给用户。
@@ -142,3 +144,8 @@
 - `python -c "import ast, pathlib; ast.parse(...)"`：通过，36 个 Python 文件语法解析正常
 - `Invoke-RestMethod http://127.0.0.1:8765/health`：通过，返回 `app_version=0.8.6`
 - 旧 8765 Python 网关进程已停止，新网关已启动为 `0.8.6`
+- `python -m unittest discover -s tests -p "test_*.py" -v`：通过，29 个测试
+- `python -c "import ast, pathlib; ast.parse(...)"`：通过，37 个 Python 文件语法解析正常
+- `python .\ArcMapAIAssistantAddIn\makeaddin.py`：通过，Add-in 包内 `config.xml` 为 1.2，`<Extensions />`，无 `AutoSyncExtension`，无 Button `image` 属性
+- `.\packaging\install.ps1`：通过，已覆盖用户 AddIns 目录
+- `Invoke-RestMethod http://127.0.0.1:8765/health`：通过，返回 `app_version=0.8.7`

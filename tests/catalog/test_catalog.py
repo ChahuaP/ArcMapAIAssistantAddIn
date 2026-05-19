@@ -48,13 +48,11 @@ class CatalogTests(unittest.TestCase):
                 functions = {node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)}
                 self.assertIn(function_name, functions, operation["executor"])
 
-    def test_addin_registers_auto_sync_extension(self):
+    def test_addin_does_not_register_auto_sync_extension(self):
         tree = ET.parse(str(ADDIN_ROOT / "config.xml"))
         namespace = {"addin": "http://schemas.esri.com/Desktop/AddIns"}
         extension = tree.find(".//addin:Extensions/addin:Extension", namespace)
-        self.assertIsNotNone(extension)
-        self.assertEqual(extension.attrib["class"], "AutoSyncExtension")
-        self.assertEqual(extension.attrib["autoLoad"], "true")
+        self.assertIsNone(extension)
 
 
 def _load_json(path):

@@ -15,7 +15,7 @@ except NameError:
 
 
 BASE_URL = "http://127.0.0.1:8765"
-EXPECTED_APP_VERSION = "0.8.6"
+EXPECTED_APP_VERSION = "0.8.7"
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 CREATE_NO_WINDOW = 0x08000000
 
@@ -30,6 +30,11 @@ def save_config(config):
 
 def sync_context(context):
     return _post("/context", {"context": context})
+
+
+def current_context():
+    response = _get("/context", timeout=30)
+    return response.get("context")
 
 
 def ensure_running():

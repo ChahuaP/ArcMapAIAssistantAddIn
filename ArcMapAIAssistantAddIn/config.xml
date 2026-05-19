@@ -3,7 +3,7 @@
   <Name>ArcMap AI Assistant</Name>
   <AddInID>{7f42eea1-1f17-4cf4-9d4f-c0c8d28c0a23}</AddInID>
   <Description>ArcMap AI Assistant toolbar.</Description>
-  <Version>1.1</Version>
+  <Version>1.2</Version>
   <Image />
   <Author>Codex</Author>
   <Company />
@@ -47,14 +47,7 @@
           <Help heading="ArcMap AI Assistant" />
         </Button>
       </Commands>
-      <Extensions>
-        <Extension caption="ArcMap AI Auto Sync"
-                   class="AutoSyncExtension"
-                   id="ArcMapAIAssistant_addin.autoSyncExtension"
-                   autoLoad="true">
-          <Help heading="ArcMap AI Assistant" />
-        </Extension>
-      </Extensions>
+      <Extensions />
       <Toolbars>
         <Toolbar caption="ArcMap AI Assistant"
                  category="ArcMap AI Assistant"

@@ -33,56 +33,6 @@ def run_command(command_text):
     return load_runtime().handle_command(command_text)
 
 
-def auto_sync(event_name):
-    try:
-        return load_runtime().auto_sync_context(event_name)
-    except Exception:
-        return False
-
-
-class AutoSyncExtension(object):
-    """Implementation for ArcMapAIAssistant_addin.autoSyncExtension (Extension)."""
-
-    def __init__(self):
-        self.enabled = True
-
-    def startup(self, *args):
-        auto_sync("startup")
-
-    def openDocument(self, *args):
-        auto_sync("openDocument")
-
-    def newDocument(self, *args):
-        auto_sync("newDocument")
-
-    def mapsChanged(self, *args):
-        auto_sync("mapsChanged")
-
-    def contentsChanged(self, *args):
-        auto_sync("contentsChanged")
-
-    def spatialReferenceChanged(self, *args):
-        auto_sync("spatialReferenceChanged")
-
-    def itemAdded(self, *args):
-        auto_sync("itemAdded")
-
-    def itemDeleted(self, *args):
-        auto_sync("itemDeleted")
-
-    def itemReordered(self, *args):
-        auto_sync("itemReordered")
-
-    def onStartEditing(self, *args):
-        auto_sync("onStartEditing")
-
-    def onStopEditing(self, *args):
-        auto_sync("onStopEditing")
-
-    def onSaveEdits(self, *args):
-        auto_sync("onSaveEdits")
-
-
 class OpenAssistantButton(object):
     """Implementation for ArcMapAIAssistant_addin.openAssistantButton (Button)."""
 
