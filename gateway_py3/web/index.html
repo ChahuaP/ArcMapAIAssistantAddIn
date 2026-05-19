@@ -1,0 +1,1198 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
+  <title>ArcGIS 工作台</title>
+  <style>
+    :root {
+      --ink: #0e1b2a;
+      --ink-strong: #071421;
+      --muted: #66758a;
+      --subtle: #8ba0b6;
+      --line: #d9e4ec;
+      --line-strong: #c6d6e2;
+      --page: #eef6f8;
+      --panel: #ffffff;
+      --panel-soft: #f7fbfc;
+      --primary: #087c91;
+      --primary-strong: #075d70;
+      --primary-soft: #e6f7fa;
+      --green: #16a34a;
+      --green-soft: #e9f9ef;
+      --amber: #c47a08;
+      --amber-soft: #fff6df;
+      --red: #c93939;
+      --red-soft: #fff0f0;
+      --violet: #635bff;
+      --violet-soft: #f1f0ff;
+      --shadow: 0 18px 44px rgba(8, 58, 78, .12);
+      --soft-shadow: 0 10px 24px rgba(14, 27, 42, .07);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; min-width: 100%; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        linear-gradient(180deg, rgba(238, 246, 248, .96), rgba(247, 251, 252, .98)),
+        repeating-linear-gradient(0deg, rgba(8, 124, 145, .04) 0, rgba(8, 124, 145, .04) 1px, transparent 1px, transparent 32px),
+        repeating-linear-gradient(90deg, rgba(8, 124, 145, .035) 0, rgba(8, 124, 145, .035) 1px, transparent 1px, transparent 32px);
+      font: 15px/1.55 "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", Arial, sans-serif;
+      overflow: hidden;
+    }
+
+    button, input, textarea { font: inherit; }
+    button {
+      cursor: pointer;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      min-height: 38px;
+      padding: 8px 13px;
+      background: #eef6f8;
+      color: var(--ink);
+      font-weight: 650;
+      transition: background-color .18s ease, border-color .18s ease, color .18s ease, box-shadow .18s ease, transform .18s ease;
+    }
+    button:hover { background: #e1f0f3; border-color: #c9dbe4; }
+    button:active { transform: translateY(1px); }
+    button.primary {
+      color: #fff;
+      background: var(--primary);
+      border-color: var(--primary);
+      box-shadow: 0 12px 26px rgba(8, 124, 145, .22);
+    }
+    button.primary:hover { background: var(--primary-strong); border-color: var(--primary-strong); }
+    button.success {
+      color: #fff;
+      background: var(--green);
+      border-color: var(--green);
+      box-shadow: 0 12px 26px rgba(22, 163, 74, .18);
+    }
+    button.success:hover { background: #12843d; border-color: #12843d; }
+    button.ghost {
+      background: #fff;
+      border-color: var(--line);
+      color: var(--muted);
+    }
+    button.ghost:hover { color: var(--ink); border-color: var(--line-strong); }
+    button.danger {
+      color: var(--red);
+      background: var(--red-soft);
+      border-color: #ffd0d0;
+    }
+    button.danger:hover { background: #ffe3e3; }
+    button.small {
+      min-height: 34px;
+      padding: 6px 10px;
+      font-size: 13px;
+    }
+    button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus-visible {
+      outline: 3px solid rgba(34, 211, 238, .55);
+      outline-offset: 2px;
+    }
+
+    input, textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      color: var(--ink);
+      padding: 10px 12px;
+      transition: border-color .18s ease, box-shadow .18s ease;
+    }
+    input:focus, textarea:focus {
+      border-color: rgba(8, 124, 145, .48);
+      box-shadow: 0 0 0 4px rgba(8, 124, 145, .10);
+    }
+    textarea { resize: vertical; min-height: 72px; }
+    label { display: block; margin-bottom: 7px; color: var(--ink-strong); font-weight: 720; }
+
+    .app {
+      height: 100%;
+      min-height: 0;
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+    }
+
+    header {
+      padding: 18px 22px 12px;
+    }
+    .topbar {
+      max-width: 1760px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: minmax(280px, 1fr) minmax(600px, 820px);
+      gap: 18px;
+      align-items: center;
+    }
+    .brand {
+      display: flex;
+      gap: 13px;
+      align-items: center;
+      min-width: 0;
+    }
+    .brand-mark {
+      width: 42px;
+      height: 42px;
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      color: #fff;
+      background: linear-gradient(135deg, #087c91, #1a9a75);
+      box-shadow: 0 12px 28px rgba(8, 124, 145, .24);
+      font-weight: 800;
+      letter-spacing: 0;
+    }
+    .brand h1 {
+      margin: 0;
+      color: var(--ink-strong);
+      font-size: 22px;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+    .brand p {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .status-line {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .top-controls {
+      min-width: 0;
+      display: grid;
+      gap: 10px;
+    }
+    .quick-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .status-tile {
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px 12px;
+      background: rgba(255, 255, 255, .88);
+      box-shadow: var(--soft-shadow);
+    }
+    .status-tile span {
+      display: block;
+      margin-bottom: 3px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .status-tile strong {
+      display: block;
+      color: var(--ink-strong);
+      font-size: 14px;
+      line-height: 1.25;
+      overflow-wrap: anywhere;
+    }
+    .status-tile.ok { background: var(--green-soft); border-color: #a8e6bd; }
+    .status-tile.warn { background: var(--amber-soft); border-color: #f5d48d; }
+    .status-tile.bad { background: var(--red-soft); border-color: #ffc8c8; }
+
+    main {
+      min-height: 0;
+      max-width: 1760px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 0 22px 22px;
+      display: grid;
+      grid-template-columns: minmax(560px, 1fr) minmax(330px, 400px);
+      gap: 16px;
+    }
+
+    .panel {
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      border: 1px solid rgba(198, 214, 226, .9);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, .9);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+    }
+    .panel-head {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 15px 16px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255, 255, 255, .72);
+    }
+    .panel-title h2 {
+      margin: 0;
+      color: var(--ink-strong);
+      font-size: 16px;
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+    .panel-title p {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .panel-body {
+      min-height: 0;
+      overflow: auto;
+      padding: 15px;
+    }
+    .stack { display: flex; flex-direction: column; gap: 14px; }
+
+    .section-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 14px;
+    }
+    .section-card h3 {
+      margin: 0 0 10px;
+      color: var(--ink-strong);
+      font-size: 14px;
+      letter-spacing: 0;
+    }
+    .hint {
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .button-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .key-state {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 38px;
+      margin-bottom: 12px;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel-soft);
+      color: var(--muted);
+    }
+    .key-state strong { color: var(--ink-strong); }
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 99px;
+      background: var(--subtle);
+      flex: 0 0 auto;
+    }
+    .dot.ok { background: var(--green); }
+    .dot.warn { background: var(--amber); }
+
+    .map-metrics {
+      display: grid;
+      gap: 8px;
+    }
+    .map-row {
+      display: grid;
+      grid-template-columns: 72px minmax(0, 1fr);
+      gap: 10px;
+      align-items: start;
+      min-height: 42px;
+      padding: 9px 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel-soft);
+    }
+    .map-row span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .map-row strong {
+      color: var(--ink-strong);
+      font-size: 14px;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+    .table-wrap {
+      margin-top: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      background: #fff;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+      font-size: 13px;
+    }
+    th, td {
+      text-align: left;
+      padding: 9px 8px;
+      border-bottom: 1px solid var(--line);
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+    th {
+      color: var(--muted);
+      background: #f4f9fb;
+      font-weight: 720;
+    }
+    tr:last-child td { border-bottom: 0; }
+
+    .chat-panel {
+      min-height: 0;
+    }
+    .chat-status {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    .chat-log {
+      flex: 1;
+      min-height: 0;
+      overflow: auto;
+      padding: 24px;
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, .64), rgba(247, 251, 252, .74)),
+        repeating-linear-gradient(90deg, rgba(8, 124, 145, .035) 0, rgba(8, 124, 145, .035) 1px, transparent 1px, transparent 34px);
+    }
+    .empty-chat {
+      height: 100%;
+      min-height: 260px;
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      text-align: center;
+    }
+    .empty-chat strong {
+      display: block;
+      margin-bottom: 6px;
+      color: var(--ink-strong);
+      font-size: 17px;
+    }
+    .bubble-row {
+      display: flex;
+      margin-bottom: 14px;
+    }
+    .bubble-row.user { justify-content: flex-end; }
+    .bubble {
+      max-width: min(780px, 84%);
+      border-radius: 8px;
+      padding: 12px 14px;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      box-shadow: 0 10px 24px rgba(14, 27, 42, .08);
+    }
+    .bubble-row.assistant .bubble {
+      color: var(--ink);
+      background: #fff;
+      border: 1px solid var(--line);
+    }
+    .bubble-row.user .bubble {
+      color: #fff;
+      background: linear-gradient(135deg, var(--primary), #0f8f73);
+      border: 1px solid rgba(255, 255, 255, .3);
+    }
+    .composer {
+      flex: 0 0 auto;
+      padding: 14px;
+      border-top: 1px solid var(--line);
+      background: rgba(255, 255, 255, .92);
+    }
+    .composer-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: end;
+    }
+    .composer textarea {
+      min-height: 62px;
+      max-height: 180px;
+    }
+
+    .task-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .task-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      background: #fff;
+      box-shadow: 0 10px 24px rgba(14, 27, 42, .05);
+    }
+    .task-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .task-title {
+      margin: 0 0 8px;
+      color: var(--ink-strong);
+      font-size: 15px;
+      font-weight: 760;
+      line-height: 1.42;
+    }
+    .task-meta {
+      color: var(--muted);
+      font-size: 13px;
+      overflow-wrap: anywhere;
+    }
+    .task-note {
+      margin-top: 9px;
+      padding: 9px 10px;
+      border-radius: 8px;
+      background: var(--primary-soft);
+      color: var(--primary-strong);
+      font-size: 13px;
+    }
+    .task-note.warn {
+      background: var(--amber-soft);
+      color: #8b5300;
+    }
+    .task-note.error {
+      background: var(--red-soft);
+      color: #991b1b;
+    }
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 26px;
+      padding: 4px 9px;
+      border-radius: 99px;
+      font-size: 12px;
+      font-weight: 760;
+      white-space: nowrap;
+    }
+    .tag.execute { color: var(--primary-strong); background: var(--primary-soft); }
+    .tag.clarify { color: #8b5300; background: var(--amber-soft); }
+    .tag.unsupported { color: #991b1b; background: var(--red-soft); }
+    .tag.done { color: #126b34; background: var(--green-soft); }
+    details {
+      margin-top: 10px;
+      border-top: 1px solid var(--line);
+      padding-top: 9px;
+    }
+    summary {
+      cursor: pointer;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 650;
+    }
+    ol.task-meta {
+      margin: 8px 0 0;
+      padding-left: 20px;
+    }
+    pre {
+      margin: 9px 0 0;
+      max-height: 240px;
+      overflow: auto;
+      border-radius: 8px;
+      padding: 11px;
+      background: #102033;
+      color: #dce8f4;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    @media (max-width: 1280px) {
+      body { overflow: auto; }
+      .app { height: auto; min-height: 100%; }
+      .topbar { grid-template-columns: 1fr; }
+      .status-line { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      main { grid-template-columns: minmax(0, 1fr); }
+      .task-panel { min-height: 360px; }
+      .chat-panel { min-height: 640px; }
+    }
+
+    @media (max-width: 820px) {
+      header { padding: 14px 12px 10px; }
+      main { grid-template-columns: 1fr; padding: 0 12px 12px; }
+      .status-line { grid-template-columns: 1fr; }
+      .brand h1 { font-size: 20px; }
+      .chat-panel { min-height: 620px; }
+      .composer-row { grid-template-columns: 1fr; }
+      .bubble { max-width: 94%; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      * { transition: none !important; scroll-behavior: auto !important; }
+    }
+
+    .modal {
+      position: fixed;
+      inset: 0;
+      z-index: 20;
+      display: grid;
+      place-items: center;
+      padding: 22px;
+      background: rgba(7, 20, 33, .42);
+      backdrop-filter: blur(6px);
+    }
+    .modal[hidden] { display: none; }
+    .modal-panel {
+      width: min(900px, 100%);
+      max-height: min(760px, calc(100vh - 44px));
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      border: 1px solid rgba(198, 214, 226, .95);
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: 0 24px 70px rgba(7, 20, 33, .28);
+    }
+    .modal-body {
+      min-height: 0;
+      overflow: auto;
+      padding: 16px;
+    }
+    .modal-grid {
+      display: grid;
+      gap: 12px;
+    }
+    .capability-group {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      background: #fff;
+    }
+    .capability-group h3 {
+      margin: 0;
+      padding: 11px 13px;
+      background: #f4f9fb;
+      border-bottom: 1px solid var(--line);
+      color: var(--ink-strong);
+      font-size: 14px;
+    }
+    .capability-list {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      padding: 12px;
+    }
+    .capability-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 11px 12px;
+      background: var(--panel-soft);
+    }
+    .capability-card strong {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--ink-strong);
+      font-size: 14px;
+    }
+    .capability-card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .capability-card code {
+      display: inline-block;
+      margin-top: 7px;
+      color: var(--primary-strong);
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+    @media (max-width: 700px) {
+      .modal { padding: 12px; }
+      .capability-list { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div class="topbar">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">GIS</div>
+          <div>
+            <h1>ArcGIS 工作台</h1>
+            <p>自然语言规划，确认后在 ArcGIS 执行</p>
+          </div>
+        </div>
+        <div class="top-controls">
+          <div class="status-line" aria-live="polite">
+            <div class="status-tile warn" id="gatewayState"><span>网关</span><strong>检查中</strong></div>
+            <div class="status-tile warn" id="arcgisState"><span>地图上下文</span><strong>未同步</strong></div>
+            <div class="status-tile warn" id="restartState"><span>重启提示</span><strong>检查中</strong></div>
+          </div>
+          <div class="quick-actions" aria-label="常用信息">
+            <button class="ghost small" onclick="openCapabilities()">能力范围</button>
+            <button class="ghost small" onclick="openModal('contextModal')">地图快照</button>
+            <button class="ghost small" onclick="openModal('keyModal')"><span id="keyActionText">API Key</span></button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section class="panel chat-panel">
+        <div class="panel-head">
+          <div class="panel-title">
+            <h2>对话</h2>
+            <p id="status" class="chat-status">页面会自动同步地图快照和任务状态。</p>
+          </div>
+          <button class="danger small" onclick="clearConversation()">清空对话</button>
+        </div>
+        <div id="chatLog" class="chat-log"></div>
+        <div class="composer">
+          <div class="composer-row">
+            <textarea id="command" aria-label="任务输入" placeholder="输入任务，按 Ctrl+Enter 发送"></textarea>
+            <button class="primary" onclick="submitPlan()">发送</button>
+          </div>
+        </div>
+      </section>
+
+      <aside class="panel task-panel">
+        <div class="panel-head">
+          <div class="panel-title">
+            <h2>任务队列</h2>
+            <p>确认后回到 ArcGIS 执行</p>
+          </div>
+          <button class="ghost small" onclick="refreshWorkflows()">刷新</button>
+        </div>
+        <div class="panel-body" id="tasks">
+          <div class="section-card">暂无任务。</div>
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <div class="modal" id="capabilitiesModal" hidden onclick="closeOnBackdrop(event)">
+    <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="capabilitiesTitle">
+      <div class="panel-head">
+        <div class="panel-title">
+          <h2 id="capabilitiesTitle">当前能力范围</h2>
+          <p id="capabilitiesSummary">从本地操作目录读取。</p>
+        </div>
+        <button class="ghost small" onclick="closeModal('capabilitiesModal')">关闭</button>
+      </div>
+      <div class="modal-body">
+        <div id="capabilityGroups" class="modal-grid">
+          <div class="section-card">正在读取能力目录...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="contextModal" hidden onclick="closeOnBackdrop(event)">
+    <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="contextTitle">
+      <div class="panel-head">
+        <div class="panel-title">
+          <h2 id="contextTitle">地图快照</h2>
+          <p>最近一次从 ArcGIS 工具栏同步的上下文。</p>
+        </div>
+        <button class="ghost small" onclick="closeModal('contextModal')">关闭</button>
+      </div>
+      <div class="modal-body stack">
+        <section class="section-card">
+          <div class="map-metrics">
+            <div class="map-row"><span>图层</span><strong id="layerCount">0</strong></div>
+            <div class="map-row"><span>MXD</span><strong id="mxdState">未知</strong></div>
+            <div class="map-row"><span>坐标系</span><strong id="srState">未知</strong></div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>图层</th><th>类型</th><th>选择</th></tr></thead>
+              <tbody id="layerTable"><tr><td colspan="3">请在 ArcGIS 工具栏点击“同步上下文”。</td></tr></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="keyModal" hidden onclick="closeOnBackdrop(event)">
+    <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="keyTitle">
+      <div class="panel-head">
+        <div class="panel-title">
+          <h2 id="keyTitle">API Key 配置</h2>
+          <p>通常只需要配置一次。</p>
+        </div>
+        <button class="ghost small" onclick="closeModal('keyModal')">关闭</button>
+      </div>
+      <div class="modal-body">
+        <section class="section-card">
+          <div class="key-state">
+            <span class="dot" id="keyDot"></span>
+            <strong id="keyBadge">Key 检查中</strong>
+          </div>
+          <form onsubmit="event.preventDefault(); saveConfig();">
+            <label for="apiKey">DeepSeek API Key</label>
+            <input id="apiKey" type="password" placeholder="sk-..." autocomplete="off">
+            <div class="button-row">
+              <button type="submit" class="primary small">保存</button>
+              <button type="button" class="ghost small" onclick="openHealth()">检查网关</button>
+            </div>
+          </form>
+          <p class="hint">Key 只保存在当前 Windows 用户配置目录，不会写进项目代码。</p>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const EXPECTED_GATEWAY_VERSION = '0.8.6';
+    const POLL_INTERVAL_MS = 2500;
+    const HEALTH_INTERVAL_MS = 10000;
+    let lastHealthCheck = 0;
+    let pollBusy = false;
+    let capabilitiesLoaded = false;
+
+    function offlineMessage() {
+      return '本地网关未连接。请回到 ArcGIS 工具栏点击“启动网关”或“打开助手”。页面会自动恢复状态。';
+    }
+
+    async function api(path, options) {
+      let response;
+      try {
+        response = await fetch(path, options || {});
+      } catch (err) {
+        throw new Error(offlineMessage());
+      }
+      const data = await response.json();
+      if (!response.ok || data.error) throw new Error(data.error || response.statusText);
+      return data;
+    }
+
+    function openModal(id) {
+      document.getElementById(id).hidden = false;
+    }
+
+    function closeModal(id) {
+      document.getElementById(id).hidden = true;
+    }
+
+    function closeOnBackdrop(event) {
+      if (event.target.classList.contains('modal')) event.target.hidden = true;
+    }
+
+    async function openCapabilities() {
+      openModal('capabilitiesModal');
+      if (!capabilitiesLoaded) await loadCapabilities();
+    }
+
+    async function loadCapabilities() {
+      const box = document.getElementById('capabilityGroups');
+      try {
+        const data = await api('/api/capabilities');
+        capabilitiesLoaded = true;
+        document.getElementById('capabilitiesSummary').textContent = `当前目录 ${data.operation_count} 个能力，版本 ${data.catalog_version}。`;
+        renderCapabilities(data.operations || []);
+      } catch (err) {
+        box.innerHTML = `<div class="section-card">${escapeHtml(err.message)}</div>`;
+      }
+    }
+
+    function renderCapabilities(operations) {
+      const box = document.getElementById('capabilityGroups');
+      const groups = {};
+      operations.forEach(operation => {
+        const category = operation.category || 'other';
+        if (!groups[category]) groups[category] = [];
+        groups[category].push(operation);
+      });
+      const order = ['map_context', 'view_layer', 'selection', 'analysis', 'export', 'other'];
+      box.innerHTML = '';
+      order.filter(category => groups[category]).forEach(category => {
+        const group = document.createElement('section');
+        group.className = 'capability-group';
+        group.innerHTML = `<h3>${escapeHtml(categoryLabel(category))}</h3>`;
+        const list = document.createElement('div');
+        list.className = 'capability-list';
+        groups[category].forEach(operation => {
+          const card = document.createElement('div');
+          card.className = 'capability-card';
+          card.innerHTML = `
+            <strong>${escapeHtml(operationTitle(operation))}</strong>
+            <p>${escapeHtml(operation.summary || '')}</p>
+            ${operation.example ? `<p class="hint">例如：${escapeHtml(operation.example)}</p>` : ''}
+            <code>${escapeHtml(operation.id)}</code>
+          `;
+          list.appendChild(card);
+        });
+        group.appendChild(list);
+        box.appendChild(group);
+      });
+    }
+
+    function categoryLabel(category) {
+      return {
+        map_context: '地图上下文',
+        view_layer: '视图与图层',
+        selection: '选择',
+        analysis: '常用分析',
+        export: '导出',
+        other: '其他'
+      }[category] || category;
+    }
+
+    function operationTitle(operation) {
+      const parts = String(operation.id || '').split('.');
+      return parts[parts.length - 1].replace(/_/g, ' ');
+    }
+
+    function setStatus(text) {
+      document.getElementById('status').textContent = text;
+    }
+
+    function setTile(id, state, text) {
+      const tile = document.getElementById(id);
+      tile.className = `status-tile ${state}`;
+      tile.querySelector('strong').textContent = text;
+    }
+
+    function setDot(id, ok, warn) {
+      const dot = document.getElementById(id);
+      dot.className = 'dot' + (ok ? ' ok' : warn ? ' warn' : '');
+    }
+
+    async function openHealth(options) {
+      const silent = options && options.silent;
+      const data = await api('/health');
+      const version = data.app_version || '旧版本';
+      setTile('gatewayState', 'ok', `已启动，${data.operation_count} 个能力`);
+      if (data.app_version === EXPECTED_GATEWAY_VERSION) {
+        setTile('restartState', 'ok', '无需重启');
+      } else {
+        setTile('restartState', 'warn', '需要重启网关');
+      }
+      lastHealthCheck = Date.now();
+      if (!silent) setStatus(`网关已连接，版本 ${version}。`);
+    }
+
+    async function loadConfig() {
+      const data = await api('/config');
+      const ok = data.config.has_deepseek_api_key;
+      document.getElementById('keyBadge').textContent = ok ? 'Key 已保存' : 'Key 未配置';
+      document.getElementById('keyActionText').textContent = ok ? 'Key 已配置' : '配置 Key';
+      setDot('keyDot', ok, !ok);
+    }
+
+    async function saveConfig() {
+      const key = document.getElementById('apiKey').value.trim();
+      if (!key) {
+        setStatus('请输入 DeepSeek API Key。');
+        return;
+      }
+      const data = await api('/config', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({deepseek_api_key: key})
+      });
+      document.getElementById('apiKey').value = '';
+      const ok = data.config.has_deepseek_api_key;
+      document.getElementById('keyBadge').textContent = ok ? 'Key 已保存' : 'Key 未配置';
+      document.getElementById('keyActionText').textContent = ok ? 'Key 已配置' : '配置 Key';
+      setDot('keyDot', ok, !ok);
+      setStatus('Key 已保存。');
+      closeModal('keyModal');
+    }
+
+    async function loadContext() {
+      const data = await api('/context');
+      const item = data.context;
+      if (!item || !item.value) {
+        setTile('arcgisState', 'warn', '未同步');
+        document.getElementById('layerCount').textContent = '0';
+        document.getElementById('mxdState').textContent = '未知';
+        document.getElementById('srState').textContent = '未知';
+        document.getElementById('layerTable').innerHTML = '<tr><td colspan="3">请在 ArcGIS 工具栏点击“同步上下文”。</td></tr>';
+        return;
+      }
+      const ctx = item.value;
+      const layers = ctx.layers || [];
+      setTile('arcgisState', 'ok', `最近同步，${layers.length} 个图层`);
+      document.getElementById('layerCount').textContent = layers.length;
+      document.getElementById('mxdState').textContent = ctx.is_saved ? '已保存' : '未保存';
+      document.getElementById('srState').textContent = (ctx.spatial_reference && ctx.spatial_reference.name) || '未知';
+      const table = document.getElementById('layerTable');
+      table.innerHTML = '';
+      if (!layers.length) {
+        table.innerHTML = '<tr><td colspan="3">当前地图没有可读图层。</td></tr>';
+        return;
+      }
+      layers.forEach(layer => {
+        const row = document.createElement('tr');
+        row.innerHTML = `<td>${escapeHtml(layer.name || '')}</td><td>${escapeHtml(layer.geometry_type || '')}</td><td>${layer.selected_count || 0}</td>`;
+        table.appendChild(row);
+      });
+    }
+
+    async function submitPlan() {
+      const input = document.getElementById('command');
+      const command = input.value.trim();
+      if (!command) return;
+      input.value = '';
+      appendBubble('user', command);
+      try {
+        setStatus('正在生成任务...');
+        const data = await api('/plan', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({command})
+        });
+        appendAssistantForWorkflow(data.workflow);
+        await refreshWorkflows(false);
+      } catch (err) {
+        appendBubble('assistant', err.message);
+        setStatus(err.message);
+      }
+    }
+
+    async function approve(id) {
+      await api(`/workflows/${id}/approve`, {method: 'POST', body: '{}'});
+      setStatus('已发送到 ArcGIS，等待你在 ArcGIS 工具栏点击“执行任务”。');
+      appendBubble('assistant', '已发送到 ArcGIS。请回到 ArcGIS 工具栏点击“执行任务”，ArcGIS 才会真正执行。');
+      await refreshWorkflows();
+    }
+
+    async function clearConversation() {
+      await api('/workflows/clear', {method: 'POST', body: '{}'});
+      setStatus('已清空。');
+      await refreshWorkflows();
+    }
+
+    async function deleteWorkflow(id) {
+      await api(`/workflows/${id}/delete`, {method: 'POST', body: '{}'});
+      setStatus('已删除。');
+      await refreshWorkflows();
+    }
+
+    async function refreshWorkflows(renderChat = true) {
+      const data = await api('/api/workflows');
+      renderTasks(data.workflows);
+      if (renderChat) renderConversation(data.workflows);
+    }
+
+    function renderConversation(workflows) {
+      const chat = document.getElementById('chatLog');
+      chat.innerHTML = '';
+      if (!workflows.length) {
+        renderEmptyChat();
+        return;
+      }
+      workflows.slice().reverse().forEach(item => {
+        appendBubble('user', item.command, false);
+        appendAssistantForWorkflow(item, false);
+      });
+      chat.scrollTop = chat.scrollHeight;
+    }
+
+    function renderEmptyChat() {
+      const chat = document.getElementById('chatLog');
+      chat.innerHTML = '<div class="empty-chat"><div><strong>等待任务</strong><span>在下方输入你想完成的 GIS 操作。</span></div></div>';
+    }
+
+    function removeEmptyChat() {
+      const empty = document.querySelector('.empty-chat');
+      if (empty) empty.remove();
+    }
+
+    function appendAssistantForWorkflow(item, scroll = true) {
+      const wf = item.workflow;
+      const action = wf.action || 'execute';
+      let text = wf.summary;
+      if (action === 'execute') {
+        text += item.status === 'draft'
+          ? '\n\n已生成任务。确认后会发送到 ArcGIS，之后还需要在 ArcGIS 工具栏点击“执行任务”。'
+          : '\n\n已发送到 ArcGIS，等待你在 ArcGIS 工具栏点击“执行任务”。';
+      } else if (action === 'clarify') {
+        text += '\n\n信息不够，当前不会执行任何操作。';
+      } else if (action === 'unsupported') {
+        text += '\n\n当前版本还没有这个能力。';
+      }
+      appendBubble('assistant', text, scroll);
+      setStatus(statusText(item));
+    }
+
+    function appendBubble(role, text, scroll = true) {
+      removeEmptyChat();
+      const chat = document.getElementById('chatLog');
+      const row = document.createElement('div');
+      row.className = `bubble-row ${role === 'user' ? 'user' : 'assistant'}`;
+      row.innerHTML = `<div class="bubble">${escapeHtml(text)}</div>`;
+      chat.appendChild(row);
+      if (scroll) chat.scrollTop = chat.scrollHeight;
+    }
+
+    function renderTasks(workflows) {
+      const box = document.getElementById('tasks');
+      box.innerHTML = '';
+      const visible = workflows.filter(item => (item.workflow.action || 'execute') === 'execute').slice(0, 20);
+      if (!visible.length) {
+        box.innerHTML = '<div class="section-card">暂无可执行任务。需要补充的信息会留在中间对话里。</div>';
+        return;
+      }
+      const list = document.createElement('div');
+      list.className = 'task-list';
+      visible.forEach(item => list.appendChild(taskCard(item)));
+      box.appendChild(list);
+    }
+
+    function taskCard(item) {
+      const action = item.workflow.action || 'execute';
+      const card = document.createElement('div');
+      card.className = 'task-card';
+      card.innerHTML = `
+        <div class="task-top">
+          <span class="tag ${tagClass(item, action)}">${statusLabel(item, action)}</span>
+        </div>
+        <p class="task-title">${escapeHtml(item.workflow.summary)}</p>
+        <div class="task-meta">${escapeHtml(shortCommand(item.command))}</div>
+        ${item.status === 'approved_for_arcmap' ? '<div class="task-note">已发送到 ArcGIS。请回到 ArcGIS 工具栏点击“执行任务”。</div>' : ''}
+        ${failedMessage(item)}
+        ${requiresSavedMap(item.workflow) ? '<div class="task-note warn">这个任务会写出新数据。请先保存 MXD，否则 ArcGIS 会拒绝执行。</div>' : ''}
+      `;
+      const actions = document.createElement('div');
+      actions.className = 'button-row';
+      if (item.status === 'draft' && action === 'execute') {
+        const approveButton = document.createElement('button');
+        approveButton.className = 'success small';
+        approveButton.textContent = '发送到 ArcGIS';
+        approveButton.onclick = () => approve(item.id);
+        actions.appendChild(approveButton);
+      }
+      const deleteButton = document.createElement('button');
+      deleteButton.className = 'danger small';
+      deleteButton.textContent = '删除';
+      deleteButton.onclick = () => deleteWorkflow(item.id);
+      actions.appendChild(deleteButton);
+      card.appendChild(actions);
+
+      const steps = document.createElement('details');
+      steps.open = item.status === 'draft';
+      steps.innerHTML = `<summary>执行步骤</summary>${stepList(item.workflow)}`;
+      card.appendChild(steps);
+
+      const tech = document.createElement('details');
+      tech.innerHTML = `<summary>技术详情</summary><pre>${escapeHtml(JSON.stringify(item.workflow, null, 2))}</pre>`;
+      card.appendChild(tech);
+      return card;
+    }
+
+    function stepList(workflow) {
+      const steps = workflow.steps || [];
+      if (!steps.length) return '<div class="task-meta">没有执行步骤。</div>';
+      return '<ol class="task-meta">' + steps.map(step => `<li>${escapeHtml(step.reason || step.operation)}</li>`).join('') + '</ol>';
+    }
+
+    function requiresSavedMap(workflow) {
+      return (workflow.steps || []).some(step => [
+        'analysis.buffer',
+        'analysis.clip',
+        'analysis.intersect',
+        'analysis.dissolve',
+        'analysis.project',
+        'analysis.spatial_join',
+        'selection.export_selected_features',
+        'export.map_png',
+        'export.map_pdf',
+        'export.table_csv'
+      ].includes(step.operation));
+    }
+
+    function failedMessage(item) {
+      if (item.status !== 'failed' || !item.result || !item.result.error) return '';
+      return `<div class="task-note error">执行失败：${escapeHtml(item.result.error)}</div>`;
+    }
+
+    function statusText(item) {
+      const action = item.workflow.action || 'execute';
+      if (action === 'clarify') return '需要补充信息。';
+      if (action === 'unsupported') return '暂不支持。';
+      if (item.status === 'draft') return '任务已生成，等待确认。';
+      if (item.status === 'approved_for_arcmap') return '已发送到 ArcGIS，等待工具栏执行。';
+      return statusLabel(item, action);
+    }
+
+    function statusLabel(item, action) {
+      if (action === 'clarify') return '需要回答';
+      if (action === 'unsupported') return '暂不支持';
+      if (item.status === 'draft') return '待确认';
+      if (item.status === 'approved_for_arcmap') return '待执行';
+      if (item.status === 'claimed_by_arcmap' || item.status === 'executing') return '执行中';
+      if (item.status === 'succeeded') return '已完成';
+      if (item.status === 'failed') return '失败';
+      return item.status;
+    }
+
+    function tagClass(item, action) {
+      if (item.status === 'succeeded') return 'done';
+      if (action === 'clarify') return 'clarify';
+      if (action === 'unsupported' || item.status === 'failed') return 'unsupported';
+      return 'execute';
+    }
+
+    function shortCommand(command) {
+      return command.length > 44 ? command.slice(0, 44) + '...' : command;
+    }
+
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+    }
+
+    async function refreshAll() {
+      try {
+        await loadConfig();
+        await openHealth({silent: true});
+        await loadContext();
+        await refreshWorkflows();
+      } catch (err) {
+        setTile('gatewayState', 'bad', '未连接');
+        setTile('restartState', 'warn', '请启动网关');
+        setStatus(err.message);
+        renderEmptyChat();
+      }
+    }
+
+    async function pollUpdates() {
+      if (pollBusy) return;
+      pollBusy = true;
+      try {
+        if (Date.now() - lastHealthCheck > HEALTH_INTERVAL_MS) {
+          await loadConfig();
+          await openHealth({silent: true});
+        }
+        await loadContext();
+        await refreshWorkflows(false);
+      } catch (err) {
+        setTile('gatewayState', 'bad', '未连接');
+        setTile('restartState', 'warn', '请启动网关');
+      } finally {
+        pollBusy = false;
+      }
+    }
+
+    document.getElementById('command').addEventListener('keydown', event => {
+      if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) submitPlan();
+    });
+
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape') {
+        document.querySelectorAll('.modal').forEach(modal => { modal.hidden = true; });
+      }
+    });
+
+    renderEmptyChat();
+    refreshAll();
+    setInterval(pollUpdates, POLL_INTERVAL_MS);
+  </script>
+</body>
+</html>

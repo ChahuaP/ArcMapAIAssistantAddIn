@@ -1,0 +1,63 @@
+{
+  "pack": "export",
+  "version": "0.1.0",
+  "operations": [
+    {
+      "id": "export.map_png",
+      "version": "1.0",
+      "category": "export",
+      "summary": "导出当前地图为 PNG。",
+      "keywords": ["export png", "导出图片", "PNG"],
+      "model_card": "Use export.map_png to export current map to PNG. Arguments: output_name, resolution optional.",
+      "parameters_schema": {
+        "type": "object",
+        "required": ["output_name"],
+        "properties": {"output_name": {"type": "string"}, "resolution": {"type": "integer"}},
+        "additionalProperties": false
+      },
+      "context_requirements": {"requires_saved_mxd": true},
+      "side_effects": "writes_data",
+      "output_policy": {"writes_output": true, "workspace": "ArcMapAI_Output", "overwrite": false},
+      "executor": "operations.export_ops.export_map_png",
+      "examples": [{"user": "导出当前地图为 png", "arguments": {"output_name": "current_map", "resolution": 150}}]
+    },
+    {
+      "id": "export.map_pdf",
+      "version": "1.0",
+      "category": "export",
+      "summary": "导出当前地图为 PDF。",
+      "keywords": ["export pdf", "导出PDF", "PDF"],
+      "model_card": "Use export.map_pdf to export current map to PDF. Arguments: output_name, resolution optional.",
+      "parameters_schema": {
+        "type": "object",
+        "required": ["output_name"],
+        "properties": {"output_name": {"type": "string"}, "resolution": {"type": "integer"}},
+        "additionalProperties": false
+      },
+      "context_requirements": {"requires_saved_mxd": true},
+      "side_effects": "writes_data",
+      "output_policy": {"writes_output": true, "workspace": "ArcMapAI_Output", "overwrite": false},
+      "executor": "operations.export_ops.export_map_pdf",
+      "examples": [{"user": "导出当前地图为 pdf", "arguments": {"output_name": "current_map_pdf", "resolution": 150}}]
+    },
+    {
+      "id": "export.table_csv",
+      "version": "1.0",
+      "category": "export",
+      "summary": "导出图层属性表为 CSV。",
+      "keywords": ["export csv", "导出表", "导出属性表", "CSV"],
+      "model_card": "Use export.table_csv to export a layer table to CSV. Arguments: layer, output_name, selected_only optional.",
+      "parameters_schema": {
+        "type": "object",
+        "required": ["layer", "output_name"],
+        "properties": {"layer": {"type": "string"}, "output_name": {"type": "string"}, "selected_only": {"type": "boolean"}},
+        "additionalProperties": false
+      },
+      "context_requirements": {"requires_layers": true, "requires_saved_mxd": true},
+      "side_effects": "writes_data",
+      "output_policy": {"writes_output": true, "workspace": "ArcMapAI_Output", "overwrite": false},
+      "executor": "operations.export_ops.export_table_csv",
+      "examples": [{"user": "导出 roads 属性表为 csv", "arguments": {"layer": "roads", "output_name": "roads_table", "selected_only": false}}]
+    }
+  ]
+}

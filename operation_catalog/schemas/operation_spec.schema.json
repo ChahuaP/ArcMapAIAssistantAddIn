@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "id",
+    "version",
+    "category",
+    "summary",
+    "model_card",
+    "parameters_schema",
+    "context_requirements",
+    "side_effects",
+    "output_policy",
+    "executor",
+    "examples"
+  ],
+  "properties": {
+    "id": {"type": "string"},
+    "version": {"type": "string"},
+    "category": {"type": "string"},
+    "summary": {"type": "string"},
+    "keywords": {"type": "array", "items": {"type": "string"}},
+    "model_card": {"type": "string"},
+    "parameters_schema": {"type": "object"},
+    "context_requirements": {"type": "object"},
+    "side_effects": {
+      "type": "string",
+      "enum": ["read_only", "changes_map", "writes_data"]
+    },
+    "output_policy": {"type": "object"},
+    "executor": {"type": "string"},
+    "examples": {"type": "array"}
+  }
+}

@@ -1,0 +1,105 @@
+{
+  "pack": "map_context",
+  "version": "0.1.0",
+  "operations": [
+    {
+      "id": "context.list_layers",
+      "version": "1.0",
+      "category": "map_context",
+      "summary": "列出当前地图中的图层。",
+      "keywords": ["list layers", "图层", "有哪些图层", "layers"],
+      "model_card": "Use context.list_layers to report the current ArcMap layer list. No arguments.",
+      "parameters_schema": {"type": "object", "properties": {}, "additionalProperties": false},
+      "context_requirements": {"requires_layers": false},
+      "side_effects": "read_only",
+      "output_policy": {"writes_output": false},
+      "executor": "operations.map_ops.list_layers",
+      "examples": [{"user": "当前地图有哪些图层", "arguments": {}}]
+    },
+    {
+      "id": "context.describe_layer",
+      "version": "1.0",
+      "category": "map_context",
+      "summary": "描述一个图层的数据源、几何类型和字段概况。",
+      "keywords": ["describe", "描述", "数据源", "geometry", "字段"],
+      "model_card": "Use context.describe_layer to summarize one layer. Arguments: layer.",
+      "parameters_schema": {
+        "type": "object",
+        "required": ["layer"],
+        "properties": {"layer": {"type": "string"}},
+        "additionalProperties": false
+      },
+      "context_requirements": {"requires_layers": true},
+      "side_effects": "read_only",
+      "output_policy": {"writes_output": false},
+      "executor": "operations.map_ops.describe_layer",
+      "examples": [{"user": "描述 roads 图层", "arguments": {"layer": "roads"}}]
+    },
+    {
+      "id": "context.list_fields",
+      "version": "1.0",
+      "category": "map_context",
+      "summary": "列出一个图层的字段。",
+      "keywords": ["fields", "字段", "属性表字段"],
+      "model_card": "Use context.list_fields to list fields for one layer. Arguments: layer.",
+      "parameters_schema": {
+        "type": "object",
+        "required": ["layer"],
+        "properties": {"layer": {"type": "string"}},
+        "additionalProperties": false
+      },
+      "context_requirements": {"requires_layers": true},
+      "side_effects": "read_only",
+      "output_policy": {"writes_output": false},
+      "executor": "operations.map_ops.list_fields",
+      "examples": [{"user": "roads 有哪些字段", "arguments": {"layer": "roads"}}]
+    },
+    {
+      "id": "context.get_selection_count",
+      "version": "1.0",
+      "category": "map_context",
+      "summary": "查看图层当前选择数量。",
+      "keywords": ["selection count", "选择数量", "选中了多少"],
+      "model_card": "Use context.get_selection_count to report selected feature count. Arguments: layer.",
+      "parameters_schema": {
+        "type": "object",
+        "required": ["layer"],
+        "properties": {"layer": {"type": "string"}},
+        "additionalProperties": false
+      },
+      "context_requirements": {"requires_layers": true},
+      "side_effects": "read_only",
+      "output_policy": {"writes_output": false},
+      "executor": "operations.map_ops.get_selection_count",
+      "examples": [{"user": "roads 选中了多少", "arguments": {"layer": "roads"}}]
+    },
+    {
+      "id": "context.get_map_extent",
+      "version": "1.0",
+      "category": "map_context",
+      "summary": "获取当前地图视图范围。",
+      "keywords": ["extent", "范围", "当前视图"],
+      "model_card": "Use context.get_map_extent to report current data frame extent. No arguments.",
+      "parameters_schema": {"type": "object", "properties": {}, "additionalProperties": false},
+      "context_requirements": {"requires_layers": false},
+      "side_effects": "read_only",
+      "output_policy": {"writes_output": false},
+      "executor": "operations.map_ops.get_map_extent",
+      "examples": [{"user": "当前视图范围是多少", "arguments": {}}]
+    },
+    {
+      "id": "context.get_spatial_reference",
+      "version": "1.0",
+      "category": "map_context",
+      "summary": "获取当前数据框坐标系。",
+      "keywords": ["spatial reference", "坐标系", "投影"],
+      "model_card": "Use context.get_spatial_reference to report the active data frame spatial reference. No arguments.",
+      "parameters_schema": {"type": "object", "properties": {}, "additionalProperties": false},
+      "context_requirements": {"requires_layers": false},
+      "side_effects": "read_only",
+      "output_policy": {"writes_output": false},
+      "executor": "operations.map_ops.get_spatial_reference",
+      "examples": [{"user": "当前地图坐标系是什么", "arguments": {}}]
+    }
+  ]
+}

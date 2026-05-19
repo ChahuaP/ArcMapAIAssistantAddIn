@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["summary", "steps"],
+  "properties": {
+    "summary": {"type": "string"},
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "operation", "arguments", "reason"],
+        "properties": {
+          "id": {"type": "string"},
+          "operation": {"type": "string"},
+          "arguments": {"type": "object"},
+          "reason": {"type": "string"}
+        }
+      }
+    }
+  }
+}

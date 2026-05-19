@@ -1,0 +1,96 @@
+{
+  "pack": "view_layer",
+  "version": "0.1.0",
+  "operations": [
+    {
+      "id": "layer.add_layer",
+      "version": "1.0",
+      "category": "view_layer",
+      "summary": "向当前地图添加图层文件或数据集。",
+      "keywords": ["add layer", "添加图层", "加载图层"],
+      "model_card": "Use layer.add_layer to add a dataset or layer file to the active data frame. Arguments: path.",
+      "parameters_schema": {
+        "type": "object",
+        "required": ["path"],
+        "properties": {"path": {"type": "string"}},
+        "additionalProperties": false
+      },
+      "context_requirements": {"requires_layers": false},
+      "side_effects": "changes_map",
+      "output_policy": {"writes_output": false},
+      "executor": "operations.layer_ops.add_layer",
+      "examples": [{"user": "添加这个 shp", "arguments": {"path": "D:/data/roads.shp"}}]
+    },
+    {
+      "id": "layer.set_visibility",
+      "version": "1.0",
+      "category": "view_layer",
+      "summary": "设置图层显隐。",
+      "keywords": ["visibility", "显示", "隐藏", "打开图层", "关闭图层"],
+      "model_card": "Use layer.set_visibility to show or hide a layer. Arguments: layer, visible.",
+      "parameters_schema": {
+        "type": "object",
+        "required": ["layer", "visible"],
+        "properties": {"layer": {"type": "string"}, "visible": {"type": "boolean"}},
+        "additionalProperties": false
+      },
+      "context_requirements": {"requires_layers": true},
+      "side_effects": "changes_map",
+      "output_policy": {"writes_output": false},
+      "executor": "operations.layer_ops.set_layer_visibility",
+      "examples": [{"user": "隐藏 roads", "arguments": {"layer": "roads", "visible": false}}]
+    },
+    {
+      "id": "view.zoom_to_layer",
+      "version": "1.0",
+      "category": "view_layer",
+      "summary": "缩放到图层范围。",
+      "keywords": ["zoom", "缩放", "定位", "图层范围"],
+      "model_card": "Use view.zoom_to_layer to zoom the active view to a layer. Arguments: layer.",
+      "parameters_schema": {
+        "type": "object",
+        "required": ["layer"],
+        "properties": {"layer": {"type": "string"}},
+        "additionalProperties": false
+      },
+      "context_requirements": {"requires_layers": true},
+      "side_effects": "changes_map",
+      "output_policy": {"writes_output": false},
+      "executor": "operations.layer_ops.zoom_to_layer",
+      "examples": [{"user": "缩放到 roads 图层", "arguments": {"layer": "roads"}}]
+    },
+    {
+      "id": "view.zoom_to_selection",
+      "version": "1.0",
+      "category": "view_layer",
+      "summary": "缩放到某图层的已选要素。",
+      "keywords": ["zoom selection", "缩放到选择", "选中范围"],
+      "model_card": "Use view.zoom_to_selection to zoom to selected features in one layer. Arguments: layer.",
+      "parameters_schema": {
+        "type": "object",
+        "required": ["layer"],
+        "properties": {"layer": {"type": "string"}},
+        "additionalProperties": false
+      },
+      "context_requirements": {"requires_layers": true},
+      "side_effects": "changes_map",
+      "output_policy": {"writes_output": false},
+      "executor": "operations.layer_ops.zoom_to_selection",
+      "examples": [{"user": "缩放到 roads 选中的要素", "arguments": {"layer": "roads"}}]
+    },
+    {
+      "id": "view.refresh_view",
+      "version": "1.0",
+      "category": "view_layer",
+      "summary": "刷新地图视图和目录。",
+      "keywords": ["refresh", "刷新"],
+      "model_card": "Use view.refresh_view to refresh active view and TOC. No arguments.",
+      "parameters_schema": {"type": "object", "properties": {}, "additionalProperties": false},
+      "context_requirements": {"requires_layers": false},
+      "side_effects": "changes_map",
+      "output_policy": {"writes_output": false},
+      "executor": "operations.layer_ops.refresh_view",
+      "examples": [{"user": "刷新地图", "arguments": {}}]
+    }
+  ]
+}

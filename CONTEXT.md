@@ -1,0 +1,144 @@
+# CONTEXT
+
+当前任务：修复旧网关继续使用旧上下文 hash 导致 ArcGIS 执行一直误报“地图结构已变化”。
+
+上次位置：本机旧网关 `0.8.5` 已停止并重启为 `0.8.6`；自动同步 Extension 保持生效。
+
+近期关键决定与原因：
+- 使用 ArcMap Python Add-in 原生结构：`config.xml` + `Install/*.py` + `.esriaddin`，因为这是 ArcMap 可直接加载的插件格式。
+- Tkinter 嵌进 ArcMap 进程会导致闪退风险，删除该方案。
+- 改用 Add-in 原生可编辑 ComboBox，`onEnter()` 中用 `arcpy.mapping.MapDocument("CURRENT")` 切换数据视图/布局视图并刷新；这个验证不依赖任何图层数据。
+- `config.xml` 中 ComboBox 明确设置 `editable="true"`，保证工具栏输入框可直接输入。
+- 插件版本号升到 `0.8`，Add-in 壳只负责原生按钮和热加载。
+- DeepSeek API key 不写入仓库；网关只读取 `DEEPSEEK_API_KEY` 或 `%APPDATA%\ArcMapAIAssistant\config.json`。
+- 普通用户点击 ArcMap 工具栏“打开助手”后自动启动本地网关、同步 ArcMap 上下文并打开 Web 工作台。
+- 完整 AI 返回、追问、不支持原因和 workflow JSON 都在 Web 工作台查看；ArcMap 里只保留短提示和执行按钮。
+- Web 工作台静态资源返回 `Cache-Control: no-store`，ArcMap 打开页面时带版本参数，避免浏览器缓存旧布局。
+- ArcMap 内直接打开浏览器仍有闪退风险，改为外部 launcher：`arcmap_runtime_py2/runtime.py` 只 `Popen(OpenAssistantWeb.cmd)`；`gateway_py3/open_web.py` 在 ArcMap 进程外启动网关并打开浏览器。
+- ArcMap 上下文同步从“打开助手”里拆出，独立为“同步上下文”按钮。
+- 新增 `StartGatewayButton`，调用 `runtime.start_gateway()`，只启动和检查本地网关，不打开网页、不读地图。
+- 工具栏按钮使用标准 ArcMap Add-in 写法：`image` 指向 16x16 图标，文字来自 `caption`；已删除 `Images/*_text.png`。
+- Planner 会把 step 中的 `parameters/params/args` 规范成 `arguments`；如果模型把参数平铺在 step 上，也会按 operation schema 收进 `arguments`。
+- Planner 会给缺失的 step `reason` 自动补默认说明，避免模型少字段导致用户看到协议错误。
+- 修复 `normalize_step()` 在 `parameters/params/args` 分支提前 return 的问题；现在别名参数也会继续补 `reason`。
+- “打开属性表窗口”当前没有原子操作，planner 会直接返回 `unsupported`，不再误判成 `export.table_csv`。
+- `export.table_csv` 的关键词从泛化的“属性表”收窄为“导出属性表/导出表/CSV”。
+- Web 标题和状态文案从 ArcMap 改为 ArcGIS。
+- 状态块移到页面右上角，显示“网关 / ArcGIS / 重启提示”；`/health` 返回 `app_version=0.8.2`，前端据此判断是否需要重启网关。
+- 左侧不再叫“连接”，改为“配置与地图”；中间对话区显示运行状态和“清空对话”。
+- Web 工作台每 2.5 秒轮询 `/context` 和 workflow 列表，每 10 秒检查网关和 Key，所以 ArcGIS 工具栏点击“同步上下文”后网页会自动更新。
+- Web 的“发送到 ArcGIS”只把 workflow 标为 `approved_for_arcmap`；真正执行仍必须回到 ArcGIS 工具栏点击“执行任务”，界面已在对话区和任务卡明确提示。
+- 上下文 hash 改为共享的执行指纹：网关和 ArcGIS runtime 都使用 `arcmap_runtime_py2/context_fingerprint.py`。
+- 执行指纹只比较会影响执行安全的内容：MXD、data frame、坐标系、图层顺序/名称/数据源/字段/几何类型/选择集；不再比较 `active_view`、地图范围 `extent` 和图层显隐状态。
+- `context_reader` 新增 `selection_hash`，避免选择集内容改变但选择数量相同导致误执行。
+- ArcGIS 执行端的上下文变化错误改为中文提示，Web 任务卡会显示失败原因。
+- 网关启动时清理 `arcmap_context`，避免 ArcGIS 没开时显示上一次同步的图层。
+- Web 状态从“ArcGIS 已同步”改为“地图上下文 / 最近同步”，明确这只是最近一次 ArcGIS 工具栏同步的快照，不代表实时连接。
+- Web 工作台按 `ui-ux-pro-max` 的企业级数据工作台方向重写：顶部品牌与状态、左侧配置地图、中间对话、右侧任务队列，技术详情默认折叠。
+- `open_web.py` 网页缓存参数更新为 `0.8.5-workbench-ui`，避免打开旧布局。
+- ArcGIS runtime 向网关 POST JSON 时改用 `ensure_ascii=True`，确保 Python 2 发送 ASCII 字节流，不再因中文 workflow summary 报编码错。
+- ArcGIS runtime 弹框和失败结果不再使用 `str(exc)`，改为安全 Unicode 转换。
+- 图层匹配去掉 `str(layer_value)`，避免以后中文图层名触发同类 ASCII 编码问题。
+- ArcMap Add-in `config.xml` 升到 0.9，并移除四个按钮的 `image` 属性；工具栏按钮改为纯文字 caption：启动网关、打开助手、同步上下文、执行任务。
+- ArcMap Add-in `config.xml` 升到 1.1，新增 `AutoSyncExtension`，监听打开/新建 MXD、地图内容变化、图层增删排序、坐标系变化和编辑保存相关事件。
+- 自动同步只在本地网关已运行时静默执行；不会因为 ArcMap 事件自动拉起网关，避免打开 ArcMap 时卡顿。
+- 自动同步有 2 秒同步防抖、10 秒网关检查缓存和 0.25 秒网关探测超时；重复上下文 hash 不重复上传。
+- “打开助手”和“启动网关”会主动读取并同步一次当前 ArcGIS 上下文，减少用户手点“同步”的需要。
+- 保存 MXD 不再参与执行上下文 hash；用户从未保存变成已保存后，已审批任务不会仅因保存路径变化被拒绝。
+- 写数据能否执行仍以 ArcGIS 端执行前二次读取为准：当前 MXD 已保存才允许输出到同级 `ArcMapAI_Output.gdb`。
+- Gateway、Web 前端和 `open_web.py` 版本号统一升到 `0.8.6`。
+- ArcGIS runtime 现在只向版本正确的网关自动同步；如果检测到旧网关，会先停掉旧 8765 监听进程再启动新网关。
+- `open_web.py` 也会检测旧网关版本；版本不一致时自动重启网关，避免网页误显示“无需重启”。
+- 新增版本一致性测试，防止 `APP_VERSION`、`EXPECTED_GATEWAY_VERSION`、`EXPECTED_APP_VERSION` 再次脱节。
+- Web 工作台左侧栏删除；能力范围、地图快照、API Key 配置都移到顶部按钮打开的弹窗。
+- Gateway 新增 `GET /api/capabilities`，能力弹窗从 operation catalog 动态读取 24 个能力，不手写能力清单。
+- `open_web.py` 网页缓存参数更新为 `0.8.5-modal-workbench`。
+- 右侧改成“任务队列”：只显示可执行任务；追问/不支持留在聊天中；任务卡支持确认发送、删除、执行步骤、技术详情。
+- 写数据任务卡提前提示“请先保存 MXD”，因为输出写到 MXD 同级 `ArcMapAI_Output.gdb`。
+- AI 规划允许返回 `execute`、`clarify`、`unsupported`，不再要求用户输入完全匹配操作名。
+- 模型返回 `action=buffer/run/执行` 且步骤合法时，planner 会规范为 `execute`，避免 “Workflow action must be execute, clarify, or unsupported.”。
+- System prompt 禁止把 `selected_operations`、`catalog_index`、JSON/schema 等内部字段暴露给用户。
+- Web 工作台新增“清空对话”，调用 `POST /workflows/clear` 删除旧 workflow 记录。
+- 当前地图状态改为竖排摘要，长坐标系名称自动换行，图层表不再横向撑开。
+- DeepSeek API Key 持久保存在 `%APPDATA%\ArcMapAIAssistant\config.json`；关闭网页或重启 ArcMap 后不需要重新输入。
+- SQLite workflow store 明确关闭连接，避免 Windows 下测试或清理时数据库文件被占用。
+- `SetupDeepSeekKey.cmd` 和 `StartGateway.cmd` 仅保留为开发/排障入口，不再是用户主流程。
+- DeepSeek 只返回 workflow JSON，ArcMap runtime 只执行 operation catalog 中登记过的 executor。
+- Gateway 每次只发送本地检索命中的少量 operation cards，不发送完整工具目录。
+- 已发现本机已安装目录 `Documents/ArcGIS/AddIns/Desktop10.1/{7f42eea1-1f17-4cf4-9d4f-c0c8d28c0a23}` 里仍是旧包，现已覆盖为 0.4，安装包内确认无 Button、无 Tkinter。
+- 插件 Python 代码保持 Python 2.7 兼容，因为 ArcMap Python Add-in 运行在 ArcGIS Desktop 自带 Python 环境里。
+
+相关代码文件：
+- `ArcMapAIAssistantAddIn/config.xml`
+- `ArcMapAIAssistantAddIn/Install/ArcMapAIAssistant_addin.py`
+- `arcmap_runtime_py2/runtime.py`
+- `arcmap_runtime_py2/context_reader.py`
+- `arcmap_runtime_py2/workflow_executor.py`
+- `arcmap_runtime_py2/operations/*.py`
+- `gateway_py3/*.py`
+- `gateway_py3/web/index.html`
+- `operation_catalog/**/*.json`
+- `SetupDeepSeekKey.cmd`
+- `StartGateway.cmd`
+- `ArcMapAIAssistantAddIn/makeaddin.py`
+- `README.md`
+
+测试/本地运行命令：
+- `python .\ArcMapAIAssistantAddIn\makeaddin.py`：通过，已重新生成 `.esriaddin`
+- `python -m gateway_py3`：启动本地网关
+- `Invoke-RestMethod http://127.0.0.1:8765/health`：通过，返回 24 个 operation
+- `python -m unittest discover -s tests -p "test_*.py" -v`：通过，7 个测试
+- `python -c "import ast, pathlib; ast.parse(...)"`：通过
+- `GET http://127.0.0.1:8765/config`：通过，返回 key 配置状态；测试后确认 8765 无监听残留
+- `python .\ArcMapAIAssistantAddIn\makeaddin.py`：通过，已重新生成 `.esriaddin`
+- `.\packaging\install.ps1`：通过，已覆盖用户 AddIns 目录
+- `StartGateway.cmd`：能启动网关；测试后已停止监听 8765 的临时 Python 进程
+- `python -c "import ast, pathlib; ast.parse(...)"`：通过，Python 语法解析正常
+- `python .\ArcMapAIAssistantAddIn\makeaddin.py`：通过，已重新生成 `.esriaddin`
+- `.\packaging\install.ps1`：通过，已覆盖 `Documents\ArcGIS\AddIns\Desktop10.1\{7f42eea1-1f17-4cf4-9d4f-c0c8d28c0a23}\arcmapaiassistantaddin.esriaddin`
+- ArcMap 点击“打开助手”外部打开 Web 工作台；点击“同步上下文”上传当前地图状态；Web 工作台输入自然语言生成 workflow；审批后回到 ArcMap 点击“执行任务”。
+- `python -m unittest discover -s tests -p "test_*.py" -v`：通过，12 个测试
+- `python -c "import ast, pathlib; ast.parse(...)"`：通过
+- 2048px 宽浏览器验证：页面 body/header/main 宽度均为 2048，主网格列宽约 450px + 1549px
+- `python .\ArcMapAIAssistantAddIn\makeaddin.py`：通过，已重新生成 `.esriaddin`
+- `.\packaging\install.ps1`：通过，已覆盖用户 AddIns 目录，安装包版本 0.7，包含三个按钮
+- `python -m unittest discover -s tests -p "test_*.py" -v`：通过，18 个测试
+- 临时网关冒烟：`/health` 返回 `app_version=0.8.1`，页面包含 ArcGIS 工作台、网关、ArcGIS、重启提示、无需重启
+- `python -c "import ast, pathlib; ast.parse(...)"`：通过
+- `GET http://127.0.0.1:8765/`：确认返回对话式 UI、待办任务、竖排地图状态样式
+- `python .\ArcMapAIAssistantAddIn\makeaddin.py`：通过，已重新生成 `.esriaddin`
+- `.\packaging\install.ps1`：通过，安装包版本 0.8，包含启动网关按钮和四个 16x16 图标；确认安装包不含 `*_text.png`
+- `python -m unittest discover -s tests -p "test_*.py" -v`：通过，18 个测试
+- `python -c "import ast, pathlib; ast.parse(...)"`：通过
+- 临时网关冒烟：`/health` 返回 `app_version=0.8.2`，页面包含“配置与地图”“清空对话”“setInterval(pollUpdates)”和“回到 ArcGIS 点击执行任务”的提示
+- Playwright 1440x900 验证：状态块在右上角，中间为对话区，右侧任务卡显示“待执行”和回到 ArcGIS 点击“执行任务”的提示
+- `python -m unittest discover -s tests -p "test_*.py" -v`：通过，21 个测试
+- `python -c "import ast, pathlib; ast.parse(...)"`：通过
+- `Invoke-RestMethod http://127.0.0.1:8765/health`：通过，返回 `app_version=0.8.3`
+- `GET http://127.0.0.1:8765/?v=0.8.3-context-hash`：通过，页面包含新版号和失败原因展示函数
+- 关闭本地 8765 网关进程：通过，已停止 `python.exe -m gateway_py3`
+- `python -m unittest discover -s tests -p "test_*.py" -v`：通过，21 个测试
+- `python -c "import ast, pathlib; ast.parse(...)"`：通过
+- `Get-NetTCPConnection -LocalPort 8765 -State Listen`：通过，返回 `NO_LISTENER`
+- `python -m unittest discover -s tests -p "test_*.py" -v`：通过，21 个测试
+- `python -c "import ast, pathlib; ast.parse(...)"`：通过
+- `git diff --check -- gateway_py3\web\index.html gateway_py3\open_web.py`：通过
+- Playwright 1440x900 验证：通过，三栏工作台布局正常
+- Playwright 390x844 验证：通过，窄屏布局降为单列
+- 关闭临时 8765 网关进程：通过
+- `python -m unittest discover -s tests -p "test_*.py" -v`：通过，22 个测试
+- `python -c "import ast, pathlib; ast.parse(...)"`：通过
+- `python .\ArcMapAIAssistantAddIn\makeaddin.py`：通过，Add-in 包内 `config.xml` 为 0.9 且无 Button `image` 属性
+- `.\packaging\install.ps1`：通过，已覆盖用户 AddIns 目录
+- `python -m unittest discover -s tests -p "test_*.py" -v`：通过，22 个测试
+- `python -c "import ast, pathlib; ast.parse(...)"`：通过
+- `GET http://127.0.0.1:8765/api/capabilities`：通过，返回 24 个能力；现有网关已重启为 `app_version=0.8.5`
+- `GET http://127.0.0.1:8765/?v=0.8.5-modal-workbench`：通过，页面无“配置与地图”左栏标题，包含能力范围、地图快照、Key 配置弹窗
+- `python -m unittest discover -s tests -p "test_*.py" -v`：通过，24 个测试
+- `python -c "import ast, pathlib; ast.parse(...)"`：通过，27 个 Python 文件语法解析正常
+- `python .\ArcMapAIAssistantAddIn\makeaddin.py`：通过，Add-in 包内 `config.xml` 为 1.1，包含 `AutoSyncExtension autoLoad=true`，无 Button `image` 属性
+- `.\packaging\install.ps1`：通过，已覆盖用户 AddIns 目录
+- `python -m unittest discover -s tests -p "test_*.py" -v`：通过，25 个测试
+- `python -c "import ast, pathlib; ast.parse(...)"`：通过，36 个 Python 文件语法解析正常
+- `Invoke-RestMethod http://127.0.0.1:8765/health`：通过，返回 `app_version=0.8.6`
+- 旧 8765 Python 网关进程已停止，新网关已启动为 `0.8.6`
