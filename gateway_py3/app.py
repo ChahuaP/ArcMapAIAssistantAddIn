@@ -10,14 +10,14 @@ from gateway_py3.catalog_loader import OperationCatalog
 from gateway_py3.deepseek_client import DeepSeekError, public_config, save_config
 from gateway_py3.logs import write_event
 from gateway_py3.paths import WEB_ROOT
-from gateway_py3.planner import Planner, PlannerError
+from gateway_py3.planner import AgenticPlanner, PlannerError
 from gateway_py3.validators import ValidationError, validate_catalog
 from gateway_py3.workflow_store import WorkflowStore
 
 
 HOST = "127.0.0.1"
 PORT = 8765
-APP_VERSION = "0.9.8"
+APP_VERSION = "0.10.2"
 
 
 class GatewayState:
@@ -26,7 +26,7 @@ class GatewayState:
         validate_catalog(self.catalog)
         self.store = WorkflowStore()
         self.store.clear_state("arcmap_context")
-        self.planner = Planner(catalog=self.catalog, store=self.store)
+        self.planner = AgenticPlanner(catalog=self.catalog, store=self.store)
 
 
 STATE = GatewayState()

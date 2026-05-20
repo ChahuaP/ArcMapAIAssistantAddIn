@@ -12,6 +12,17 @@ from .paths import data_dir
 
 
 DB_PATH = data_dir() / "workflows.sqlite"
+WORKFLOW_COLUMNS = {
+    "id",
+    "status",
+    "command",
+    "context_hash",
+    "workflow_json",
+    "agent_trace_json",
+    "created_at",
+    "updated_at",
+    "result_json"
+}
 
 
 class WorkflowStore:
@@ -33,6 +44,7 @@ class WorkflowStore:
 
     def _init(self) -> None:
         with self._connection() as conn:
+            _recreate_workflows_if_schema_changed(conn)
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS workflows (
@@ -41,7 +53,7 @@ class WorkflowStore:
                     command TEXT NOT NULL,
                     context_hash TEXT NOT NULL,
                     workflow_json TEXT NOT NULL,
-                    selected_operations_json TEXT NOT NULL,
+                    agent_trace_json TEXT NOT NULL,
                     created_at REAL NOT NULL,
                     updated_at REAL NOT NULL,
                     result_json TEXT
@@ -58,14 +70,14 @@ class WorkflowStore:
                 """
             )
 
-    def create_draft(self, command: str, context_hash: str, workflow: Dict[str, Any], selected_operations: List[str]) -> Dict[str, Any]:
+    def create_draft(self, command: str, context_hash: str, workflow: Dict[str, Any], agent_trace: List[Dict[str, Any]]) -> Dict[str, Any]:
         workflow_id = str(uuid.uuid4())
         now = time.time()
         with self._connection() as conn:
             conn.execute(
                 """
                 INSERT INTO workflows
-                (id, status, command, context_hash, workflow_json, selected_operations_json, created_at, updated_at)
+                (id, status, command, context_hash, workflow_json, agent_trace_json, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
@@ -74,7 +86,7 @@ class WorkflowStore:
                     command,
                     context_hash,
                     json.dumps(workflow, ensure_ascii=False, sort_keys=True),
-                    json.dumps(selected_operations, ensure_ascii=False),
+                    json.dumps(agent_trace, ensure_ascii=False, sort_keys=True),
                     now,
                     now
                 )
@@ -84,7 +96,7 @@ class WorkflowStore:
     def get(self, workflow_id: str) -> Dict[str, Any]:
         with self._connection() as conn:
             row = conn.execute(
-                "SELECT id, status, command, context_hash, workflow_json, selected_operations_json, created_at, updated_at, result_json FROM workflows WHERE id = ?",
+                "SELECT id, status, command, context_hash, workflow_json, agent_trace_json, created_at, updated_at, result_json FROM workflows WHERE id = ?",
                 (workflow_id,)
             ).fetchone()
         if row is None:
@@ -94,7 +106,7 @@ class WorkflowStore:
     def list_recent(self, limit: int = 50) -> List[Dict[str, Any]]:
         with self._connection() as conn:
             rows = conn.execute(
-                "SELECT id, status, command, context_hash, workflow_json, selected_operations_json, created_at, updated_at, result_json FROM workflows ORDER BY updated_at DESC LIMIT ?",
+                "SELECT id, status, command, context_hash, workflow_json, agent_trace_json, created_at, updated_at, result_json FROM workflows ORDER BY updated_at DESC LIMIT ?",
                 (limit,)
             ).fetchall()
         return [_row_to_dict(row) for row in rows]
@@ -108,7 +120,7 @@ class WorkflowStore:
         with self._connection() as conn:
             rows = conn.execute(
                 """
-                SELECT id, status, command, context_hash, workflow_json, selected_operations_json, created_at, updated_at, result_json
+                SELECT id, status, command, context_hash, workflow_json, agent_trace_json, created_at, updated_at, result_json
                 FROM workflows
                 WHERE status = 'draft' AND updated_at >= ?
                 ORDER BY updated_at DESC
@@ -150,7 +162,7 @@ class WorkflowStore:
         with self._connection() as conn:
             row = conn.execute(
                 """
-                SELECT id, status, command, context_hash, workflow_json, selected_operations_json, created_at, updated_at, result_json
+                SELECT id, status, command, context_hash, workflow_json, agent_trace_json, created_at, updated_at, result_json
                 FROM workflows
                 WHERE status = 'approved_for_arcmap'
                 ORDER BY updated_at DESC
@@ -201,16 +213,24 @@ class WorkflowStore:
         return self.get(workflow_id)
 
 
+def _recreate_workflows_if_schema_changed(conn) -> None:
+    table = conn.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'workflows'").fetchone()
+    if table is None:
+        return
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(workflows)").fetchall()}
+    if columns != WORKFLOW_COLUMNS:
+        conn.execute("DROP TABLE workflows")
+
+
 def _row_to_dict(row) -> Dict[str, Any]:
-    result = {
+    return {
         "id": row[0],
         "status": row[1],
         "command": row[2],
         "context_hash": row[3],
         "workflow": json.loads(row[4]),
-        "selected_operations": json.loads(row[5]),
+        "agent_trace": json.loads(row[5]),
         "created_at": row[6],
         "updated_at": row[7],
         "result": json.loads(row[8]) if row[8] else None
     }
-    return result

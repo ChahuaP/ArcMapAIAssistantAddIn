@@ -1,8 +1,8 @@
 # CONTEXT
 
-当前任务：修复文件定位把“请你打开 d 盘下的 nanjing.shp”解析成 `D:\你` 的问题。
+当前任务：修复 Agentic Planner 对“打开文件夹下所有 shp 并执行相交”的真实 DeepSeek 规划失败问题。
 
-上次位置：本机网关已重启为 `0.9.8` 当前源码，operation catalog 为 35 个能力；路径解析已验证不会把“请你”当成目录名。
+上次位置：本机网关已重启为 `0.10.1` 当前源码；真实 POST `/plan` 使用指令 `请你的打开D:\Data\shapefile\叠加分析\相交下所有的shp，并执行相交` 已生成 `layer.add_layer -> layer.add_layer -> analysis.intersect` 三步 workflow。
 
 近期关键决定与原因：
 - 使用 ArcMap Python Add-in 原生结构：`config.xml` + `Install/*.py` + `.esriaddin`，因为这是 ArcMap 可直接加载的插件格式。
@@ -18,9 +18,9 @@
 - ArcMap 上下文同步从“打开助手”里拆出，独立为“同步上下文”按钮。
 - 新增 `StartGatewayButton`，调用 `runtime.start_gateway()`，只启动和检查本地网关，不打开网页、不读地图。
 - 工具栏按钮使用标准 ArcMap Add-in 写法：`image` 指向 16x16 图标，文字来自 `caption`；已删除 `Images/*_text.png`。
-- Planner 会把 step 中的 `parameters/params/args` 规范成 `arguments`；如果模型把参数平铺在 step 上，也会按 operation schema 收进 `arguments`。
-- Planner 会给缺失的 step `id` 自动补稳定编号，并避开已有编号，避免模型少字段导致用户看到协议错误。
-- Planner 会给缺失的 step `reason` 自动补默认说明，避免模型少字段导致用户看到协议错误。
+- Gateway 规划层已改为 `AgenticPlanner`：DeepSeek 通过本地白名单工具理解任务、查询文件/上下文/catalog，并最终提交 workflow proposal。
+- Planner 不再做 `parameters/params/args` 兼容、不再补 step id/reason；坏协议会回填给 DeepSeek 修正一次，仍失败才给用户中文追问。
+- DeepSeek 仍不能执行 ArcPy 或任意 Python；ArcGIS runtime 只执行 catalog 中登记过的 operation。
 - 修复 `normalize_step()` 在 `parameters/params/args` 分支提前 return 的问题；现在别名参数也会继续补 `reason`。
 - “打开属性表窗口”当前没有原子操作，planner 会直接返回 `unsupported`，不再误判成 `export.table_csv`。
 - `export.table_csv` 的关键词从泛化的“属性表”收窄为“导出属性表/导出表/CSV”。
@@ -54,10 +54,9 @@
 - Gateway 新增 `GET /api/capabilities`，能力弹窗从 operation catalog 动态读取 24 个能力，不手写能力清单。
 - `open_web.py` 网页缓存参数更新为 `0.8.5-modal-workbench`。
 - 右侧改成“任务队列”：只显示可执行任务；追问/不支持留在聊天中；任务卡支持确认发送、删除、执行步骤、技术详情。
-- 写数据任务不再一律要求保存 MXD；如果当前 MXD 未保存且输出位置不明确，Planner 返回追问，要求用户说明输出文件夹或 GDB。
-- Planner 的追问逻辑已通用化：缺必要参数、图层不存在/重名、字段不存在、输出位置不明确都会转成 `clarify`。
-- Planner 支持最近追问续答：上一条是 `clarify` 时，类似“输出到 D 盘”的短回答会并回原始任务重新规划，而不是当成全新任务。
-- Planner 会跳过由旧 bug 产生的孤立追问；例如“输出到 D 盘”被错误问成“想输出什么内容”后，再次输入输出位置仍会回到更早的缓冲区任务。
+- 写数据任务不再一律要求保存 MXD；如果当前 MXD 未保存且输出位置不明确，`validators.prepare_workflow()` 拒绝 workflow 并要求用户说明文件夹或 GDB。
+- 缺必要参数、图层不存在/重名、字段不存在、输出位置不明确，都由 `validators.py` 这个唯一边界校验。
+- 追问续答不再靠本地关键词拼接；AgenticPlanner 会把最近对话摘要发给 DeepSeek，由模型理解用户补充。
 - 分析/导出类操作支持显式 `output_workspace` 或 `output_folder`；MXD 已保存时仍可默认输出到 MXD 同级目录。
 - `output_workspace` 支持普通文件夹和 `.gdb` 路径；普通文件夹会使用或创建其中的 `ArcMapAI_Output.gdb`。
 - 新增 Gateway 侧受限文件定位：完整路径直接解析；只说“D 盘下”时不扫全盘，而是列一级目录追问；补充具体目录后限时递归查找 GIS 文件。
@@ -66,32 +65,35 @@
 - 文件定位支持目录型请求：例如“添加某文件夹下的两个 shapefile”，目录存在且 shp 数量不超过 12 个时直接生成多个 `layer.add_layer` 步骤；数量过多才追问缩小范围。
 - ArcGIS 同步上下文会读取 `default_gdb`：优先读 MXD 的 `defaultGeodatabase`，否则读 ArcMap 当前 Geoprocessing workspace 中的 `.gdb`。
 - 用户说“输出到默认 GDB/默认地理数据库”时，Gateway 会把写数据操作的 `output_workspace` 填成当前上下文里的 `default_gdb`，不写死用户路径。
-- DeepSeek 返回缺少 `operation`、多余参数等坏协议时，Planner 会转成中文追问，不再把 `Step missing field: ...` 这类英文协议错误直接显示给用户。
-- 多操作任务支持“本地确定性前置步骤 + AI 后续规划 + workflow 合并”：例如先添加本地 shp，再对新增图层做相交/缓冲/选择/导出等后续操作，不再被文件定位器截断成纯添加图层。
-- Gateway 给 DeepSeek 发送 `preplanned_steps` 说明已确定的前置步骤，只要求模型返回剩余步骤；最终 workflow 会重排 step id 并合并。
+- DeepSeek 返回缺少 `operation`、多余参数等坏协议时，Gateway 会把中文校验结果作为 tool result 回填给 DeepSeek 修正一次。
+- 多操作任务现在由 DeepSeek 主导规划；文件解析只是 `file_resolve` 工具结果，不再生成前置 workflow 或合并 suffix workflow。
+- 旧的 `preplanned_steps` prompt 拼接链路已删除。
 - ArcGIS runtime 的 `find_layer` 支持从前序步骤结果找图层，也支持按当前地图中的图层名/数据源重新查找，避免 AddLayer 插入顶部后旧图层索引偏移导致后续步骤拿错图层。
 - 新增结构化属性条件协议，DeepSeek 不写 SQL；ArcGIS runtime 用 `condition_utils` 编译为 ArcGIS SQL。
 - 新增 `edits_data` side effect：属性更新、删除要素、删除字段、追加数据会直接修改原数据，ArcGIS runtime 会先估算影响并弹窗二次确认。
 - 新增叠加分析能力：擦除、标识、联合、对称差异、更新叠加、合并、追加。
 - 新增属性表能力：添加字段、删除字段、按结构化条件批量更新属性、按结构化条件删除要素。
 - ArcPy 可执行底图能力已撤掉：`operation_catalog/catalog.json` 不再加载 `packs/basemap.json`，并删除 `operation_catalog/packs/basemap.json`、`arcmap_runtime_py2/operations/basemap_ops.py`、`gateway_py3/basemap_providers.py`。
-- Planner 仍本地识别“底图/OSM/WMS/高德/天地图/ESRI/XYZ”等表达，但直接返回 `unsupported`，不再生成 ArcGIS 执行任务。
+- 底图仍不可执行；由 DeepSeek 根据 catalog 能力返回 `unsupported`，Gateway 校验保证不会生成不存在的底图 operation。
 - 当前判断：ArcMap 手工可以通过 GIS Servers 添加 WMS/WMTS；Python Add-in/ArcPy 不能稳定从 URL 直接创建底图图层。后续需要 C# ArcObjects 或预制 `.lyr` 方案。
-- FileResolver 新增 `ParsedCommand`，包含 `original`、`clean_text`、`file_resolution`；Planner 现在只用 `clean_text` 判断后续操作，不再用 `_strip_path_fragments()` 从原始字符串里补救。
-- `FileResolution` 暴露结构化 `files`，每个文件包含 `path/name/kind`；`resolve_command()` 保留为兼容入口。
+- `FileResolver` 已收窄为纯工具：`resolve_command()` 返回 `FileResolution.to_tool_result()` 可序列化结构，不再提供 `workflow()`、`ParsedCommand` 或 `clean_text`。
+- `FileResolution` 暴露结构化 `files`，每个文件包含 `path/layer_name/name/kind`。
 - `FileResolver._directory_fragments()` 现在只从输入盘符之后提取目录片段，并截掉“输出到/保存到”等输出尾巴；`请你打开d盘下的nanjing.shp` 会返回“D:\ 范围太大”并列出一级目录，不再生成 `D:\你`。
 - ArcGIS runtime 仍尝试用 ArcPy 创建 WMS 图层；如果当前 ArcMap 版本不能从 ArcPy 直接创建 WMS 图层，会提示通过 GIS Servers 建立 WMS 服务图层或使用预制 `.lyr`。
 - 输出图层添加改为去重：如果 ArcMap 已因地理处理自动把输出加到 TOC，runtime 不再重复 `AddLayer`。
 - AI 规划允许返回 `execute`、`clarify`、`unsupported`，不再要求用户输入完全匹配操作名。
 - 模型返回 `action=buffer/run/执行` 且步骤合法时，planner 会规范为 `execute`，避免 “Workflow action must be execute, clarify, or unsupported.”。
-- System prompt 禁止把 `selected_operations`、`catalog_index`、JSON/schema 等内部字段暴露给用户。
+- System prompt 禁止把 tool calls、schema、operation id、catalog 内部信息暴露给普通用户。
 - Web 工作台新增“清空对话”，调用 `POST /workflows/clear` 删除旧 workflow 记录。
 - 当前地图状态改为竖排摘要，长坐标系名称自动换行，图层表不再横向撑开。
 - DeepSeek API Key 持久保存在 `%APPDATA%\ArcMapAIAssistant\config.json`；关闭网页或重启 ArcMap 后不需要重新输入。
 - SQLite workflow store 明确关闭连接，避免 Windows 下测试或清理时数据库文件被占用。
 - `SetupDeepSeekKey.cmd` 和 `StartGateway.cmd` 仅保留为开发/排障入口，不再是用户主流程。
 - DeepSeek 只返回 workflow JSON，ArcMap runtime 只执行 operation catalog 中登记过的 executor。
-- Gateway 每次只发送本地检索命中的少量 operation cards，不发送完整工具目录。
+- Gateway 首轮发送 35 个 operation 的短索引，并提供 `catalog_get_operation_schema` 工具按需查询完整 schema；旧 `OperationRouter` 已删除。
+- `file_resolve` 现在支持 AI 工具调用传入裸路径或裸文件夹，例如 `D:\Data\shapefile\叠加分析\相交`，会直接解析该目录下可添加 GIS 文件；不再要求一定带“打开/添加”等中文动词。
+- Agentic Planner 工具轮次从 4 提升到 8，因为真实 DeepSeek 经常到第 4 轮才拿到本地校验错误，需要继续一轮修正 workflow。
+- operation index 增加 `model_card`，让 DeepSeek 在首轮就看到常用参数名，例如 `layer.add_layer` 使用 `path`，减少它猜出 `layer_source` 这类非法参数。
 - 已发现本机已安装目录 `Documents/ArcGIS/AddIns/Desktop10.1/{7f42eea1-1f17-4cf4-9d4f-c0c8d28c0a23}` 里仍是旧包，现已覆盖为 0.4，安装包内确认无 Button、无 Tkinter。
 - 插件 Python 代码保持 Python 2.7 兼容，因为 ArcMap Python Add-in 运行在 ArcGIS Desktop 自带 Python 环境里。
 
@@ -111,6 +113,10 @@
 - `README.md`
 
 测试/本地运行命令：
+- `python -m unittest discover -s tests -p "test_*.py" -v`：通过，39 个测试
+- `python -c "import ast, pathlib; ast.parse(...)"`：通过，45 个 Python 文件语法解析正常
+- `git diff --check`：通过
+- `Invoke-RestMethod http://127.0.0.1:8765/health`：通过，返回 `app_version=0.10.0`、35 个 operation
 - `python -m unittest discover -s tests -p "test_*.py" -v`：通过，69 个测试
 - `python -c "import ast, pathlib; ast.parse(...)"`：通过，Python 语法解析正常
 - `POST http://127.0.0.1:8765/plan`，command=`请你打开d盘下的nanjing.shp`：通过，返回列出 `D:\` 一级目录的追问，不再出现 `D:\你`
@@ -192,8 +198,6 @@
 - `python -m unittest discover -s tests -p "test_*.py" -v`：通过，32 个测试
 - `python -c "import ast, pathlib; ast.parse(...)"`：通过，37 个 Python 文件语法解析正常
 - `Invoke-RestMethod http://127.0.0.1:8765/health`：通过，返回 `app_version=0.8.8`
-- `python -m unittest tests.gateway.test_router_validators.RouterAndValidatorTests.test_planner_fills_missing_step_id -v`：通过，1 个测试
-- `python -m unittest tests.gateway.test_router_validators.RouterAndValidatorTests.test_planner_fills_missing_step_id_without_colliding -v`：通过，1 个测试
 - `python -m unittest discover -s tests -p "test_*.py" -v`：通过，51 个测试
 - `python -c "import ast, pathlib; ast.parse(...)"`：通过，46 个 Python 文件语法解析正常
 - `Invoke-RestMethod http://127.0.0.1:8765/health`：通过，返回 `app_version=0.9.0`、36 个 operation
@@ -225,3 +229,6 @@
 - `python -m unittest discover -s tests -p "test_*.py" -v`：通过，67 个测试
 - `python -c "import ast, pathlib; ast.parse(...)"`：通过，45 个 Python 文件语法解析正常
 - `Invoke-RestMethod http://127.0.0.1:8765/health`：通过，返回 `app_version=0.9.7`、35 个 operation
+- `python -m unittest discover -s tests -p "test_*.py" -v`：通过，43 个测试
+- `python -c "import ast, pathlib; ast.parse(...)"`：通过，Python 语法解析正常
+- `POST http://127.0.0.1:8765/plan`，command=`请你的打开D:\Data\shapefile\叠加分析\相交下所有的shp，并执行相交`：通过，真实 DeepSeek 返回三步 workflow：添加 `p1.shp`、添加 `p2.shp`、执行 `analysis.intersect`

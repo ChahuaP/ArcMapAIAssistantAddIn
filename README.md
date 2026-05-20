@@ -4,9 +4,9 @@ ArcMap AI Assistant v1 现在分三层：
 
 - `ArcMapAIAssistantAddIn`：ArcMap Python Add-in 壳，只负责原生按钮和热加载 runtime。
 - `arcmap_runtime_py2`：ArcMap 内执行层，采集上下文、调用本地网关、执行已注册 ArcPy 原子操作。
-- `gateway_py3` + `operation_catalog`：Python3 本地网关、DeepSeek 规划、Web 控制台、workflow 存储、工具目录。
+- `gateway_py3` + `operation_catalog`：Python3 本地网关、DeepSeek Agentic Planner、Web 控制台、workflow 存储、工具目录。
 
-DeepSeek 不直接执行代码，只能返回 workflow JSON；ArcMap 只执行 catalog 里登记过的 operation。
+DeepSeek 负责理解用户意图、调用本地白名单工具查询文件/上下文/能力目录，并提出 workflow；Gateway 负责校验，ArcMap 只执行 catalog 里登记过的 operation。DeepSeek 不能直接执行 ArcPy 或任意 Python。
 
 ## 普通用户使用
 
@@ -91,7 +91,7 @@ ArcMapAIAssistantAddIn\ArcMapAIAssistantAddIn.esriaddin
 1. 在 `operation_catalog/packs/*.json` 增加 operation spec。
 2. 在 `arcmap_runtime_py2/operations/` 增加 executor。
 3. 增加测试，确保 spec 和 executor 对得上。
-4. 不改 DeepSeek 总 prompt；网关会按用户输入检索少量 operation cards 发送给模型。
+4. 不改 DeepSeek 总 prompt；Agentic Planner 会把 operation 短索引和本地工具提供给模型，完整 schema 通过 `catalog_get_operation_schema` 查询。
 
 ## 关键点
 
@@ -100,6 +100,9 @@ ArcMapAIAssistantAddIn\ArcMapAIAssistantAddIn.esriaddin
 - `Install/ArcMapAIAssistant_addin.py` 只负责原生按钮和热加载外部 runtime。
 - `arcmap_runtime_py2/runtime.py` 负责 ArcMap 内入口。
 - `gateway_py3/app.py` 负责本地网关和 Web 控制台。
+- `gateway_py3/planner.py` 负责 Agentic Planner 主循环。
+- `gateway_py3/agent_tools.py` 负责 DeepSeek 可调用的本地白名单工具。
+- `gateway_py3/validators.py` 是 workflow 的唯一校验边界。
 - `operation_catalog/packs/*.json` 负责原子操作说明。
 - `gateway_py3/file_resolver.py` 负责受限本地文件查找，不做整盘索引或整盘递归扫描。
 - `arcmap_runtime_py2/operations/condition_utils.py` 负责把结构化属性条件编译为 ArcGIS SQL。

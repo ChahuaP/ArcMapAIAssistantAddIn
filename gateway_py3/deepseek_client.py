@@ -57,6 +57,41 @@ class DeepSeekClient:
         result["_usage"] = payload.get("usage", {})
         return result
 
+    def chat_agent(self, messages: List[Dict[str, Any]], tools: List[Dict[str, Any]]) -> Dict[str, Any]:
+        if not self.api_key:
+            raise DeepSeekError("DeepSeek API key not found. Set DEEPSEEK_API_KEY or %APPDATA%/ArcMapAIAssistant/config.json.")
+
+        body = {
+            "model": self.model,
+            "messages": messages,
+            "tools": tools,
+            "tool_choice": "auto",
+            "temperature": 0
+        }
+        data = json.dumps(body).encode("utf-8")
+        request = urllib.request.Request(
+            f"{self.base_url}/chat/completions",
+            data=data,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.api_key}"
+            },
+            method="POST"
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            raise DeepSeekError(f"DeepSeek HTTP {exc.code}: {detail}")
+        except Exception as exc:
+            raise DeepSeekError(str(exc))
+
+        return {
+            "message": payload["choices"][0]["message"],
+            "usage": payload.get("usage", {})
+        }
+
 
 def load_config() -> Dict[str, Any]:
     path = config_path()

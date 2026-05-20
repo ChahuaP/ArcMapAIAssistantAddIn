@@ -200,24 +200,7 @@ def _text(value):
 
 
 def _resolve_output_workspace(context, output_workspace):
-    workspace = _text(output_workspace).strip()
-    if _is_default_gdb_token(workspace):
-        default_gdb = context.get("default_gdb")
-        if not default_gdb:
-            raise OperationError(u"当前 ArcGIS 没有可用默认 GDB。请先在 ArcGIS 中设置默认地理数据库，或明确指定输出 .gdb。")
-        return _text(default_gdb)
-    return workspace
-
-
-def _is_default_gdb_token(value):
-    normalized = _text(value).replace(u" ", u"").lower()
-    return normalized in (
-        u"defaultgdb",
-        u"default.gdb",
-        u"默认gdb",
-        u"默认地理数据库",
-        u"默认数据库"
-    )
+    return _text(output_workspace).strip()
 
 
 def _layer_source_exists(mxd, df, path):
