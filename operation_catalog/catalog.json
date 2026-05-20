@@ -5,6 +5,7 @@
     "packs/view_layer.json",
     "packs/selection.json",
     "packs/analysis.json",
+    "packs/table.json",
     "packs/export.json"
   ]
 }

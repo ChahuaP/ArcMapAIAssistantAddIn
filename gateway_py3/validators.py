@@ -29,7 +29,7 @@ def validate_catalog(catalog: OperationCatalog) -> None:
         missing = [key for key in required if key not in operation]
         if missing:
             raise ValidationError(f"{operation.get('id', '<unknown>')} missing fields: {missing}")
-        if operation["side_effects"] not in ("read_only", "changes_map", "writes_data"):
+        if operation["side_effects"] not in ("read_only", "changes_map", "writes_data", "edits_data"):
             raise ValidationError(f"{operation['id']} has invalid side_effects")
 
 
@@ -103,7 +103,8 @@ def _validate_type(step_id: str, name: str, value: Any, schema: Dict[str, Any]) 
         item_schema = schema.get("items", {})
         for index, item in enumerate(value):
             _validate_type(step_id, f"{name}[{index}]", item, item_schema)
+    if expected == "object" and not isinstance(value, dict):
+        raise ValidationError(f"{step_id}.{name} must be object.")
     enum = schema.get("enum")
     if enum and value not in enum:
         raise ValidationError(f"{step_id}.{name} must be one of {enum}.")
-

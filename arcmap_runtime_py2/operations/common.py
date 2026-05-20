@@ -33,12 +33,18 @@ def active_data_frame(mxd=None):
     return frames[0]
 
 
-def find_layer(context, layer_value):
+def find_layer(context, layer_value, step_outputs=None):
     if not layer_value:
         raise OperationError("Layer is required.")
     raw = _text(layer_value)
+    explicit_layer_ref = False
     if raw.startswith(u"layer_ref:"):
         raw = raw[len(u"layer_ref:"):]
+        explicit_layer_ref = True
+    if raw.startswith(u"layer:"):
+        explicit_layer_ref = True
+    if raw.startswith(u"from_step:"):
+        return _find_layer_from_step(raw[len(u"from_step:"):], step_outputs or {})
 
     matches = []
     for layer in context.get("layers", []):
@@ -49,23 +55,40 @@ def find_layer(context, layer_value):
         for layer in context.get("layers", []):
             if lowered == (layer.get("name") or "").lower() or lowered == (layer.get("longName") or "").lower():
                 matches.append(layer)
+    mxd = current_mxd()
+    df = active_data_frame(mxd)
+    layers = arcpy.mapping.ListLayers(mxd, "", df)
+
     if len(matches) != 1:
+        live_match = _find_live_layer(raw, layers)
+        if live_match is not None:
+            return live_match
         if not matches:
             raise OperationError(u"Layer not found: %s" % raw)
         raise OperationError(u"Layer is ambiguous: %s" % raw)
 
-    mxd = current_mxd()
-    df = active_data_frame(mxd)
-    index = int(matches[0]["layer_ref"].split(":")[1])
-    layers = arcpy.mapping.ListLayers(mxd, "", df)
+    if not explicit_layer_ref:
+        live_match = _find_live_layer(raw, layers)
+        if live_match is not None:
+            return live_match
+
+    layer_ref = matches[0].get("layer_ref", "")
+    if layer_ref.startswith("from_step:"):
+        return _find_layer_from_step(layer_ref[len("from_step:"):], step_outputs or {})
+    if not layer_ref.startswith("layer:"):
+        live_match = _find_live_layer(raw, layers)
+        if live_match is not None:
+            return live_match
+        raise OperationError(u"Layer metadata is not executable: %s" % raw)
+    index = int(layer_ref.split(":")[1])
     if index >= len(layers):
-        raise OperationError("Layer index no longer exists: %s" % matches[0]["layer_ref"])
+        raise OperationError("Layer index no longer exists: %s" % layer_ref)
     return layers[index]
 
 
 def output_gdb(context, output_workspace=None):
     if output_workspace:
-        workspace = _text(output_workspace)
+        workspace = _resolve_output_workspace(context, output_workspace)
         if workspace.lower().endswith(u".gdb"):
             gdb = workspace
         else:
@@ -176,6 +199,27 @@ def _text(value):
     return unicode(value)
 
 
+def _resolve_output_workspace(context, output_workspace):
+    workspace = _text(output_workspace).strip()
+    if _is_default_gdb_token(workspace):
+        default_gdb = context.get("default_gdb")
+        if not default_gdb:
+            raise OperationError(u"当前 ArcGIS 没有可用默认 GDB。请先在 ArcGIS 中设置默认地理数据库，或明确指定输出 .gdb。")
+        return _text(default_gdb)
+    return workspace
+
+
+def _is_default_gdb_token(value):
+    normalized = _text(value).replace(u" ", u"").lower()
+    return normalized in (
+        u"defaultgdb",
+        u"default.gdb",
+        u"默认gdb",
+        u"默认地理数据库",
+        u"默认数据库"
+    )
+
+
 def _layer_source_exists(mxd, df, path):
     expected = _normalize_path(path)
     for layer in arcpy.mapping.ListLayers(mxd, "", df):
@@ -183,6 +227,50 @@ def _layer_source_exists(mxd, df, path):
         if source and _normalize_path(source) == expected:
             return True
     return False
+
+
+def _find_layer_from_step(step_id, step_outputs):
+    result = step_outputs.get(step_id)
+    if not isinstance(result, dict):
+        raise OperationError(u"Step output not found: %s" % step_id)
+    source = result.get("output") or result.get("added_layer")
+    if not source:
+        raise OperationError(u"Step has no layer output: %s" % step_id)
+    mxd = current_mxd()
+    df = active_data_frame(mxd)
+    layers = arcpy.mapping.ListLayers(mxd, "", df)
+    match = _find_live_layer(_text(source), layers)
+    if match is not None:
+        return match
+    name = os.path.splitext(os.path.basename(_text(source)))[0]
+    match = _find_live_layer(name, layers)
+    if match is not None:
+        return match
+    raise OperationError(u"Layer from step not found in map: %s" % step_id)
+
+
+def _find_live_layer(raw, layers):
+    value = _text(raw)
+    expected_path = _normalize_path(value)
+    expected_name = os.path.splitext(os.path.basename(value))[0] if value else value
+    matches = []
+    for layer in layers:
+        layer_name = getattr(layer, "name", "")
+        long_name = getattr(layer, "longName", layer_name)
+        source = _safe_data_source(layer)
+        if value in (layer_name, long_name):
+            matches.append(layer)
+            continue
+        if expected_name and expected_name in (layer_name, long_name):
+            matches.append(layer)
+            continue
+        if source and _normalize_path(source) == expected_path:
+            matches.append(layer)
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        raise OperationError(u"Layer is ambiguous: %s" % value)
+    return None
 
 
 def _safe_data_source(layer):

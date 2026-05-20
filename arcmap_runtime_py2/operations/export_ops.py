@@ -23,7 +23,7 @@ def export_map_pdf(context, arguments, step_outputs):
 
 
 def export_table_csv(context, arguments, step_outputs):
-    layer = common.find_layer(context, arguments["layer"])
+    layer = common.find_layer(context, arguments["layer"], step_outputs)
     output = common.output_file(context, arguments["output_name"], ".csv", arguments.get("output_folder"))
     common.export_table_to_csv(layer, output, bool(arguments.get("selected_only", False)))
     return {"output": output}

@@ -25,7 +25,7 @@
     "context_requirements": {"type": "object"},
     "side_effects": {
       "type": "string",
-      "enum": ["read_only", "changes_map", "writes_data"]
+      "enum": ["read_only", "changes_map", "writes_data", "edits_data"]
     },
     "output_policy": {"type": "object"},
     "executor": {"type": "string"},

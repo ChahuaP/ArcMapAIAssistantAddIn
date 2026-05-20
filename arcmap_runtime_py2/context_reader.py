@@ -7,6 +7,12 @@ import arcpy
 import context_fingerprint
 
 
+try:
+    unicode
+except NameError:
+    unicode = str
+
+
 def read_context():
     mxd = arcpy.mapping.MapDocument("CURRENT")
     data_frames = arcpy.mapping.ListDataFrames(mxd)
@@ -19,6 +25,7 @@ def read_context():
     context = {
         "mxd_path": _mxd_path(mxd),
         "is_saved": bool(_mxd_path(mxd)),
+        "default_gdb": _default_geodatabase(mxd),
         "active_view": getattr(mxd, "activeView", None),
         "data_frame": data_frame.name if data_frame is not None else None,
         "spatial_reference": _spatial_reference(data_frame),
@@ -37,6 +44,17 @@ def _mxd_path(mxd):
     path = getattr(mxd, "filePath", None)
     if path and os.path.exists(path):
         return path
+    return ""
+
+
+def _default_geodatabase(mxd):
+    default_gdb = getattr(mxd, "defaultGeodatabase", None)
+    if default_gdb:
+        return default_gdb
+    env = getattr(arcpy, "env", None)
+    workspace = getattr(env, "workspace", None)
+    if workspace and unicode(workspace).lower().endswith(u".gdb"):
+        return workspace
     return ""
 
 

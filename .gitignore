@@ -1,0 +1,3 @@
+config/basemap_providers.local.json
+*.pyc
+__pycache__/

@@ -132,7 +132,7 @@ def _execute_pending():
 
     try:
         context = context_reader.read_context()
-        result = workflow_executor.execute(row, context)
+        result = workflow_executor.execute(row, context, confirm_callback=_confirm_direct_edit)
     except Exception as exc:
         result = {
             "ok": False,
@@ -203,3 +203,12 @@ def _unicode_text(value):
             return str(value).decode("utf-8", "replace")
         except Exception:
             return u"<unprintable>"
+
+
+def _confirm_direct_edit(message):
+    text = _unicode_text(message) + u"\n\n这会直接修改原始数据，且不承诺可撤销。是否继续？"
+    result = pythonaddins.MessageBox(text, "ArcMap AI Assistant", 4)
+    if isinstance(result, bool):
+        return result
+    value = _unicode_text(result).lower()
+    return value in (u"yes", u"y", u"true", u"1", u"6", u"是", u"确定")

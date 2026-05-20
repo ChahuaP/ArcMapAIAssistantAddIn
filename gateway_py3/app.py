@@ -17,7 +17,7 @@ from gateway_py3.workflow_store import WorkflowStore
 
 HOST = "127.0.0.1"
 PORT = 8765
-APP_VERSION = "0.8.8"
+APP_VERSION = "0.9.7"
 
 
 class GatewayState:
@@ -65,10 +65,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "Not found"}, 404)
         except (PlannerError, DeepSeekError, ValidationError, ValueError) as exc:
             write_event("http.rejected", {"path": path, "error": str(exc)})
-            self._json({"error": str(exc)}, 400)
+            self._json({"error": _public_error(exc)}, 400)
         except Exception as exc:
             write_event("http.error", {"path": path, "error": str(exc)})
-            self._json({"error": str(exc)}, 500)
+            self._json({"error": "系统处理时遇到问题。请稍后重试，或查看运行日志。"}, 500)
 
     def do_POST(self):
         path = urlparse(self.path).path
@@ -113,10 +113,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "Not found"}, 404)
         except (PlannerError, DeepSeekError, ValidationError, ValueError) as exc:
             write_event("http.rejected", {"path": path, "error": str(exc)})
-            self._json({"error": str(exc)}, 400)
+            self._json({"error": _public_error(exc)}, 400)
         except Exception as exc:
             write_event("http.error", {"path": path, "error": str(exc)})
-            self._json({"error": str(exc)}, 500)
+            self._json({"error": "系统处理时遇到问题。请稍后重试，或查看运行日志。"}, 500)
 
     def log_message(self, fmt, *args):
         write_event("http.access", {"message": fmt % args})
@@ -184,6 +184,15 @@ def _public_operation(operation):
         "parameters": sorted(properties.keys()),
         "example": (operation.get("examples") or [{}])[0].get("user", "")
     }
+
+
+def _public_error(exc):
+    if isinstance(exc, ValidationError):
+        return "任务信息不完整或参数不符合要求。请换一种更明确的说法。"
+    message = str(exc)
+    if message.startswith("DeepSeek API key must start with sk-."):
+        return "DeepSeek API Key 格式不对，请检查后重新填写。"
+    return message
 
 
 if __name__ == "__main__":

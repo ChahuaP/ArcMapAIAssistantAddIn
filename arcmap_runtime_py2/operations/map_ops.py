@@ -11,17 +11,17 @@ def list_layers(context, arguments, step_outputs):
 
 
 def describe_layer(context, arguments, step_outputs):
-    layer_info = _layer_info(context, arguments["layer"])
+    layer_info = _layer_info(context, arguments["layer"], step_outputs)
     return layer_info
 
 
 def list_fields(context, arguments, step_outputs):
-    layer_info = _layer_info(context, arguments["layer"])
+    layer_info = _layer_info(context, arguments["layer"], step_outputs)
     return {"layer": layer_info["name"], "fields": layer_info.get("fields", [])}
 
 
 def get_selection_count(context, arguments, step_outputs):
-    layer_info = _layer_info(context, arguments["layer"])
+    layer_info = _layer_info(context, arguments["layer"], step_outputs)
     return {"layer": layer_info["name"], "selected_count": layer_info.get("selected_count", 0)}
 
 
@@ -33,8 +33,8 @@ def get_spatial_reference(context, arguments, step_outputs):
     return {"spatial_reference": context.get("spatial_reference")}
 
 
-def _layer_info(context, layer_value):
-    layer = common.find_layer(context, layer_value)
+def _layer_info(context, layer_value, step_outputs=None):
+    layer = common.find_layer(context, layer_value, step_outputs)
     for item in context.get("layers", []):
         if item["name"] == layer.name or item["longName"] == getattr(layer, "longName", layer.name):
             return item

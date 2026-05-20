@@ -17,18 +17,18 @@ def add_layer(context, arguments, step_outputs):
     layer = arcpy.mapping.Layer(path)
     arcpy.mapping.AddLayer(df, layer, "TOP")
     common.refresh()
-    return {"added_layer": path}
+    return {"added_layer": path, "layer_name": getattr(layer, "name", os.path.splitext(os.path.basename(path))[0])}
 
 
 def set_layer_visibility(context, arguments, step_outputs):
-    layer = common.find_layer(context, arguments["layer"])
+    layer = common.find_layer(context, arguments["layer"], step_outputs)
     layer.visible = bool(arguments["visible"])
     common.refresh()
     return {"layer": layer.name, "visible": bool(layer.visible)}
 
 
 def zoom_to_layer(context, arguments, step_outputs):
-    layer = common.find_layer(context, arguments["layer"])
+    layer = common.find_layer(context, arguments["layer"], step_outputs)
     mxd = common.current_mxd()
     df = common.active_data_frame(mxd)
     df.extent = layer.getExtent()
@@ -37,7 +37,7 @@ def zoom_to_layer(context, arguments, step_outputs):
 
 
 def zoom_to_selection(context, arguments, step_outputs):
-    layer = common.find_layer(context, arguments["layer"])
+    layer = common.find_layer(context, arguments["layer"], step_outputs)
     mxd = common.current_mxd()
     df = common.active_data_frame(mxd)
     df.extent = layer.getSelectedExtent()

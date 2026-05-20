@@ -1,0 +1,91 @@
+{
+  "pack": "table",
+  "version": "0.1.0",
+  "operations": [
+    {
+      "id": "table.add_field",
+      "version": "1.0",
+      "category": "table",
+      "summary": "向图层属性表添加字段，直接修改原始数据。",
+      "keywords": ["add field", "添加字段", "新增字段"],
+      "model_card": "Use table.add_field to add a field to a layer. This directly edits source data and requires confirmation. Arguments: layer, field_name, field_type optional, field_length optional.",
+      "parameters_schema": {
+        "type": "object",
+        "required": ["layer", "field_name"],
+        "properties": {
+          "layer": {"type": "string"},
+          "field_name": {"type": "string"},
+          "field_type": {"type": "string"},
+          "field_length": {"type": "integer"}
+        },
+        "additionalProperties": false
+      },
+      "context_requirements": {"requires_layers": true, "requires_confirmation": true},
+      "side_effects": "edits_data",
+      "output_policy": {"writes_output": false, "edits_original": true},
+      "executor": "operations.table_ops.add_field",
+      "examples": [{"user": "给 roads 添加字段 k", "arguments": {"layer": "roads", "field_name": "k", "field_type": "TEXT", "field_length": 50}}]
+    },
+    {
+      "id": "table.delete_field",
+      "version": "1.0",
+      "category": "table",
+      "summary": "删除图层属性字段，直接修改原始数据。",
+      "keywords": ["delete field", "删除字段"],
+      "model_card": "Use table.delete_field to delete one existing field. This directly edits source data and requires confirmation. Arguments: layer, field_name.",
+      "parameters_schema": {
+        "type": "object",
+        "required": ["layer", "field_name"],
+        "properties": {"layer": {"type": "string"}, "field_name": {"type": "string"}},
+        "additionalProperties": false
+      },
+      "context_requirements": {"requires_layers": true, "requires_fields": true, "field_arguments": ["field_name"], "requires_confirmation": true},
+      "side_effects": "edits_data",
+      "output_policy": {"writes_output": false, "edits_original": true},
+      "executor": "operations.table_ops.delete_field",
+      "examples": [{"user": "删除 roads 的 TEMP 字段", "arguments": {"layer": "roads", "field_name": "TEMP"}}]
+    },
+    {
+      "id": "table.update_rows",
+      "version": "1.0",
+      "category": "table",
+      "summary": "按条件批量修改属性值，直接修改原始数据。",
+      "keywords": ["update rows", "修改字段", "调整字段", "批量修改", "赋值"],
+      "model_card": "Use table.update_rows to update attribute values by structured where condition, not SQL text. This directly edits source data and requires confirmation. Arguments: layer, where, assignments. assignments is an object of field names to new values.",
+      "parameters_schema": {
+        "type": "object",
+        "required": ["layer", "where", "assignments"],
+        "properties": {
+          "layer": {"type": "string"},
+          "where": {"type": "object"},
+          "assignments": {"type": "object"}
+        },
+        "additionalProperties": false
+      },
+      "context_requirements": {"requires_layers": true, "requires_fields": true, "assignment_fields": true, "condition_fields": true, "requires_confirmation": true},
+      "side_effects": "edits_data",
+      "output_policy": {"writes_output": false, "edits_original": true},
+      "executor": "operations.table_ops.update_rows",
+      "examples": [{"user": "把字段 a 等于 c 的要素的字段 b 改成 d", "arguments": {"layer": "roads", "where": {"field": "a", "op": "eq", "value": "c"}, "assignments": {"b": "d"}}}]
+    },
+    {
+      "id": "table.delete_rows",
+      "version": "1.0",
+      "category": "table",
+      "summary": "按条件删除要素，直接修改原始数据。",
+      "keywords": ["delete rows", "删除要素", "删除记录", "删掉"],
+      "model_card": "Use table.delete_rows to delete features by structured where condition, not SQL text. This directly edits source data and requires confirmation. Arguments: layer, where.",
+      "parameters_schema": {
+        "type": "object",
+        "required": ["layer", "where"],
+        "properties": {"layer": {"type": "string"}, "where": {"type": "object"}},
+        "additionalProperties": false
+      },
+      "context_requirements": {"requires_layers": true, "requires_fields": true, "condition_fields": true, "requires_confirmation": true},
+      "side_effects": "edits_data",
+      "output_policy": {"writes_output": false, "edits_original": true},
+      "executor": "operations.table_ops.delete_rows",
+      "examples": [{"user": "删除字段 a 等于 c 的要素", "arguments": {"layer": "roads", "where": {"field": "a", "op": "eq", "value": "c"}}}]
+    }
+  ]
+}

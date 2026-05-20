@@ -7,14 +7,14 @@
       "version": "1.0",
       "category": "selection",
       "summary": "按属性条件选择要素。",
-      "keywords": ["select", "where", "选择", "属性选择", "大于", "小于", "等于"],
-      "model_card": "Use selection.select_by_attribute to select features by SQL where clause. Arguments: layer, where_clause, selection_type optional.",
+      "keywords": ["select", "where", "选择", "属性选择", "大于", "小于", "等于", "之间", "为空"],
+      "model_card": "Use selection.select_by_attribute to select features by structured where condition, not SQL text. Arguments: layer, where, selection_type optional. where examples: {\"field\":\"POP\",\"op\":\"gt\",\"value\":10000}, {\"field\":\"POP\",\"op\":\"between\",\"values\":[10,20]}, {\"op\":\"and\",\"conditions\":[...]}",
       "parameters_schema": {
         "type": "object",
-        "required": ["layer", "where_clause"],
+        "required": ["layer", "where"],
         "properties": {
           "layer": {"type": "string"},
-          "where_clause": {"type": "string"},
+          "where": {"type": "object"},
           "selection_type": {"type": "string", "enum": ["NEW_SELECTION", "ADD_TO_SELECTION", "REMOVE_FROM_SELECTION", "SUBSET_SELECTION", "SWITCH_SELECTION", "CLEAR_SELECTION"]}
         },
         "additionalProperties": false
@@ -23,15 +23,15 @@
       "side_effects": "changes_map",
       "output_policy": {"writes_output": false},
       "executor": "operations.selection_ops.select_by_attribute",
-      "examples": [{"user": "选择人口大于10000的县", "arguments": {"layer": "counties", "where_clause": "POPULATION > 10000"}}]
+      "examples": [{"user": "选择人口大于10000的县", "arguments": {"layer": "counties", "where": {"field": "POPULATION", "op": "gt", "value": 10000}}}]
     },
     {
       "id": "selection.select_by_location",
       "version": "1.0",
       "category": "selection",
       "summary": "按空间关系选择要素。",
-      "keywords": ["select by location", "空间选择", "相交", "within", "intersect"],
-      "model_card": "Use selection.select_by_location to select target features by spatial relation to another layer. Arguments: target_layer, overlap_type, select_layer.",
+      "keywords": ["select by location", "空间选择", "相交", "within", "intersect", "包含", "距离内", "边界接触"],
+      "model_card": "Use selection.select_by_location to select target features by spatial relation to another layer or its selected features. Arguments: target_layer, overlap_type, select_layer, selection_type optional, search_distance optional. overlap_type should be ArcPy SelectLayerByLocation values such as INTERSECT, WITHIN, CONTAINS, WITHIN_A_DISTANCE, BOUNDARY_TOUCHES, SHARE_A_LINE_SEGMENT_WITH, ARE_IDENTICAL_TO, HAVE_THEIR_CENTER_IN.",
       "parameters_schema": {
         "type": "object",
         "required": ["target_layer", "overlap_type", "select_layer"],
@@ -39,7 +39,8 @@
           "target_layer": {"type": "string"},
           "overlap_type": {"type": "string"},
           "select_layer": {"type": "string"},
-          "selection_type": {"type": "string"}
+          "selection_type": {"type": "string"},
+          "search_distance": {"type": "string"}
         },
         "additionalProperties": false
       },

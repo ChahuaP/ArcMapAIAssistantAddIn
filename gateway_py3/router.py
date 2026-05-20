@@ -45,7 +45,9 @@ class OperationRouter:
             "selection.select_by_attribute",
             "selection.select_by_location",
             "selection.clear_selection",
-            "analysis.buffer"
+            "analysis.buffer",
+            "layer.add_layer",
+            "table.update_rows"
         ]
         operations = []
         for operation_id in preferred_ids:
@@ -70,9 +72,11 @@ class OperationRouter:
             if _contains(command, keyword):
                 score += 5
 
-        if operation["side_effects"] == "writes_data" and any(word in command for word in ["导出", "生成", "创建", "缓冲", "裁剪", "融合", "投影", "连接"]):
+        if operation["side_effects"] == "writes_data" and any(word in command for word in ["导出", "生成", "创建", "缓冲", "裁剪", "融合", "投影", "连接", "擦除", "标识", "联合", "合并"]):
             score += 2
-        if operation["side_effects"] == "changes_map" and any(word in command for word in ["缩放", "显示", "隐藏", "选择", "刷新"]):
+        if operation["side_effects"] == "changes_map" and any(word in command for word in ["缩放", "显示", "隐藏", "选择", "刷新", "打开", "添加", "加载", "底图"]):
+            score += 2
+        if operation["side_effects"] == "edits_data" and any(word in command for word in ["修改", "调整", "改成", "删除", "添加字段", "追加", "赋值"]):
             score += 2
 
         layer_names = [layer.get("name", "") for layer in context.get("layers", [])]

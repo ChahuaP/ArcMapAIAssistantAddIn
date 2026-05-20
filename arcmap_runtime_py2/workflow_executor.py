@@ -15,7 +15,7 @@ class WorkflowExecutionError(Exception):
     pass
 
 
-def execute(workflow_row, context):
+def execute(workflow_row, context, confirm_callback=None):
     workflow = workflow_row["workflow"]
     expected_hash = workflow_row["context_hash"]
     actual_hash = context_reader.context_hash(context)
@@ -34,6 +34,7 @@ def execute(workflow_row, context):
         arguments = step["arguments"]
         _validate_arguments(step["id"], arguments, operation["parameters_schema"])
         _validate_write_policy(operation, context, arguments)
+        _confirm_edit_if_needed(operation, context, arguments, step_outputs, confirm_callback)
         result = _call_executor(operation["executor"], context, arguments, step_outputs)
         step_outputs[step["id"]] = result
         results.append({"step_id": step["id"], "operation": operation_id, "result": result})
@@ -61,6 +62,17 @@ def _validate_write_policy(operation, context, arguments):
     raise WorkflowExecutionError(u"当前 MXD 未保存。请先说明输出位置，或保存 MXD 后重新生成任务。")
 
 
+def _confirm_edit_if_needed(operation, context, arguments, step_outputs, confirm_callback):
+    if operation.get("side_effects") != "edits_data":
+        return
+    if confirm_callback is None:
+        raise WorkflowExecutionError(u"该任务会直接修改原始数据，需要在 ArcGIS 中确认后才能执行。")
+    estimate = _call_estimator(operation["executor"], context, arguments, step_outputs)
+    message = estimate.get("summary") or u"该任务会直接修改原始数据。是否继续？"
+    if not confirm_callback(message):
+        raise WorkflowExecutionError(u"用户取消了直接修改数据的操作。")
+
+
 def _validate_arguments(step_id, arguments, schema):
     required = schema.get("required", [])
     properties = schema.get("properties", {})
@@ -78,7 +90,22 @@ def _call_executor(executor_path, context, arguments, step_outputs):
     if module_name.startswith("operations."):
         common = importlib.import_module("operations.common")
         reload(common)
+        try:
+            condition_utils = importlib.import_module("operations.condition_utils")
+            reload(condition_utils)
+        except Exception:
+            pass
     module = importlib.import_module(module_name)
     module = reload(module)
     function = getattr(module, function_name)
     return function(context, arguments, step_outputs)
+
+
+def _call_estimator(executor_path, context, arguments, step_outputs):
+    module_name, function_name = executor_path.rsplit(".", 1)
+    module = importlib.import_module(module_name)
+    module = reload(module)
+    estimator = getattr(module, "estimate_" + function_name, None)
+    if estimator is None:
+        return {"summary": u"该任务会直接修改原始数据。是否继续？"}
+    return estimator(context, arguments, step_outputs)

@@ -81,10 +81,94 @@ class OutputLayerTests(unittest.TestCase):
         self.assertTrue(output.endswith(r"ArcMapAI_Output.gdb\nanjing_buffer"))
         self.assertEqual(calls["created"][0][1], "ArcMapAI_Output.gdb")
 
+    def test_output_workspace_default_gdb_token_uses_context_default_gdb(self):
+        fake_arcpy = types.SimpleNamespace()
+        fake_arcpy.Exists = lambda path: path.lower().endswith(".gdb")
+        fake_arcpy.CreateFileGDB_management = lambda folder, name: None
+        sys.modules["arcpy"] = fake_arcpy
+
+        spec = importlib.util.spec_from_file_location("common_default_gdb", COMMON_PATH)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = module.output_feature_class(
+                {"default_gdb": str(pathlib.Path(directory) / "Default.gdb")},
+                "nanjing_buffer",
+                "默认gdb"
+            )
+
+        self.assertTrue(output.endswith(r"Default.gdb\nanjing_buffer"))
+
+    def test_output_workspace_default_gdb_token_requires_context_default_gdb(self):
+        fake_arcpy = types.SimpleNamespace()
+        fake_arcpy.Exists = lambda path: False
+        fake_arcpy.CreateFileGDB_management = lambda folder, name: None
+        sys.modules["arcpy"] = fake_arcpy
+
+        spec = importlib.util.spec_from_file_location("common_default_gdb_missing", COMMON_PATH)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        with self.assertRaises(Exception):
+            module.output_feature_class({}, "nanjing_buffer", "默认gdb")
+
+    def test_find_layer_can_use_layer_added_by_previous_step_name(self):
+        added_layer = FakeLayer(r"D:\Data\p1.shp", "p1")
+
+        class Mapping(object):
+            @staticmethod
+            def MapDocument(value):
+                return object()
+
+            @staticmethod
+            def ListDataFrames(mxd):
+                return [object()]
+
+            @staticmethod
+            def ListLayers(mxd, wildcard, data_frame):
+                return [added_layer]
+
+        sys.modules["arcpy"] = types.SimpleNamespace(mapping=Mapping)
+        spec = importlib.util.spec_from_file_location("common_find_added_name", COMMON_PATH)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        found = module.find_layer({"layers": []}, "p1", {})
+
+        self.assertIs(found, added_layer)
+
+    def test_find_layer_can_use_from_step_output(self):
+        added_layer = FakeLayer(r"D:\Data\p1.shp", "p1")
+
+        class Mapping(object):
+            @staticmethod
+            def MapDocument(value):
+                return object()
+
+            @staticmethod
+            def ListDataFrames(mxd):
+                return [object()]
+
+            @staticmethod
+            def ListLayers(mxd, wildcard, data_frame):
+                return [added_layer]
+
+        sys.modules["arcpy"] = types.SimpleNamespace(mapping=Mapping)
+        spec = importlib.util.spec_from_file_location("common_find_from_step", COMMON_PATH)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        found = module.find_layer({"layers": []}, "from_step:step_1", {"step_1": {"added_layer": r"D:\Data\p1.shp"}})
+
+        self.assertIs(found, added_layer)
+
 
 class FakeLayer(object):
-    def __init__(self, data_source):
+    def __init__(self, data_source, name=None):
         self.dataSource = data_source
+        self.name = name or pathlib.Path(data_source).stem
+        self.longName = self.name
 
     def supports(self, name):
         return name == "DATASOURCE"

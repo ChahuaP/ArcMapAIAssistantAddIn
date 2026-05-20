@@ -24,6 +24,8 @@ ArcMap 可以通过“启动网关”手动启动本地网关，不需要用户�
 
 `SetupDeepSeekKey.cmd` 和 `StartGateway.cmd` 只保留给开发/排障。
 
+属性编辑类任务会直接修改原始数据。执行前 ArcMap 会统计影响范围并二次确认，用户取消则不执行。
+
 开发/排障命令仍保留在 runtime 中：
 
 - `/start`：手动启动本地网关。
@@ -56,6 +58,8 @@ python -m gateway_py3
   "model": "deepseek-chat"
 }
 ```
+
+当前 ArcMap Python Add-in 版本暂不支持自动添加底图。ArcMap 手工可以通过 GIS Servers 添加 WMS/WMTS；自动化底图后续需要 C# ArcObjects 或预制 `.lyr` 方案。
 
 ## Add-in 构建
 
@@ -97,4 +101,6 @@ ArcMapAIAssistantAddIn\ArcMapAIAssistantAddIn.esriaddin
 - `arcmap_runtime_py2/runtime.py` 负责 ArcMap 内入口。
 - `gateway_py3/app.py` 负责本地网关和 Web 控制台。
 - `operation_catalog/packs/*.json` 负责原子操作说明。
+- `gateway_py3/file_resolver.py` 负责受限本地文件查找，不做整盘索引或整盘递归扫描。
+- `arcmap_runtime_py2/operations/condition_utils.py` 负责把结构化属性条件编译为 ArcGIS SQL。
 - `.esriaddin` 是打包后的安装文件，本质是包含 `config.xml`、`Install/`、`Images/` 的压缩包。

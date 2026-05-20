@@ -3,7 +3,7 @@
   <Name>ArcMap AI Assistant</Name>
   <AddInID>{7f42eea1-1f17-4cf4-9d4f-c0c8d28c0a23}</AddInID>
   <Description>ArcMap AI Assistant toolbar.</Description>
-  <Version>1.2</Version>
+  <Version>1.4</Version>
   <Image />
   <Author>Codex</Author>
   <Company />
@@ -14,23 +14,23 @@
   <AddIn language="PYTHON" library="ArcMapAIAssistant_addin.py" namespace="ArcMapAIAssistant_addin">
     <ArcMap>
       <Commands>
-        <Button caption="助手"
+        <Button caption="显示控制台"
                 category="ArcMap AI Assistant"
                 class="OpenAssistantButton"
                 id="ArcMapAIAssistant_addin.openAssistantButton"
                 message="Open ArcMap AI Assistant"
-                tip="打开 ArcMap AI Assistant">
+                tip="显示 Web 控制台">
           <Help heading="ArcMap AI Assistant" />
         </Button>
-        <Button caption="网关"
+        <Button caption="启动AI后台"
                 category="ArcMap AI Assistant"
                 class="StartGatewayButton"
                 id="ArcMapAIAssistant_addin.startGatewayButton"
                 message="Start local gateway"
-                tip="启动本地网关">
+                tip="启动本地 AI 网关">
           <Help heading="ArcMap AI Assistant" />
         </Button>
-        <Button caption="同步"
+        <Button caption="同步上下文"
                 category="ArcMap AI Assistant"
                 class="SyncContextButton"
                 id="ArcMapAIAssistant_addin.syncContextButton"
@@ -38,12 +38,12 @@
                 tip="同步当前 ArcMap 上下文">
           <Help heading="ArcMap AI Assistant" />
         </Button>
-        <Button caption="执行"
+        <Button caption="执行工作流"
                 category="ArcMap AI Assistant"
                 class="ExecuteWorkflowButton"
                 id="ArcMapAIAssistant_addin.executeWorkflowButton"
                 message="Execute approved workflow"
-                tip="执行已审批任务">
+                tip="执行已审批工作流">
           <Help heading="ArcMap AI Assistant" />
         </Button>
       </Commands>

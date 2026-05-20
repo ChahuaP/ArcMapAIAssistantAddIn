@@ -653,7 +653,7 @@
         <div id="chatLog" class="chat-log"></div>
         <div class="composer">
           <div class="composer-row">
-            <textarea id="command" aria-label="任务输入" placeholder="输入任务，按 Ctrl+Enter 发送"></textarea>
+            <textarea id="command" aria-label="任务输入" placeholder="输入任务，按 Enter 发送，Shift+Enter 换行"></textarea>
             <button class="primary" onclick="submitPlan()">发送</button>
           </div>
         </div>
@@ -748,7 +748,7 @@
   </div>
 
   <script>
-    const EXPECTED_GATEWAY_VERSION = '0.8.8';
+    const EXPECTED_GATEWAY_VERSION = '0.9.7';
     const POLL_INTERVAL_MS = 2500;
     const HEALTH_INTERVAL_MS = 10000;
     let lastHealthCheck = 0;
@@ -808,7 +808,7 @@
         if (!groups[category]) groups[category] = [];
         groups[category].push(operation);
       });
-      const order = ['map_context', 'view_layer', 'selection', 'analysis', 'export', 'other'];
+      const order = ['map_context', 'view_layer', 'selection', 'analysis', 'table', 'basemap', 'export', 'other'];
       box.innerHTML = '';
       order.filter(category => groups[category]).forEach(category => {
         const group = document.createElement('section');
@@ -838,6 +838,8 @@
         view_layer: '视图与图层',
         selection: '选择',
         analysis: '常用分析',
+        table: '属性表',
+        basemap: '底图',
         export: '导出',
         other: '其他'
       }[category] || category;
@@ -1181,7 +1183,10 @@
     }
 
     document.getElementById('command').addEventListener('keydown', event => {
-      if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) submitPlan();
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        submitPlan();
+      }
     });
 
     document.addEventListener('keydown', event => {

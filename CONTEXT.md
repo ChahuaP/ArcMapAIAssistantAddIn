@@ -1,8 +1,8 @@
 # CONTEXT
 
-当前任务：修复追问续答和显式输出目录执行问题。
+当前任务：撤掉 ArcPy 可执行底图能力，避免 WMS/XYZ URL 在 ArcMap 中生成必失败任务。
 
-上次位置：Add-in 已重新打包并安装为 1.2；本机网关已重启为 `0.8.8`；Extension 自动同步已回退。
+上次位置：本机网关已重启为 `0.9.1` 当前源码，operation catalog 为 36 个能力；Add-in 已重新打包安装为 1.4。
 
 近期关键决定与原因：
 - 使用 ArcMap Python Add-in 原生结构：`config.xml` + `Install/*.py` + `.esriaddin`，因为这是 ArcMap 可直接加载的插件格式。
@@ -19,6 +19,7 @@
 - 新增 `StartGatewayButton`，调用 `runtime.start_gateway()`，只启动和检查本地网关，不打开网页、不读地图。
 - 工具栏按钮使用标准 ArcMap Add-in 写法：`image` 指向 16x16 图标，文字来自 `caption`；已删除 `Images/*_text.png`。
 - Planner 会把 step 中的 `parameters/params/args` 规范成 `arguments`；如果模型把参数平铺在 step 上，也会按 operation schema 收进 `arguments`。
+- Planner 会给缺失的 step `id` 自动补稳定编号，并避开已有编号，避免模型少字段导致用户看到协议错误。
 - Planner 会给缺失的 step `reason` 自动补默认说明，避免模型少字段导致用户看到协议错误。
 - 修复 `normalize_step()` 在 `parameters/params/args` 分支提前 return 的问题；现在别名参数也会继续补 `reason`。
 - “打开属性表窗口”当前没有原子操作，planner 会直接返回 `unsupported`，不再误判成 `export.table_csv`。
@@ -59,6 +60,26 @@
 - Planner 会跳过由旧 bug 产生的孤立追问；例如“输出到 D 盘”被错误问成“想输出什么内容”后，再次输入输出位置仍会回到更早的缓冲区任务。
 - 分析/导出类操作支持显式 `output_workspace` 或 `output_folder`；MXD 已保存时仍可默认输出到 MXD 同级目录。
 - `output_workspace` 支持普通文件夹和 `.gdb` 路径；普通文件夹会使用或创建其中的 `ArcMapAI_Output.gdb`。
+- 新增 Gateway 侧受限文件定位：完整路径直接解析；只说“D 盘下”时不扫全盘，而是列一级目录追问；补充具体目录后限时递归查找 GIS 文件。
+- 文件定位续答会拆分原始请求和“用户补充”，避免把 `用户补充：Data` 当成真实目录名。
+- 文件定位在具体目录未找到目标文件时，会继续列出下一层子目录，让用户继续补充目录。
+- 文件定位支持目录型请求：例如“添加某文件夹下的两个 shapefile”，目录存在且 shp 数量不超过 12 个时直接生成多个 `layer.add_layer` 步骤；数量过多才追问缩小范围。
+- ArcGIS 同步上下文会读取 `default_gdb`：优先读 MXD 的 `defaultGeodatabase`，否则读 ArcMap 当前 Geoprocessing workspace 中的 `.gdb`。
+- 用户说“输出到默认 GDB/默认地理数据库”时，Gateway 会把写数据操作的 `output_workspace` 填成当前上下文里的 `default_gdb`，不写死用户路径。
+- DeepSeek 返回缺少 `operation`、多余参数等坏协议时，Planner 会转成中文追问，不再把 `Step missing field: ...` 这类英文协议错误直接显示给用户。
+- 多操作任务支持“本地确定性前置步骤 + AI 后续规划 + workflow 合并”：例如先添加本地 shp，再对新增图层做相交/缓冲/选择/导出等后续操作，不再被文件定位器截断成纯添加图层。
+- Gateway 给 DeepSeek 发送 `preplanned_steps` 说明已确定的前置步骤，只要求模型返回剩余步骤；最终 workflow 会重排 step id 并合并。
+- ArcGIS runtime 的 `find_layer` 支持从前序步骤结果找图层，也支持按当前地图中的图层名/数据源重新查找，避免 AddLayer 插入顶部后旧图层索引偏移导致后续步骤拿错图层。
+- 新增结构化属性条件协议，DeepSeek 不写 SQL；ArcGIS runtime 用 `condition_utils` 编译为 ArcGIS SQL。
+- 新增 `edits_data` side effect：属性更新、删除要素、删除字段、追加数据会直接修改原数据，ArcGIS runtime 会先估算影响并弹窗二次确认。
+- 新增叠加分析能力：擦除、标识、联合、对称差异、更新叠加、合并、追加。
+- 新增属性表能力：添加字段、删除字段、按结构化条件批量更新属性、按结构化条件删除要素。
+- ArcPy 可执行底图能力已撤掉：`operation_catalog/catalog.json` 不再加载 `packs/basemap.json`，并删除 `operation_catalog/packs/basemap.json`、`arcmap_runtime_py2/operations/basemap_ops.py`、`gateway_py3/basemap_providers.py`。
+- Planner 仍本地识别“底图/OSM/WMS/高德/天地图/ESRI/XYZ”等表达，但直接返回 `unsupported`，不再生成 ArcGIS 执行任务。
+- 当前判断：ArcMap 手工可以通过 GIS Servers 添加 WMS/WMTS；Python Add-in/ArcPy 不能稳定从 URL 直接创建底图图层。后续需要 C# ArcObjects 或预制 `.lyr` 方案。
+- FileResolver 新增 `ParsedCommand`，包含 `original`、`clean_text`、`file_resolution`；Planner 现在只用 `clean_text` 判断后续操作，不再用 `_strip_path_fragments()` 从原始字符串里补救。
+- `FileResolution` 暴露结构化 `files`，每个文件包含 `path/name/kind`；`resolve_command()` 保留为兼容入口。
+- ArcGIS runtime 仍尝试用 ArcPy 创建 WMS 图层；如果当前 ArcMap 版本不能从 ArcPy 直接创建 WMS 图层，会提示通过 GIS Servers 建立 WMS 服务图层或使用预制 `.lyr`。
 - 输出图层添加改为去重：如果 ArcMap 已因地理处理自动把输出加到 TOC，runtime 不再重复 `AddLayer`。
 - AI 规划允许返回 `execute`、`clarify`、`unsupported`，不再要求用户输入完全匹配操作名。
 - 模型返回 `action=buffer/run/执行` 且步骤合法时，planner 会规范为 `execute`，避免 “Workflow action must be execute, clarify, or unsupported.”。
@@ -89,6 +110,17 @@
 - `README.md`
 
 测试/本地运行命令：
+- `python -m unittest discover -s tests -p "test_*.py" -v`：通过，46 个测试
+- `python -c "import ast, pathlib; ast.parse(...)"`：通过，46 个 Python 文件语法解析正常
+- `python -m json.tool operation_catalog/**/*.json`：通过
+- `Invoke-RestMethod http://127.0.0.1:8765/health`：通过，返回 `app_version=0.9.0`、36 个 operation
+- `python -m unittest discover -s tests -p "test_*.py" -v`：通过，48 个测试
+- `python .\ArcMapAIAssistantAddIn\makeaddin.py`：通过，Add-in 包版本 1.3
+- `.\packaging\install.ps1`：通过，已覆盖用户 AddIns 目录
+- `python .\ArcMapAIAssistantAddIn\makeaddin.py`：通过，Add-in 包版本 1.4，按钮文案为“启动AI后台 / 显示控制台 / 同步上下文 / 执行工作流”
+- `.\packaging\install.ps1`：通过，已覆盖用户 AddIns 目录
+- `python -m unittest discover -s tests -p "test_*.py" -v`：通过，49 个测试
+- Web 输入框支持 Enter 发送，Shift+Enter 换行。
 - `python .\ArcMapAIAssistantAddIn\makeaddin.py`：通过，已重新生成 `.esriaddin`
 - `python -m gateway_py3`：启动本地网关
 - `Invoke-RestMethod http://127.0.0.1:8765/health`：通过，返回 24 个 operation
@@ -155,3 +187,36 @@
 - `python -m unittest discover -s tests -p "test_*.py" -v`：通过，32 个测试
 - `python -c "import ast, pathlib; ast.parse(...)"`：通过，37 个 Python 文件语法解析正常
 - `Invoke-RestMethod http://127.0.0.1:8765/health`：通过，返回 `app_version=0.8.8`
+- `python -m unittest tests.gateway.test_router_validators.RouterAndValidatorTests.test_planner_fills_missing_step_id -v`：通过，1 个测试
+- `python -m unittest tests.gateway.test_router_validators.RouterAndValidatorTests.test_planner_fills_missing_step_id_without_colliding -v`：通过，1 个测试
+- `python -m unittest discover -s tests -p "test_*.py" -v`：通过，51 个测试
+- `python -c "import ast, pathlib; ast.parse(...)"`：通过，46 个 Python 文件语法解析正常
+- `Invoke-RestMethod http://127.0.0.1:8765/health`：通过，返回 `app_version=0.9.0`、36 个 operation
+- `python -m unittest tests.gateway.test_file_resolver -v`：通过，10 个测试
+- `python -m unittest discover -s tests -p "test_*.py" -v`：通过，55 个测试
+- `python -c "import ast, pathlib; ast.parse(...)"`：通过，46 个 Python 文件语法解析正常
+- `Invoke-RestMethod http://127.0.0.1:8765/health`：通过，返回 `app_version=0.9.0`、36 个 operation
+- `python -m unittest discover -s tests -p "test_*.py" -v`：通过，61 个测试
+- `python -c "import ast, pathlib; ast.parse(...)"`：通过，47 个 Python 文件语法解析正常
+- `Invoke-RestMethod http://127.0.0.1:8765/health`：通过，返回 `app_version=0.9.0`、36 个 operation
+- `python -m unittest discover -s tests -p "test_*.py" -v`：通过，65 个测试
+- `python -c "import ast, pathlib; ast.parse(...)"`：通过，47 个 Python 文件语法解析正常
+- `Invoke-RestMethod http://127.0.0.1:8765/health`：通过，返回 `app_version=0.9.1`、36 个 operation
+- `python -m unittest discover -s tests -p "test_*.py" -v`：通过，66 个测试
+- `python -c "import ast, pathlib; ast.parse(...)"`：通过，48 个 Python 文件语法解析正常
+- `Invoke-RestMethod http://127.0.0.1:8765/health`：通过，返回 `app_version=0.9.2`、36 个 operation
+- `python -m unittest discover -s tests -p "test_*.py" -v`：通过，66 个测试
+- `python -c "import ast, pathlib; ast.parse(...)"`：通过，48 个 Python 文件语法解析正常
+- `Invoke-RestMethod http://127.0.0.1:8765/health`：通过，返回 `app_version=0.9.3`、36 个 operation
+- `python -m unittest discover -s tests -p "test_*.py" -v`：通过，69 个测试
+- `python -c "import ast, pathlib; ast.parse(...)"`：通过，49 个 Python 文件语法解析正常
+- `Invoke-RestMethod http://127.0.0.1:8765/health`：通过，返回 `app_version=0.9.4`、36 个 operation
+- `python -m unittest discover -s tests -p "test_*.py" -v`：通过，70 个测试
+- `python -c "import ast, pathlib; ast.parse(...)"`：通过，49 个 Python 文件语法解析正常
+- `Invoke-RestMethod http://127.0.0.1:8765/health`：通过，返回 `app_version=0.9.5`、36 个 operation
+- `python -m unittest discover -s tests -p "test_*.py" -v`：通过，71 个测试
+- `python -c "import ast, pathlib; ast.parse(...)"`：通过，49 个 Python 文件语法解析正常
+- `Invoke-RestMethod http://127.0.0.1:8765/health`：通过，返回 `app_version=0.9.6`、36 个 operation
+- `python -m unittest discover -s tests -p "test_*.py" -v`：通过，67 个测试
+- `python -c "import ast, pathlib; ast.parse(...)"`：通过，45 个 Python 文件语法解析正常
+- `Invoke-RestMethod http://127.0.0.1:8765/health`：通过，返回 `app_version=0.9.7`、35 个 operation
