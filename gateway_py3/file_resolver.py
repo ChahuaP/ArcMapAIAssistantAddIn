@@ -229,12 +229,17 @@ def _drive_letter(command: str) -> str | None:
 
 
 def _directory_fragments(command: str, root: Path, file_name: str = "") -> List[str]:
-    text = command
+    text = command or ""
     if file_name:
         text = text.replace(file_name, " ")
+    drive_match = DRIVE_RE.search(text)
+    if drive_match is not None:
+        text = text[drive_match.end():]
+    text = _remove_output_tail(text)
     text = DRIVE_RE.sub(" ", text)
     for word in (
-        "用户补充", "补充", "帮我", "请", "打开", "添加", "加载", "导入",
+        "用户补充", "补充", "帮我", "请你", "请您", "请", "你", "您", "麻烦",
+        "打开", "添加", "加载", "导入",
         "文件夹", "目录", "下面", "下", "里的", "里面", "就在", "就是",
         "在", "是", "的", "文件", "两个", "2个", "所有", "全部", "都",
         "shapefile", "shape", "shp"
@@ -246,6 +251,15 @@ def _directory_fragments(command: str, root: Path, file_name: str = "") -> List[
         if item and item not in (root.drive,):
             parts.append(item)
     return parts
+
+
+def _remove_output_tail(text: str) -> str:
+    cut = len(text)
+    for marker in ("输出到", "输出至", "保存到", "保存至", "存到", "另存到"):
+        index = text.find(marker)
+        if index >= 0:
+            cut = min(cut, index)
+    return text[:cut]
 
 
 def _split_supplement(command: str) -> tuple[str, str]:

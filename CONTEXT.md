@@ -1,8 +1,8 @@
 # CONTEXT
 
-当前任务：撤掉 ArcPy 可执行底图能力，避免 WMS/XYZ URL 在 ArcMap 中生成必失败任务。
+当前任务：修复文件定位把“请你打开 d 盘下的 nanjing.shp”解析成 `D:\你` 的问题。
 
-上次位置：本机网关已重启为 `0.9.1` 当前源码，operation catalog 为 36 个能力；Add-in 已重新打包安装为 1.4。
+上次位置：本机网关已重启为 `0.9.8` 当前源码，operation catalog 为 35 个能力；路径解析已验证不会把“请你”当成目录名。
 
 近期关键决定与原因：
 - 使用 ArcMap Python Add-in 原生结构：`config.xml` + `Install/*.py` + `.esriaddin`，因为这是 ArcMap 可直接加载的插件格式。
@@ -79,6 +79,7 @@
 - 当前判断：ArcMap 手工可以通过 GIS Servers 添加 WMS/WMTS；Python Add-in/ArcPy 不能稳定从 URL 直接创建底图图层。后续需要 C# ArcObjects 或预制 `.lyr` 方案。
 - FileResolver 新增 `ParsedCommand`，包含 `original`、`clean_text`、`file_resolution`；Planner 现在只用 `clean_text` 判断后续操作，不再用 `_strip_path_fragments()` 从原始字符串里补救。
 - `FileResolution` 暴露结构化 `files`，每个文件包含 `path/name/kind`；`resolve_command()` 保留为兼容入口。
+- `FileResolver._directory_fragments()` 现在只从输入盘符之后提取目录片段，并截掉“输出到/保存到”等输出尾巴；`请你打开d盘下的nanjing.shp` 会返回“D:\ 范围太大”并列出一级目录，不再生成 `D:\你`。
 - ArcGIS runtime 仍尝试用 ArcPy 创建 WMS 图层；如果当前 ArcMap 版本不能从 ArcPy 直接创建 WMS 图层，会提示通过 GIS Servers 建立 WMS 服务图层或使用预制 `.lyr`。
 - 输出图层添加改为去重：如果 ArcMap 已因地理处理自动把输出加到 TOC，runtime 不再重复 `AddLayer`。
 - AI 规划允许返回 `execute`、`clarify`、`unsupported`，不再要求用户输入完全匹配操作名。
@@ -110,6 +111,10 @@
 - `README.md`
 
 测试/本地运行命令：
+- `python -m unittest discover -s tests -p "test_*.py" -v`：通过，69 个测试
+- `python -c "import ast, pathlib; ast.parse(...)"`：通过，Python 语法解析正常
+- `POST http://127.0.0.1:8765/plan`，command=`请你打开d盘下的nanjing.shp`：通过，返回列出 `D:\` 一级目录的追问，不再出现 `D:\你`
+- `POST http://127.0.0.1:8765/plan`，command=`请你打开D盘Data文件夹下的nanjing.shp，输出到E盘`：通过，解析到 `D:\Data\shapefile\nanjing.shp`
 - `python -m unittest discover -s tests -p "test_*.py" -v`：通过，46 个测试
 - `python -c "import ast, pathlib; ast.parse(...)"`：通过，46 个 Python 文件语法解析正常
 - `python -m json.tool operation_catalog/**/*.json`：通过

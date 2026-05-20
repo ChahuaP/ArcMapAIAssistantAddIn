@@ -29,6 +29,18 @@ class FileResolverTests(unittest.TestCase):
         self.assertIn("范围太大", result.summary)
         self.assertIn("Data", result.summary)
 
+    def test_polite_prefix_before_drive_is_not_directory_fragment(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            (root / "Data").mkdir()
+            resolver = FileResolver(drive_roots={"D": root})
+            result = resolver.resolve_command("请你打开d盘下的nanjing.shp")
+
+        self.assertEqual(result.status, "clarify")
+        self.assertIn("范围太大", result.summary)
+        self.assertNotIn("你", result.summary)
+        self.assertNotIn("没有找到目录", result.summary)
+
     def test_specific_directory_searches_limited_scope(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
@@ -38,6 +50,19 @@ class FileResolverTests(unittest.TestCase):
             target.write_text("", encoding="utf-8")
             resolver = FileResolver(drive_roots={"D": root})
             result = resolver.resolve_command("帮我打开 D 盘 Data 文件夹 shapefile 文件夹下的 nanjing.shp")
+
+        self.assertEqual(result.status, "resolved")
+        self.assertEqual(pathlib.Path(result.path), target)
+
+    def test_later_output_drive_does_not_override_input_drive(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            shp_dir = root / "Data"
+            shp_dir.mkdir()
+            target = shp_dir / "nanjing.shp"
+            target.write_text("", encoding="utf-8")
+            resolver = FileResolver(drive_roots={"D": root, "E": root / "Output"})
+            result = resolver.resolve_command("请你打开D盘Data文件夹下的nanjing.shp，输出到E盘")
 
         self.assertEqual(result.status, "resolved")
         self.assertEqual(pathlib.Path(result.path), target)
