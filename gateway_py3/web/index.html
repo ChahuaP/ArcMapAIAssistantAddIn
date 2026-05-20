@@ -748,7 +748,7 @@
   </div>
 
   <script>
-    const EXPECTED_GATEWAY_VERSION = '0.10.2';
+    const EXPECTED_GATEWAY_VERSION = '0.10.3';
     const POLL_INTERVAL_MS = 2500;
     const HEALTH_INTERVAL_MS = 10000;
     let lastHealthCheck = 0;
@@ -1106,7 +1106,8 @@
         'selection.export_selected_features',
         'export.map_png',
         'export.map_pdf',
-        'export.table_csv'
+        'export.table_csv',
+        'export.split_by_field'
       ].includes(step.operation));
     }
 

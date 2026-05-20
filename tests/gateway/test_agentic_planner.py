@@ -282,6 +282,25 @@ class AgenticPlannerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValidationError, "输出位置"):
             prepare_workflow(workflow, self.catalog, _context(is_saved=False))
 
+    def test_split_by_field_workflow_is_prepared_with_timestamp(self):
+        workflow = {
+            "action": "execute",
+            "summary": "按字段拆分导出。",
+            "steps": [
+                _step("step_1", "export.split_by_field", {
+                    "layer": "nanjing",
+                    "field": "NAME",
+                    "output_name": "nanjing_by_name",
+                    "output_format": "shp",
+                    "output_folder": r"D:\exports"
+                }, "按 NAME 字段拆分导出")
+            ]
+        }
+        prepared = prepare_workflow(workflow, self.catalog, _context(is_saved=True))
+
+        output_name = prepared["steps"][0]["arguments"]["output_name"]
+        self.assertRegex(output_name, r"^nanjing_by_name_\d{8}_\d{6}$")
+
     def test_chinese_output_name_is_rejected_before_runtime_execution(self):
         workflow = {
             "action": "execute",

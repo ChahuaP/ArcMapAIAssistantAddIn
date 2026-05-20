@@ -58,6 +58,35 @@
       "output_policy": {"writes_output": true, "workspace": "mxd_default_or_output_folder", "overwrite": false},
       "executor": "operations.export_ops.export_table_csv",
       "examples": [{"user": "导出 roads 属性表为 csv", "arguments": {"layer": "roads", "output_name": "roads_table", "selected_only": false}}]
+    },
+    {
+      "id": "export.split_by_field",
+      "version": "1.0",
+      "category": "export",
+      "summary": "按字段唯一值把一个图层拆分导出为多个数据文件。",
+      "keywords": ["split by field", "按字段拆分", "按属性分组导出", "每类导出shp"],
+      "model_card": "Use export.split_by_field to export one output per unique value of a field. Arguments: layer, field, output_name as ASCII prefix, output_format optional shp|gdb, output_folder for shapefiles, output_workspace for gdb, include_null optional, selected_only optional, max_outputs optional. Use this when the user asks to split/export features by a field value.",
+      "parameters_schema": {
+        "type": "object",
+        "required": ["layer", "field", "output_name"],
+        "properties": {
+          "layer": {"type": "string"},
+          "field": {"type": "string"},
+          "output_name": {"type": "string"},
+          "output_format": {"type": "string", "enum": ["shp", "gdb"]},
+          "output_folder": {"type": "string"},
+          "output_workspace": {"type": "string"},
+          "include_null": {"type": "boolean"},
+          "selected_only": {"type": "boolean"},
+          "max_outputs": {"type": "integer"}
+        },
+        "additionalProperties": false
+      },
+      "context_requirements": {"requires_layers": true, "requires_fields": true, "field_arguments": ["field"], "requires_output_location_when_unsaved": true},
+      "side_effects": "writes_data",
+      "output_policy": {"writes_output": true, "workspace": "mxd_default_or_output_folder_or_output_workspace", "overwrite": false},
+      "executor": "operations.export_ops.split_by_field",
+      "examples": [{"user": "把 roads 按 type 字段拆分导出为 shp", "arguments": {"layer": "roads", "field": "type", "output_name": "roads_by_type", "output_format": "shp", "output_folder": "D:\\Data\\exports"}}]
     }
   ]
 }

@@ -1,8 +1,8 @@
 # CONTEXT
 
-当前任务：修复 Agentic Planner 文件查找过早追问问题，并补齐输出名时间戳和图层清空/移除/排序能力。
+当前任务：新增按字段唯一值拆分导出能力 `export.split_by_field`。
 
-上次位置：本机网关已重启为 `0.10.2` 当前源码；真实 POST `/plan` 使用指令 `请你打开d盘下的南京.shp` 时，DeepSeek 会继续调用 `file_resolve` 检查 `Data`、`TestData`、`Data\shapefile` 等可能目录，找不到后再用中文追问，不再直接把首层目录甩给用户。
+上次位置：本机网关已重启为 `0.10.3` 当前源码；真实 POST `/plan` 使用指令 `把 nanjing 图层按 NAME 字段拆分导出为 shp，输出到 D:\Data` 已生成 `export.split_by_field` workflow，并自动把输出前缀加上时间戳。
 
 近期关键决定与原因：
 - 使用 ArcMap Python Add-in 原生结构：`config.xml` + `Install/*.py` + `.esriaddin`，因为这是 ArcMap 可直接加载的插件格式。
@@ -97,6 +97,9 @@
 - 如果 DeepSeek 在文件查找拿到 `child_directories` 后泛泛追问，Planner 会要求它再选一个可能目录继续调用 `file_resolve`；如果模型已经总结查过的位置并追问，则不再强行继续深挖。
 - 写数据操作的 `output_name` 会自动追加 `yyyyMMdd_HHmmss` 时间戳，减少同名输出失败。
 - 新增图层基础能力：`layer.remove_layer`、`layer.clear_layers`、`layer.move_layer`。
+- 新增 `export.split_by_field`：按字段唯一值把一个图层拆分导出为多个 shp 或 GDB feature class。参数包括 `layer`、`field`、`output_name`、`output_format`、`output_folder`、`output_workspace`、`include_null`、`selected_only`、`max_outputs`。
+- `export.split_by_field` 默认导出 shp；如果 `output_workspace` 是 `.gdb` 会导出为 GDB feature class。shp 输出位置可以使用 `output_folder`，也兼容普通文件夹形式的 `output_workspace`。
+- 拆分导出的每个输出名使用 ASCII 安全名称，空值组使用 `null`，非 ASCII 字段值会转为安全下划线名称，避免 ArcMap Python 2 编码问题。
 - operation index 增加 `model_card`，让 DeepSeek 在首轮就看到常用参数名，例如 `layer.add_layer` 使用 `path`，减少它猜出 `layer_source` 这类非法参数。
 - 已发现本机已安装目录 `Documents/ArcGIS/AddIns/Desktop10.1/{7f42eea1-1f17-4cf4-9d4f-c0c8d28c0a23}` 里仍是旧包，现已覆盖为 0.4，安装包内确认无 Button、无 Tkinter。
 - 插件 Python 代码保持 Python 2.7 兼容，因为 ArcMap Python Add-in 运行在 ArcGIS Desktop 自带 Python 环境里。
@@ -242,3 +245,9 @@
 - `git diff --check`：通过，仅有 CRLF 提示
 - `Invoke-RestMethod http://127.0.0.1:8765/health`：通过，返回 `app_version=0.10.2`、38 个 operation
 - `POST http://127.0.0.1:8765/plan`，command=`请你打开d盘下的南京.shp`：通过，真实 DeepSeek 会继续调用 `file_resolve` 查可能目录，找不到后总结已查位置再追问。
+- `python -m unittest discover -s tests -p "test_*.py" -v`：通过，47 个测试
+- `python -c "import ast, pathlib; ast.parse(...)"`：通过，Python 语法解析正常
+- `python -m json.tool operation_catalog/**/*.json`：通过
+- `git diff --check`：通过，仅有 CRLF 提示
+- `Invoke-RestMethod http://127.0.0.1:8765/health`：通过，返回 `app_version=0.10.3`、39 个 operation
+- `POST http://127.0.0.1:8765/plan`，command=`把 nanjing 图层按 NAME 字段拆分导出为 shp，输出到 D:\Data`：通过，真实 DeepSeek 选中 `export.split_by_field`。
