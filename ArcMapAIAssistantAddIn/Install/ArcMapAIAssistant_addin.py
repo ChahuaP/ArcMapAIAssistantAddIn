@@ -1,14 +1,53 @@
 # -*- coding: utf-8 -*-
 
 import imp
+import json
 import os
 import pythonaddins
 import sys
 
 
-RUNTIME_PATH = r"D:\Development\Python\Arcpy\arcmap_runtime_py2"
 RUNTIME_MODULE = "arcmap_ai_assistant_runtime"
 RUNTIME_FILE = "runtime.py"
+INSTALL_CONFIG = os.path.join("ArcMapAIAssistant", "install.json")
+
+
+try:
+    unicode
+except NameError:
+    unicode = str
+    basestring = str
+
+
+def installed_runtime_path():
+    override = os.environ.get("ARCMAP_AI_RUNTIME_PATH")
+    if override:
+        return override
+    install_dir = installed_app_dir()
+    if install_dir:
+        return os.path.join(install_dir, "arcmap_runtime_py2")
+    root = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+    return os.path.join(root, "ArcMapAIAssistant", "app", "arcmap_runtime_py2")
+
+
+def installed_app_dir():
+    appdata = os.environ.get("APPDATA")
+    if not appdata:
+        return ""
+    config_path = os.path.join(appdata, INSTALL_CONFIG)
+    if not os.path.isfile(config_path):
+        return ""
+    try:
+        with open(config_path, "rb") as config_file:
+            raw = config_file.read()
+        if not isinstance(raw, unicode):
+            raw = raw.decode("utf-8", "replace")
+        raw = raw.lstrip(u"\ufeff")
+        payload = json.loads(raw)
+    except Exception:
+        return ""
+    install_dir = payload.get("install_dir", "")
+    return install_dir if isinstance(install_dir, basestring) else ""
 
 
 def show_message(text):
@@ -16,11 +55,12 @@ def show_message(text):
 
 
 def load_runtime_module():
-    runtime_file = os.path.join(RUNTIME_PATH, RUNTIME_FILE)
+    runtime_path = installed_runtime_path()
+    runtime_file = os.path.join(runtime_path, RUNTIME_FILE)
     if not os.path.isfile(runtime_file):
         raise RuntimeError("Runtime file not found: %s" % runtime_file)
-    if RUNTIME_PATH not in sys.path:
-        sys.path.insert(0, RUNTIME_PATH)
+    if runtime_path not in sys.path:
+        sys.path.insert(0, runtime_path)
     return imp.load_source(RUNTIME_MODULE, runtime_file)
 
 

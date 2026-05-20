@@ -54,6 +54,11 @@ class CatalogTests(unittest.TestCase):
         extension = tree.find(".//addin:Extensions/addin:Extension", namespace)
         self.assertIsNone(extension)
 
+    def test_addin_runtime_path_comes_from_install_config(self):
+        addin_source = (ADDIN_ROOT / "Install" / "ArcMapAIAssistant_addin.py").read_text(encoding="utf-8")
+        self.assertNotIn(r"D:\Development\Python\Arcpy", addin_source)
+        self.assertIn("install.json", addin_source)
+
 
 def _load_json(path):
     return json.loads(path.read_text(encoding="utf-8"))

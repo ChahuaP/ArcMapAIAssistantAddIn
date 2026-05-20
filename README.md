@@ -10,6 +10,48 @@ DeepSeek 负责理解用户意图、调用本地白名单工具查询文件/上�
 
 ## 普通用户使用
 
+## 给用户安装
+
+发布包不要直接发源码目录。先在开发机双击：
+
+```text
+BuildArcMapAIAssistantRelease.cmd
+```
+
+也可以用命令生成：
+
+```powershell
+pwsh.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\packaging\build_release.ps1 -BuildGateway
+```
+
+发布包会生成到：
+
+```text
+release\ArcMapAIAssistant
+```
+
+把整个目录压缩发给用户。用户解压后双击：
+
+```text
+InstallArcMapAIAssistant.cmd
+```
+
+安装器会让用户选择安装位置，例如：
+
+- `C:\Program Files\ArcMapAIAssistant`
+- `D:\ArcMapAIAssistant`
+- 自定义路径
+
+普通用户机器不需要安装 Python3。Python3 网关已经由 PyInstaller 打包成 `ArcMapAIAssistantGateway.exe`，安装时会复制到用户选择的安装目录。
+
+卸载时双击：
+
+```text
+UninstallArcMapAIAssistant.cmd
+```
+
+卸载器会停止本地网关、删除 ArcMap Add-in 和程序安装目录。默认保留 API Key 等用户配置；需要彻底删除时运行 `packaging\uninstall.ps1 -RemoveUserConfig`。
+
 首次使用：
 
 1. 打开 ArcMap。

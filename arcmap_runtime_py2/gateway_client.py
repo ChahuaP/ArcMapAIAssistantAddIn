@@ -135,6 +135,9 @@ def execution_result(workflow_id, status, result):
 
 def _gateway_commands():
     exe_candidates = [
+        os.path.join(REPO_ROOT, "gateway", "ArcMapAIAssistantGateway.exe"),
+        os.path.join(REPO_ROOT, "ArcMapAIAssistantGateway.exe"),
+        os.path.join(REPO_ROOT, "dist", "ArcMapAIAssistantGateway", "ArcMapAIAssistantGateway.exe"),
         os.path.join(REPO_ROOT, "dist", "ArcMapAIAssistantGateway.exe"),
         os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "ArcMapAIAssistant", "ArcMapAIAssistantGateway.exe")
     ]

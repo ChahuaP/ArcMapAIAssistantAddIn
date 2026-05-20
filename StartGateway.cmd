@@ -5,10 +5,14 @@ cd /d "%~dp0"
 echo Starting ArcMap AI Assistant Gateway...
 echo.
 
-if "%DEEPSEEK_API_KEY%"=="" (
-  echo DEEPSEEK_API_KEY is not set in this window.
-  echo If this is the first run, close this window and double-click SetupDeepSeekKey.cmd first.
-  echo.
+if exist "%~dp0gateway\ArcMapAIAssistantGateway.exe" (
+  start "" "%~dp0gateway\ArcMapAIAssistantGateway.exe"
+  exit /b 0
+)
+
+if exist "%~dp0ArcMapAIAssistantGateway.exe" (
+  start "" "%~dp0ArcMapAIAssistantGateway.exe"
+  exit /b 0
 )
 
 where py >nul 2>nul

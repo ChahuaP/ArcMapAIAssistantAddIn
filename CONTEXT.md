@@ -1,8 +1,8 @@
 # CONTEXT
 
-当前任务：新增按字段唯一值拆分导出能力 `export.split_by_field`。
+当前任务：完善面向普通用户的 release 安装包与 README。
 
-上次位置：本机网关已重启为 `0.10.3` 当前源码；真实 POST `/plan` 使用指令 `把 nanjing 图层按 NAME 字段拆分导出为 shp，输出到 D:\Data` 已生成 `export.split_by_field` workflow，并自动把输出前缀加上时间戳。
+上次位置：`release\ArcMapAIAssistant\README.txt` 已重写为只面向用户的安装、使用、示例、卸载说明；不再包含开发、架构和排障细节。
 
 近期关键决定与原因：
 - 使用 ArcMap Python Add-in 原生结构：`config.xml` + `Install/*.py` + `.esriaddin`，因为这是 ArcMap 可直接加载的插件格式。
@@ -101,6 +101,10 @@
 - `export.split_by_field` 默认导出 shp；如果 `output_workspace` 是 `.gdb` 会导出为 GDB feature class。shp 输出位置可以使用 `output_folder`，也兼容普通文件夹形式的 `output_workspace`。
 - 拆分导出的每个输出名使用 ASCII 安全名称，空值组使用 `null`，非 ASCII 字段值会转为安全下划线名称，避免 ArcMap Python 2 编码问题。
 - operation index 增加 `model_card`，让 DeepSeek 在首轮就看到常用参数名，例如 `layer.add_layer` 使用 `path`，减少它猜出 `layer_source` 这类非法参数。
+- 打包发布目录为 `release\ArcMapAIAssistant`，用户只需要拿整个文件夹，双击 `InstallArcMapAIAssistant.cmd` 安装，双击 `UninstallArcMapAIAssistant.cmd` 卸载。
+- 安装脚本会让用户选择安装到 `D:\ArcMapAIAssistant`、`C:\Program Files\ArcMapAIAssistant` 或自定义目录；运行时通过 `%APPDATA%\ArcMapAIAssistant\install.json` 找到安装目录。
+- Python3 网关已按 PyInstaller onedir 方式打包到安装目录下的 `gateway\ArcMapAIAssistantGateway.exe`，普通用户电脑不需要安装 Python3。
+- 一键生成安装包入口是 `BuildArcMapAIAssistantRelease.cmd`，用户版说明模板是 `packaging\USER_README.txt`，会复制成 release 目录里的 `README.txt`。
 - 已发现本机已安装目录 `Documents/ArcGIS/AddIns/Desktop10.1/{7f42eea1-1f17-4cf4-9d4f-c0c8d28c0a23}` 里仍是旧包，现已覆盖为 0.4，安装包内确认无 Button、无 Tkinter。
 - 插件 Python 代码保持 Python 2.7 兼容，因为 ArcMap Python Add-in 运行在 ArcGIS Desktop 自带 Python 环境里。
 
@@ -116,6 +120,13 @@
 - `operation_catalog/**/*.json`
 - `SetupDeepSeekKey.cmd`
 - `StartGateway.cmd`
+- `InstallArcMapAIAssistant.cmd`
+- `UninstallArcMapAIAssistant.cmd`
+- `BuildArcMapAIAssistantRelease.cmd`
+- `packaging/USER_README.txt`
+- `packaging/build_release.ps1`
+- `packaging/install.ps1`
+- `packaging/uninstall.ps1`
 - `ArcMapAIAssistantAddIn/makeaddin.py`
 - `README.md`
 
@@ -251,3 +262,5 @@
 - `git diff --check`：通过，仅有 CRLF 提示
 - `Invoke-RestMethod http://127.0.0.1:8765/health`：通过，返回 `app_version=0.10.3`、39 个 operation
 - `POST http://127.0.0.1:8765/plan`，command=`把 nanjing 图层按 NAME 字段拆分导出为 shp，输出到 D:\Data`：通过，真实 DeepSeek 选中 `export.split_by_field`。
+- `.\packaging\build_release.ps1 -BuildGateway`：通过，生成 `dist\ArcMapAIAssistantGateway` 和 `release\ArcMapAIAssistant`
+- `.\packaging\build_release.ps1`：通过，刷新 release 安装包和用户 README

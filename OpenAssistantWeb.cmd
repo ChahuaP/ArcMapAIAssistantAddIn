@@ -2,16 +2,5 @@
 setlocal
 cd /d "%~dp0"
 
-where py >nul 2>nul
-if not errorlevel 1 (
-  py -3 -m gateway_py3.open_web
-  exit /b %errorlevel%
-)
-
-where python >nul 2>nul
-if not errorlevel 1 (
-  python -m gateway_py3.open_web
-  exit /b %errorlevel%
-)
-
-exit /b 1
+start "" "http://127.0.0.1:8765/?v=0.10.3-split-by-field"
+exit /b 0

@@ -24,10 +24,11 @@ def add_required_file(zip_file, filename):
 def add_directory(zip_file, directory):
     root = os.path.join(CURRENT_PATH, directory)
     for path, dirs, files in os.walk(root):
+        dirs[:] = [item for item in dirs if item != "__pycache__"]
         archive_path = os.path.relpath(path, CURRENT_PATH)
         added_file = False
         for filename in files:
-            if looks_like_a_backup(filename):
+            if looks_like_a_backup(filename) or filename.lower().endswith(".pyc"):
                 continue
             archive_file = os.path.join(archive_path, filename)
             print(archive_file)
