@@ -36,7 +36,7 @@ class FileResolverTests(unittest.TestCase):
 
         self.assertEqual(result.status, "clarify")
         self.assertIn("范围太大", result.question)
-        self.assertIn("Data", result.question)
+        self.assertIn("Data", result.child_directories)
 
     def test_drive_directory_file_search_resolves(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -86,8 +86,26 @@ class FileResolverTests(unittest.TestCase):
             })
 
         self.assertEqual(result.status, "clarify")
-        self.assertIn("下一层目录有", result.question)
-        self.assertIn("shapefile", result.question)
+        self.assertEqual(result.search_root, str(data_dir))
+        self.assertIn("shapefile", result.child_directories)
+
+    def test_child_directory_result_is_not_truncated(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            data_dir = root / "Data"
+            for index in range(16):
+                (data_dir / ("folder_%02d" % index)).mkdir(parents=True)
+            resolver = FileResolver(drive_roots={"D": root})
+            result = resolver.resolve({
+                "drive": "D",
+                "directory": "Data",
+                "file_name": "nanjing.shp"
+            })
+
+        self.assertEqual(result.status, "clarify")
+        self.assertEqual(len(result.child_directories), 16)
+        self.assertIn("folder_15", result.child_directories)
+        self.assertNotIn("folder_15", result.question)
 
     def test_folder_with_many_files_asks_for_narrower_input(self):
         with tempfile.TemporaryDirectory() as directory:

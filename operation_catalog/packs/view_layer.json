@@ -41,6 +41,65 @@
       "examples": [{"user": "隐藏 roads", "arguments": {"layer": "roads", "visible": false}}]
     },
     {
+      "id": "layer.remove_layer",
+      "version": "1.0",
+      "category": "view_layer",
+      "summary": "从当前地图移除一个图层，不删除源数据。",
+      "keywords": ["remove layer", "删除图层", "移除图层"],
+      "model_card": "Use layer.remove_layer to remove one layer from the current map without deleting source data. Arguments: layer.",
+      "parameters_schema": {
+        "type": "object",
+        "required": ["layer"],
+        "properties": {"layer": {"type": "string"}},
+        "additionalProperties": false
+      },
+      "context_requirements": {"requires_layers": true},
+      "side_effects": "changes_map",
+      "output_policy": {"writes_output": false},
+      "executor": "operations.layer_ops.remove_layer",
+      "examples": [{"user": "把 roads 图层从地图里移除", "arguments": {"layer": "roads"}}]
+    },
+    {
+      "id": "layer.clear_layers",
+      "version": "1.0",
+      "category": "view_layer",
+      "summary": "清空当前地图中的所有图层，不删除源数据。",
+      "keywords": ["clear layers", "清空图层", "移除所有图层"],
+      "model_card": "Use layer.clear_layers to remove all layers from the current map without deleting source data. No arguments.",
+      "parameters_schema": {"type": "object", "properties": {}, "additionalProperties": false},
+      "context_requirements": {"requires_layers": true},
+      "side_effects": "changes_map",
+      "output_policy": {"writes_output": false},
+      "executor": "operations.layer_ops.clear_layers",
+      "examples": [{"user": "清空所有图层", "arguments": {}}]
+    },
+    {
+      "id": "layer.move_layer",
+      "version": "1.0",
+      "category": "view_layer",
+      "summary": "调整图层顺序。",
+      "keywords": ["move layer", "调整顺序", "图层置顶", "图层置底", "上移", "下移"],
+      "model_card": "Use layer.move_layer to reorder layers. Arguments: layer, position, reference_layer optional. position must be TOP, BOTTOM, UP, DOWN, BEFORE, or AFTER. BEFORE/AFTER require reference_layer.",
+      "parameters_schema": {
+        "type": "object",
+        "required": ["layer", "position"],
+        "properties": {
+          "layer": {"type": "string"},
+          "position": {"type": "string", "enum": ["TOP", "BOTTOM", "UP", "DOWN", "BEFORE", "AFTER"]},
+          "reference_layer": {"type": "string"}
+        },
+        "additionalProperties": false
+      },
+      "context_requirements": {"requires_layers": true},
+      "side_effects": "changes_map",
+      "output_policy": {"writes_output": false},
+      "executor": "operations.layer_ops.move_layer",
+      "examples": [
+        {"user": "把 roads 置顶", "arguments": {"layer": "roads", "position": "TOP"}},
+        {"user": "把 roads 移到 boundary 上面", "arguments": {"layer": "roads", "position": "BEFORE", "reference_layer": "boundary"}}
+      ]
+    },
+    {
       "id": "view.zoom_to_layer",
       "version": "1.0",
       "category": "view_layer",

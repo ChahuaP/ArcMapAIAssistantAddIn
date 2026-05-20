@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+from datetime import datetime
 from pathlib import Path
 import re
 from typing import Any, Dict, List
@@ -40,6 +41,7 @@ def prepare_workflow(workflow: Dict[str, Any], catalog: OperationCatalog, contex
     prepared = copy.deepcopy(workflow)
     normalize_workflow(prepared)
     apply_default_output_names(prepared, catalog)
+    apply_output_name_timestamp(prepared, catalog)
     validate_workflow(prepared, catalog)
     validate_workflow_semantics(prepared, catalog, context)
     return prepared
@@ -91,6 +93,26 @@ def apply_default_output_names(workflow: Dict[str, Any], catalog: OperationCatal
         output_name = _default_output_name_for_step(operation_id, arguments)
         if output_name:
             arguments["output_name"] = output_name
+
+
+def apply_output_name_timestamp(workflow: Dict[str, Any], catalog: OperationCatalog) -> None:
+    if workflow.get("action") != "execute":
+        return
+    suffix = datetime.now().strftime("%Y%m%d_%H%M%S")
+    for step in workflow.get("steps") or []:
+        operation_id = step.get("operation")
+        if operation_id not in catalog.operations:
+            continue
+        operation = catalog.operations[operation_id]
+        if operation.get("side_effects") != "writes_data":
+            continue
+        arguments = step.get("arguments")
+        if not isinstance(arguments, dict):
+            continue
+        output_name = arguments.get("output_name")
+        if not output_name or _has_timestamp_suffix(str(output_name)):
+            continue
+        arguments["output_name"] = "%s_%s" % (output_name, suffix)
 
 
 def validate_workflow_semantics(workflow: Dict[str, Any], catalog: OperationCatalog, context: Dict[str, Any]) -> None:
@@ -411,3 +433,6 @@ def _safe_output_name(value: str) -> str:
         text = "out_" + text
     return text[:120]
 
+
+def _has_timestamp_suffix(value: str) -> bool:
+    return bool(re.search(r"(?:^|_)\d{8}(?:_\d{6})?$", value))

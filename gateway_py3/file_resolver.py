@@ -7,9 +7,6 @@ from typing import Any, Dict, List
 
 
 GIS_EXTENSIONS = (".shp", ".lyr", ".tif", ".img", ".sde", ".gdb")
-SHAPEFILE_EXTENSIONS = (".shp",)
-
-
 class FileResolution:
     def __init__(
         self,
@@ -18,12 +15,16 @@ class FileResolution:
         path: str | None = None,
         paths: List[str] | None = None,
         candidates: List[str] | None = None,
+        search_root: str = "",
+        child_directories: List[str] | None = None,
     ):
         self.status = status
         self.question = question
         self.path = path
         self.paths = paths or ([path] if path else [])
         self.candidates = candidates or []
+        self.search_root = search_root
+        self.child_directories = child_directories or []
         self.files = [_resolved_file(path) for path in self.paths]
 
     def to_tool_result(self) -> Dict[str, Any]:
@@ -31,7 +32,9 @@ class FileResolution:
             "status": self.status,
             "files": self.files,
             "question": self.question,
-            "candidates": self.candidates
+            "candidates": self.candidates,
+            "search_root": self.search_root,
+            "child_directories": self.child_directories,
         }
 
 
@@ -66,8 +69,10 @@ class FileResolver:
                 if directories:
                     return FileResolution(
                         "clarify",
-                        "%s 范围太大，我不会直接扫描整盘。一级目录有：%s。请告诉我 %s 在哪个目录下。" %
-                        (str(root), "、".join(directories[:12]), Path(file_name).name)
+                        "%s 范围太大，我不会直接扫描整盘。请告诉我 %s 在哪个目录下。" %
+                        (str(root), Path(file_name).name),
+                        search_root=str(root),
+                        child_directories=directories,
                     )
                 return FileResolution("clarify", "%s 范围太大，而且没有可用一级目录。请补充更具体的文件夹。" % str(root))
             return self._find_file(search_root, Path(file_name).name)
@@ -77,8 +82,9 @@ class FileResolver:
             if directories:
                 return FileResolution(
                     "clarify",
-                    "%s 范围太大，我不会直接扫描整盘。一级目录有：%s。请告诉我要继续查哪个目录。" %
-                    (str(root), "、".join(directories[:12]))
+                    "%s 范围太大，我不会直接扫描整盘。请告诉我要继续查哪个目录。" % str(root),
+                    search_root=str(root),
+                    child_directories=directories,
                 )
             return FileResolution("clarify", "%s 范围太大，而且没有可用一级目录。请补充更具体的文件夹。" % str(root))
         return _resolve_existing_folder(search_root, _extensions(arguments))
@@ -115,7 +121,13 @@ class FileResolver:
                 "找到多个同名文件：%s。请说明要打开哪一个。" % "、".join([str(path) for path in matches[:8]]),
                 candidates=[str(path) for path in matches]
             )
-        return FileResolution("clarify", _not_found_summary(search_root, file_name))
+        directories = _child_directories(search_root)
+        return FileResolution(
+            "clarify",
+            _not_found_summary(search_root, file_name, directories),
+            search_root=str(search_root),
+            child_directories=directories,
+        )
 
 
 def _optional_string(arguments: Dict[str, Any], key: str) -> str:
@@ -157,14 +169,9 @@ def _child_directories(root: Path) -> List[str]:
         return []
 
 
-def _not_found_summary(search_root: Path, file_name: str) -> str:
-    directories = _child_directories(search_root)
+def _not_found_summary(search_root: Path, file_name: str, directories: List[str]) -> str:
     if directories:
-        return "在 %s 下没有找到 %s。下一层目录有：%s。请告诉我继续查哪个目录。" % (
-            str(search_root),
-            file_name,
-            "、".join(directories[:12])
-        )
+        return "在 %s 下没有找到 %s。请告诉我继续查哪个目录。" % (str(search_root), file_name)
     return "在 %s 下没有找到 %s，而且这个目录下没有可继续选择的子目录。请确认文件名或换一个目录。" % (str(search_root), file_name)
 
 
@@ -181,7 +188,13 @@ def _folder_files(folder: Path, extensions: tuple[str, ...]) -> List[Path]:
 def _resolve_existing_folder(folder: Path, extensions: tuple[str, ...]) -> FileResolution:
     paths = _folder_files(folder, extensions)
     if not paths:
-        return FileResolution("clarify", _no_folder_files_summary(folder, extensions))
+        directories = _child_directories(folder)
+        return FileResolution(
+            "clarify",
+            _no_folder_files_summary(folder, extensions, directories),
+            search_root=str(folder),
+            child_directories=directories,
+        )
     if len(paths) > 12:
         return FileResolution(
             "clarify",
@@ -191,15 +204,10 @@ def _resolve_existing_folder(folder: Path, extensions: tuple[str, ...]) -> FileR
     return FileResolution("resolved", "", paths=[str(path) for path in paths])
 
 
-def _no_folder_files_summary(folder: Path, extensions: tuple[str, ...]) -> str:
-    directories = _child_directories(folder)
+def _no_folder_files_summary(folder: Path, extensions: tuple[str, ...], directories: List[str]) -> str:
     label = "、".join(extensions)
     if directories:
-        return "在 %s 下没有找到 %s 文件。下一层目录有：%s。请告诉我继续查哪个目录。" % (
-            str(folder),
-            label,
-            "、".join(directories[:12])
-        )
+        return "在 %s 下没有找到 %s 文件。请告诉我继续查哪个目录。" % (str(folder), label)
     return "在 %s 下没有找到 %s 文件，而且这个目录下没有可继续选择的子目录。请确认文件夹。" % (str(folder), label)
 
 

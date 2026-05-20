@@ -3,7 +3,7 @@ import pathlib
 import tempfile
 import unittest
 
-from gateway_py3.agent_tools import AgentToolRuntime
+from gateway_py3.agent_tools import AgentToolError, AgentToolRuntime
 from gateway_py3.catalog_loader import OperationCatalog
 from gateway_py3.file_resolver import FileResolver
 from gateway_py3.planner import AgenticPlanner
@@ -57,7 +57,7 @@ class AgenticPlannerTests(unittest.TestCase):
             "layer.add_layer",
             "analysis.intersect"
         ])
-        self.assertEqual(workflow["steps"][2]["arguments"]["output_name"], "p1_p2_intersect")
+        self.assertRegex(workflow["steps"][2]["arguments"]["output_name"], r"^p1_p2_intersect_\d{8}_\d{6}$")
         tool_result_messages = [m for m in client.calls[1]["messages"] if m.get("role") == "tool"]
         self.assertIn("p1", tool_result_messages[0]["content"])
 
@@ -72,7 +72,31 @@ class AgenticPlannerTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "clarify")
         self.assertIn("范围太大", result["question"])
+        self.assertIn("Data", result["child_directories"])
         self.assertEqual(result["files"], [])
+
+    def test_file_resolve_tool_rejects_natural_language_text_argument(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = WorkflowStore(pathlib.Path(directory) / "workflows.sqlite")
+            runtime = AgentToolRuntime(self.catalog, store, _context())
+
+            with self.assertRaises(AgentToolError):
+                runtime.handle("file_resolve", {"text": "打开 d 盘下的 nanjing.shp"})
+
+    def test_workflow_validate_rejects_original_command_argument(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = WorkflowStore(pathlib.Path(directory) / "workflows.sqlite")
+            runtime = AgentToolRuntime(self.catalog, store, _context())
+
+            with self.assertRaises(AgentToolError):
+                runtime.handle("workflow_validate", {
+                    "original_command": "刷新地图",
+                    "workflow": {
+                        "action": "execute",
+                        "summary": "刷新地图。",
+                        "steps": [_step("step_1", "view.refresh_view", {}, "刷新地图")]
+                    }
+                })
 
     def test_tool_clarification_question_is_preserved_when_model_stops(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -82,6 +106,8 @@ class AgenticPlannerTests(unittest.TestCase):
             resolver = FileResolver(drive_roots={"D": root})
             client = FakeAgentClient([
                 _assistant_tool_call("call_1", "file_resolve", {"drive": "D", "file_name": "nanjing.shp"}),
+                {"role": "assistant", "content": "需要更多信息。"},
+                {"role": "assistant", "content": "需要更多信息。"},
                 {"role": "assistant", "content": "需要更多信息。"}
             ])
             planner = AgenticPlanner(catalog=self.catalog, client=client, store=store, file_resolver=resolver)
@@ -89,7 +115,73 @@ class AgenticPlannerTests(unittest.TestCase):
 
         self.assertEqual(row["workflow"]["action"], "clarify")
         self.assertIn("范围太大", row["workflow"]["summary"])
-        self.assertIn("Data", row["workflow"]["summary"])
+        self.assertIn("nanjing.shp", row["workflow"]["summary"])
+
+    def test_premature_file_question_is_nudged_back_to_tool_search(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            folder = root / "Data" / "shapefile"
+            folder.mkdir(parents=True)
+            target = folder / "nanjing.shp"
+            target.write_text("", encoding="utf-8")
+            store = WorkflowStore(pathlib.Path(directory) / "workflows.sqlite")
+            resolver = FileResolver(drive_roots={"D": root})
+            client = FakeAgentClient([
+                _assistant_tool_call("call_1", "file_resolve", {"drive": "D", "file_name": "nanjing.shp"}),
+                {"role": "assistant", "content": "需要更多信息。"},
+                _assistant_tool_call("call_2", "file_resolve", {
+                    "drive": "D",
+                    "directory_parts": ["Data", "shapefile"],
+                    "file_name": "nanjing.shp"
+                }),
+                _assistant_tool_call("call_3", "workflow_propose", {
+                    "action": "execute",
+                    "summary": "将添加 nanjing 图层。",
+                    "steps": [
+                        _step("step_1", "layer.add_layer", {"path": str(target)}, "添加 nanjing")
+                    ]
+                })
+            ])
+            planner = AgenticPlanner(catalog=self.catalog, client=client, store=store, file_resolver=resolver)
+            row = planner.plan("打开d盘下的nanjing.shp", _context())
+
+        self.assertEqual(row["workflow"]["action"], "execute")
+        self.assertEqual([item["name"] for item in row["agent_trace"] if item.get("type") == "tool"], [
+            "file_resolve",
+            "file_resolve",
+        ])
+
+    def test_model_can_continue_search_from_child_directories_before_clarifying(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            folder = root / "Data" / "shapefile"
+            folder.mkdir(parents=True)
+            target = folder / "nanjing.shp"
+            target.write_text("", encoding="utf-8")
+            store = WorkflowStore(pathlib.Path(directory) / "workflows.sqlite")
+            resolver = FileResolver(drive_roots={"D": root})
+            client = FakeAgentClient([
+                _assistant_tool_call("call_1", "file_resolve", {"drive": "D", "file_name": "nanjing.shp"}),
+                _assistant_tool_call("call_2", "file_resolve", {
+                    "drive": "D",
+                    "directory_parts": ["Data", "shapefile"],
+                    "file_name": "nanjing.shp"
+                }),
+                _assistant_tool_call("call_3", "workflow_propose", {
+                    "action": "execute",
+                    "summary": "将添加 nanjing 图层。",
+                    "steps": [
+                        _step("step_1", "layer.add_layer", {"path": str(target)}, "添加 nanjing")
+                    ]
+                })
+            ])
+            planner = AgenticPlanner(catalog=self.catalog, client=client, store=store, file_resolver=resolver)
+            row = planner.plan("打开d盘下的nanjing.shp", _context())
+
+        self.assertEqual(row["workflow"]["action"], "execute")
+        self.assertEqual(row["workflow"]["steps"][0]["operation"], "layer.add_layer")
+        tool_names = [item["name"] for item in row["agent_trace"] if item.get("type") == "tool"]
+        self.assertEqual(tool_names, ["file_resolve", "file_resolve"])
 
     def test_recent_conversation_is_sent_to_model_for_short_followup(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -112,7 +204,7 @@ class AgenticPlannerTests(unittest.TestCase):
 
         first_user_message = client.calls[0]["messages"][1]["content"]
         self.assertIn("recent_conversation", first_user_message)
-        self.assertEqual(row["workflow"]["steps"][0]["arguments"]["output_name"], "p1_p2_intersect")
+        self.assertRegex(row["workflow"]["steps"][0]["arguments"]["output_name"], r"^p1_p2_intersect_\d{8}_\d{6}$")
 
     def test_bad_workflow_is_fed_back_once_then_repaired(self):
         client = FakeAgentClient([

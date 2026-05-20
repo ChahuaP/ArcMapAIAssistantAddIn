@@ -1,8 +1,8 @@
 # CONTEXT
 
-当前任务：修复 Agentic Planner 对“打开文件夹下所有 shp 并执行相交”的真实 DeepSeek 规划失败问题。
+当前任务：修复 Agentic Planner 文件查找过早追问问题，并补齐输出名时间戳和图层清空/移除/排序能力。
 
-上次位置：本机网关已重启为 `0.10.1` 当前源码；真实 POST `/plan` 使用指令 `请你的打开D:\Data\shapefile\叠加分析\相交下所有的shp，并执行相交` 已生成 `layer.add_layer -> layer.add_layer -> analysis.intersect` 三步 workflow。
+上次位置：本机网关已重启为 `0.10.2` 当前源码；真实 POST `/plan` 使用指令 `请你打开d盘下的南京.shp` 时，DeepSeek 会继续调用 `file_resolve` 检查 `Data`、`TestData`、`Data\shapefile` 等可能目录，找不到后再用中文追问，不再直接把首层目录甩给用户。
 
 近期关键决定与原因：
 - 使用 ArcMap Python Add-in 原生结构：`config.xml` + `Install/*.py` + `.esriaddin`，因为这是 ArcMap 可直接加载的插件格式。
@@ -93,6 +93,10 @@
 - Gateway 首轮发送 35 个 operation 的短索引，并提供 `catalog_get_operation_schema` 工具按需查询完整 schema；旧 `OperationRouter` 已删除。
 - `file_resolve` 现在支持 AI 工具调用传入裸路径或裸文件夹，例如 `D:\Data\shapefile\叠加分析\相交`，会直接解析该目录下可添加 GIS 文件；不再要求一定带“打开/添加”等中文动词。
 - Agentic Planner 工具轮次从 4 提升到 8，因为真实 DeepSeek 经常到第 4 轮才拿到本地校验错误，需要继续一轮修正 workflow。
+- `file_resolve` 只接收结构化参数，不再接收自然语言；目录查找结果把完整下一层目录放进 `child_directories` 给 DeepSeek 内部继续判断，用户侧只在模型真正找不到时看到追问。
+- 如果 DeepSeek 在文件查找拿到 `child_directories` 后泛泛追问，Planner 会要求它再选一个可能目录继续调用 `file_resolve`；如果模型已经总结查过的位置并追问，则不再强行继续深挖。
+- 写数据操作的 `output_name` 会自动追加 `yyyyMMdd_HHmmss` 时间戳，减少同名输出失败。
+- 新增图层基础能力：`layer.remove_layer`、`layer.clear_layers`、`layer.move_layer`。
 - operation index 增加 `model_card`，让 DeepSeek 在首轮就看到常用参数名，例如 `layer.add_layer` 使用 `path`，减少它猜出 `layer_source` 这类非法参数。
 - 已发现本机已安装目录 `Documents/ArcGIS/AddIns/Desktop10.1/{7f42eea1-1f17-4cf4-9d4f-c0c8d28c0a23}` 里仍是旧包，现已覆盖为 0.4，安装包内确认无 Button、无 Tkinter。
 - 插件 Python 代码保持 Python 2.7 兼容，因为 ArcMap Python Add-in 运行在 ArcGIS Desktop 自带 Python 环境里。
@@ -232,3 +236,9 @@
 - `python -m unittest discover -s tests -p "test_*.py" -v`：通过，43 个测试
 - `python -c "import ast, pathlib; ast.parse(...)"`：通过，Python 语法解析正常
 - `POST http://127.0.0.1:8765/plan`，command=`请你的打开D:\Data\shapefile\叠加分析\相交下所有的shp，并执行相交`：通过，真实 DeepSeek 返回三步 workflow：添加 `p1.shp`、添加 `p2.shp`、执行 `analysis.intersect`
+- `python -m unittest discover -s tests -p "test_*.py" -v`：通过，44 个测试
+- `python -c "import ast, pathlib; ast.parse(...)"`：通过，Python 语法解析正常
+- `python -m json.tool operation_catalog/**/*.json`：通过
+- `git diff --check`：通过，仅有 CRLF 提示
+- `Invoke-RestMethod http://127.0.0.1:8765/health`：通过，返回 `app_version=0.10.2`、38 个 operation
+- `POST http://127.0.0.1:8765/plan`，command=`请你打开d盘下的南京.shp`：通过，真实 DeepSeek 会继续调用 `file_resolve` 查可能目录，找不到后总结已查位置再追问。

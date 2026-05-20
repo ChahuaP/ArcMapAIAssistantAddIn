@@ -13,6 +13,7 @@ from .workflow_store import WorkflowStore
 
 
 MAX_TOOL_ROUNDS = 8
+MAX_FILE_SEARCH_NUDGES = 1
 
 SYSTEM_PROMPT = """You are ArcMap AI Assistant.
 You help non-technical ArcGIS/ArcMap users turn natural Chinese requests into safe GIS workflow drafts.
@@ -34,8 +35,13 @@ Hard rules:
 - You parse natural language into structured tool arguments. Tools do not parse natural language for you.
 - For local files, call file_resolve with structured arguments only: path, folder_path, drive, directory, directory_parts, file_name, extensions.
 - Do not pass Chinese sentences or phrases into file_resolve.
+- Do not invent or expand file paths. Use path/folder_path only when the user provided that exact path. If the user only provided a drive and file name, call file_resolve with drive and file_name only.
+- Do not reuse path components from recent_conversation unless the user explicitly refers to the same folder or previous result.
 - If the user asks to open local files and then process those opened files, call file_resolve and use the resolved layer_name values as later step inputs.
-- If a tool returns status clarify, submit workflow_propose with action clarify and the tool question in Chinese.
+- If file_resolve returns status clarify with child_directories, the question is only a fallback for the user. First use those directory names as local facts and call file_resolve again on a small number of plausible next directories. Do not blindly enumerate every directory, and do not recursively scan a drive root.
+- Do not stop after the first file_resolve clarify when child_directories is not empty. You must try at least one plausible child directory before asking the user.
+- Only ask the user to clarify after file_resolve has no useful child_directories, too many equal candidates, or no plausible next directory remains.
+- Final clarify text must be a normal Chinese question. Summarize what was checked briefly; do not dump long directory lists unless the user explicitly needs choices.
 - If a later step uses a dataset produced by an earlier step, reference it as from_step:step_id when the layer name is not enough.
 - Do not mention JSON, schema, tool calls, operation ids, catalog internals, or validation internals to the user.
 - Do not overwrite existing data.
@@ -73,6 +79,7 @@ class AgenticPlanner:
 
         validation_feedback_count = 0
         pending_question = ""
+        file_search_nudges = 0
         for _ in range(MAX_TOOL_ROUNDS):
             response = self.client.chat_agent(messages, tools)
             assistant_message = response["message"]
@@ -85,6 +92,15 @@ class AgenticPlanner:
             except AgentToolError as exc:
                 return self._store_clarification(command, context, friendly_validation_message(exc), trace)
             if proposal is not None:
+                if (
+                    _premature_file_clarification(proposal, trace)
+                    and _generic_clarification(str(proposal.get("summary", "")))
+                    and file_search_nudges < MAX_FILE_SEARCH_NUDGES
+                ):
+                    messages.append(_file_search_nudge_message())
+                    file_search_nudges += 1
+                    continue
+                proposal = _merge_pending_question(proposal, pending_question)
                 finalized, feedback = self._try_finalize(command, context, proposal, trace)
                 if finalized is not None:
                     return finalized
@@ -98,7 +114,30 @@ class AgenticPlanner:
             if not tool_calls:
                 content_workflow = _json_workflow_from_content(assistant_message.get("content"))
                 if content_workflow is None:
-                    return self._store_clarification(command, context, pending_question or "这个任务还不够明确，请补充要操作的数据、处理方式或输出位置。", trace)
+                    content_text = _assistant_content(assistant_message)
+                    if (
+                        _file_result_can_continue(trace)
+                        and _generic_clarification(content_text)
+                        and file_search_nudges < MAX_FILE_SEARCH_NUDGES
+                    ):
+                        messages.append(_file_search_nudge_message())
+                        file_search_nudges += 1
+                        continue
+                    summary = (
+                        content_text
+                        if content_text and not _generic_clarification(content_text)
+                        else pending_question or "这个任务还不够明确，请补充要操作的数据、处理方式或输出位置。"
+                    )
+                    return self._store_clarification(command, context, summary, trace)
+                if (
+                    _premature_file_clarification(content_workflow, trace)
+                    and _generic_clarification(str(content_workflow.get("summary", "")))
+                    and file_search_nudges < MAX_FILE_SEARCH_NUDGES
+                ):
+                    messages.append(_file_search_nudge_message())
+                    file_search_nudges += 1
+                    continue
+                content_workflow = _merge_pending_question(content_workflow, pending_question)
                 finalized, feedback = self._try_finalize(command, context, content_workflow, trace)
                 if finalized is not None:
                     return finalized
@@ -257,6 +296,11 @@ def _json_workflow_from_content(content: Any) -> Dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
+def _assistant_content(message: Dict[str, Any]) -> str:
+    content = message.get("content")
+    return content.strip() if isinstance(content, str) and content.strip() else ""
+
+
 def _question_from_tool_result(result: Dict[str, Any]) -> str:
     status = result.get("status")
     question = result.get("question")
@@ -266,6 +310,57 @@ def _question_from_tool_result(result: Dict[str, Any]) -> str:
     if isinstance(error, str) and error.strip():
         return error.strip()
     return ""
+
+
+def _merge_pending_question(workflow: Dict[str, Any], pending_question: str) -> Dict[str, Any]:
+    if not pending_question or workflow.get("action") != "clarify":
+        return workflow
+    summary = workflow.get("summary")
+    if isinstance(summary, str) and summary.strip() and not _generic_clarification(summary):
+        return workflow
+    merged = dict(workflow)
+    merged["summary"] = pending_question
+    merged["steps"] = []
+    return merged
+
+
+def _generic_clarification(summary: str) -> bool:
+    text = summary.strip()
+    generic_markers = (
+        "不明确",
+        "不够明确",
+        "不清楚",
+        "需要更多信息",
+        "需要补充",
+        "补充要操作的数据",
+        "请补充要操作的数据",
+    )
+    return any(marker in text for marker in generic_markers)
+
+
+def _premature_file_clarification(workflow: Dict[str, Any], trace: List[Dict[str, Any]]) -> bool:
+    return workflow.get("action") == "clarify" and _file_result_can_continue(trace)
+
+
+def _file_result_can_continue(trace: List[Dict[str, Any]]) -> bool:
+    for item in reversed(trace):
+        if item.get("type") != "tool" or item.get("name") != "file_resolve":
+            continue
+        result = item.get("result") or {}
+        return result.get("status") == "clarify" and bool(result.get("child_directories"))
+    return False
+
+
+def _file_search_nudge_message() -> Dict[str, str]:
+    return {
+        "role": "user",
+        "content": (
+            "The last file_resolve result included child_directories. "
+            "Do not ask the user yet. Pick one plausible child directory from that list "
+            "and call file_resolve again with structured arguments. "
+            "Only ask the user if no plausible child directory remains."
+        )
+    }
 
 
 def _message_for_history(message: Dict[str, Any]) -> Dict[str, Any]:
