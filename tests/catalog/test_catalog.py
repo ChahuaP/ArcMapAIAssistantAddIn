@@ -66,8 +66,13 @@ class CatalogTests(unittest.TestCase):
         install_script = (PACKAGING_ROOT / "install.ps1").read_text(encoding="utf-8-sig")
         self.assertIn('"operation_catalog"', build_script)
         self.assertIn('"app\\operation_catalog"', build_script)
+        self.assertIn('"app\\VERSION"', build_script)
+        self.assertIn("Get-AppVersion", build_script)
         self.assertIn('"operation_catalog"', install_script)
         self.assertIn('"catalog.json"', install_script)
+        self.assertIn('"VERSION"', install_script)
+        self.assertIn("app_version", install_script)
+        self.assertIn("Test-InstallHealth", install_script)
 
 
 def _load_json(path):

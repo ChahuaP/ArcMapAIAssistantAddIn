@@ -7,6 +7,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from gateway_py3.catalog_loader import OperationCatalog
+from gateway_py3.diagnostics import collect_diagnostics
 from gateway_py3.deepseek_client import DeepSeekError, public_config, save_config
 from gateway_py3.logs import write_event
 from gateway_py3.paths import WEB_ROOT
@@ -17,7 +18,7 @@ from gateway_py3.workflow_store import WorkflowStore
 
 HOST = "127.0.0.1"
 PORT = 8765
-APP_VERSION = "0.10.4"
+APP_VERSION = "0.10.5"
 
 
 class GatewayState:
@@ -57,6 +58,12 @@ class Handler(BaseHTTPRequestHandler):
                     "operation_count": len(STATE.catalog.operations),
                     "operations": [_public_operation(operation) for operation in STATE.catalog.all_operations()]
                 })
+            elif path == "/api/diagnostics":
+                self._json(collect_diagnostics(
+                    APP_VERSION,
+                    STATE.catalog.version,
+                    len(STATE.catalog.operations)
+                ))
             elif path == "/pending":
                 self._json({"workflow": STATE.store.pending()})
             elif path == "/" or path.startswith("/web/"):

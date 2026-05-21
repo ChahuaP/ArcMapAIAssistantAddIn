@@ -15,7 +15,7 @@ except NameError:
 
 
 BASE_URL = "http://127.0.0.1:8765"
-EXPECTED_APP_VERSION = "0.10.4"
+EXPECTED_APP_VERSION = "0.10.5"
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 CREATE_NO_WINDOW = 0x08000000
 
@@ -49,6 +49,9 @@ def ensure_running():
         if _is_compatible(_health_payload(timeout=2)):
             return
         time.sleep(0.5)
+    payload = _health_payload(timeout=2)
+    if payload and not _is_compatible(payload):
+        raise RuntimeError(u"本地网关版本不匹配：当前 %s，需要 %s。请重新安装最新版。" % (payload.get("app_version", u"未知"), EXPECTED_APP_VERSION))
     raise RuntimeError(u"本地网关启动失败。请双击 StartGateway.cmd 查看错误。")
 
 

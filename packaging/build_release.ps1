@@ -48,6 +48,16 @@ function Copy-PowerShellFile {
     [System.IO.File]::WriteAllText($Destination, $text, $encoding)
 }
 
+function Get-AppVersion {
+    $appPy = Join-Path $repoRoot "gateway_py3\app.py"
+    $text = [System.IO.File]::ReadAllText($appPy, [System.Text.Encoding]::UTF8)
+    $match = [regex]::Match($text, 'APP_VERSION\s*=\s*"([^"]+)"')
+    if (-not $match.Success) {
+        throw "无法从 $appPy 读取 APP_VERSION。"
+    }
+    return $match.Groups[1].Value
+}
+
 if ($BuildGateway) {
     Push-Location $PSScriptRoot
     try {
@@ -81,6 +91,8 @@ New-Item -ItemType Directory -Path (Join-Path $ReleaseRoot "app") -Force | Out-N
 New-Item -ItemType Directory -Path (Join-Path $ReleaseRoot "ArcMapAIAssistantAddIn") -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $ReleaseRoot "packaging") -Force | Out-Null
 
+$appVersion = Get-AppVersion
+Set-Content -LiteralPath (Join-Path $ReleaseRoot "app\VERSION") -Value $appVersion -Encoding ASCII
 Copy-TreeFiltered (Join-Path $repoRoot "arcmap_runtime_py2") (Join-Path $ReleaseRoot "app\arcmap_runtime_py2")
 Copy-TreeFiltered (Join-Path $repoRoot "operation_catalog") (Join-Path $ReleaseRoot "app\operation_catalog")
 Copy-Item -LiteralPath $gatewayDist -Destination (Join-Path $ReleaseRoot "app\gateway") -Recurse -Force

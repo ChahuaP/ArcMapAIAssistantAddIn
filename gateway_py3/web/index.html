@@ -274,6 +274,10 @@
       gap: 8px;
       margin-top: 10px;
     }
+    .modal-actions {
+      margin-top: 0;
+      justify-content: flex-end;
+    }
     .key-state {
       display: flex;
       align-items: center;
@@ -609,9 +613,57 @@
       font-size: 12px;
       overflow-wrap: anywhere;
     }
+    .diagnostic-list {
+      display: grid;
+      gap: 10px;
+    }
+    .diagnostic-card {
+      display: grid;
+      grid-template-columns: 86px minmax(0, 1fr);
+      gap: 10px;
+      align-items: start;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      background: var(--panel-soft);
+    }
+    .diagnostic-card.ok { border-color: #a8e6bd; background: var(--green-soft); }
+    .diagnostic-card.warn { border-color: #f5d48d; background: var(--amber-soft); }
+    .diagnostic-card.bad { border-color: #ffc8c8; background: var(--red-soft); }
+    .diagnostic-state {
+      display: inline-flex;
+      justify-content: center;
+      border-radius: 99px;
+      padding: 4px 9px;
+      font-size: 12px;
+      font-weight: 760;
+      background: #fff;
+    }
+    .diagnostic-card.ok .diagnostic-state { color: #126b34; }
+    .diagnostic-card.warn .diagnostic-state { color: #8b5300; }
+    .diagnostic-card.bad .diagnostic-state { color: #991b1b; }
+    .diagnostic-card strong {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--ink-strong);
+      font-size: 14px;
+    }
+    .diagnostic-card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .diagnostic-card code {
+      display: block;
+      margin-top: 7px;
+      color: var(--primary-strong);
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
     @media (max-width: 700px) {
       .modal { padding: 12px; }
       .capability-list { grid-template-columns: 1fr; }
+      .diagnostic-card { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -635,6 +687,7 @@
           <div class="quick-actions" aria-label="常用信息">
             <button class="ghost small" onclick="openCapabilities()">能力范围</button>
             <button class="ghost small" onclick="openModal('contextModal')">地图快照</button>
+            <button class="ghost small" onclick="openDiagnostics()">系统诊断</button>
             <button class="ghost small" onclick="openModal('keyModal')"><span id="keyActionText">API Key</span></button>
           </div>
         </div>
@@ -718,6 +771,26 @@
     </div>
   </div>
 
+  <div class="modal" id="diagnosticsModal" hidden onclick="closeOnBackdrop(event)">
+    <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="diagnosticsTitle">
+      <div class="panel-head">
+        <div class="panel-title">
+          <h2 id="diagnosticsTitle">系统诊断</h2>
+          <p id="diagnosticsSummary">检查安装、配置、目录、版本和网络。</p>
+        </div>
+        <div class="button-row modal-actions">
+          <button class="ghost small" onclick="loadDiagnostics()">重新检查</button>
+          <button class="ghost small" onclick="closeModal('diagnosticsModal')">关闭</button>
+        </div>
+      </div>
+      <div class="modal-body">
+        <div id="diagnosticsList" class="diagnostic-list">
+          <div class="section-card">正在检查...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="modal" id="keyModal" hidden onclick="closeOnBackdrop(event)">
     <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="keyTitle">
       <div class="panel-head">
@@ -749,7 +822,7 @@
   </div>
 
   <script>
-    const EXPECTED_GATEWAY_VERSION = '0.10.4';
+    const EXPECTED_GATEWAY_VERSION = '0.10.5';
     const POLL_INTERVAL_MS = 2500;
     const HEALTH_INTERVAL_MS = 10000;
     let lastHealthCheck = 0;
@@ -787,6 +860,50 @@
     async function openCapabilities() {
       openModal('capabilitiesModal');
       if (!capabilitiesLoaded) await loadCapabilities();
+    }
+
+    async function openDiagnostics() {
+      openModal('diagnosticsModal');
+      await loadDiagnostics();
+    }
+
+    async function loadDiagnostics() {
+      const box = document.getElementById('diagnosticsList');
+      box.innerHTML = '<div class="section-card">正在检查...</div>';
+      try {
+        const data = await api('/api/diagnostics');
+        document.getElementById('diagnosticsSummary').textContent = data.ok
+          ? `检查通过，当前版本 ${data.app_version}。`
+          : `发现需要处理的项目，当前版本 ${data.app_version}。`;
+        renderDiagnostics(data.checks || []);
+      } catch (err) {
+        document.getElementById('diagnosticsSummary').textContent = '诊断失败。';
+        box.innerHTML = `<div class="section-card">${escapeHtml(err.message)}</div>`;
+      }
+    }
+
+    function renderDiagnostics(checks) {
+      const labels = {ok: '正常', warn: '提醒', bad: '异常'};
+      const box = document.getElementById('diagnosticsList');
+      if (!checks.length) {
+        box.innerHTML = '<div class="section-card">没有诊断结果。</div>';
+        return;
+      }
+      box.innerHTML = '';
+      checks.forEach(item => {
+        const status = item.status || 'warn';
+        const card = document.createElement('div');
+        card.className = `diagnostic-card ${status}`;
+        card.innerHTML = `
+          <span class="diagnostic-state">${escapeHtml(labels[status] || status)}</span>
+          <div>
+            <strong>${escapeHtml(item.label || item.id || '')}</strong>
+            <p>${escapeHtml(item.detail || '')}</p>
+            ${item.path ? `<code>${escapeHtml(item.path)}</code>` : ''}
+          </div>
+        `;
+        box.appendChild(card);
+      });
     }
 
     async function loadCapabilities() {
