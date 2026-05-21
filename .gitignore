@@ -1,6 +1,11 @@
 config/basemap_providers.local.json
 *.pyc
+*.pyo
+*.pyd
 __pycache__/
+.claude/
+*.local.json
+CONTEXT.md
 build/
 dist/
 release/

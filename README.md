@@ -1,151 +1,167 @@
 # ArcMap AI Assistant
 
-ArcMap AI Assistant v1 现在分三层：
+ArcMap AI Assistant is a local AI workbench for ArcMap. It lets users describe GIS tasks in natural language, reviews the generated workflow, and executes only registered ArcPy operations inside ArcMap.
 
-- `ArcMapAIAssistantAddIn`：ArcMap Python Add-in 壳，只负责原生按钮和热加载 runtime。
-- `arcmap_runtime_py2`：ArcMap 内执行层，采集上下文、调用本地网关、执行已注册 ArcPy 原子操作。
-- `gateway_py3` + `operation_catalog`：Python3 本地网关、DeepSeek Agentic Planner、Web 控制台、workflow 存储、工具目录。
+The project is built for ArcGIS Desktop / ArcMap, not ArcGIS Pro.
 
-DeepSeek 负责理解用户意图、调用本地白名单工具查询文件/上下文/能力目录，并提出 workflow；Gateway 负责校验，ArcMap 只执行 catalog 里登记过的 operation。DeepSeek 不能直接执行 ArcPy 或任意 Python。
+## What It Does
 
-## 普通用户使用
+- Opens local GIS files and folders from natural language requests.
+- Reads the current ArcMap context: layers, fields, selections, coordinate system, MXD status, and default geodatabase.
+- Plans workflows with DeepSeek through a local Python 3 gateway.
+- Executes approved ArcPy operations from a fixed operation catalog.
+- Supports common map, layer, selection, analysis, table, and export operations.
+- Provides a local Web console for conversation, task review, API key configuration, capabilities, and workflow queue.
+- Packages into a user-facing installer folder, so normal users do not need to install Python 3.
 
-## 给用户安装
+## Safety Model
 
-发布包不要直接发源码目录。先在开发机双击：
+DeepSeek never runs arbitrary Python and never calls ArcPy directly.
 
-```text
-BuildArcMapAIAssistantRelease.cmd
-```
+The execution path is:
 
-也可以用命令生成：
+1. ArcMap synchronizes the current GIS context to the local gateway.
+2. DeepSeek plans a workflow by using whitelist tools exposed by the gateway.
+3. The gateway validates the workflow against the operation catalog.
+4. The user approves the task in the Web console.
+5. ArcMap pulls the approved workflow and executes only registered ArcPy operations.
 
-```powershell
-pwsh.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\packaging\build_release.ps1 -BuildGateway
-```
+Direct data edits, such as field updates, feature deletion, and field deletion, require a second confirmation in ArcMap before execution.
 
-发布包会生成到：
+## Requirements
 
-```text
-release\ArcMapAIAssistant
-```
+For end users:
 
-把整个目录压缩发给用户。用户解压后双击：
+- Windows
+- ArcGIS Desktop / ArcMap
+- DeepSeek API key
+- A release package built from this repository
+
+For developers:
+
+- Python 3 for the local gateway
+- ArcGIS Desktop Python 2.7 for the ArcMap Add-in runtime
+- PowerShell 7
+- PyInstaller for building the bundled gateway executable
+
+## Install From Release Package
+
+Do not install from the source tree directly.
+
+Download the release package from GitHub Releases, unzip it, and run:
 
 ```text
 InstallArcMapAIAssistant.cmd
 ```
 
-安装器会让用户选择安装位置，例如：
+The installer lets the user choose an installation directory, such as:
 
-- `C:\Program Files\ArcMapAIAssistant`
 - `D:\ArcMapAIAssistant`
-- 自定义路径
+- `C:\Program Files\ArcMapAIAssistant`
+- a custom directory
 
-普通用户机器不需要安装 Python3。Python3 网关已经由 PyInstaller 打包成 `ArcMapAIAssistantGateway.exe`，安装时会复制到用户选择的安装目录。
-
-卸载时双击：
+After installation, open ArcMap and enable the toolbar if needed:
 
 ```text
-UninstallArcMapAIAssistant.cmd
+Customize > Toolbars > ArcMap AI Assistant
 ```
 
-卸载器会停止本地网关、删除 ArcMap Add-in 和程序安装目录。默认保留 API Key 等用户配置；需要彻底删除时运行 `packaging\uninstall.ps1 -RemoveUserConfig`。
+## Basic Use
 
-首次使用：
+1. Click `启动AI后台` in the ArcMap toolbar.
+2. Click `显示控制台` to open the local Web console.
+3. Configure the DeepSeek API key in the Web console.
+4. Click `同步上下文` in ArcMap.
+5. Type a GIS task in the Web console.
+6. Review and approve the generated task.
+7. Click `执行工作流` in ArcMap.
 
-1. 打开 ArcMap。
-2. 如果网页连不上，在 `ArcMap AI Assistant` 工具栏点击“启动网关”。
-3. 点击“打开助手”。
-4. 在打开的 Web 工作台里保存 DeepSeek API Key。
-5. 在 ArcMap 工具栏点击“同步上下文”。
-6. 在 Web 工作台输入自然语言请求，审批生成的 workflow。
-7. 回到 ArcMap 点击“执行任务”。
+Example requests:
 
-ArcMap 可以通过“启动网关”手动启动本地网关，不需要用户手动开命令行。ArcMap 的“打开助手”只启动外部 launcher，不直接打开浏览器，避免 ArcMap 进程闪退。完整 AI 返回、追问、不支持原因和 workflow JSON 都在 Web 工作台查看。
+- `缩放到 nanjing 图层`
+- `选择 nanjing 中 NAME 等于 鼓楼区 的要素`
+- `给 roads 做 100 米缓冲区，输出到 D:\Data`
+- `打开 D:\Data\shapefile 下所有 shp`
+- `把 nanjing 当前选中的要素导出到 D:\Data，输出名 nanjing_selected`
+- `把 nanjing 图层按 NAME 字段拆分导出为 shp，输出到 D:\Data`
 
-`SetupDeepSeekKey.cmd` 和 `StartGateway.cmd` 只保留给开发/排障。
+## Build A Release Package
 
-属性编辑类任务会直接修改原始数据。执行前 ArcMap 会统计影响范围并二次确认，用户取消则不执行。
-
-开发/排障命令仍保留在 runtime 中：
-
-- `/start`：手动启动本地网关。
-- `/key sk-...`：在 ArcMap 里保存 DeepSeek API key。
-- `/config`：打开 Web 控制台配置页。
-- `/open`：打开 Web 控制台。
-- `/health`：检查本地网关。
-- `/execute`：执行 Web 控制台已审批的 workflow。
-
-## 开发启动
-
-开发时也可以手动启动本地网关：
+From the repository root:
 
 ```powershell
-$env:DEEPSEEK_API_KEY='你的 key'
+.\BuildArcMapAIAssistantRelease.cmd
+```
+
+Or run the packaging script directly:
+
+```powershell
+pwsh.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\packaging\build_release.ps1 -BuildGateway
+```
+
+The release package is generated at:
+
+```text
+release\ArcMapAIAssistant
+```
+
+Zip the whole folder and publish it as a GitHub Release asset.
+
+## Development
+
+Start the Python 3 gateway:
+
+```powershell
+$env:DEEPSEEK_API_KEY = "your-key"
 python -m gateway_py3
 ```
 
-也可以放到：
-
-```text
-%APPDATA%\ArcMapAIAssistant\config.json
-```
-
-格式：
-
-```json
-{
-  "deepseek_api_key": "你的 key",
-  "model": "deepseek-chat"
-}
-```
-
-当前 ArcMap Python Add-in 版本暂不支持自动添加底图。ArcMap 手工可以通过 GIS Servers 添加 WMS/WMTS；自动化底图后续需要 C# ArcObjects 或预制 `.lyr` 方案。
-
-## Add-in 构建
+Build the ArcMap Add-in:
 
 ```powershell
-pwsh.exe -NoLogo -NoProfile -Command "python .\ArcMapAIAssistantAddIn\makeaddin.py"
+python .\ArcMapAIAssistantAddIn\makeaddin.py
 ```
 
-生成文件：
+The generated Add-in file is:
 
 ```text
 ArcMapAIAssistantAddIn\ArcMapAIAssistantAddIn.esriaddin
 ```
 
-## 安装验证
+Run tests:
 
-1. 双击 `ArcMapAIAssistantAddIn\ArcMapAIAssistantAddIn.esriaddin` 安装。
-2. 打开 ArcMap。
-3. 如果工具栏没显示，打开 `Customize > Toolbars > ArcMap AI Assistant`。
-4. 点击“启动网关”，确认本地网关可用。
-5. 点击“打开助手”，外部 launcher 会打开 Web 工作台。
-6. 点击“同步上下文”，把当前 ArcMap 图层、字段和选择集上传到网关。
-7. 在 Web 工作台输入自然语言请求，查看 AI 返回并审批 workflow。
-8. 回到 ArcMap 点击“执行任务”，执行已审批 workflow。
+```powershell
+python -m unittest discover -s tests -p "test_*.py" -v
+```
 
-## 扩展原子操作
+## Project Layout
 
-新增 operation 的固定流程：
+```text
+ArcMapAIAssistantAddIn/   ArcMap Python Add-in shell
+arcmap_runtime_py2/       ArcMap-side Python 2 runtime and ArcPy executor
+gateway_py3/              Local Python 3 gateway, Web console, DeepSeek planner
+operation_catalog/        Registered GIS operation specs and schemas
+packaging/                Installer, uninstaller, and PyInstaller build scripts
+tests/                    Gateway and fake ArcMap runtime tests
+```
 
-1. 在 `operation_catalog/packs/*.json` 增加 operation spec。
-2. 在 `arcmap_runtime_py2/operations/` 增加 executor。
-3. 增加测试，确保 spec 和 executor 对得上。
-4. 不改 DeepSeek 总 prompt；Agentic Planner 会把 operation 短索引和本地工具提供给模型，完整 schema 通过 `catalog_get_operation_schema` 查询。
+## Add Operations
 
-## 关键点
+To add a new GIS operation:
 
-- ArcMap Python Add-in 使用 ArcGIS Desktop 自带的 Python 2.7 运行。
-- `config.xml` 负责声明 Add-in、Toolbar、Button。
-- `Install/ArcMapAIAssistant_addin.py` 只负责原生按钮和热加载外部 runtime。
-- `arcmap_runtime_py2/runtime.py` 负责 ArcMap 内入口。
-- `gateway_py3/app.py` 负责本地网关和 Web 控制台。
-- `gateway_py3/planner.py` 负责 Agentic Planner 主循环。
-- `gateway_py3/agent_tools.py` 负责 DeepSeek 可调用的本地白名单工具。
-- `gateway_py3/validators.py` 是 workflow 的唯一校验边界。
-- `operation_catalog/packs/*.json` 负责原子操作说明。
-- `gateway_py3/file_resolver.py` 负责受限本地文件查找，不做整盘索引或整盘递归扫描。
-- `arcmap_runtime_py2/operations/condition_utils.py` 负责把结构化属性条件编译为 ArcGIS SQL。
-- `.esriaddin` 是打包后的安装文件，本质是包含 `config.xml`、`Install/`、`Images/` 的压缩包。
+1. Add an operation spec in `operation_catalog/packs/*.json`.
+2. Add the ArcPy executor in `arcmap_runtime_py2/operations/`.
+3. Add tests for the catalog spec, validation, and executor behavior.
+4. Rebuild the Add-in or release package when needed.
+
+Operation descriptions and execution code are intentionally separate. The model sees the catalog; ArcMap executes only registered executor functions.
+
+## Current Limitations
+
+- ArcMap basemap automation is not enabled. ArcMap can add WMS/WMTS manually through GIS Servers, but stable automated basemap creation needs a future ArcObjects or prepared `.lyr` implementation.
+- The project targets ArcMap and ArcPy, not ArcGIS Pro.
+- The Web console and gateway run locally on `127.0.0.1`.
+
+## License
+
+MIT License. See [LICENSE](LICENSE).
