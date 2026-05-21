@@ -742,13 +742,14 @@
             </div>
           </form>
           <p class="hint">Key 只保存在当前 Windows 用户配置目录，不会写进项目代码。</p>
+          <p class="hint" id="configPathHint">配置路径检查中。</p>
         </section>
       </div>
     </div>
   </div>
 
   <script>
-    const EXPECTED_GATEWAY_VERSION = '0.10.3';
+    const EXPECTED_GATEWAY_VERSION = '0.10.4';
     const POLL_INTERVAL_MS = 2500;
     const HEALTH_INTERVAL_MS = 10000;
     let lastHealthCheck = 0;
@@ -884,6 +885,7 @@
       const ok = data.config.has_deepseek_api_key;
       document.getElementById('keyBadge').textContent = ok ? 'Key 已保存' : 'Key 未配置';
       document.getElementById('keyActionText').textContent = ok ? 'Key 已配置' : '配置 Key';
+      document.getElementById('configPathHint').textContent = `配置文件：${data.config.config_path || '未知'}`;
       setDot('keyDot', ok, !ok);
     }
 
@@ -902,6 +904,7 @@
       const ok = data.config.has_deepseek_api_key;
       document.getElementById('keyBadge').textContent = ok ? 'Key 已保存' : 'Key 未配置';
       document.getElementById('keyActionText').textContent = ok ? 'Key 已配置' : '配置 Key';
+      document.getElementById('configPathHint').textContent = `配置文件：${data.config.config_path || '未知'}`;
       setDot('keyDot', ok, !ok);
       setStatus('Key 已保存。');
       closeModal('keyModal');
