@@ -9,6 +9,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 CATALOG_ROOT = ROOT / "operation_catalog"
 RUNTIME_ROOT = ROOT / "arcmap_runtime_py2"
 ADDIN_ROOT = ROOT / "ArcMapAIAssistantAddIn"
+PACKAGING_ROOT = ROOT / "packaging"
 
 
 class CatalogTests(unittest.TestCase):
@@ -59,6 +60,14 @@ class CatalogTests(unittest.TestCase):
         self.assertNotIn(str(ROOT), addin_source)
         self.assertNotIn(str(ROOT).replace("/", "\\"), addin_source)
         self.assertIn("install.json", addin_source)
+
+    def test_release_and_install_package_operation_catalog(self):
+        build_script = (PACKAGING_ROOT / "build_release.ps1").read_text(encoding="utf-8-sig")
+        install_script = (PACKAGING_ROOT / "install.ps1").read_text(encoding="utf-8-sig")
+        self.assertIn('"operation_catalog"', build_script)
+        self.assertIn('"app\\operation_catalog"', build_script)
+        self.assertIn('"operation_catalog"', install_script)
+        self.assertIn('"catalog.json"', install_script)
 
 
 def _load_json(path):

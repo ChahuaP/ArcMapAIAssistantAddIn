@@ -82,6 +82,7 @@ New-Item -ItemType Directory -Path (Join-Path $ReleaseRoot "ArcMapAIAssistantAdd
 New-Item -ItemType Directory -Path (Join-Path $ReleaseRoot "packaging") -Force | Out-Null
 
 Copy-TreeFiltered (Join-Path $repoRoot "arcmap_runtime_py2") (Join-Path $ReleaseRoot "app\arcmap_runtime_py2")
+Copy-TreeFiltered (Join-Path $repoRoot "operation_catalog") (Join-Path $ReleaseRoot "app\operation_catalog")
 Copy-Item -LiteralPath $gatewayDist -Destination (Join-Path $ReleaseRoot "app\gateway") -Recurse -Force
 Copy-CmdFile (Join-Path $repoRoot "OpenAssistantWeb.cmd") (Join-Path $ReleaseRoot "app\OpenAssistantWeb.cmd")
 Copy-CmdFile (Join-Path $repoRoot "StartGateway.cmd") (Join-Path $ReleaseRoot "app\StartGateway.cmd")

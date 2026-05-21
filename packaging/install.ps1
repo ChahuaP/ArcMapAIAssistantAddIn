@@ -77,12 +77,14 @@ $appSource = Join-Path $packageRoot "app"
 $addin = Join-Path $packageRoot "ArcMapAIAssistantAddIn\ArcMapAIAssistantAddIn.esriaddin"
 $gatewayExe = Join-Path $appSource "gateway\ArcMapAIAssistantGateway.exe"
 $runtimeSource = Join-Path $appSource "arcmap_runtime_py2"
+$catalogSource = Join-Path $appSource "operation_catalog"
 $openCmd = Join-Path $appSource "OpenAssistantWeb.cmd"
 $startCmd = Join-Path $appSource "StartGateway.cmd"
 
 Require-File $addin "缺少 ArcMap 插件包：$addin"
 Require-File $gatewayExe "缺少 Python3 网关 EXE：$gatewayExe。请先用 packaging\build_release.ps1 生成发布包。"
 Require-File (Join-Path $runtimeSource "runtime.py") "缺少 ArcMap runtime：$runtimeSource"
+Require-File (Join-Path $catalogSource "catalog.json") "缺少操作目录：$catalogSource"
 Require-File $openCmd "缺少打开控制台脚本：$openCmd"
 Require-File $startCmd "缺少启动后台脚本：$startCmd"
 
@@ -97,6 +99,7 @@ Write-Host "正在安装到：$targetRoot"
 New-Item -ItemType Directory -Path $targetRoot -Force | Out-Null
 
 Copy-CleanDirectory $runtimeSource (Join-Path $targetRoot "arcmap_runtime_py2")
+Copy-CleanDirectory $catalogSource (Join-Path $targetRoot "operation_catalog")
 Copy-CleanDirectory (Join-Path $appSource "gateway") (Join-Path $targetRoot "gateway")
 Copy-Item -LiteralPath $openCmd -Destination (Join-Path $targetRoot "OpenAssistantWeb.cmd") -Force
 Copy-Item -LiteralPath $startCmd -Destination (Join-Path $targetRoot "StartGateway.cmd") -Force
