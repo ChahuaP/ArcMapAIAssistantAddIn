@@ -1,21 +1,34 @@
 @echo off
+chcp 65001 >nul
 setlocal
-cd /d "%~dp0"
+set "ROOT=%~dp0"
+set "INSTALL_PS=%ROOT%packaging\install.ps1"
+
+if not exist "%INSTALL_PS%" goto missing_package
 
 where pwsh.exe >nul 2>nul
-if not errorlevel 1 (
-  pwsh.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0packaging\install.ps1"
-  pause
-  exit /b %errorlevel%
-)
+if %ERRORLEVEL% EQU 0 goto use_pwsh
 
 where powershell.exe >nul 2>nul
-if not errorlevel 1 (
-  powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0packaging\install.ps1"
-  pause
-  exit /b %errorlevel%
-)
+if %ERRORLEVEL% EQU 0 goto use_powershell
 
 echo 未找到 PowerShell，无法安装。
+pause
+exit /b 1
+
+:use_pwsh
+pwsh.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%INSTALL_PS%"
+set "ERR=%ERRORLEVEL%"
+pause
+exit /b %ERR%
+
+:use_powershell
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%INSTALL_PS%"
+set "ERR=%ERRORLEVEL%"
+pause
+exit /b %ERR%
+
+:missing_package
+echo 安装包不完整，缺少：%INSTALL_PS%
 pause
 exit /b 1

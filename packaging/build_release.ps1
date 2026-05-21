@@ -32,6 +32,14 @@ function Copy-TreeFiltered {
     }
 }
 
+function Copy-CmdFile {
+    param([string]$Source, [string]$Destination)
+    $encoding = New-Object System.Text.UTF8Encoding -ArgumentList $false
+    $text = [System.IO.File]::ReadAllText($Source, [System.Text.Encoding]::UTF8)
+    $text = $text -replace "`r?`n", "`r`n"
+    [System.IO.File]::WriteAllText($Destination, $text, $encoding)
+}
+
 if ($BuildGateway) {
     Push-Location $PSScriptRoot
     try {
@@ -67,13 +75,13 @@ New-Item -ItemType Directory -Path (Join-Path $ReleaseRoot "packaging") -Force |
 
 Copy-TreeFiltered (Join-Path $repoRoot "arcmap_runtime_py2") (Join-Path $ReleaseRoot "app\arcmap_runtime_py2")
 Copy-Item -LiteralPath $gatewayDist -Destination (Join-Path $ReleaseRoot "app\gateway") -Recurse -Force
-Copy-Item -LiteralPath (Join-Path $repoRoot "OpenAssistantWeb.cmd") -Destination (Join-Path $ReleaseRoot "app\OpenAssistantWeb.cmd") -Force
-Copy-Item -LiteralPath (Join-Path $repoRoot "StartGateway.cmd") -Destination (Join-Path $ReleaseRoot "app\StartGateway.cmd") -Force
+Copy-CmdFile (Join-Path $repoRoot "OpenAssistantWeb.cmd") (Join-Path $ReleaseRoot "app\OpenAssistantWeb.cmd")
+Copy-CmdFile (Join-Path $repoRoot "StartGateway.cmd") (Join-Path $ReleaseRoot "app\StartGateway.cmd")
 Copy-Item -LiteralPath (Join-Path $repoRoot "ArcMapAIAssistantAddIn\ArcMapAIAssistantAddIn.esriaddin") -Destination (Join-Path $ReleaseRoot "ArcMapAIAssistantAddIn\ArcMapAIAssistantAddIn.esriaddin") -Force
 Copy-Item -LiteralPath (Join-Path $repoRoot "packaging\install.ps1") -Destination (Join-Path $ReleaseRoot "packaging\install.ps1") -Force
 Copy-Item -LiteralPath (Join-Path $repoRoot "packaging\uninstall.ps1") -Destination (Join-Path $ReleaseRoot "packaging\uninstall.ps1") -Force
-Copy-Item -LiteralPath (Join-Path $repoRoot "InstallArcMapAIAssistant.cmd") -Destination (Join-Path $ReleaseRoot "InstallArcMapAIAssistant.cmd") -Force
-Copy-Item -LiteralPath (Join-Path $repoRoot "UninstallArcMapAIAssistant.cmd") -Destination (Join-Path $ReleaseRoot "UninstallArcMapAIAssistant.cmd") -Force
+Copy-CmdFile (Join-Path $repoRoot "InstallArcMapAIAssistant.cmd") (Join-Path $ReleaseRoot "InstallArcMapAIAssistant.cmd")
+Copy-CmdFile (Join-Path $repoRoot "UninstallArcMapAIAssistant.cmd") (Join-Path $ReleaseRoot "UninstallArcMapAIAssistant.cmd")
 Copy-Item -LiteralPath (Join-Path $repoRoot "packaging\USER_README.txt") -Destination (Join-Path $ReleaseRoot "README.txt") -Force
 
 Write-Host "发布包已生成：$ReleaseRoot"
