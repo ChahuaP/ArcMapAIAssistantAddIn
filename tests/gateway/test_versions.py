@@ -11,8 +11,10 @@ class VersionTests(unittest.TestCase):
         app_version = _find(ROOT / "gateway_py3" / "app.py", r'APP_VERSION = "([^"]+)"')
         opener_version = _find(ROOT / "gateway_py3" / "open_web.py", r'EXPECTED_APP_VERSION = "([^"]+)"')
         web_version = _find(ROOT / "gateway_py3" / "web" / "index.html", r"EXPECTED_GATEWAY_VERSION = '([^']+)'")
+        runtime_version = _find(ROOT / "arcmap_runtime_py2" / "gateway_client.py", r'EXPECTED_APP_VERSION = "([^"]+)"')
         self.assertEqual(app_version, opener_version)
         self.assertEqual(app_version, web_version)
+        self.assertEqual(app_version, runtime_version)
 
 
 def _find(path, pattern):
