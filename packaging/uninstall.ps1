@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$DesktopVersion = "Desktop10.1",
     [switch]$RemoveUserConfig,
     [switch]$Quiet

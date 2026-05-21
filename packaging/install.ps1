@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$InstallDir = "",
     [string]$DesktopVersion = "Desktop10.1",
     [switch]$Quiet
