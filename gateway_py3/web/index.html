@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="icon" href="data:,">
-  <title>ArcGIS 工作台</title>
+  <link rel="icon" href="/web/favicon.svg" type="image/svg+xml">
+  <title>GeoPilot</title>
   <style>
     :root {
       --ink: #0e1b2a;
@@ -141,10 +141,15 @@
       display: grid;
       place-items: center;
       color: #fff;
-      background: linear-gradient(135deg, #087c91, #1a9a75);
+      background: linear-gradient(135deg, #075d70, #10a37f);
       box-shadow: 0 12px 28px rgba(8, 124, 145, .24);
       font-weight: 800;
       letter-spacing: 0;
+    }
+    .brand-mark svg {
+      width: 27px;
+      height: 27px;
+      display: block;
     }
     .brand h1 {
       margin: 0;
@@ -672,10 +677,16 @@
     <header>
       <div class="topbar">
         <div class="brand">
-          <div class="brand-mark" aria-hidden="true">GIS</div>
+          <div class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 64 64" role="img" focusable="false">
+              <path d="M32 5 56 18v28L32 59 8 46V18L32 5Z" fill="none" stroke="rgba(255,255,255,.92)" stroke-width="4" stroke-linejoin="round"/>
+              <path d="M32 14 45 25 36 50H28L19 25 32 14Z" fill="rgba(255,255,255,.95)"/>
+              <path d="M32 23a8 8 0 1 1 0 16 8 8 0 0 1 0-16Z" fill="#087c91"/>
+            </svg>
+          </div>
           <div>
-            <h1>ArcGIS 工作台</h1>
-            <p>自然语言规划，确认后在 ArcGIS 执行</p>
+            <h1>GeoPilot</h1>
+            <p>自然语言 GIS 工作流，确认后在 ArcGIS 执行</p>
           </div>
         </div>
         <div class="top-controls">
@@ -822,7 +833,7 @@
   </div>
 
   <script>
-    const EXPECTED_GATEWAY_VERSION = '0.10.5';
+    const EXPECTED_GATEWAY_VERSION = '0.10.6';
     const POLL_INTERVAL_MS = 2500;
     const HEALTH_INTERVAL_MS = 10000;
     let lastHealthCheck = 0;

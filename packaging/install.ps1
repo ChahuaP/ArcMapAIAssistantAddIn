@@ -19,14 +19,14 @@ function Select-InstallDir {
     if ($Requested) {
         return $Requested
     }
-    $defaultDir = if (Test-Path -LiteralPath "D:\") { "D:\ArcMapAIAssistant" } else { "C:\Program Files\ArcMapAIAssistant" }
+    $defaultDir = Join-Path $env:ProgramFiles "GeoPilot"
     if ($Quiet) {
         return $defaultDir
     }
 
     Write-Host ""
     Write-Host "请选择安装位置："
-    Write-Host "1. C:\Program Files\ArcMapAIAssistant"
+    Write-Host "1. $defaultDir"
     if (Test-Path -LiteralPath "D:\") {
         Write-Host "2. D:\ArcMapAIAssistant"
         Write-Host "3. 自定义路径"
@@ -38,7 +38,7 @@ function Select-InstallDir {
         return $defaultDir
     }
     if ($choice -eq "1") {
-        return "C:\Program Files\ArcMapAIAssistant"
+        return $defaultDir
     }
     if ((Test-Path -LiteralPath "D:\") -and $choice -eq "2") {
         return "D:\ArcMapAIAssistant"
@@ -116,7 +116,7 @@ $appVersion = (Get-Content -Encoding UTF8 -LiteralPath $versionFile -Raw).Trim()
 $targetRoot = Select-InstallDir $InstallDir
 $targetRoot = [System.IO.Path]::GetFullPath($targetRoot)
 if ($targetRoot.StartsWith($env:ProgramFiles, [System.StringComparison]::OrdinalIgnoreCase) -and -not (Test-IsAdministrator)) {
-    throw "安装到 $env:ProgramFiles 需要管理员权限。请右键用管理员身份运行安装程序，或选择 D:\ArcMapAIAssistant。"
+    throw "安装到 $env:ProgramFiles 需要管理员权限。请使用 InstallArcMapAIAssistant.cmd 或安装器启动，它会自动请求管理员权限。"
 }
 
 Write-Host ""

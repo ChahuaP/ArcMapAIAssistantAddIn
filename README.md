@@ -1,6 +1,6 @@
-# ArcMap AI Assistant
+# GeoPilot
 
-ArcMap AI Assistant is a local AI workbench for ArcMap. It lets users describe GIS tasks in natural language, reviews the generated workflow, and executes only registered ArcPy operations inside ArcMap.
+GeoPilot is a local AI workbench for ArcMap. It lets users describe GIS tasks in natural language, reviews the generated workflow, and executes only registered ArcPy operations inside ArcMap.
 
 The project is built for ArcGIS Desktop / ArcMap, not ArcGIS Pro.
 
@@ -43,22 +43,31 @@ For developers:
 - ArcGIS Desktop Python 2.7 for the ArcMap Add-in runtime
 - PowerShell 7
 - PyInstaller for building the bundled gateway executable
+- Inno Setup 6 for building the optional `GeoPilotSetup.exe` installer
 
 ## Install From Release Package
 
 Do not install from the source tree directly.
 
-Download the release package from GitHub Releases, unzip it, and run:
+Download the release package from GitHub Releases. If the release includes the installer, run:
+
+```text
+GeoPilotSetup-<version>.exe
+```
+
+The installer opens like a normal Windows setup program and automatically requests administrator permission when installing to `C:\Program Files\GeoPilot`.
+
+If you use the folder package instead, unzip it and run:
 
 ```text
 InstallArcMapAIAssistant.cmd
 ```
 
-The installer lets the user choose an installation directory, such as:
+The command installer also requests administrator permission automatically. The default installation directory is:
 
-- `D:\ArcMapAIAssistant`
-- `C:\Program Files\ArcMapAIAssistant`
-- a custom directory
+```text
+C:\Program Files\GeoPilot
+```
 
 After installation, open ArcMap and enable the toolbar if needed:
 
@@ -93,6 +102,12 @@ From the repository root:
 .\BuildArcMapAIAssistantRelease.cmd
 ```
 
+To build the Windows setup executable, install Inno Setup 6 and run:
+
+```powershell
+.\BuildGeoPilotInstaller.cmd
+```
+
 Or run the packaging script directly:
 
 ```powershell
@@ -105,7 +120,7 @@ The release package is generated at:
 release\ArcMapAIAssistant
 ```
 
-Zip the whole folder and publish it as a GitHub Release asset.
+The setup executable is generated beside it as `release\GeoPilotSetup-<version>.exe`.
 
 ## Development
 

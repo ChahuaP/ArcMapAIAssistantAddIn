@@ -18,7 +18,7 @@ from gateway_py3.workflow_store import WorkflowStore
 
 HOST = "127.0.0.1"
 PORT = 8765
-APP_VERSION = "0.10.5"
+APP_VERSION = "0.10.6"
 
 
 class GatewayState:

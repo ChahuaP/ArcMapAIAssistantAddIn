@@ -1,14 +1,15 @@
-ArcMap AI Assistant 使用说明
-===========================
+GeoPilot 使用说明
+================
 
 一、安装
 
 1. 关闭 ArcMap。
-2. 双击 InstallArcMapAIAssistant.cmd。
-3. 按提示选择安装位置。
-   推荐安装到 D:\ArcMapAIAssistant。
-4. 安装完成后打开 ArcMap。
-5. 如果没有看到工具栏，请在 ArcMap 菜单打开：
+2. 如果安装包里有 GeoPilotSetup.exe，直接双击它安装。
+3. 如果只有文件夹安装包，双击 InstallArcMapAIAssistant.cmd。
+4. 出现 Windows 管理员权限提示时，点击“是”。
+5. 默认安装到 C:\Program Files\GeoPilot。
+6. 安装完成后打开 ArcMap。
+7. 如果没有看到工具栏，请在 ArcMap 菜单打开：
    Customize > Toolbars > ArcMap AI Assistant
 
 

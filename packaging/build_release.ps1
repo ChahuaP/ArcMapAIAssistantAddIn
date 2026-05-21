@@ -1,6 +1,7 @@
 ﻿param(
     [string]$ReleaseRoot = "",
-    [switch]$BuildGateway
+    [switch]$BuildGateway,
+    [switch]$BuildInstaller
 )
 
 $ErrorActionPreference = "Stop"
@@ -58,17 +59,57 @@ function Get-AppVersion {
     return $match.Groups[1].Value
 }
 
+function Find-InnoCompiler {
+    $command = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+    if ($command) {
+        return $command.Source
+    }
+    $candidates = @()
+    if (${env:ProgramFiles(x86)}) {
+        $candidates += (Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe")
+    }
+    if ($env:ProgramFiles) {
+        $candidates += (Join-Path $env:ProgramFiles "Inno Setup 6\ISCC.exe")
+    }
+    if ($env:LOCALAPPDATA) {
+        $candidates += (Join-Path $env:LOCALAPPDATA "Programs\Inno Setup 6\ISCC.exe")
+    }
+    foreach ($candidate in $candidates) {
+        if (Test-Path -LiteralPath $candidate) {
+            return $candidate
+        }
+    }
+    throw "未找到 Inno Setup 编译器 ISCC.exe。请安装 Inno Setup 6 后重试：https://jrsoftware.org/isinfo.php"
+}
+
+function Stop-BuildOutputGateway {
+    param([string]$GatewayExePath)
+    $target = [System.IO.Path]::GetFullPath($GatewayExePath)
+    Get-Process -ErrorAction SilentlyContinue | ForEach-Object {
+        try {
+            if ($_.Path -and ([System.IO.Path]::GetFullPath($_.Path) -eq $target)) {
+                Stop-Process -Id $_.Id -Force -ErrorAction Stop
+            }
+        } catch {
+        }
+    }
+}
+
 if ($BuildGateway) {
     Push-Location $PSScriptRoot
     try {
         $distPath = Join-Path $repoRoot "dist"
         $workPath = Join-Path $repoRoot "build"
+        Stop-BuildOutputGateway (Join-Path $distPath "ArcMapAIAssistantGateway\ArcMapAIAssistantGateway.exe")
         $pyinstallerArgs = @(".\pyinstaller_gateway.spec", "--noconfirm", "--clean", "--distpath", $distPath, "--workpath", $workPath)
         $pyinstaller = Get-Command pyinstaller -ErrorAction SilentlyContinue
         if ($pyinstaller) {
             & $pyinstaller.Source @pyinstallerArgs
         } else {
             python -m PyInstaller @pyinstallerArgs
+        }
+        if ($LASTEXITCODE -ne 0) {
+            throw "PyInstaller 打包失败，退出码：$LASTEXITCODE"
         }
     } finally {
         Pop-Location
@@ -107,3 +148,14 @@ Copy-Item -LiteralPath (Join-Path $repoRoot "packaging\USER_README.txt") -Destin
 
 Write-Host "发布包已生成：$ReleaseRoot"
 Write-Host "把整个目录压缩发给用户，用户双击 InstallArcMapAIAssistant.cmd 安装。"
+
+if ($BuildInstaller) {
+    $iscc = Find-InnoCompiler
+    $setupScript = Join-Path $repoRoot "packaging\GeoPilotSetup.iss"
+    $installerOutput = Join-Path $repoRoot "release"
+    & $iscc $setupScript "/DMyAppVersion=$appVersion" "/DMySourceDir=$ReleaseRoot" "/DMyOutputDir=$installerOutput"
+    if ($LASTEXITCODE -ne 0) {
+        throw "Inno Setup 打包失败，退出码：$LASTEXITCODE"
+    }
+    Write-Host "安装器已生成：$(Join-Path $installerOutput ("GeoPilotSetup-$appVersion.exe"))"
+}

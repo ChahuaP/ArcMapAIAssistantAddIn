@@ -16,6 +16,13 @@ class VersionTests(unittest.TestCase):
         self.assertEqual(app_version, web_version)
         self.assertEqual(app_version, runtime_version)
 
+    def test_web_opener_uses_clean_local_url(self):
+        opener = (ROOT / "gateway_py3" / "open_web.py").read_text(encoding="utf-8")
+        command = (ROOT / "OpenAssistantWeb.cmd").read_text(encoding="utf-8")
+        self.assertIn("WEB_URL = BASE_URL", opener)
+        self.assertIn('"http://127.0.0.1:8765"', command)
+        self.assertNotIn("?v=", command)
+
 
 def _find(path, pattern):
     match = re.search(pattern, path.read_text(encoding="utf-8"))

@@ -74,6 +74,27 @@ class CatalogTests(unittest.TestCase):
         self.assertIn("app_version", install_script)
         self.assertIn("Test-InstallHealth", install_script)
 
+    def test_windows_installer_requests_admin_and_uses_inno_setup(self):
+        build_script = (PACKAGING_ROOT / "build_release.ps1").read_text(encoding="utf-8-sig")
+        installer_cmd = (ROOT / "BuildGeoPilotInstaller.cmd").read_text(encoding="utf-8")
+        install_cmd = (ROOT / "InstallArcMapAIAssistant.cmd").read_text(encoding="utf-8")
+        uninstall_cmd = (ROOT / "UninstallArcMapAIAssistant.cmd").read_text(encoding="utf-8")
+        inno_script = (PACKAGING_ROOT / "GeoPilotSetup.iss").read_text(encoding="utf-8")
+        self.assertIn("-BuildInstaller", installer_cmd)
+        self.assertIn("ISCC.exe", build_script)
+        self.assertIn("Programs\\Inno Setup 6\\ISCC.exe", build_script)
+        self.assertIn("Stop-BuildOutputGateway", build_script)
+        self.assertIn("PyInstaller 打包失败", build_script)
+        self.assertIn("Inno Setup 打包失败", build_script)
+        self.assertIn("Start-Process", install_cmd)
+        self.assertIn("-Verb RunAs", install_cmd)
+        self.assertIn("Start-Process", uninstall_cmd)
+        self.assertIn("-Verb RunAs", uninstall_cmd)
+        self.assertIn("PrivilegesRequired=admin", inno_script)
+        self.assertIn(r"DefaultDirName={autopf}\GeoPilot", inno_script)
+        self.assertIn("RunOnceId", inno_script)
+        self.assertNotIn("ChineseSimplified.isl", inno_script)
+
 
 def _load_json(path):
     return json.loads(path.read_text(encoding="utf-8"))
