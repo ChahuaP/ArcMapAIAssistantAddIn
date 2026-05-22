@@ -13,6 +13,13 @@ except NameError:
     unicode = str
 
 
+VALUE_PROFILE_EXCLUDED_TYPES = set(["Geometry", "Raster", "Blob"])
+MAX_VALUE_PROFILE_FIELDS = 30
+MAX_VALUE_PROFILE_ROWS = 250
+MAX_FIELD_VALUE_SAMPLES = 20
+MAX_VALUE_TEXT_LENGTH = 120
+
+
 def read_context():
     mxd = arcpy.mapping.MapDocument("CURRENT")
     data_frames = arcpy.mapping.ListDataFrames(mxd)
@@ -103,11 +110,76 @@ def _layer_info(layer, index):
         except Exception:
             pass
         try:
-            for field in arcpy.ListFields(layer):
+            fields = arcpy.ListFields(layer)
+            for field in fields:
                 info["fields"].append({"name": field.name, "type": field.type})
+            _attach_field_value_samples(layer, info, fields)
         except Exception:
             pass
     return info
+
+
+def _attach_field_value_samples(layer, layer_info, fields):
+    profiled_fields = [field for field in fields if getattr(field, "type", None) not in VALUE_PROFILE_EXCLUDED_TYPES]
+    profiled_fields = profiled_fields[:MAX_VALUE_PROFILE_FIELDS]
+    if not profiled_fields:
+        return
+    field_names = [field.name for field in profiled_fields]
+    samples = dict((field.name, []) for field in profiled_fields)
+    seen = dict((field.name, set()) for field in profiled_fields)
+    try:
+        cursor = arcpy.da.SearchCursor(layer, field_names)
+    except Exception:
+        return
+    try:
+        row_count = 0
+        for row in cursor:
+            row_count += 1
+            for index, raw_value in enumerate(row):
+                if raw_value is None:
+                    continue
+                field_name = field_names[index]
+                if len(samples[field_name]) >= MAX_FIELD_VALUE_SAMPLES:
+                    continue
+                value = _sample_text(raw_value)
+                if not value or value in seen[field_name]:
+                    continue
+                seen[field_name].add(value)
+                samples[field_name].append(value)
+            if row_count >= MAX_VALUE_PROFILE_ROWS or _all_sample_lists_full(samples):
+                break
+    finally:
+        try:
+            del cursor
+        except Exception:
+            pass
+    for field_info in layer_info.get("fields", []):
+        values = samples.get(field_info.get("name"))
+        if values:
+            field_info["value_samples"] = values
+    if len(fields) > len(profiled_fields):
+        layer_info["value_profile_truncated"] = True
+
+
+def _all_sample_lists_full(samples):
+    for values in samples.values():
+        if len(values) < MAX_FIELD_VALUE_SAMPLES:
+            return False
+    return True
+
+
+def _sample_text(value):
+    try:
+        text = value if isinstance(value, unicode) else unicode(value)
+    except Exception:
+        try:
+            text = value.decode("utf-8", "ignore")
+        except Exception:
+            text = u""
+    text = text.strip()
+    if len(text) > MAX_VALUE_TEXT_LENGTH:
+        text = text[:MAX_VALUE_TEXT_LENGTH]
+    return text
 
 
 def _safe_support(layer, support_name, attr_name):

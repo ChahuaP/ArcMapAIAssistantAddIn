@@ -158,6 +158,168 @@ class ProjectAndToolTests(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertIn("不安全", result["error"])
 
+    def test_toolbuilder_adds_python2_encoding_header(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            store = WorkflowStore(root / "workflows.sqlite")
+            runtime = AgentToolRuntime(self.catalog, store, _context())
+
+            with _temporary_tool_roots(root):
+                result = runtime.handle("toolbuilder_create_draft", {
+                    "name": "测试工具",
+                    "capability": "执行测试能力",
+                    "operation_spec": _custom_spec(),
+                    "executor_code": "def execute(context, arguments, step_outputs):\n    return {'ok': True}\n",
+                    "tests": []
+                })
+                executor_path = pathlib.Path(result["tool"]["files"]["executor"])
+                executor_code = executor_path.read_text(encoding="utf-8")
+
+        self.assertTrue(result["ok"])
+        self.assertTrue(executor_code.startswith("# -*- coding: utf-8 -*-\n"))
+
+    def test_toolbuilder_rejects_python3_only_executor_code(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            store = WorkflowStore(root / "workflows.sqlite")
+            runtime = AgentToolRuntime(self.catalog, store, _context())
+
+            with _temporary_tool_roots(root):
+                result = runtime.handle("toolbuilder_create_draft", {
+                    "name": "错误工具",
+                    "capability": "使用 Python3 语法",
+                    "operation_spec": _custom_spec(),
+                    "executor_code": "def execute(context, arguments, step_outputs):\n    raise ValueError(f\"bad {arguments}\")\n",
+                    "tests": []
+                })
+
+        self.assertFalse(result["ok"])
+        self.assertIn("Python 2.7", result["error"])
+
+    def test_toolbuilder_rejects_arcgis_pro_api(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            store = WorkflowStore(root / "workflows.sqlite")
+            runtime = AgentToolRuntime(self.catalog, store, _context())
+
+            with _temporary_tool_roots(root):
+                result = runtime.handle("toolbuilder_create_draft", {
+                    "name": "错误工具",
+                    "capability": "使用 ArcGIS Pro API",
+                    "operation_spec": _custom_spec(),
+                    "executor_code": "def execute(context, arguments, step_outputs):\n    arcpy.mp.ArcGISProject('CURRENT')\n    return {'ok': True}\n",
+                    "tests": []
+                })
+
+        self.assertFalse(result["ok"])
+        self.assertIn("arcpy.mp", result["error"])
+
+    def test_writes_data_tool_must_use_runtime_output_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            store = WorkflowStore(root / "workflows.sqlite")
+            runtime = AgentToolRuntime(self.catalog, store, _context())
+            spec = _custom_spec()
+            spec["side_effects"] = "writes_data"
+            spec["parameters_schema"] = {
+                "type": "object",
+                "required": ["input_layer", "output_name"],
+                "properties": {
+                    "input_layer": {"type": "layer"},
+                    "output_name": {"type": "string"}
+                },
+                "additionalProperties": False
+            }
+
+            with _temporary_tool_roots(root):
+                result = runtime.handle("toolbuilder_create_draft", {
+                    "name": "错误工具",
+                    "capability": "自己拼输出路径",
+                    "operation_spec": spec,
+                    "executor_code": "def execute(context, arguments, step_outputs):\n    return {'output': arguments['output_name']}\n",
+                    "tests": []
+                })
+
+        self.assertFalse(result["ok"])
+        self.assertIn("output_path", result["error"])
+
+    def test_output_path_full_variable_does_not_satisfy_runtime_output_contract(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            store = WorkflowStore(root / "workflows.sqlite")
+            runtime = AgentToolRuntime(self.catalog, store, _context())
+            spec = _custom_writes_data_spec()
+
+            with _temporary_tool_roots(root):
+                result = runtime.handle("toolbuilder_create_draft", {
+                    "name": "错误工具",
+                    "capability": "变量名假装 output_path",
+                    "operation_spec": spec,
+                    "executor_code": "def execute(context, arguments, step_outputs):\n    output_path_full = arguments['output_workspace'] + arguments['output_name']\n    return {'output': output_path_full}\n",
+                    "tests": []
+                })
+
+        self.assertFalse(result["ok"])
+        self.assertIn("arguments[\"output_path\"]", result["error"])
+
+    def test_writes_data_executor_must_not_read_output_workspace_or_name(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            store = WorkflowStore(root / "workflows.sqlite")
+            runtime = AgentToolRuntime(self.catalog, store, _context())
+            spec = _custom_writes_data_spec()
+
+            with _temporary_tool_roots(root):
+                result = runtime.handle("toolbuilder_create_draft", {
+                    "name": "错误工具",
+                    "capability": "自己拼输出路径",
+                    "operation_spec": spec,
+                    "executor_code": "def execute(context, arguments, step_outputs):\n    arcpy.CopyFeatures_management(arguments['input_layer'], arguments['output_path'])\n    return {'workspace': arguments['output_workspace']}\n",
+                    "tests": []
+                })
+
+        self.assertFalse(result["ok"])
+        self.assertIn("output_workspace", result["error"])
+
+    def test_toolbuilder_rejects_get_output_on_layer_argument(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            store = WorkflowStore(root / "workflows.sqlite")
+            runtime = AgentToolRuntime(self.catalog, store, _context())
+            spec = _custom_writes_data_spec()
+
+            with _temporary_tool_roots(root):
+                result = runtime.handle("toolbuilder_create_draft", {
+                    "name": "错误工具",
+                    "capability": "把 Layer 当 Result",
+                    "operation_spec": spec,
+                    "executor_code": "def execute(context, arguments, step_outputs):\n    input_layer = arguments['input_layer']\n    spatial_ref = input_layer.getOutput(0)\n    return {'output': arguments['output_path'], 'spatial_ref': spatial_ref}\n",
+                    "tests": []
+                })
+
+        self.assertFalse(result["ok"])
+        self.assertIn("getOutput", result["error"])
+
+    def test_writes_data_tool_must_require_output_name(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            store = WorkflowStore(root / "workflows.sqlite")
+            runtime = AgentToolRuntime(self.catalog, store, _context())
+            spec = _custom_writes_data_spec()
+            spec["parameters_schema"]["required"] = ["input_layer"]
+
+            with _temporary_tool_roots(root):
+                result = runtime.handle("toolbuilder_create_draft", {
+                    "name": "错误工具",
+                    "capability": "输出名未必填",
+                    "operation_spec": spec,
+                    "executor_code": "def execute(context, arguments, step_outputs):\n    arcpy.FeatureToPoint_management(arguments['input_layer'], arguments['output_path'], 'CENTROID')\n    return {'output': arguments['output_path']}\n",
+                    "tests": []
+                })
+
+        self.assertFalse(result["ok"])
+        self.assertIn("output_name", result["error"])
+
     def test_toolbuilder_validates_pending_files_before_enable(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
@@ -280,6 +442,21 @@ def _custom_spec():
         "executor": "will_be_overridden",
         "examples": []
     }
+
+
+def _custom_writes_data_spec():
+    spec = _custom_spec()
+    spec["side_effects"] = "writes_data"
+    spec["parameters_schema"] = {
+        "type": "object",
+        "required": ["input_layer", "output_name"],
+        "properties": {
+            "input_layer": {"type": "layer"},
+            "output_name": {"type": "string"}
+        },
+        "additionalProperties": False
+    }
+    return spec
 
 
 @contextlib.contextmanager

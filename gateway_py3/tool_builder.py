@@ -37,6 +37,19 @@ DISALLOWED_ATTR_CALLS = {
     ("os", "system"),
     ("os", "unlink"),
 }
+EXECUTOR_ENCODING_HEADER = "# -*- coding: utf-8 -*-\n"
+CODING_RE = re.compile(r"coding[:=]\s*([-\w.]+)")
+PYTHON2_UNSUPPORTED_NODE_NAMES = {
+    "AnnAssign",
+    "AsyncFor",
+    "AsyncFunctionDef",
+    "AsyncWith",
+    "Await",
+    "FormattedValue",
+    "JoinedStr",
+    "Nonlocal",
+    "NamedExpr",
+}
 
 
 class ToolBuilderError(Exception):
@@ -47,18 +60,18 @@ def create_draft_tool(store, arguments: Dict[str, Any]) -> Dict[str, Any]:
     name = _required_string(arguments, "name")
     capability = _required_string(arguments, "capability")
     operation_spec = arguments.get("operation_spec")
-    executor_code = _required_string(arguments, "executor_code")
+    executor_code = _normalize_executor_code(_required_string(arguments, "executor_code"))
     tests = arguments.get("tests", [])
     if not isinstance(operation_spec, dict):
         raise ToolBuilderError("operation_spec 必须是对象。")
     if not isinstance(tests, list):
         raise ToolBuilderError("tests 必须是数组。")
-    _validate_executor_code(executor_code)
+    spec = canonicalize_operation_spec(operation_spec)
+    _validate_executor_contract(spec, executor_code)
 
     draft_id = str(uuid.uuid4())
     draft_dir = PENDING_ROOT / draft_id
     draft_dir.mkdir(parents=True, exist_ok=True)
-    spec = canonicalize_operation_spec(operation_spec)
     spec["executor"] = "custom_tool:%s:execute" % draft_id
     spec = canonicalize_operation_spec(spec)
 
@@ -235,17 +248,55 @@ def _validate_tool_files(source_dir: Path, tool_id: str) -> None:
     if spec.get("executor") != expected_executor:
         raise ToolBuilderError("operation_spec executor 与待审核工具目录不一致。")
     _write_text(spec_path, json.dumps(spec, ensure_ascii=False, indent=2, sort_keys=True))
-    _validate_executor_code(executor_path.read_text(encoding="utf-8"))
+    executor_code = _normalize_executor_code(executor_path.read_text(encoding="utf-8"))
+    _validate_executor_contract(spec, executor_code)
+    _write_text(executor_path, executor_code)
 
 
-def _validate_executor_code(code: str) -> None:
+def _validate_executor_contract(spec: Dict[str, Any], code: str) -> None:
+    tree = _validate_executor_code(code)
+    if spec.get("side_effects") != "writes_data":
+        return
+    properties = (spec.get("parameters_schema") or {}).get("properties") or {}
+    required = (spec.get("parameters_schema") or {}).get("required") or []
+    if "output_name" not in properties:
+        raise ToolBuilderError("writes_data 自定义工具必须声明 output_name 参数，由 GeoPilot 统一生成输出路径。")
+    if "output_name" not in required:
+        raise ToolBuilderError("writes_data 自定义工具必须把 output_name 声明为 required。")
+    if not _executor_uses_argument_key(tree, "output_path"):
+        raise ToolBuilderError("writes_data 自定义工具必须使用 arguments[\"output_path\"]，不要自己拼输出路径。")
+    for forbidden_key in ("output_workspace", "output_name"):
+        if _executor_uses_argument_key(tree, forbidden_key):
+            raise ToolBuilderError("writes_data 自定义工具执行代码不能读取 arguments[\"%s\"]；请只使用 GeoPilot 生成的 arguments[\"output_path\"]。" % forbidden_key)
+
+
+def _normalize_executor_code(code: str) -> str:
+    text = code.replace("\r\n", "\n").replace("\r", "\n")
+    lines = text.splitlines(True)
+    for line in lines[:2]:
+        match = CODING_RE.search(line)
+        if not match:
+            continue
+        encoding = match.group(1).lower().replace("_", "-")
+        if encoding != "utf-8":
+            raise ToolBuilderError("executor.py 必须使用 UTF-8 编码声明。")
+        return text
+    if lines and lines[0].startswith("#!"):
+        return lines[0] + EXECUTOR_ENCODING_HEADER + "".join(lines[1:])
+    return EXECUTOR_ENCODING_HEADER + text
+
+
+def _validate_executor_code(code: str) -> ast.AST:
     try:
         tree = ast.parse(code)
     except SyntaxError as exc:
         raise ToolBuilderError("executor_code 不是有效 Python 代码：%s" % exc)
-    functions = {node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)}
-    if "execute" not in functions:
+    _validate_python2_subset(tree)
+    functions = {node.name: node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)}
+    execute_func = functions.get("execute")
+    if execute_func is None:
         raise ToolBuilderError("executor_code 必须定义 execute(context, arguments, step_outputs)。")
+    _validate_execute_signature(execute_func)
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
@@ -254,21 +305,106 @@ def _validate_executor_code(code: str) -> None:
             _validate_import(node.module or "")
         elif isinstance(node, ast.Call):
             _validate_call(node.func)
+    return tree
 
 
 def _validate_import(module_name: str) -> None:
     root = module_name.split(".", 1)[0]
     if root in DISALLOWED_IMPORT_ROOTS:
         raise ToolBuilderError("自定义工具不能导入不安全模块：%s。" % root)
+    if module_name == "arcpy.mp" or module_name.startswith("arcpy.mp."):
+        raise ToolBuilderError("自定义工具运行在 ArcMap Python 2.7，不能使用 ArcGIS Pro 的 arcpy.mp。")
+    if module_name == "arcpy.mapping" or module_name.startswith("arcpy.mapping."):
+        raise ToolBuilderError("自定义工具不能直接访问当前地图；请使用 runtime 传入的图层参数。")
 
 
 def _validate_call(func: ast.AST) -> None:
     if isinstance(func, ast.Name) and func.id in DISALLOWED_CALLS:
         raise ToolBuilderError("自定义工具不能调用不安全函数：%s。" % func.id)
+    chain = _attribute_chain(func)
+    if chain[:2] == ("arcpy", "mp"):
+        raise ToolBuilderError("自定义工具运行在 ArcMap Python 2.7，不能使用 ArcGIS Pro 的 arcpy.mp。")
+    if chain[:2] == ("arcpy", "mapping"):
+        raise ToolBuilderError("自定义工具不能直接访问当前地图；请使用 runtime 传入的图层参数。")
+    if chain and chain[-1] == "getOutput":
+        raise ToolBuilderError("自定义工具不能调用 getOutput；GeoPilot 传入的是 ArcMap Layer 对象和 arguments[\"output_path\"]，不是地理处理 Result。")
     if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
         pair = (func.value.id, func.attr)
         if pair in DISALLOWED_ATTR_CALLS:
             raise ToolBuilderError("自定义工具不能调用不安全函数：%s.%s。" % pair)
+
+
+def _validate_python2_subset(tree: ast.AST) -> None:
+    for node in ast.walk(tree):
+        if node.__class__.__name__ in PYTHON2_UNSUPPORTED_NODE_NAMES:
+            raise ToolBuilderError("executor_code 必须使用 ArcMap Python 2.7 可执行语法，不能使用 f-string、类型注解或 async 等 Python 3 语法。")
+        if isinstance(node, ast.FunctionDef):
+            if getattr(node, "returns", None) is not None:
+                raise ToolBuilderError("executor_code 不能使用类型注解。")
+            _validate_arguments_are_python2(node.args)
+        if isinstance(node, ast.Raise) and getattr(node, "cause", None) is not None:
+            raise ToolBuilderError("executor_code 不能使用 Python 3 的 raise ... from ... 语法。")
+
+
+def _validate_arguments_are_python2(arguments: ast.arguments) -> None:
+    if getattr(arguments, "posonlyargs", []):
+        raise ToolBuilderError("executor_code 不能使用 Python 3 的仅位置参数。")
+    if getattr(arguments, "kwonlyargs", []):
+        raise ToolBuilderError("executor_code 不能使用 Python 3 的仅关键字参数。")
+    for arg in list(getattr(arguments, "args", [])) + list(getattr(arguments, "kwonlyargs", [])):
+        if getattr(arg, "annotation", None) is not None:
+            raise ToolBuilderError("executor_code 不能使用类型注解。")
+
+
+def _validate_execute_signature(execute_func: ast.FunctionDef) -> None:
+    args = execute_func.args
+    arg_names = [arg.arg for arg in args.args]
+    if (
+        arg_names != ["context", "arguments", "step_outputs"]
+        or args.defaults
+        or args.vararg
+        or args.kwarg
+        or getattr(args, "kwonlyargs", [])
+    ):
+        raise ToolBuilderError("execute 函数签名必须是 execute(context, arguments, step_outputs)。")
+
+
+def _attribute_chain(node: ast.AST) -> tuple[str, ...]:
+    parts = []
+    current = node
+    while isinstance(current, ast.Attribute):
+        parts.append(current.attr)
+        current = current.value
+    if isinstance(current, ast.Name):
+        parts.append(current.id)
+        return tuple(reversed(parts))
+    return ()
+
+
+def _executor_uses_argument_key(tree: ast.AST, key: str) -> bool:
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name) and node.value.id == "arguments":
+            if _literal_subscript_key(node) == key:
+                return True
+        if isinstance(node, ast.Call) and _attribute_chain(node.func) == ("arguments", "get"):
+            if node.args and _literal_node_value(node.args[0]) == key:
+                return True
+    return False
+
+
+def _literal_subscript_key(node: ast.Subscript) -> str | None:
+    value = node.slice
+    if isinstance(value, ast.Index):
+        value = value.value
+    return _literal_node_value(value)
+
+
+def _literal_node_value(node: ast.AST) -> str | None:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.Str):
+        return node.s
+    return None
 
 
 def _required_string(arguments: Dict[str, Any], key: str) -> str:

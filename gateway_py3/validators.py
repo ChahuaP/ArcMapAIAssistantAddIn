@@ -404,6 +404,7 @@ def _validate_field_references(
     requirements = operation.get("context_requirements") or {}
     if not requirements.get("requires_fields"):
         return
+    _normalize_field_markers(arguments)
     fields = []
     for name in requirements.get("field_arguments", []):
         if name in arguments:
@@ -521,6 +522,8 @@ def _layer_argument_names(operation: Dict[str, Any]) -> List[str]:
 
 def _matching_layers_exact(value: str, layers: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     raw = value[len("layer_ref:"):] if value.startswith("layer_ref:") else value
+    if raw.startswith("@"):
+        raw = raw[1:]
     matches = []
     for layer in layers:
         if raw in (
@@ -556,6 +559,45 @@ def _condition_fields(condition: Any) -> List[str]:
         return _condition_fields(condition.get("condition"))
     field = condition.get("field")
     return [str(field)] if field else []
+
+
+def _normalize_field_markers(arguments: Dict[str, Any]) -> None:
+    for key in ("field", "field_name"):
+        if key in arguments:
+            arguments[key] = _field_name(arguments[key])
+    for key in ("fields", "dissolve_fields"):
+        if isinstance(arguments.get(key), list):
+            arguments[key] = [_field_name(value) for value in arguments[key]]
+    if isinstance(arguments.get("where"), dict):
+        _normalize_condition_field_markers(arguments["where"])
+    if isinstance(arguments.get("assignments"), dict):
+        normalized = {}
+        for key, value in arguments["assignments"].items():
+            normalized[_field_name(key)] = value
+        arguments["assignments"] = normalized
+
+
+def _normalize_condition_field_markers(condition: Dict[str, Any]) -> None:
+    op = _condition_operator(condition, strict=False)
+    if op in ("and", "or"):
+        for child in condition.get("conditions") or []:
+            if isinstance(child, dict):
+                _normalize_condition_field_markers(child)
+        return
+    if op == "not":
+        child = condition.get("condition")
+        if isinstance(child, dict):
+            _normalize_condition_field_markers(child)
+        return
+    if "field" in condition:
+        condition["field"] = _field_name(condition["field"])
+
+
+def _field_name(value: Any) -> str:
+    if value is None:
+        return ""
+    text = str(value)
+    return text[1:] if text.startswith("#") else text
 
 
 def _condition_operator(condition: Dict[str, Any], strict: bool = True) -> str:

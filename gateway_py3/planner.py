@@ -26,6 +26,10 @@ Hard rules:
 - Attribute where operators are limited to: eq, ne, gt, gte, lt, lte, between, in, like, is_null, is_not_null, and, or, not.
 - Use like with SQL wildcards for text patterns. Text contains must be {"field":"NAME","op":"like","value":"%南京%"}. Do not use contains, starts_with, ends_with, regex, or raw SQL.
 - between uses values with exactly two items. in uses a non-empty values list. eq/ne/gt/gte/lt/lte/like use value. is_null/is_not_null do not use value.
+- You are the planner. Tools only provide facts. Decide which tools to call, inspect the map/layers/fields/attribute samples when needed, then compose the workflow.
+- Do not split user text into conditions by local string rules. Natural phrases are often partial or semantic: "k街道的乔木" may require inspecting a layer profile, finding that one field contains values like "xxx区k街道" and another field contains values like "乔木用地", then building an and condition with like wildcards.
+- Layer mentions may appear as @图层名 from the UI. Treat @ as a selection marker and use the matching ArcGIS layer.
+- Field mentions may appear as #字段名 from the UI. Treat # as a selection marker only. Workflow arguments must use the real field name without #.
 - Never invent ArcPy tools. Workflow steps may only use registered operation ids from the catalog.
 - Never execute anything. You only propose a workflow; the user and ArcGIS runtime execute later.
 - The final proposal must be submitted with workflow_propose, or as a JSON object with action, summary, and steps.
@@ -56,6 +60,14 @@ Hard rules:
 - If the current mode is full_agent, prefer the active project workdir for local data lookup and output planning.
 - In full_agent mode, generated data should use arcgis_context.project_output_workspace when the user does not provide an output location.
 - If existing tools cannot satisfy the user, return unsupported with a clear missing_capability summary. If the user explicitly asks to create that missing tool, call toolbuilder_create_draft and explain that the tool waits for review before it can be enabled.
+- Custom tool executor_code is not free-form application code. It must run inside ArcMap Python 2.7 as one small function: def execute(context, arguments, step_outputs): ...
+- Custom tool executor_code must start with # -*- coding: utf-8 -*- and use Python 2.7-compatible syntax only. Do not use f-strings, type annotations, pathlib, dataclasses, async, or raise ... from ...
+- Custom tool executor_code must not use ArcGIS Pro APIs: no arcpy.mp and no ArcGISProject. It must not call arcpy.mapping.MapDocument, arcpy.mapping.ListLayers, or inspect CURRENT maps.
+- Custom tool executor_code must not call getOutput. GeoPilot passes ArcMap Layer objects, not geoprocessing Result objects.
+- Custom tool executor_code receives already-resolved arguments from GeoPilot. For layer parameters, arguments["input_layer"] is the ArcMap layer object; do not search for layers by name.
+- For writes_data custom tools, define required output_name in operation_spec and write to arguments["output_path"]. Do not read arguments["output_workspace"] or arguments["output_name"] inside executor_code, and do not build output paths from arcpy.env.workspace, output_workspace, or output_name. Variable names like output_path_full do not count; the code must read arguments["output_path"] or arguments.get("output_path").
+- Keep executor_code ASCII except the encoding header. Put Chinese descriptions in operation_spec, not in Python comments or string literals.
+- Prefer stable ArcMap geoprocessing calls and arcpy.da cursors. When a built-in ArcPy tool exists, call it directly instead of manually reimplementing geometry logic.
 - Custom operations already present in operation_index are enabled and reviewed. Do not tell the user they still need review.
 """
 
@@ -186,7 +198,14 @@ class AgenticPlanner:
 
                 if name == "workflow_propose":
                     if result.get("ok"):
-                        return self._store_workflow(command, context, result["workflow"], trace, mode, project_id)
+                        finalized, feedback = self._try_finalize(command, context, result["workflow"], trace, mode, project_id)
+                        if finalized is not None:
+                            return finalized
+                        validation_feedback_count += 1
+                        if validation_feedback_count > 1:
+                            return self._store_clarification(command, context, feedback, trace, mode, project_id)
+                        messages.append(_tool_message(tool_call.get("id"), {"ok": False, "error": feedback}))
+                        continue
                     validation_feedback_count += 1
                     if validation_feedback_count > 1:
                         return self._store_clarification(command, context, result.get("error", "这个任务信息还不完整。"), trace, mode, project_id)
@@ -233,6 +252,9 @@ class AgenticPlanner:
         mode: str,
         project_id: str | None
     ) -> Tuple[Dict[str, Any] | None, str]:
+        exploration_feedback = _attribute_exploration_feedback(workflow, trace)
+        if exploration_feedback:
+            return None, exploration_feedback
         try:
             prepared = prepare_workflow(workflow, self.catalog, context)
         except ValidationError as exc:
@@ -299,6 +321,7 @@ def _context_summary(context: Dict[str, Any]) -> Dict[str, Any]:
             "longName": layer.get("longName"),
             "fields": [field.get("name") for field in layer.get("fields", [])[:80]],
             "field_types": {field.get("name"): field.get("type") for field in layer.get("fields", [])[:80] if field.get("name")},
+            "has_attribute_value_samples": _has_attribute_value_samples(layer),
             "selected_count": layer.get("selected_count"),
             "visible": layer.get("visible"),
             "geometry_type": layer.get("geometry_type"),
@@ -428,6 +451,33 @@ def _question_from_tool_result(result: Dict[str, Any]) -> str:
     if isinstance(error, str) and error.strip():
         return error.strip()
     return ""
+
+
+def _attribute_exploration_feedback(workflow: Dict[str, Any], trace: List[Dict[str, Any]]) -> str:
+    if not _workflow_uses_attribute_where(workflow):
+        return ""
+    if _trace_has_tool(trace, "arcgis_get_layer_profile") or _trace_has_tool(trace, "arcgis_get_context"):
+        return ""
+    return "属性条件需要先查看目标图层的字段和值样例。请先调用 arcgis_get_layer_profile 或 arcgis_get_context，基于真实字段和值样例理解用户意图后，再生成结构化 where。"
+
+
+def _workflow_uses_attribute_where(workflow: Dict[str, Any]) -> bool:
+    for step in workflow.get("steps") or []:
+        arguments = step.get("arguments") if isinstance(step, dict) else None
+        if isinstance(arguments, dict) and isinstance(arguments.get("where"), dict):
+            return True
+    return False
+
+
+def _trace_has_tool(trace: List[Dict[str, Any]], name: str) -> bool:
+    return any(item.get("type") == "tool" and item.get("name") == name for item in trace)
+
+
+def _has_attribute_value_samples(layer: Dict[str, Any]) -> bool:
+    for field in layer.get("fields", []) or []:
+        if field.get("value_samples"):
+            return True
+    return False
 
 
 def _merge_pending_question(workflow: Dict[str, Any], pending_question: str) -> Dict[str, Any]:

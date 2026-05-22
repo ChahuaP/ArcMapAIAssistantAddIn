@@ -53,6 +53,18 @@ class AgentToolRuntime:
                 {"type": "object", "properties": {}, "additionalProperties": False}
             ),
             _tool(
+                "arcgis_get_layer_profile",
+                "Get one current ArcGIS layer's fields and sampled attribute values. Use this to understand natural language attribute intent before writing where conditions.",
+                {
+                    "type": "object",
+                    "required": ["layer"],
+                    "properties": {
+                        "layer": {"type": "string", "description": "Exact layer_ref or layer name from arcgis_context.layers, for example layer:0 or roads."}
+                    },
+                    "additionalProperties": False
+                }
+            ),
+            _tool(
                 "project_get_context",
                 "Get the active GeoPilot project workdir and saved project memories. Use only in full_agent mode.",
                 {"type": "object", "properties": {}, "additionalProperties": False}
@@ -129,7 +141,7 @@ class AgentToolRuntime:
             ),
             _tool(
                 "toolbuilder_create_draft",
-                "Create a disabled draft ArcPy operation package after the user explicitly agrees to create a missing tool. The draft waits for human review before enablement.",
+                "Create a disabled draft ArcMap ArcPy operation package after the user explicitly agrees to create a missing tool. executor_code must be ArcMap Python 2.7 compatible, define execute(context, arguments, step_outputs), use runtime-provided layer objects and arguments['output_path'], and avoid arcpy.mp/arcpy.mapping current-map access or getOutput. The draft waits for human review before enablement.",
                 {
                     "type": "object",
                     "required": ["name", "capability", "operation_spec", "executor_code", "tests"],
@@ -164,6 +176,8 @@ class AgentToolRuntime:
             return self._catalog_get_operation_schema(arguments)
         if name == "arcgis_get_context":
             return {"context": self.context}
+        if name == "arcgis_get_layer_profile":
+            return self._arcgis_get_layer_profile(arguments)
         if name == "project_get_context":
             return self._project_get_context()
         if name == "project_list_files":
@@ -189,6 +203,28 @@ class AgentToolRuntime:
         except CatalogError as exc:
             raise AgentToolError(str(exc))
         return {"operation": operation}
+
+    def _arcgis_get_layer_profile(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        _reject_unknown(arguments, {"layer"})
+        layer_value = _required_string(arguments, "layer")
+        matches = _matching_layers_exact(layer_value, self.context.get("layers", []) or [])
+        if len(matches) != 1:
+            if len(matches) > 1:
+                return {"ok": False, "error": "图层“%s”不唯一，请使用 layer_ref。" % layer_value}
+            return {"ok": False, "error": "当前地图没有精确匹配“%s”的图层。" % layer_value}
+        layer = matches[0]
+        return {
+            "ok": True,
+            "layer": {
+                "layer_ref": layer.get("layer_ref"),
+                "name": layer.get("name"),
+                "longName": layer.get("longName"),
+                "geometry_type": layer.get("geometry_type"),
+                "selected_count": layer.get("selected_count"),
+                "fields": _profile_fields(layer.get("fields", []) or []),
+                "value_profile_truncated": bool(layer.get("value_profile_truncated"))
+            }
+        }
 
     def _file_resolve(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
         _reject_unknown(arguments, {"path", "folder_path", "drive", "directory", "directory_parts", "file_name", "extensions"})
@@ -354,6 +390,31 @@ def _reject_unknown(arguments: Dict[str, Any], allowed: set[str]) -> None:
     unknown = sorted(set(arguments) - allowed)
     if unknown:
         raise AgentToolError("Unknown arguments: %s" % unknown)
+
+
+def _matching_layers_exact(value: str, layers: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    raw = value[1:] if value.startswith("@") else value
+    matches = []
+    for layer in layers:
+        if raw in (
+            layer.get("layer_ref"),
+            layer.get("name"),
+            layer.get("longName"),
+            layer.get("dataSource")
+        ):
+            matches.append(layer)
+    return matches
+
+
+def _profile_fields(fields: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    result = []
+    for field in fields:
+        result.append({
+            "name": field.get("name"),
+            "type": field.get("type"),
+            "value_samples": field.get("value_samples", [])[:20]
+        })
+    return result
 
 
 def _workflow_from_arguments(arguments: Dict[str, Any]) -> Dict[str, Any]:

@@ -326,6 +326,79 @@ class AgenticPlannerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValidationError, "字段"):
             prepare_workflow(workflow, self.catalog, _context())
 
+    def test_layer_profile_tool_returns_field_value_samples(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = WorkflowStore(pathlib.Path(directory) / "workflows.sqlite")
+            context = _context()
+            context["layers"][0]["fields"] = [
+                {"name": "b", "type": "String", "value_samples": ["xxx区k街道"]},
+                {"name": "c", "type": "String", "value_samples": ["乔木用地"]}
+            ]
+            runtime = AgentToolRuntime(self.catalog, store, context)
+
+            result = runtime.handle("arcgis_get_layer_profile", {"layer": "nanjing"})
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["layer"]["fields"][0]["value_samples"], ["xxx区k街道"])
+
+    def test_attribute_where_requires_layer_profile_before_final_workflow(self):
+        context = _context()
+        context["layers"][0]["fields"] = [
+            {"name": "b", "type": "String", "value_samples": ["xxx区k街道"]},
+            {"name": "c", "type": "String", "value_samples": ["乔木用地"]}
+        ]
+        client = FakeAgentClient([
+            _assistant_tool_call("call_1", "workflow_propose", {
+                "action": "execute",
+                "summary": "选择 k 街道乔木。",
+                "steps": [
+                    _step("step_1", "selection.select_by_attribute", {
+                        "layer": "nanjing",
+                        "where": {"field": "b", "op": "like", "value": "%k街道%"}
+                    }, "选择")
+                ]
+            }),
+            _assistant_tool_call("call_2", "arcgis_get_layer_profile", {"layer": "nanjing"}),
+            _assistant_tool_call("call_3", "workflow_propose", {
+                "action": "execute",
+                "summary": "选择 k 街道乔木。",
+                "steps": [
+                    _step("step_1", "selection.select_by_attribute", {
+                        "layer": "nanjing",
+                        "where": {
+                            "op": "and",
+                            "conditions": [
+                                {"field": "b", "op": "like", "value": "%k街道%"},
+                                {"field": "c", "op": "like", "value": "%乔木%"}
+                            ]
+                        }
+                    }, "基于字段值样例选择 k 街道乔木")
+                ]
+            })
+        ])
+
+        row = self._plan(client, "查 nanjing 图层所有 k 街道的乔木", context)
+
+        self.assertEqual(len(client.calls), 3)
+        where = row["workflow"]["steps"][0]["arguments"]["where"]
+        self.assertEqual(where["conditions"][1]["field"], "c")
+
+    def test_ui_layer_and_field_markers_are_normalized(self):
+        workflow = {
+            "action": "execute",
+            "summary": "按名称选择。",
+            "steps": [
+                _step("step_1", "selection.select_by_attribute", {
+                    "layer": "@nanjing",
+                    "where": {"field": "#NAME", "op": "like", "value": "%京%"}
+                }, "选择")
+            ]
+        }
+        prepared = prepare_workflow(workflow, self.catalog, _context())
+
+        self.assertEqual(prepared["steps"][0]["arguments"]["layer"], "layer:nanjing")
+        self.assertEqual(prepared["steps"][0]["arguments"]["where"]["field"], "NAME")
+
     def test_unsaved_mxd_write_without_output_location_clarifies(self):
         workflow = {
             "action": "execute",
