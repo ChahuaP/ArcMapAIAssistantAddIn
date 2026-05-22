@@ -15,6 +15,43 @@ class ValidationError(Exception):
     pass
 
 
+CONDITION_OPERATOR_ALIASES = {
+    "等于": "eq",
+    "不等于": "ne",
+    "大于": "gt",
+    "大于等于": "gte",
+    "小于": "lt",
+    "小于等于": "lte",
+    "之间": "between",
+    "包含于": "in",
+    "模糊匹配": "like",
+    "为空": "is_null",
+    "非空": "is_not_null",
+}
+LEAF_CONDITION_OPERATORS = {
+    "eq",
+    "=",
+    "ne",
+    "!=",
+    "<>",
+    "gt",
+    ">",
+    "gte",
+    ">=",
+    "lt",
+    "<",
+    "lte",
+    "<=",
+    "between",
+    "in",
+    "like",
+    "is_null",
+    "is_not_null",
+}
+VALUE_CONDITION_OPERATORS = {"eq", "=", "ne", "!=", "<>", "gt", ">", "gte", ">=", "lt", "<", "lte", "<=", "like"}
+CONDITION_OPERATOR_HELP = "eq, ne, gt, gte, lt, lte, between, in, like, is_null, is_not_null, and, or, not"
+
+
 def validate_catalog(catalog: OperationCatalog) -> None:
     required = [
         "id",
@@ -179,6 +216,7 @@ def validate_workflow_semantics(workflow: Dict[str, Any], catalog: OperationCata
         arguments = step["arguments"]
 
         _validate_layer_references(operation, arguments, context, available_layers, seen_step_ids)
+        _validate_condition_arguments(operation, arguments)
         _validate_field_references(operation, arguments, context, available_layers)
         _validate_output_location(operation, arguments, context)
         _validate_output_name(arguments)
@@ -310,6 +348,51 @@ def _validate_and_normalize_layer_reference(
     if candidates:
         raise ValidationError("当前地图里没有精确匹配“%s”的图层。可用图层有：%s。请从当前图层列表中选择一个。" % (value, "、".join(candidates)))
     raise ValidationError("当前地图里没有“%s”图层。请先添加图层，或说明要使用哪个已有图层。" % value)
+
+
+def _validate_condition_arguments(operation: Dict[str, Any], arguments: Dict[str, Any]) -> None:
+    properties = (operation.get("parameters_schema") or {}).get("properties") or {}
+    if "where" not in properties or "where" not in arguments:
+        return
+    _validate_condition_node(arguments.get("where"))
+
+
+def _validate_condition_node(condition: Any) -> None:
+    if not isinstance(condition, dict) or not condition:
+        raise ValidationError("属性条件 where 必须是结构化对象。")
+    op = _condition_operator(condition)
+    if op in ("and", "or"):
+        children = condition.get("conditions")
+        if not isinstance(children, list) or not children:
+            raise ValidationError("%s 条件必须包含非空 conditions。" % op)
+        for child in children:
+            _validate_condition_node(child)
+        return
+    if op == "not":
+        child = condition.get("condition")
+        if not isinstance(child, dict):
+            raise ValidationError("not 条件必须包含 condition。")
+        _validate_condition_node(child)
+        return
+    if op not in LEAF_CONDITION_OPERATORS:
+        raise ValidationError(
+            "属性条件操作符“%s”不支持。可用操作符：%s。文本包含请使用 op=like，value 写成 %%关键词%%；不要使用 contains、starts_with、ends_with 或 regex。"
+            % (op, CONDITION_OPERATOR_HELP)
+        )
+    if not condition.get("field"):
+        raise ValidationError("属性条件缺少字段名。")
+    if op in VALUE_CONDITION_OPERATORS and "value" not in condition:
+        raise ValidationError("%s 条件必须提供 value。" % op)
+    if op == "between":
+        values = condition.get("values")
+        if not isinstance(values, list) or len(values) != 2:
+            raise ValidationError("between 条件必须提供两个 values。")
+    if op == "in":
+        values = condition.get("values")
+        if not isinstance(values, list) or not values:
+            raise ValidationError("in 条件必须提供非空 values。")
+    if op in ("is_null", "is_not_null") and "value" in condition:
+        raise ValidationError("%s 条件不能提供 value。" % op)
 
 
 def _validate_field_references(
@@ -463,7 +546,7 @@ def _primary_layer_value(operation: Dict[str, Any], arguments: Dict[str, Any]) -
 def _condition_fields(condition: Any) -> List[str]:
     if not isinstance(condition, dict):
         return []
-    op = str(condition.get("op", condition.get("operator", ""))).lower()
+    op = _condition_operator(condition, strict=False)
     if op in ("and", "or"):
         fields = []
         for child in condition.get("conditions") or []:
@@ -473,6 +556,16 @@ def _condition_fields(condition: Any) -> List[str]:
         return _condition_fields(condition.get("condition"))
     field = condition.get("field")
     return [str(field)] if field else []
+
+
+def _condition_operator(condition: Dict[str, Any], strict: bool = True) -> str:
+    op = condition.get("op", condition.get("operator"))
+    if op is None:
+        if strict:
+            raise ValidationError("属性条件缺少 op。")
+        return ""
+    text = str(op).strip().lower()
+    return CONDITION_OPERATOR_ALIASES.get(text, text)
 
 
 def _available_layer_names(layers: List[Dict[str, Any]]) -> List[str]:

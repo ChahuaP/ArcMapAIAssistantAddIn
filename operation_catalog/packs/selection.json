@@ -7,8 +7,8 @@
       "version": "1.0",
       "category": "selection",
       "summary": "按属性条件选择要素。",
-      "keywords": ["select", "where", "选择", "属性选择", "大于", "小于", "等于", "之间", "为空"],
-      "model_card": "Use selection.select_by_attribute to select features by structured where condition, not SQL text. Arguments: layer, where, selection_type optional. where examples: {\"field\":\"POP\",\"op\":\"gt\",\"value\":10000}, {\"field\":\"POP\",\"op\":\"between\",\"values\":[10,20]}, {\"op\":\"and\",\"conditions\":[...]}",
+      "keywords": ["select", "where", "选择", "属性选择", "大于", "小于", "等于", "之间", "为空", "包含"],
+      "model_card": "Use selection.select_by_attribute to select features by structured where condition, not SQL text. Arguments: layer, where, selection_type optional. Allowed where ops: eq, ne, gt, gte, lt, lte, between, in, like, is_null, is_not_null, and, or, not. Text contains must use op like with SQL wildcard value such as %南京%; never use op contains.",
       "parameters_schema": {
         "type": "object",
         "required": ["layer", "where"],
@@ -19,7 +19,7 @@
         },
         "additionalProperties": false
       },
-      "context_requirements": {"requires_layers": true, "requires_fields": true},
+      "context_requirements": {"requires_layers": true, "requires_fields": true, "condition_fields": true},
       "side_effects": "changes_map",
       "output_policy": {"writes_output": false},
       "executor": "operations.selection_ops.select_by_attribute",

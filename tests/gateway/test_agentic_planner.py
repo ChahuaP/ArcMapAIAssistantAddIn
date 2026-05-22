@@ -283,6 +283,49 @@ class AgenticPlannerTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             prepare_workflow(workflow, self.catalog, _context())
 
+    def test_attribute_condition_rejects_contains_before_runtime_execution(self):
+        workflow = {
+            "action": "execute",
+            "summary": "按名称选择。",
+            "steps": [
+                _step("step_1", "selection.select_by_attribute", {
+                    "layer": "nanjing",
+                    "where": {"field": "NAME", "op": "contains", "value": "京"}
+                }, "选择名称包含京的要素")
+            ]
+        }
+        with self.assertRaisesRegex(ValidationError, "contains"):
+            prepare_workflow(workflow, self.catalog, _context())
+
+    def test_attribute_condition_accepts_like_for_text_contains(self):
+        workflow = {
+            "action": "execute",
+            "summary": "按名称选择。",
+            "steps": [
+                _step("step_1", "selection.select_by_attribute", {
+                    "layer": "nanjing",
+                    "where": {"field": "NAME", "op": "like", "value": "%京%"}
+                }, "选择名称包含京的要素")
+            ]
+        }
+        prepared = prepare_workflow(workflow, self.catalog, _context())
+
+        self.assertEqual(prepared["steps"][0]["arguments"]["where"]["op"], "like")
+
+    def test_select_by_attribute_validates_condition_field(self):
+        workflow = {
+            "action": "execute",
+            "summary": "按不存在字段选择。",
+            "steps": [
+                _step("step_1", "selection.select_by_attribute", {
+                    "layer": "nanjing",
+                    "where": {"field": "MISSING", "op": "eq", "value": "x"}
+                }, "选择")
+            ]
+        }
+        with self.assertRaisesRegex(ValidationError, "字段"):
+            prepare_workflow(workflow, self.catalog, _context())
+
     def test_unsaved_mxd_write_without_output_location_clarifies(self):
         workflow = {
             "action": "execute",

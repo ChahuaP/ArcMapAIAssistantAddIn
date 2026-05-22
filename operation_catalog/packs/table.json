@@ -51,7 +51,7 @@
       "category": "table",
       "summary": "按条件批量修改属性值，直接修改原始数据。",
       "keywords": ["update rows", "修改字段", "调整字段", "批量修改", "赋值"],
-      "model_card": "Use table.update_rows to update attribute values by structured where condition, not SQL text. This directly edits source data and requires confirmation. Arguments: layer, where, assignments. assignments is an object of field names to new values.",
+      "model_card": "Use table.update_rows to update attribute values by structured where condition, not SQL text. This directly edits source data and requires confirmation. Arguments: layer, where, assignments. Allowed where ops: eq, ne, gt, gte, lt, lte, between, in, like, is_null, is_not_null, and, or, not. Text contains must use op like with SQL wildcard value such as %南京%; never use op contains. assignments is an object of field names to new values.",
       "parameters_schema": {
         "type": "object",
         "required": ["layer", "where", "assignments"],
@@ -74,7 +74,7 @@
       "category": "table",
       "summary": "按条件删除要素，直接修改原始数据。",
       "keywords": ["delete rows", "删除要素", "删除记录", "删掉"],
-      "model_card": "Use table.delete_rows to delete features by structured where condition, not SQL text. This directly edits source data and requires confirmation. Arguments: layer, where.",
+      "model_card": "Use table.delete_rows to delete features by structured where condition, not SQL text. This directly edits source data and requires confirmation. Arguments: layer, where. Allowed where ops: eq, ne, gt, gte, lt, lte, between, in, like, is_null, is_not_null, and, or, not. Text contains must use op like with SQL wildcard value such as %南京%; never use op contains.",
       "parameters_schema": {
         "type": "object",
         "required": ["layer", "where"],
