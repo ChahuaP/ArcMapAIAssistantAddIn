@@ -120,7 +120,7 @@ class AgentToolRuntime:
                     "type": "object",
                     "required": ["action", "summary", "steps"],
                     "properties": {
-                        "action": {"type": "string", "enum": ["execute", "clarify", "unsupported"]},
+                        "action": {"type": "string", "enum": ["execute", "clarify", "unsupported", "answer"]},
                         "summary": {"type": "string"},
                         "steps": {"type": "array", "items": {"type": "object"}}
                     },

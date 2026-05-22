@@ -17,7 +17,7 @@ GeoPilot 使用说明
 
 1. 在 ArcMap 工具栏点击“启动AI后台”。
 2. 点击“显示控制台”，会打开网页控制台。
-3. 第一次使用时，在网页右上角打开模型配置，填写 DeepSeek 或 MiniMax API Key 并保存。
+3. 第一次使用时，在网页右上角打开模型配置，填写 DeepSeek 或 MiniMax Token Plan API Key 并保存。
 4. 回到 ArcMap，点击“同步上下文”。
 5. 在网页控制台输入要做的 GIS 操作。
 6. 网页生成任务后，点击确认发送到 ArcGIS。

@@ -9,6 +9,17 @@ import os
 import context_reader
 
 
+try:
+    reload
+except NameError:
+    from importlib import reload
+
+try:
+    basestring
+except NameError:
+    basestring = (str,)
+
+
 CATALOG_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "operation_catalog"))
 CUSTOM_TOOLS_ROOT = os.path.join(
     os.environ.get("APPDATA", os.path.expanduser("~")),
@@ -34,17 +45,20 @@ def execute(workflow_row, context, confirm_callback=None):
     results = []
 
     for step in workflow["steps"]:
+        step_id = str(step["id"])
         operation_id = step["operation"]
         if operation_id not in operations:
             raise WorkflowExecutionError("Unknown operation: %s" % operation_id)
         operation = operations[operation_id]
         arguments = step["arguments"]
-        _validate_arguments(step["id"], arguments, operation["parameters_schema"])
+        _validate_arguments(step_id, arguments, operation["parameters_schema"])
         _validate_write_policy(operation, context, arguments)
-        _confirm_edit_if_needed(operation, context, arguments, step_outputs, confirm_callback)
-        result = _call_executor(operation["executor"], context, arguments, step_outputs)
-        step_outputs[step["id"]] = result
-        results.append({"step_id": step["id"], "operation": operation_id, "result": result})
+        runtime_arguments = _prepare_runtime_arguments(operation, context, arguments, step_outputs)
+        _confirm_edit_if_needed(operation, context, runtime_arguments, step_outputs, confirm_callback)
+        result = _call_executor(operation["executor"], context, runtime_arguments, step_outputs)
+        result = _finalize_runtime_result(operation, context, runtime_arguments, result)
+        step_outputs[step_id] = result
+        results.append({"step_id": step_id, "operation": operation_id, "result": result})
 
     return {"ok": True, "summary": workflow["summary"], "steps": results}
 
@@ -65,8 +79,64 @@ def _load_operations():
                 continue
             with open(spec_path, "r") as f:
                 operation = json.load(f)
+            operation = _canonicalize_operation(operation)
             operations[operation["id"]] = operation
     return operations
+
+
+def _canonicalize_operation(operation):
+    result = dict(operation)
+    result["parameters_schema"] = _canonicalize_parameters_schema(result.get("parameters_schema", {}))
+    if not isinstance(result.get("context_requirements"), dict):
+        result["context_requirements"] = {}
+    if not isinstance(result.get("output_policy"), dict):
+        result["output_policy"] = {}
+    return result
+
+
+def _canonicalize_parameters_schema(schema):
+    if not isinstance(schema, dict):
+        return {"type": "object", "required": [], "properties": {}, "additionalProperties": False}
+    if schema.get("type") == "object":
+        result = dict(schema)
+        properties = result.get("properties", {})
+        result["properties"] = _canonicalize_parameter_properties(properties if isinstance(properties, dict) else {})
+        required = result.get("required", [])
+        result["required"] = required if isinstance(required, list) else []
+        result.setdefault("additionalProperties", False)
+        return result
+
+    properties = {}
+    required = []
+    for name, value in schema.items():
+        if not isinstance(value, dict):
+            continue
+        prop = dict(value)
+        required_flag = prop.pop("required", False)
+        if required_flag is True or str(required_flag).lower() in ("true", "1", "yes"):
+            required.append(name)
+        properties[name] = _canonicalize_parameter_property(prop)
+    return {
+        "type": "object",
+        "required": required,
+        "properties": properties,
+        "additionalProperties": False
+    }
+
+
+def _canonicalize_parameter_properties(properties):
+    result = {}
+    for name, value in properties.items():
+        result[name] = _canonicalize_parameter_property(value if isinstance(value, dict) else {})
+    return result
+
+
+def _canonicalize_parameter_property(prop):
+    result = dict(prop)
+    if result.get("type") == "layer":
+        result["type"] = "string"
+        result["x-geopilot-kind"] = "layer"
+    return result
 
 
 def _validate_write_policy(operation, context, arguments):
@@ -118,6 +188,72 @@ def _call_executor(executor_path, context, arguments, step_outputs):
     return function(context, arguments, step_outputs)
 
 
+def _prepare_runtime_arguments(operation, context, arguments, step_outputs):
+    if not _is_custom_operation(operation):
+        return arguments
+    runtime_arguments = dict(arguments)
+    common = _operations_common()
+    for name in _layer_argument_names(operation):
+        if name not in runtime_arguments:
+            continue
+        runtime_arguments[name] = _resolve_layer_argument(common, context, runtime_arguments[name], step_outputs)
+    if _is_custom_writes_data(operation) and runtime_arguments.get("output_name") and not runtime_arguments.get("output_path"):
+        runtime_arguments["output_path"] = common.output_feature_class(
+            context,
+            runtime_arguments["output_name"],
+            runtime_arguments.get("output_workspace")
+        )
+    return runtime_arguments
+
+
+def _finalize_runtime_result(operation, context, arguments, result):
+    if result is None or not isinstance(result, dict):
+        result = {"ok": True}
+    if not _is_custom_writes_data(operation):
+        return result
+    output_path = arguments.get("output_path")
+    if not output_path:
+        return result
+    common = _operations_common()
+    result.setdefault("output", output_path)
+    result["layer"] = common.add_output_layer(output_path)
+    return result
+
+
+def _is_custom_writes_data(operation):
+    return operation.get("side_effects") == "writes_data" and _is_custom_operation(operation)
+
+
+def _is_custom_operation(operation):
+    return operation.get("executor", "").startswith("custom_tool:")
+
+
+def _layer_argument_names(operation):
+    properties = (operation.get("parameters_schema") or {}).get("properties") or {}
+    names = []
+    for name in properties:
+        if properties.get(name, {}).get("x-geopilot-kind") == "layer":
+            names.append(name)
+            continue
+        lowered = name.lower()
+        if "layer" in lowered and "output" not in lowered:
+            names.append(name)
+    return names
+
+
+def _resolve_layer_argument(common, context, value, step_outputs):
+    if isinstance(value, list):
+        return [_resolve_layer_argument(common, context, item, step_outputs) for item in value]
+    if isinstance(value, basestring):
+        return common.find_layer(context, value, step_outputs)
+    return value
+
+
+def _operations_common():
+    common = importlib.import_module("operations.common")
+    return reload(common)
+
+
 def _call_custom_executor(executor_path, context, arguments, step_outputs):
     module, function_name = _load_custom_module(executor_path)
     function = getattr(module, function_name)
@@ -150,4 +286,6 @@ def _load_custom_module(executor_path):
     if not os.path.isfile(executor_file):
         raise WorkflowExecutionError(u"自定义工具文件不存在：%s" % executor_file)
     module = imp.load_source("geopilot_custom_%s" % tool_id.replace("-", "_"), executor_file)
+    import arcpy
+    module.arcpy = arcpy
     return module, function_name

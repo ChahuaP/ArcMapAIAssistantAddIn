@@ -131,6 +131,97 @@ class OutputLayerTests(unittest.TestCase):
 
         self.assertIs(found, added_layer)
 
+    def test_find_layer_requires_exact_raster_name(self):
+        raster_layer = FakeLayer(r"D:\Data\tiff\太湖DEM\gblu(太湖).tif", "gblu(太湖).tif")
+
+        class Mapping(object):
+            @staticmethod
+            def MapDocument(value):
+                return object()
+
+            @staticmethod
+            def ListDataFrames(mxd):
+                return [object()]
+
+            @staticmethod
+            def ListLayers(mxd, wildcard, data_frame):
+                return [raster_layer]
+
+        sys.modules["arcpy"] = types.SimpleNamespace(mapping=Mapping)
+        spec = importlib.util.spec_from_file_location("common_find_raster_name", COMMON_PATH)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        with self.assertRaises(Exception):
+            module.find_layer({"layers": []}, "gblu(太湖)", {})
+
+        found = module.find_layer({"layers": []}, "gblu(太湖).tif", {})
+
+        self.assertIs(found, raster_layer)
+
+    def test_find_layer_exact_reference_does_not_choose_similar_select_layer(self):
+        select_layer = FakeLayer(r"D:\Data\taihu_test_area_select.shp", "taihu_test_area_select")
+        area_layer = FakeLayer(r"D:\Data\taihu_test_area.shp", "taihu_test_area")
+
+        class Mapping(object):
+            @staticmethod
+            def MapDocument(value):
+                return object()
+
+            @staticmethod
+            def ListDataFrames(mxd):
+                return [object()]
+
+            @staticmethod
+            def ListLayers(mxd, wildcard, data_frame):
+                return [select_layer, area_layer]
+
+        sys.modules["arcpy"] = types.SimpleNamespace(mapping=Mapping)
+        spec = importlib.util.spec_from_file_location("common_find_exact_layer_ref", COMMON_PATH)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        context = {
+            "layers": [
+                {"layer_ref": "layer:0", "name": "taihu_test_area_select", "longName": "taihu_test_area_select"},
+                {"layer_ref": "layer:1", "name": "taihu_test_area", "longName": "taihu_test_area"}
+            ]
+        }
+
+        self.assertIs(module.find_layer(context, "layer:1", {}), area_layer)
+        self.assertIs(module.find_layer(context, "taihu_test_area", {}), area_layer)
+        with self.assertRaises(Exception):
+            module.find_layer(context, "taihutestarea", {})
+
+    def test_find_layer_from_step_accepts_integer_step_key(self):
+        raster_layer = FakeLayer(r"D:\Data\tiff\太湖DEM\gblu(太湖).tif", "gblu(太湖).tif")
+
+        class Mapping(object):
+            @staticmethod
+            def MapDocument(value):
+                return object()
+
+            @staticmethod
+            def ListDataFrames(mxd):
+                return [object()]
+
+            @staticmethod
+            def ListLayers(mxd, wildcard, data_frame):
+                return [raster_layer]
+
+        sys.modules["arcpy"] = types.SimpleNamespace(mapping=Mapping)
+        spec = importlib.util.spec_from_file_location("common_find_integer_step", COMMON_PATH)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        found = module.find_layer(
+            {"layers": []},
+            "from_step:1",
+            {1: {"added_layer": r"D:\Data\tiff\太湖DEM\gblu(太湖).tif"}}
+        )
+
+        self.assertIs(found, raster_layer)
+
 
 class FakeLayer(object):
     def __init__(self, data_source, name=None):

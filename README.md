@@ -34,7 +34,7 @@ For end users:
 
 - Windows
 - ArcGIS Desktop / ArcMap
-- DeepSeek API key or MiniMax API key
+- DeepSeek API key or MiniMax Token Plan API key
 - A release package built from this repository
 
 For developers:

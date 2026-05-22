@@ -199,7 +199,7 @@ class WorkflowStore:
                     SELECT id, status, mode, project_id, command, context_hash, workflow_json, agent_trace_json, created_at, updated_at, result_json
                     FROM workflows
                     WHERE project_id = ?
-                    ORDER BY updated_at DESC LIMIT ?
+                    ORDER BY created_at DESC LIMIT ?
                     """,
                     (project_id, limit)
                 ).fetchall()
@@ -208,7 +208,7 @@ class WorkflowStore:
                     """
                     SELECT id, status, mode, project_id, command, context_hash, workflow_json, agent_trace_json, created_at, updated_at, result_json
                     FROM workflows
-                    ORDER BY updated_at DESC LIMIT ?
+                    ORDER BY created_at DESC LIMIT ?
                     """,
                     (limit,)
                 ).fetchall()
@@ -327,7 +327,7 @@ class WorkflowStore:
     def list_projects(self) -> List[Dict[str, Any]]:
         with self._connection() as conn:
             rows = conn.execute(
-                "SELECT id, name, workdir, created_at, updated_at FROM projects ORDER BY updated_at DESC"
+                "SELECT id, name, workdir, created_at, updated_at FROM projects ORDER BY created_at DESC"
             ).fetchall()
         return [_project_row_to_dict(row) for row in rows]
 
@@ -517,6 +517,13 @@ class WorkflowStore:
         with self._connection() as conn:
             conn.execute("UPDATE pending_tools SET status = ?, updated_at = ? WHERE id = ?", (status, time.time(), tool_id))
         return self.get_pending_tool(tool_id)
+
+    def delete_pending_tool(self, tool_id: str) -> Dict[str, Any]:
+        with self._connection() as conn:
+            cursor = conn.execute("DELETE FROM pending_tools WHERE id = ?", (tool_id,))
+        if cursor.rowcount == 0:
+            raise KeyError(tool_id)
+        return {"ok": True, "id": tool_id}
 
 
 def _migrate_workflows_schema(conn) -> None:

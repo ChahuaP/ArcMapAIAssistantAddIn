@@ -14,6 +14,10 @@ DEEPSEEK_PROVIDER = "deepseek"
 MINIMAX_PROVIDER = "minimax"
 SEMI_AGENT_MODE = "semi_agent"
 FULL_AGENT_MODE = "full_agent"
+MINIMAX_TOKEN_PLAN_BASE_URL = "https://api.minimaxi.com/v1"
+MINIMAX_LEGACY_BASE_URLS = {
+    "https://api.minimax.io/v1",
+}
 
 DEFAULT_CONFIG = {
     "default_mode": SEMI_AGENT_MODE,
@@ -26,7 +30,7 @@ DEFAULT_CONFIG = {
         },
         MINIMAX_PROVIDER: {
             "model": "MiniMax-M2.7",
-            "base_url": "https://api.minimax.io/v1",
+            "base_url": MINIMAX_TOKEN_PLAN_BASE_URL,
         },
     },
 }
@@ -97,7 +101,7 @@ class ChatProvider:
                 return json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
-            raise ProviderError("%s HTTP %s: %s" % (provider_label(self.provider_id), exc.code, detail))
+            raise ProviderError(provider_http_error(self.provider_id, exc.code, detail))
         except Exception as exc:
             raise ProviderError(str(exc))
 
@@ -259,11 +263,40 @@ def provider_label(provider_id: str) -> str:
     }.get(provider_id, provider_id)
 
 
+def provider_http_error(provider_id: str, status_code: int, detail: str) -> str:
+    label = provider_label(provider_id)
+    message = _extract_http_error_message(detail)
+    readable = message or detail
+    if status_code == 401:
+        if provider_id == MINIMAX_PROVIDER:
+            return "MiniMax Token Plan API Key 无效。请在右上角“API Key”里重新保存从 MiniMax Token Plan 页面获取的 Key，并确认接口地址为 https://api.minimaxi.com。原始信息：%s" % readable
+        if provider_id == DEEPSEEK_PROVIDER:
+            return "DeepSeek API Key 无效。请在右上角“API Key”里重新保存 DeepSeek API Key。原始信息：%s" % readable
+    return "%s HTTP %s：%s" % (label, status_code, readable)
+
+
+def _extract_http_error_message(detail: str) -> str:
+    try:
+        payload = json.loads(detail)
+    except ValueError:
+        return detail.strip()
+    error = payload.get("error") if isinstance(payload, dict) else None
+    if isinstance(error, dict):
+        message = error.get("message")
+        if isinstance(message, str) and message.strip():
+            return message.strip()
+    message = payload.get("message") if isinstance(payload, dict) else None
+    if isinstance(message, str) and message.strip():
+        return message.strip()
+    return detail.strip()
+
+
 def _normalized_config(config: Dict[str, Any]) -> Dict[str, Any]:
     normalized = json.loads(json.dumps(DEFAULT_CONFIG))
     providers = config.get("providers") if isinstance(config.get("providers"), dict) else {}
     for provider_id in (DEEPSEEK_PROVIDER, MINIMAX_PROVIDER):
         normalized["providers"][provider_id].update(providers.get(provider_id) or {})
+    _migrate_minimax_token_plan_defaults(normalized)
 
     if config.get("deepseek_api_key"):
         normalized["providers"][DEEPSEEK_PROVIDER]["api_key"] = config["deepseek_api_key"]
@@ -277,6 +310,13 @@ def _normalized_config(config: Dict[str, Any]) -> Dict[str, Any]:
             normalized[key] = config[key]
     _validate_config(normalized)
     return normalized
+
+
+def _migrate_minimax_token_plan_defaults(config: Dict[str, Any]) -> None:
+    minimax = config["providers"][MINIMAX_PROVIDER]
+    base_url = str(minimax.get("base_url") or "").strip().rstrip("/")
+    if base_url in MINIMAX_LEGACY_BASE_URLS:
+        minimax["base_url"] = MINIMAX_TOKEN_PLAN_BASE_URL
 
 
 def _merge_config(existing: Dict[str, Any], patch: Dict[str, Any]) -> Dict[str, Any]:

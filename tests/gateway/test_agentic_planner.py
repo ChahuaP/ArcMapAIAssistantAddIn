@@ -117,6 +117,22 @@ class AgenticPlannerTests(unittest.TestCase):
         self.assertIn("范围太大", row["workflow"]["summary"])
         self.assertIn("nanjing.shp", row["workflow"]["summary"])
 
+    def test_plain_markdown_response_is_stored_as_answer(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = WorkflowStore(pathlib.Path(directory) / "workflows.sqlite")
+            client = FakeAgentClient([
+                {
+                    "role": "assistant",
+                    "content": "<think>读取项目历史。</think>## 之前完成的事\n\n- 已打开 **nanjing.shp**。"
+                }
+            ])
+            planner = AgenticPlanner(catalog=self.catalog, client=client, store=store)
+            row = planner.plan("你之前干了啥", _context())
+
+        self.assertEqual(row["workflow"]["action"], "answer")
+        self.assertIn("## 之前完成的事", row["workflow"]["summary"])
+        self.assertEqual(row["workflow"]["steps"], [])
+
     def test_premature_file_question_is_nudged_back_to_tool_search(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
@@ -343,6 +359,106 @@ class AgenticPlannerTests(unittest.TestCase):
                 "layers": [_layer("p1"), _layer("p2")]
             })
 
+    def test_generated_output_add_layer_step_is_removed(self):
+        self.catalog.operations["custom.feature_to_point"] = _custom_writes_data_spec()
+        workflow = {
+            "action": "execute",
+            "summary": "将面图层转换为中心点。",
+            "steps": [
+                _step("step_1", "custom.feature_to_point", {
+                    "input_layer": "nanjing",
+                    "output_name": "taihucenterpoints",
+                    "output_workspace": r"D:\Data\GeoPilotComplexTest\output"
+                }, "面转点"),
+                _step("step_2", "layer.add_layer", {
+                    "path": r"D:\Data\GeoPilotComplexTest\output\ArcMapAI_Output.gdb\taihucenterpoints"
+                }, "添加生成结果")
+            ]
+        }
+
+        prepared = prepare_workflow(workflow, self.catalog, _context(is_saved=False))
+
+        self.assertEqual(len(prepared["steps"]), 1)
+        self.assertEqual(prepared["steps"][0]["operation"], "custom.feature_to_point")
+        self.assertRegex(prepared["steps"][0]["arguments"]["output_name"], r"^taihucenterpoints_\d{8}_\d{6}$")
+
+    def test_layer_reference_is_exact_and_normalized_to_layer_ref(self):
+        self.catalog.operations["custom.feature_to_point"] = _custom_writes_data_spec()
+        context = {
+            "is_saved": False,
+            "layers": [
+                _layer_with_ref("layer:0", "taihu_test_area_select"),
+                _layer_with_ref("layer:1", "taihu_test_area")
+            ]
+        }
+        workflow = {
+            "action": "execute",
+            "summary": "将 taihu_test_area 转为中心点。",
+            "steps": [
+                _step("step_1", "custom.feature_to_point", {
+                    "input_layer": "taihu_test_area",
+                    "output_name": "taihu_center_points",
+                    "output_workspace": r"D:\out"
+                }, "面转点")
+            ]
+        }
+
+        prepared = prepare_workflow(workflow, self.catalog, context)
+
+        self.assertEqual(prepared["steps"][0]["arguments"]["input_layer"], "layer:1")
+
+    def test_layer_reference_does_not_fuzzy_match_similar_layer_names(self):
+        self.catalog.operations["custom.feature_to_point"] = _custom_writes_data_spec()
+        context = {
+            "is_saved": False,
+            "layers": [
+                _layer_with_ref("layer:0", "taihu_test_area_select"),
+                _layer_with_ref("layer:1", "taihu_test_area")
+            ]
+        }
+        workflow = {
+            "action": "execute",
+            "summary": "将 taihu_test_area 转为中心点。",
+            "steps": [
+                _step("step_1", "custom.feature_to_point", {
+                    "input_layer": "taihutestarea",
+                    "output_name": "taihu_center_points",
+                    "output_workspace": r"D:\out"
+                }, "面转点")
+            ]
+        }
+
+        with self.assertRaisesRegex(ValidationError, "精确匹配"):
+            prepare_workflow(workflow, self.catalog, context)
+
+    def test_added_layer_name_is_normalized_to_step_reference(self):
+        with tempfile.TemporaryDirectory() as directory:
+            raster = pathlib.Path(directory) / "gblu(太湖).tif"
+            raster.write_text("", encoding="utf-8")
+            workflow = {
+                "action": "execute",
+                "summary": "打开 gblu(太湖).tif 并缩放到其位置。",
+                "steps": [
+                    {
+                        "id": 1,
+                        "operation": "layer.add_layer",
+                        "arguments": {"path": str(raster)},
+                        "reason": "添加图层"
+                    },
+                    {
+                        "id": 2,
+                        "operation": "view.zoom_to_layer",
+                        "arguments": {"layer": "gblu(太湖)"},
+                        "reason": "缩放到图层"
+                    }
+                ]
+            }
+            prepared = prepare_workflow(workflow, self.catalog, _context(is_saved=True))
+
+        self.assertEqual(prepared["steps"][0]["id"], "1")
+        self.assertEqual(prepared["steps"][1]["id"], "2")
+        self.assertEqual(prepared["steps"][1]["arguments"]["layer"], "from_step:1")
+
     def test_basemap_remains_unsupported_without_executable_steps(self):
         client = FakeAgentClient([
             _assistant_tool_call("call_1", "workflow_propose", {
@@ -405,6 +521,37 @@ def _layer(name):
         "fields": [{"name": "OBJECTID"}, {"name": "NAME"}],
         "selected_count": 0,
         "geometry_type": "Polygon"
+    }
+
+
+def _layer_with_ref(layer_ref, name):
+    layer = _layer(name)
+    layer["layer_ref"] = layer_ref
+    return layer
+
+
+def _custom_writes_data_spec():
+    return {
+        "id": "custom.feature_to_point",
+        "version": "0.1.0",
+        "category": "custom",
+        "summary": "面转点",
+        "model_card": "把面图层转换为中心点，并保留属性。",
+        "parameters_schema": {
+            "type": "object",
+            "required": ["input_layer", "output_name"],
+            "properties": {
+                "input_layer": {"type": "string"},
+                "output_name": {"type": "string"},
+                "output_workspace": {"type": "string"}
+            },
+            "additionalProperties": False
+        },
+        "context_requirements": {"requires_layers": True},
+        "side_effects": "writes_data",
+        "output_policy": {},
+        "executor": "custom_tool:demo:execute",
+        "examples": []
     }
 
 

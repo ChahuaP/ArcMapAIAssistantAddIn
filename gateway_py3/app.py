@@ -8,18 +8,19 @@ from urllib.parse import urlparse
 
 from gateway_py3.catalog_loader import OperationCatalog
 from gateway_py3.diagnostics import collect_diagnostics
+from gateway_py3.folder_dialog import FolderDialogError, select_folder
 from gateway_py3.llm_providers import FULL_AGENT_MODE, ProviderError, public_config, save_config
 from gateway_py3.logs import write_event
 from gateway_py3.paths import WEB_ROOT
 from gateway_py3.planner import AgenticPlanner, PlannerError
-from gateway_py3.tool_builder import ToolBuilderError, enable_tool, reject_tool
+from gateway_py3.tool_builder import ToolBuilderError, delete_tool, enable_tool, reject_tool
 from gateway_py3.validators import ValidationError, validate_catalog
 from gateway_py3.workflow_store import WorkflowStore
 
 
 HOST = "127.0.0.1"
 PORT = 8765
-APP_VERSION = "0.11.0"
+APP_VERSION = "0.11.13"
 
 
 class GatewayState:
@@ -41,6 +42,11 @@ STATE = GatewayState()
 
 class Handler(BaseHTTPRequestHandler):
     server_version = "ArcMapAIAssistantGateway/0.1"
+
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self._cors_headers()
+        self.end_headers()
 
     def do_GET(self):
         path = urlparse(self.path).path
@@ -115,6 +121,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"workflow": row})
             elif path == "/config":
                 self._json({"config": save_config(_config_payload(payload))})
+            elif path == "/dialog/select-folder":
+                self._json({"folder": select_folder(str(payload.get("title") or "选择 GeoPilot 项目工作目录"))})
             elif path == "/projects":
                 name = payload.get("name") or ""
                 workdir = payload.get("workdir") or ""
@@ -157,9 +165,14 @@ class Handler(BaseHTTPRequestHandler):
             elif path.startswith("/tools/") and path.endswith("/reject"):
                 tool_id = path.split("/")[2]
                 self._json({"tool": reject_tool(STATE.store, tool_id)})
+            elif path.startswith("/tools/") and path.endswith("/delete"):
+                tool_id = path.split("/")[2]
+                tool = delete_tool(STATE.store, tool_id)
+                STATE.reload_catalog()
+                self._json({"tool": tool, "operation_count": len(STATE.catalog.operations)})
             else:
                 self._json({"error": "Not found"}, 404)
-        except (KeyError, PlannerError, ProviderError, ToolBuilderError, ValidationError, ValueError) as exc:
+        except (KeyError, FolderDialogError, PlannerError, ProviderError, ToolBuilderError, ValidationError, ValueError) as exc:
             write_event("http.rejected", {"path": path, "error": str(exc)})
             self._json({"error": _public_error(exc)}, 400)
         except Exception as exc:
@@ -180,9 +193,14 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
-        self.send_header("Access-Control-Allow-Origin", "http://127.0.0.1:%s" % PORT)
+        self._cors_headers()
         self.end_headers()
         self.wfile.write(data)
+
+    def _cors_headers(self):
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
 
     def _static(self, path):
         rel = "index.html" if path == "/" else path[len("/web/"):]

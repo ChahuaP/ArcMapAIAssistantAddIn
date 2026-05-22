@@ -55,6 +55,34 @@ class ProviderConfigTests(unittest.TestCase):
         self.assertTrue(config["providers"]["minimax"]["has_api_key"])
         self.assertEqual(config["config_path"], str(path))
 
+    def test_minimax_default_uses_token_plan_endpoint(self):
+        with tempfile.TemporaryDirectory() as directory:
+            appdata = pathlib.Path(directory) / "Roaming"
+            localappdata = pathlib.Path(directory) / "Local"
+            os.environ["APPDATA"] = str(appdata)
+            os.environ["LOCALAPPDATA"] = str(localappdata)
+
+            config = llm_providers.public_config()
+
+        self.assertEqual(config["providers"]["minimax"]["base_url"], "https://api.minimaxi.com/v1")
+
+    def test_legacy_minimax_endpoint_is_migrated_to_token_plan_endpoint(self):
+        with tempfile.TemporaryDirectory() as directory:
+            appdata = pathlib.Path(directory) / "Roaming"
+            localappdata = pathlib.Path(directory) / "Local"
+            os.environ["APPDATA"] = str(appdata)
+            os.environ["LOCALAPPDATA"] = str(localappdata)
+            path = appdata / "ArcMapAIAssistant" / "config.json"
+            path.parent.mkdir(parents=True)
+            path.write_text(
+                '{"providers":{"minimax":{"api_key":"unit-test-key","base_url":"https://api.minimax.io/v1"}}}',
+                encoding="utf-8"
+            )
+
+            config = llm_providers.load_config()
+
+        self.assertEqual(config["providers"]["minimax"]["base_url"], "https://api.minimaxi.com/v1")
+
     def test_missing_key_message_names_provider_field(self):
         with tempfile.TemporaryDirectory() as directory:
             appdata = pathlib.Path(directory) / "Roaming"
@@ -69,6 +97,16 @@ class ProviderConfigTests(unittest.TestCase):
 
         self.assertIn(str(path), message)
         self.assertIn("providers.minimax.api_key", message)
+
+    def test_minimax_unauthorized_error_is_user_readable(self):
+        raw = '{"type":"error","error":{"type":"authorized_error","message":"invalid api key (2049)","http_code":"401"}}'
+
+        message = llm_providers.provider_http_error("minimax", 401, raw)
+
+        self.assertIn("MiniMax Token Plan API Key 无效", message)
+        self.assertIn("https://api.minimaxi.com", message)
+        self.assertIn("invalid api key (2049)", message)
+        self.assertNotIn('{"type"', message)
 
 
 if __name__ == "__main__":

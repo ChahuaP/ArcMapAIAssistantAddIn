@@ -1,6 +1,7 @@
 import importlib
 import pathlib
 import sys
+import tempfile
 import types
 import unittest
 
@@ -37,6 +38,62 @@ class WorkflowExecutorConfirmationTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["steps"][0]["result"]["updated"], 3)
 
+    def test_custom_writes_data_gets_output_path_and_adds_layer(self):
+        calls = {}
+
+        class Common(object):
+            @staticmethod
+            def find_layer(context, layer_value, step_outputs):
+                calls["find_layer"] = layer_value
+                return "exact-layer-object"
+
+            @staticmethod
+            def output_feature_class(context, output_name, output_workspace=None):
+                calls["output_feature_class"] = (output_name, output_workspace)
+                return r"C:\work\ArcMapAI_Output.gdb\taihucenterpoints"
+
+            @staticmethod
+            def add_output_layer(path):
+                calls["add_output_layer"] = path
+                return {"added": True}
+
+        def executor(executor_path, context, arguments, step_outputs):
+            calls["executor_arguments"] = dict(arguments)
+            return None
+
+        self.workflow_executor._operations_common = lambda: Common
+        self.workflow_executor._call_executor = executor
+
+        operation = self.workflow_executor._canonicalize_operation(_custom_write_operation())
+        self.workflow_executor._load_operations = lambda: {"custom.feature_to_point": operation}
+        result = self.workflow_executor.execute(_custom_write_row(), {"is_saved": False})
+
+        self.assertEqual(calls["find_layer"], "taihutestarea")
+        self.assertEqual(calls["output_feature_class"], ("taihucenterpoints", r"C:\work"))
+        self.assertEqual(calls["executor_arguments"]["input_layer"], "exact-layer-object")
+        self.assertEqual(calls["executor_arguments"]["output_path"], r"C:\work\ArcMapAI_Output.gdb\taihucenterpoints")
+        self.assertEqual(calls["add_output_layer"], r"C:\work\ArcMapAI_Output.gdb\taihucenterpoints")
+        self.assertEqual(result["steps"][0]["result"]["output"], r"C:\work\ArcMapAI_Output.gdb\taihucenterpoints")
+
+    def test_custom_executor_receives_arcpy_global(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            tool_dir = root / "tool_1"
+            tool_dir.mkdir()
+            (tool_dir / "executor.py").write_text(
+                "def execute(context, arguments, step_outputs):\n    return {'marker': arcpy.marker}\n",
+                encoding="utf-8"
+            )
+            old_root = self.workflow_executor.CUSTOM_TOOLS_ROOT
+            self.workflow_executor.CUSTOM_TOOLS_ROOT = str(root)
+            sys.modules["arcpy"] = types.SimpleNamespace(marker="ok")
+            try:
+                result = self.workflow_executor._call_custom_executor("custom_tool:tool_1:execute", {}, {}, {})
+            finally:
+                self.workflow_executor.CUSTOM_TOOLS_ROOT = old_root
+
+        self.assertEqual(result["marker"], "ok")
+
 
 def _row():
     return {
@@ -65,6 +122,39 @@ def _operation():
             "additionalProperties": False
         },
         "executor": "operations.table_ops.update_rows"
+    }
+
+
+def _custom_write_row():
+    return {
+        "context_hash": "hash",
+        "workflow": {
+            "summary": "面转点。",
+            "steps": [
+                {
+                    "id": "step_1",
+                    "operation": "custom.feature_to_point",
+                    "arguments": {
+                        "input_layer": "taihutestarea",
+                        "output_name": "taihucenterpoints",
+                        "output_workspace": r"C:\work"
+                    },
+                    "reason": "测试自建写数据工具"
+                }
+            ]
+        }
+    }
+
+
+def _custom_write_operation():
+    return {
+        "side_effects": "writes_data",
+        "parameters_schema": {
+            "input_layer": {"type": "layer", "required": True},
+            "output_name": {"type": "string", "required": True},
+            "output_workspace": {"type": "string", "required": False}
+        },
+        "executor": "custom_tool:tool_1:execute"
     }
 
 

@@ -58,9 +58,9 @@ def create_draft_tool(store, arguments: Dict[str, Any]) -> Dict[str, Any]:
     draft_id = str(uuid.uuid4())
     draft_dir = PENDING_ROOT / draft_id
     draft_dir.mkdir(parents=True, exist_ok=True)
-    spec = dict(operation_spec)
+    spec = canonicalize_operation_spec(operation_spec)
     spec["executor"] = "custom_tool:%s:execute" % draft_id
-    _validate_spec_shape(spec)
+    spec = canonicalize_operation_spec(spec)
 
     files = {
         "operation_spec": str(draft_dir / "operation_spec.json"),
@@ -97,19 +97,94 @@ def reject_tool(store, tool_id: str) -> Dict[str, Any]:
     return store.set_pending_tool_status(tool_id, "rejected")
 
 
+def delete_tool(store, tool_id: str) -> Dict[str, Any]:
+    tool = store.get_pending_tool(tool_id)
+    _delete_child_directory(PENDING_ROOT, tool_id)
+    _delete_child_directory(ENABLED_ROOT, tool_id)
+    store.delete_pending_tool(tool_id)
+    return {"ok": True, "id": tool_id, "status": tool["status"], "name": tool["name"]}
+
+
 def enabled_operation_specs() -> list[Dict[str, Any]]:
     specs = []
     if not ENABLED_ROOT.exists():
         return specs
     for path in sorted(ENABLED_ROOT.glob("*/operation_spec.json")):
-        try:
-            with path.open("r", encoding="utf-8") as handle:
-                spec = json.load(handle)
-            if isinstance(spec, dict):
-                specs.append(spec)
-        except Exception:
-            continue
+        with path.open("r", encoding="utf-8") as handle:
+            spec = json.load(handle)
+        specs.append(canonicalize_operation_spec(spec, source=path))
     return specs
+
+
+def canonicalize_operation_spec(spec: Dict[str, Any], source: Path | None = None) -> Dict[str, Any]:
+    if not isinstance(spec, dict):
+        raise ToolBuilderError("operation_spec 必须是对象。")
+    result = dict(spec)
+    try:
+        result["parameters_schema"] = _canonical_parameters_schema(result.get("parameters_schema"))
+    except ToolBuilderError as exc:
+        label = "：%s" % source if source else ""
+        raise ToolBuilderError("operation_spec 参数定义不合法%s：%s" % (label, exc))
+    if not isinstance(result.get("context_requirements"), dict):
+        result["context_requirements"] = {}
+    if not isinstance(result.get("output_policy"), dict):
+        result["output_policy"] = {}
+    _validate_spec_shape(result)
+    return result
+
+
+def _canonical_parameters_schema(schema: Any) -> Dict[str, Any]:
+    if not isinstance(schema, dict):
+        raise ToolBuilderError("parameters_schema 必须是对象。")
+    if schema.get("type") == "object":
+        properties = schema.get("properties", {})
+        required = schema.get("required", [])
+        if not isinstance(properties, dict):
+            raise ToolBuilderError("parameters_schema.properties 必须是对象。")
+        if not isinstance(required, list) or any(not isinstance(item, str) for item in required):
+            raise ToolBuilderError("parameters_schema.required 必须是字符串数组。")
+        result = dict(schema)
+        result["properties"] = {
+            name: _canonical_parameter_property(value, name)
+            for name, value in properties.items()
+        }
+        result["required"] = required
+        result.setdefault("additionalProperties", False)
+        return result
+
+    properties = {}
+    required = []
+    for name, value in schema.items():
+        if not isinstance(name, str) or not name:
+            raise ToolBuilderError("参数名不能为空。")
+        if not isinstance(value, dict):
+            raise ToolBuilderError("参数“%s”定义必须是对象。" % name)
+        prop = dict(value)
+        required_flag = prop.pop("required", False)
+        if required_flag is True or str(required_flag).lower() in ("true", "1", "yes"):
+            required.append(name)
+        properties[name] = _canonical_parameter_property(prop, name)
+    return {
+        "type": "object",
+        "required": required,
+        "properties": properties,
+        "additionalProperties": False
+    }
+
+
+def _canonical_parameter_property(value: Any, name: str) -> Dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ToolBuilderError("参数“%s”定义必须是对象。" % name)
+    prop = dict(value)
+    parameter_type = prop.get("type")
+    if parameter_type == "layer":
+        prop["type"] = "string"
+        prop["x-geopilot-kind"] = "layer"
+        return prop
+    allowed = {"string", "boolean", "integer", "number", "array", "object"}
+    if parameter_type not in allowed:
+        raise ToolBuilderError("参数“%s”的 type 不合法。" % name)
+    return prop
 
 
 def _validate_spec_shape(spec: Dict[str, Any]) -> None:
@@ -135,8 +210,17 @@ def _validate_spec_shape(spec: Dict[str, Any]) -> None:
     side_effects = spec.get("side_effects")
     if side_effects not in ("read_only", "changes_map", "writes_data", "edits_data"):
         raise ToolBuilderError("side_effects 不合法。")
-    if not isinstance(spec.get("parameters_schema"), dict):
-        raise ToolBuilderError("parameters_schema 必须是对象。")
+    schema = spec.get("parameters_schema")
+    if not isinstance(schema, dict) or schema.get("type") != "object":
+        raise ToolBuilderError("parameters_schema 必须是 JSON Schema object。")
+    if not isinstance(schema.get("properties"), dict):
+        raise ToolBuilderError("parameters_schema.properties 必须是对象。")
+    if not isinstance(schema.get("required", []), list):
+        raise ToolBuilderError("parameters_schema.required 必须是数组。")
+    if not isinstance(spec.get("context_requirements"), dict):
+        raise ToolBuilderError("context_requirements 必须是对象。")
+    if not isinstance(spec.get("output_policy"), dict):
+        raise ToolBuilderError("output_policy 必须是对象。")
 
 
 def _validate_tool_files(source_dir: Path, tool_id: str) -> None:
@@ -146,12 +230,11 @@ def _validate_tool_files(source_dir: Path, tool_id: str) -> None:
         raise ToolBuilderError("待审核工具包缺少 operation_spec.json 或 executor.py。")
     with spec_path.open("r", encoding="utf-8") as handle:
         spec = json.load(handle)
-    if not isinstance(spec, dict):
-        raise ToolBuilderError("operation_spec.json 必须是对象。")
-    _validate_spec_shape(spec)
+    spec = canonicalize_operation_spec(spec, source=spec_path)
     expected_executor = "custom_tool:%s:execute" % tool_id
     if spec.get("executor") != expected_executor:
         raise ToolBuilderError("operation_spec executor 与待审核工具目录不一致。")
+    _write_text(spec_path, json.dumps(spec, ensure_ascii=False, indent=2, sort_keys=True))
     _validate_executor_code(executor_path.read_text(encoding="utf-8"))
 
 
@@ -198,3 +281,12 @@ def _required_string(arguments: Dict[str, Any], key: str) -> str:
 def _write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
+
+
+def _delete_child_directory(root: Path, child_name: str) -> None:
+    target = (root / child_name).resolve()
+    root_resolved = root.resolve()
+    if not str(target).lower().startswith(str(root_resolved).lower() + "\\"):
+        raise ToolBuilderError("工具目录不合法：%s" % child_name)
+    if target.exists():
+        shutil.rmtree(str(target))

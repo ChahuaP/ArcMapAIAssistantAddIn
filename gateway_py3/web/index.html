@@ -464,6 +464,12 @@
       color: #eef3f8;
       font-size: 13px;
     }
+    .folder-picker-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: center;
+    }
     .sidebar-scroll {
       min-height: 0;
       overflow: auto;
@@ -694,16 +700,29 @@
       background: var(--mode-task-bg);
       padding: 14px;
     }
+    body.mode-full .section-card {
+      background: #1b160e;
+      border-color: #4d3e20;
+      color: #efe6d1;
+    }
     .section-card h3 {
       margin: 0 0 10px;
       color: var(--ink-strong);
       font-size: 14px;
       letter-spacing: 0;
     }
+    body.mode-full .section-card h3,
+    body.mode-full .section-card strong {
+      color: #fff7df;
+    }
     .hint {
       margin: 8px 0 0;
       color: var(--muted);
       font-size: 13px;
+    }
+    body.mode-full .hint,
+    body.mode-full .section-card p {
+      color: #d8c99c;
     }
     .button-row {
       display: flex;
@@ -855,9 +874,11 @@
       max-width: min(780px, 84%);
       border-radius: 8px;
       padding: 12px 14px;
-      white-space: pre-wrap;
       overflow-wrap: anywhere;
       box-shadow: 0 10px 24px rgba(14, 27, 42, .08);
+    }
+    .plain-bubble {
+      white-space: pre-wrap;
     }
     .bubble-row.assistant .bubble {
       color: var(--ink);
@@ -876,6 +897,99 @@
       color: #efe6d1;
       border-color: #5d4b25;
       background: #1b160e;
+    }
+    .markdown-body {
+      display: grid;
+      gap: 8px;
+      white-space: normal;
+      line-height: 1.58;
+    }
+    .markdown-body p,
+    .markdown-body ul,
+    .markdown-body ol,
+    .markdown-body blockquote,
+    .markdown-body pre,
+    .markdown-body h1,
+    .markdown-body h2,
+    .markdown-body h3 {
+      margin: 0;
+    }
+    .markdown-body ul,
+    .markdown-body ol {
+      padding-left: 20px;
+    }
+    .markdown-body h1,
+    .markdown-body h2,
+    .markdown-body h3 {
+      color: var(--ink-strong);
+      font-size: 16px;
+      line-height: 1.35;
+      letter-spacing: 0;
+    }
+    body.mode-full .markdown-body h1,
+    body.mode-full .markdown-body h2,
+    body.mode-full .markdown-body h3 {
+      color: #fff7df;
+    }
+    .markdown-body blockquote {
+      border-left: 3px solid var(--primary);
+      padding-left: 10px;
+      color: var(--muted);
+    }
+    body.mode-full .markdown-body blockquote {
+      border-color: #f0cf72;
+      color: #d8c99c;
+    }
+    .markdown-body code {
+      border-radius: 5px;
+      padding: 1px 5px;
+      background: rgba(8, 124, 145, .12);
+      color: var(--primary-strong);
+      font-family: Consolas, "Cascadia Mono", monospace;
+      font-size: 12px;
+    }
+    body.mode-full .markdown-body code {
+      background: #2a2112;
+      color: #f8d880;
+    }
+    .markdown-body pre code {
+      display: block;
+      padding: 0;
+      background: transparent;
+      color: inherit;
+      white-space: pre;
+    }
+    .markdown-body a {
+      color: var(--primary-strong);
+      font-weight: 650;
+    }
+    body.mode-full .markdown-body a {
+      color: #f0cf72;
+    }
+    .think-panel {
+      margin-top: 10px;
+      border: 1px dashed rgba(8, 124, 145, .35);
+      border-radius: 8px;
+      padding: 9px 10px;
+      background: rgba(8, 124, 145, .07);
+      color: var(--muted);
+    }
+    .think-panel summary {
+      color: var(--primary-strong);
+      font-weight: 760;
+    }
+    .think-content {
+      margin-top: 8px;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+    body.mode-full .think-panel {
+      border-color: #6f5a2e;
+      background: #241d11;
+      color: #d8c99c;
+    }
+    body.mode-full .think-panel summary {
+      color: #f0cf72;
     }
     .composer {
       flex: 0 0 auto;
@@ -919,10 +1033,18 @@
       background: var(--mode-task-bg);
       box-shadow: 0 10px 24px rgba(14, 27, 42, .05);
     }
+    .task-card.active {
+      border-color: var(--primary);
+      box-shadow: 0 12px 28px rgba(8, 124, 145, .16);
+    }
     body.mode-full .task-card {
       border-color: #5d4b25;
       background: #1b160e;
       box-shadow: 0 12px 28px rgba(0, 0, 0, .18);
+    }
+    body.mode-full .task-card.active {
+      border-color: #f0cf72;
+      box-shadow: 0 16px 34px rgba(240, 207, 114, .12);
     }
     body.mode-full .task-meta,
     body.mode-full .task-note,
@@ -1188,19 +1310,19 @@
     .diagnostic-card.warn { border-color: #f5d48d; background: var(--amber-soft); }
     .diagnostic-card.bad { border-color: #ffc8c8; background: var(--red-soft); }
     body.mode-full .diagnostic-card.ok {
-      background: #e9f9ef;
-      border-color: #a8e6bd;
-      color: #071421;
+      background: #102017;
+      border-color: #3f8f58;
+      color: #d9f7df;
     }
     body.mode-full .diagnostic-card.warn {
-      background: #fff6df;
-      border-color: #f5d48d;
-      color: #071421;
+      background: #2b2111;
+      border-color: #8d6f2c;
+      color: #f8d880;
     }
     body.mode-full .diagnostic-card.bad {
-      background: #fff0f0;
-      border-color: #ffc8c8;
-      color: #071421;
+      background: #2a1412;
+      border-color: #8e4039;
+      color: #ffc8c0;
     }
     .diagnostic-state {
       display: inline-flex;
@@ -1211,9 +1333,15 @@
       font-weight: 760;
       background: #fff;
     }
+    body.mode-full .diagnostic-state {
+      background: rgba(255, 255, 255, .08);
+    }
     .diagnostic-card.ok .diagnostic-state { color: #126b34; }
     .diagnostic-card.warn .diagnostic-state { color: #8b5300; }
     .diagnostic-card.bad .diagnostic-state { color: #991b1b; }
+    body.mode-full .diagnostic-card.ok .diagnostic-state { color: #9be2b0; }
+    body.mode-full .diagnostic-card.warn .diagnostic-state { color: #f8d880; }
+    body.mode-full .diagnostic-card.bad .diagnostic-state { color: #ffc8c0; }
     .compact-list {
       display: grid;
       gap: 10px;
@@ -1244,10 +1372,16 @@
       color: var(--ink-strong);
       font-size: 14px;
     }
+    body.mode-full .diagnostic-card strong {
+      color: #fff7df;
+    }
     .diagnostic-card p {
       margin: 0;
       color: var(--muted);
       font-size: 13px;
+    }
+    body.mode-full .diagnostic-card p {
+      color: #d8c99c;
     }
     .diagnostic-card code {
       display: block;
@@ -1255,6 +1389,9 @@
       color: var(--primary-strong);
       font-size: 12px;
       overflow-wrap: anywhere;
+    }
+    body.mode-full .diagnostic-card code {
+      color: #f0cf72;
     }
     @media (max-width: 700px) {
       .modal { padding: 12px; }
@@ -1302,7 +1439,7 @@
           <div class="quick-actions" aria-label="常用信息">
             <button class="ghost small" onclick="openCapabilities()">能力范围</button>
             <button class="ghost small" onclick="openModal('contextModal')">地图快照</button>
-            <button class="ghost small" onclick="openPendingTools()">待审核工具</button>
+            <button class="ghost small" onclick="openPendingTools()">工具管理</button>
             <button class="ghost small" onclick="openDiagnostics()">系统诊断</button>
             <button class="ghost small" onclick="openModal('keyModal')"><span id="keyActionText">API Key</span></button>
           </div>
@@ -1324,7 +1461,10 @@
           <label for="projectName">项目名称</label>
           <input id="projectName" type="text" placeholder="南京分析项目">
           <label for="projectWorkdir">工作目录</label>
-          <input id="projectWorkdir" type="text" placeholder="D:\Data\NanjingProject">
+          <div class="folder-picker-row">
+            <input id="projectWorkdir" type="text" placeholder="D:\Data\NanjingProject">
+            <button type="button" class="ghost small" onclick="chooseProjectFolder()">选择</button>
+          </div>
           <button type="submit" class="primary small">创建项目</button>
         </form>
         <div class="sidebar-scroll">
@@ -1360,7 +1500,7 @@
         <div class="panel-head">
           <div class="panel-title">
             <h2>任务</h2>
-            <p>左侧选中哪条，这里就显示哪条</p>
+            <p id="taskPanelHint">按时间显示全部任务</p>
           </div>
           <button class="ghost small" onclick="refreshWorkflows()">刷新</button>
         </div>
@@ -1439,8 +1579,8 @@
     <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="toolsTitle">
       <div class="panel-head">
         <div class="panel-title">
-          <h2 id="toolsTitle">待审核工具</h2>
-          <p id="toolsSummary">Agent 生成的新工具默认不会启用。</p>
+          <h2 id="toolsTitle">工具管理</h2>
+          <p id="toolsSummary">新工具审核通过并启用后，会进入能力目录。</p>
         </div>
         <div class="button-row modal-actions">
           <button class="ghost small" onclick="loadPendingTools()">刷新</button>
@@ -1498,16 +1638,21 @@
   </div>
 
   <script>
-    const EXPECTED_GATEWAY_VERSION = '0.11.0';
+    const EXPECTED_GATEWAY_VERSION = '0.11.13';
+    const API_ORIGIN = window.location.protocol === 'file:' ? 'http://127.0.0.1:8765' : '';
     const POLL_INTERVAL_MS = 2500;
     const HEALTH_INTERVAL_MS = 10000;
+    const MODE_STORAGE_KEY = 'geopilot.currentMode';
     let lastHealthCheck = 0;
     let pollBusy = false;
     let capabilitiesLoaded = false;
     let currentMode = 'semi_agent';
+    let modeInitialized = false;
     let activeProject = null;
     let cachedWorkflows = [];
     let selectedWorkflowId = '';
+    let transientUserMessage = '';
+    let transientAssistantMessage = '';
 
     function offlineMessage() {
       return '本地网关未连接。请回到 ArcGIS 工具栏点击“启动网关”或“打开助手”。页面会自动恢复状态。';
@@ -1516,13 +1661,18 @@
     async function api(path, options) {
       let response;
       try {
-        response = await fetch(path, options || {});
+        response = await fetch(apiUrl(path), options || {});
       } catch (err) {
         throw new Error(offlineMessage());
       }
       const data = await response.json();
       if (!response.ok || data.error) throw new Error(data.error || response.statusText);
       return data;
+    }
+
+    function apiUrl(path) {
+      if (/^https?:\/\//i.test(path)) return path;
+      return `${API_ORIGIN}${path}`;
     }
 
     function openModal(id) {
@@ -1682,13 +1832,33 @@
       if (!silent) setStatus(`网关已连接，版本 ${version}。`);
     }
 
+    function loadStoredMode() {
+      try {
+        const mode = localStorage.getItem(MODE_STORAGE_KEY);
+        return (mode === 'semi_agent' || mode === 'full_agent') ? mode : '';
+      } catch (err) {
+        return '';
+      }
+    }
+
+    function storeMode(mode) {
+      try {
+        localStorage.setItem(MODE_STORAGE_KEY, mode);
+      } catch (err) {
+        // 浏览器禁用本地存储时，当前页面状态仍然有效。
+      }
+    }
+
     async function loadConfig() {
       const data = await api('/config');
       const providers = data.config.providers || {};
       const deepseekOk = providers.deepseek && providers.deepseek.has_api_key;
       const minimaxOk = providers.minimax && providers.minimax.has_api_key;
       const ok = deepseekOk || minimaxOk;
-      currentMode = data.config.default_mode || currentMode;
+      if (!modeInitialized) {
+        currentMode = loadStoredMode() || data.config.default_mode || currentMode;
+        modeInitialized = true;
+      }
       updateModeUI();
       document.getElementById('semiProvider').value = data.config.semi_agent_provider || 'deepseek';
       document.getElementById('fullProvider').value = data.config.full_agent_provider || 'minimax';
@@ -1736,7 +1906,9 @@
     }
 
     async function setMode(mode) {
+      if (mode !== 'semi_agent' && mode !== 'full_agent') return;
       currentMode = mode;
+      storeMode(mode);
       updateModeUI();
       setStatus(mode === 'full_agent' ? '已切换到全代理模式。' : '已切换到半代理模式。');
     }
@@ -1749,10 +1921,12 @@
       document.getElementById('fullModeButton').classList.toggle('active', fullMode);
       document.getElementById('sidebarTitle').textContent = fullMode ? '项目' : '对话';
       document.getElementById('newProjectButton').hidden = !fullMode;
-      document.getElementById('sidebarProjectForm').hidden = true;
+      if (!fullMode) document.getElementById('sidebarProjectForm').hidden = true;
       document.getElementById('projectHistoryTitle').hidden = !fullMode;
       document.getElementById('sidebarProjects').hidden = !fullMode;
-      document.getElementById('sidebarHistoryTitle').textContent = fullMode ? '对话' : '对话';
+      document.getElementById('sidebarHistoryTitle').hidden = fullMode;
+      document.getElementById('sidebarHistory').hidden = fullMode;
+      document.getElementById('taskPanelHint').textContent = fullMode ? '显示当前项目的全部任务' : '显示半代理模式的全部任务';
       const note = document.getElementById('modeNote');
       if (fullMode) {
         note.innerHTML = '<strong>全代理模式</strong><span>围绕当前项目工作目录规划，保留项目记忆。</span>';
@@ -1813,6 +1987,32 @@
       if (!form.hidden) document.getElementById('projectName').focus();
     }
 
+    async function chooseProjectFolder() {
+      if (currentMode !== 'full_agent') {
+        setStatus('半代理模式不使用项目。切换到全代理模式后再选择工作目录。');
+        return;
+      }
+      try {
+        setStatus('请选择项目工作目录...');
+        const data = await api('/dialog/select-folder', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({title: '选择 GeoPilot 项目工作目录'})
+        });
+        const folder = data.folder || {};
+        if (folder.cancelled) {
+          setStatus('已取消选择。');
+          return;
+        }
+        if (folder.path) {
+          document.getElementById('projectWorkdir').value = folder.path;
+          setStatus('已选择项目工作目录。');
+        }
+      } catch (err) {
+        setStatus(err.message);
+      }
+    }
+
     async function createProject() {
       if (currentMode !== 'full_agent') {
         setStatus('半代理模式不使用项目。切换到全代理模式后再创建项目。');
@@ -1821,7 +2021,7 @@
       const name = document.getElementById('projectName').value.trim();
       const workdir = document.getElementById('projectWorkdir').value.trim();
       if (!workdir) {
-        setStatus('请输入项目工作目录。');
+        setStatus('请选择项目工作目录。');
         return;
       }
       const data = await api('/projects', {
@@ -1887,15 +2087,16 @@
     function renderPendingTools(tools) {
       const box = document.getElementById('pendingToolsList');
       if (!tools.length) {
-        box.innerHTML = '<div class="section-card">暂无待审核工具。</div>';
+        box.innerHTML = '<div class="section-card">暂无自定义工具。</div>';
         return;
       }
       box.innerHTML = '';
       tools.forEach(tool => {
+        const statusText = {pending_review: '待审核', enabled: '已启用', rejected: '已拒绝'}[tool.status] || tool.status;
         const card = document.createElement('div');
         card.className = 'compact-item';
         card.innerHTML = `
-          <strong>${escapeHtml(tool.name)} · ${escapeHtml(tool.status)}</strong>
+          <strong>${escapeHtml(tool.name)} · ${escapeHtml(statusText)}</strong>
           <p>${escapeHtml(tool.capability)}</p>
           <p class="hint">${escapeHtml((tool.payload.operation_spec || {}).id || '')}</p>
         `;
@@ -1903,9 +2104,15 @@
           const actions = document.createElement('div');
           actions.className = 'button-row';
           actions.innerHTML = `
-            <button class="success small" onclick="enableTool('${escapeHtml(tool.id)}')">启用</button>
-            <button class="danger small" onclick="rejectTool('${escapeHtml(tool.id)}')">拒绝</button>
+            <button class="success small" onclick="enableTool('${escapeJs(tool.id)}')">启用</button>
+            <button class="ghost small" onclick="rejectTool('${escapeJs(tool.id)}')">拒绝</button>
+            <button class="danger small" onclick="deleteTool('${escapeJs(tool.id)}')">删除</button>
           `;
+          card.appendChild(actions);
+        } else {
+          const actions = document.createElement('div');
+          actions.className = 'button-row';
+          actions.innerHTML = `<button class="danger small" onclick="deleteTool('${escapeJs(tool.id)}')">删除</button>`;
           card.appendChild(actions);
         }
         box.appendChild(card);
@@ -1925,6 +2132,14 @@
       await loadPendingTools();
     }
 
+    async function deleteTool(id) {
+      if (!window.confirm('确定删除这个自建工具吗？删除后它会从能力范围里移除。')) return;
+      await api(`/tools/${id}/delete`, {method: 'POST', body: '{}'});
+      capabilitiesLoaded = false;
+      setStatus('自建工具已删除。');
+      await loadPendingTools();
+    }
+
     async function submitPlan() {
       const input = document.getElementById('command');
       const command = input.value.trim();
@@ -1934,8 +2149,14 @@
         return;
       }
       input.value = '';
-      selectedWorkflowId = '';
-      renderConversation([]);
+      transientUserMessage = command;
+      transientAssistantMessage = '正在思考...';
+      if (currentMode === 'full_agent') {
+        renderConversation(cachedWorkflows);
+      } else {
+        selectedWorkflowId = '';
+        renderConversation(cachedWorkflows);
+      }
       try {
         setStatus('正在生成任务...');
         const data = await api('/plan', {
@@ -1943,10 +2164,13 @@
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({command, mode: currentMode, project_id: activeProject ? activeProject.id : ''})
         });
+        transientUserMessage = '';
+        transientAssistantMessage = '';
         selectedWorkflowId = data.workflow.id;
         await refreshWorkflows();
       } catch (err) {
-        appendBubble('assistant', err.message);
+        transientAssistantMessage = err.message;
+        renderConversation(cachedWorkflows);
         setStatus(err.message);
       }
     }
@@ -1969,6 +2193,8 @@
         body: JSON.stringify(clearScope())
       });
       selectedWorkflowId = '';
+      transientUserMessage = '';
+      transientAssistantMessage = '';
       setStatus('已清空。');
       await refreshWorkflows();
     }
@@ -1992,14 +2218,39 @@
     function renderConversation(workflows) {
       const chat = document.getElementById('chatLog');
       chat.innerHTML = '';
+      if (currentMode === 'full_agent') {
+        const items = visibleWorkflows(workflows).slice().reverse();
+        if (!items.length && !transientUserMessage) {
+          renderEmptyChat();
+          return;
+        }
+        items.forEach(item => {
+          appendBubble('user', item.command, false);
+          appendAssistantForWorkflow(item, false, false);
+        });
+        appendTransientConversation(false);
+        chat.scrollTop = chat.scrollHeight;
+        const selected = selectedWorkflow(workflows);
+        if (selected) setStatus(statusText(selected));
+        return;
+      }
       const item = selectedWorkflow(workflows);
-      if (!item) {
+      if (!item && !transientUserMessage) {
         renderEmptyChat();
         return;
       }
-      appendBubble('user', item.command, false);
-      appendAssistantForWorkflow(item, false);
+      if (item) {
+        appendBubble('user', item.command, false);
+        appendAssistantForWorkflow(item, false);
+      }
+      appendTransientConversation(false);
       chat.scrollTop = chat.scrollHeight;
+    }
+
+    function appendTransientConversation(scroll = true) {
+      if (!transientUserMessage) return;
+      appendBubble('user', transientUserMessage, false);
+      appendBubble('assistant', transientAssistantMessage || '正在思考...', scroll);
     }
 
     function renderEmptyChat() {
@@ -2012,7 +2263,7 @@
       if (empty) empty.remove();
     }
 
-    function appendAssistantForWorkflow(item, scroll = true) {
+    function appendAssistantForWorkflow(item, scroll = true, updateStatus = true) {
       const wf = item.workflow;
       const action = wf.action || 'execute';
       let text = wf.summary;
@@ -2026,7 +2277,7 @@
         text += '\n\n当前版本还没有这个能力。';
       }
       appendBubble('assistant', text, scroll);
-      setStatus(statusText(item));
+      if (updateStatus) setStatus(statusText(item));
     }
 
     function appendBubble(role, text, scroll = true) {
@@ -2034,31 +2285,189 @@
       const chat = document.getElementById('chatLog');
       const row = document.createElement('div');
       row.className = `bubble-row ${role === 'user' ? 'user' : 'assistant'}`;
-      row.innerHTML = `<div class="bubble">${escapeHtml(text)}</div>`;
+      const bubble = document.createElement('div');
+      bubble.className = `bubble ${role === 'assistant' ? 'markdown-bubble' : 'plain-bubble'}`;
+      if (role === 'assistant') {
+        bubble.innerHTML = renderAssistantMarkdown(text);
+      } else {
+        bubble.textContent = text;
+      }
+      row.appendChild(bubble);
       chat.appendChild(row);
       if (scroll) chat.scrollTop = chat.scrollHeight;
+    }
+
+    function renderAssistantMarkdown(text) {
+      const parsed = splitThinking(text);
+      const body = parsed.body || '已生成回复。';
+      let html = `<div class="markdown-body">${renderMarkdown(body)}</div>`;
+      parsed.thoughts.forEach((thought, index) => {
+        html += `
+          <details class="think-panel">
+            <summary>${parsed.thoughts.length > 1 ? `思考过程 ${index + 1}` : '思考过程'}</summary>
+            <div class="think-content markdown-body">${renderMarkdown(thought)}</div>
+          </details>
+        `;
+      });
+      return html;
+    }
+
+    function splitThinking(text) {
+      const thoughts = [];
+      const body = String(text || '').replace(/<think>([\s\S]*?)<\/think>/gi, (_match, content) => {
+        if (String(content || '').trim()) thoughts.push(String(content).trim());
+        return '';
+      }).trim();
+      return {body, thoughts};
+    }
+
+    function renderMarkdown(text) {
+      const lines = String(text || '').replace(/\r\n/g, '\n').split('\n');
+      const html = [];
+      let paragraph = [];
+      let listType = '';
+      let inFence = false;
+      let fenceLines = [];
+
+      const flushParagraph = () => {
+        if (!paragraph.length) return;
+        html.push(`<p>${renderInlineMarkdown(paragraph.join(' '))}</p>`);
+        paragraph = [];
+      };
+      const closeList = () => {
+        if (!listType) return;
+        html.push(`</${listType}>`);
+        listType = '';
+      };
+      const openList = type => {
+        if (listType === type) return;
+        closeList();
+        listType = type;
+        html.push(`<${type}>`);
+      };
+
+      lines.forEach(line => {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('```')) {
+          if (inFence) {
+            html.push(`<pre><code>${escapeHtml(fenceLines.join('\n'))}</code></pre>`);
+            fenceLines = [];
+            inFence = false;
+          } else {
+            flushParagraph();
+            closeList();
+            inFence = true;
+          }
+          return;
+        }
+        if (inFence) {
+          fenceLines.push(line);
+          return;
+        }
+        if (!trimmed) {
+          flushParagraph();
+          closeList();
+          return;
+        }
+        const heading = /^(#{1,3})\s+(.+)$/.exec(trimmed);
+        if (heading) {
+          flushParagraph();
+          closeList();
+          const level = heading[1].length;
+          html.push(`<h${level}>${renderInlineMarkdown(heading[2])}</h${level}>`);
+          return;
+        }
+        const unordered = /^[-*]\s+(.+)$/.exec(trimmed);
+        if (unordered) {
+          flushParagraph();
+          openList('ul');
+          html.push(`<li>${renderInlineMarkdown(unordered[1])}</li>`);
+          return;
+        }
+        const ordered = /^\d+[.)]\s+(.+)$/.exec(trimmed);
+        if (ordered) {
+          flushParagraph();
+          openList('ol');
+          html.push(`<li>${renderInlineMarkdown(ordered[1])}</li>`);
+          return;
+        }
+        const quote = /^>\s?(.+)$/.exec(trimmed);
+        if (quote) {
+          flushParagraph();
+          closeList();
+          html.push(`<blockquote>${renderInlineMarkdown(quote[1])}</blockquote>`);
+          return;
+        }
+        closeList();
+        paragraph.push(trimmed);
+      });
+
+      if (inFence) html.push(`<pre><code>${escapeHtml(fenceLines.join('\n'))}</code></pre>`);
+      flushParagraph();
+      closeList();
+      return html.join('') || '<p></p>';
+    }
+
+    function renderInlineMarkdown(text) {
+      const codeTokens = [];
+      let safe = escapeHtml(text).replace(/`([^`]+)`/g, (_match, code) => {
+        const token = `@@CODE${codeTokens.length}@@`;
+        codeTokens.push(`<code>${code}</code>`);
+        return token;
+      });
+      safe = safe.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, (_match, label, url) => {
+        return `<a href="${escapeHtml(url)}" target="_blank" rel="noreferrer">${label}</a>`;
+      });
+      safe = safe.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+      safe = safe.replace(/__([^_]+)__/g, '<strong>$1</strong>');
+      safe = safe.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+      safe = safe.replace(/_([^_]+)_/g, '<em>$1</em>');
+      codeTokens.forEach((tokenHtml, index) => {
+        safe = safe.replace(`@@CODE${index}@@`, tokenHtml);
+      });
+      return safe;
+    }
+
+    function workflowTitle(workflow) {
+      const parsed = splitThinking((workflow || {}).summary || '');
+      return stripMarkdown(parsed.body || (workflow || {}).summary || '').trim() || '任务';
+    }
+
+    function stripMarkdown(text) {
+      return String(text || '')
+        .replace(/```[\s\S]*?```/g, ' ')
+        .replace(/`([^`]+)`/g, '$1')
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+        .replace(/[*_#>`-]/g, ' ')
+        .replace(/\s+/g, ' ');
     }
 
     function renderTasks(workflows) {
       const box = document.getElementById('tasks');
       box.innerHTML = '';
-      const item = selectedWorkflow(workflows);
-      if (!item) {
-        box.innerHTML = '<div class="section-card">左侧选择一条对话后，这里会显示对应任务。</div>';
+      const items = visibleWorkflows(workflows);
+      if (!items.length) {
+        const text = currentMode === 'full_agent'
+          ? '当前项目暂无任务。'
+          : '暂无任务。';
+        box.innerHTML = `<div class="section-card">${text}</div>`;
         return;
       }
       const list = document.createElement('div');
       list.className = 'task-list';
-      list.appendChild(taskCard(item));
+      items.forEach(item => list.appendChild(taskCard(item)));
       box.appendChild(list);
     }
 
     function renderSidebarItems(workflows) {
       const box = document.getElementById('sidebarHistory');
+      if (currentMode === 'full_agent') {
+        box.innerHTML = '';
+        return;
+      }
       const visible = visibleWorkflows(workflows).slice(0, 12);
       if (!visible.length) {
-        const emptyHint = currentMode === 'full_agent' ? '这个项目还没有对话' : '生成任务后会显示在这里';
-        box.innerHTML = `<div class="sidebar-session"><div><strong>暂无对话</strong><span>${emptyHint}</span></div></div>`;
+        box.innerHTML = '<div class="sidebar-session"><div><strong>暂无对话</strong><span>生成任务后会显示在这里</span></div></div>';
         return;
       }
       box.innerHTML = '';
@@ -2089,6 +2498,7 @@
         selectedWorkflowId = '';
         return;
       }
+      if (transientUserMessage && currentMode !== 'full_agent' && !selectedWorkflowId) return;
       if (!visible.some(item => item.id === selectedWorkflowId)) {
         selectedWorkflowId = visible[0].id;
       }
@@ -2120,13 +2530,15 @@
     function taskCard(item) {
       const action = item.workflow.action || 'execute';
       const card = document.createElement('div');
-      card.className = 'task-card';
+      card.className = `task-card${item.id === selectedWorkflowId ? ' active' : ''}`;
       card.innerHTML = `
         <div class="task-top">
           <span class="tag ${tagClass(item, action)}">${statusLabel(item, action)}</span>
+          ${item.id === selectedWorkflowId ? '<span class="task-meta">当前</span>' : ''}
         </div>
-        <p class="task-title">${escapeHtml(item.workflow.summary)}</p>
+        <p class="task-title">${escapeHtml(workflowTitle(item.workflow))}</p>
         <div class="task-meta">${escapeHtml(shortCommand(item.command))}</div>
+        ${action === 'answer' ? '<div class="task-note">这是一条普通回复，不需要发送到 ArcGIS。</div>' : ''}
         ${item.status === 'approved_for_arcmap' ? '<div class="task-note">已发送到 ArcGIS。请回到 ArcGIS 工具栏点击“执行任务”。</div>' : ''}
         ${failedMessage(item)}
         ${writesData(item.workflow) ? '<div class="task-note warn">这个任务会写出新数据。若当前 MXD 未保存，需要在对话中说明输出文件夹或 GDB。</div>' : ''}
@@ -2139,6 +2551,13 @@
         approveButton.textContent = '发送到 ArcGIS';
         approveButton.onclick = () => approve(item.id);
         actions.appendChild(approveButton);
+      }
+      if (item.id !== selectedWorkflowId) {
+        const viewButton = document.createElement('button');
+        viewButton.className = 'ghost small';
+        viewButton.textContent = '查看对话';
+        viewButton.onclick = () => selectWorkflow(item.id);
+        actions.appendChild(viewButton);
       }
       const deleteButton = document.createElement('button');
       deleteButton.className = 'danger small';
@@ -2189,12 +2608,14 @@
       const action = item.workflow.action || 'execute';
       if (action === 'clarify') return '需要补充信息。';
       if (action === 'unsupported') return '暂不支持。';
+      if (action === 'answer') return '已回答。';
       if (item.status === 'draft') return '任务已生成，等待确认。';
       if (item.status === 'approved_for_arcmap') return '已发送到 ArcGIS，等待工具栏执行。';
       return statusLabel(item, action);
     }
 
     function statusLabel(item, action) {
+      if (action === 'answer') return '已回答';
       if (action === 'clarify') return '需要回答';
       if (action === 'unsupported') return '暂不支持';
       if (item.status === 'draft') return '待确认';
@@ -2207,6 +2628,7 @@
 
     function tagClass(item, action) {
       if (item.status === 'succeeded') return 'done';
+      if (action === 'answer') return 'done';
       if (action === 'clarify') return 'clarify';
       if (action === 'unsupported' || item.status === 'failed') return 'unsupported';
       return 'execute';

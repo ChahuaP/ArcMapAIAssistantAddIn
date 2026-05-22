@@ -43,6 +43,7 @@ def prepare_workflow(workflow: Dict[str, Any], catalog: OperationCatalog, contex
     apply_default_output_names(prepared, catalog)
     apply_project_output_location(prepared, catalog, context)
     apply_output_name_timestamp(prepared, catalog)
+    remove_generated_output_add_layers(prepared, catalog)
     validate_workflow(prepared, catalog)
     validate_workflow_semantics(prepared, catalog, context)
     return prepared
@@ -54,15 +55,15 @@ def validate_workflow(workflow: Dict[str, Any], catalog: OperationCatalog) -> No
     if not isinstance(workflow.get("summary"), str) or not workflow["summary"].strip():
         raise ValidationError("Workflow summary is required.")
     action = workflow.get("action")
-    if action not in ("execute", "clarify", "unsupported"):
-        raise ValidationError("Workflow action must be execute, clarify, or unsupported.")
+    if action not in ("execute", "clarify", "unsupported", "answer"):
+        raise ValidationError("Workflow action must be execute, clarify, unsupported, or answer.")
     steps = workflow.get("steps")
     if not isinstance(steps, list):
         raise ValidationError("Workflow steps must be an array.")
     if action == "execute" and not steps:
         raise ValidationError("Executable workflow must contain at least one step.")
-    if action in ("clarify", "unsupported") and steps:
-        raise ValidationError("Clarify and unsupported workflows must not contain executable steps.")
+    if action in ("clarify", "unsupported", "answer") and steps:
+        raise ValidationError("Clarify, unsupported, and answer workflows must not contain executable steps.")
 
     seen_step_ids = set()
     for step in steps:
@@ -74,6 +75,9 @@ def normalize_workflow(workflow: Dict[str, Any]) -> None:
     if isinstance(workflow.get("action"), str):
         workflow["action"] = workflow["action"].strip().lower()
     workflow.setdefault("steps", [])
+    for step in workflow.get("steps") or []:
+        if isinstance(step, dict) and "id" in step:
+            step["id"] = str(step["id"])
 
 
 def apply_default_output_names(workflow: Dict[str, Any], catalog: OperationCatalog) -> None:
@@ -114,6 +118,28 @@ def apply_output_name_timestamp(workflow: Dict[str, Any], catalog: OperationCata
         if not output_name or _has_timestamp_suffix(str(output_name)):
             continue
         arguments["output_name"] = "%s_%s" % (output_name, suffix)
+
+
+def remove_generated_output_add_layers(workflow: Dict[str, Any], catalog: OperationCatalog) -> None:
+    if workflow.get("action") != "execute":
+        return
+    generated_names: set[str] = set()
+    kept_steps = []
+    for step in workflow.get("steps") or []:
+        operation_id = step.get("operation")
+        arguments = step.get("arguments")
+        if (
+            operation_id == "layer.add_layer"
+            and isinstance(arguments, dict)
+            and _path_points_to_generated_output(arguments.get("path"), generated_names)
+        ):
+            continue
+        kept_steps.append(step)
+        if operation_id in catalog.operations:
+            operation = catalog.operations[operation_id]
+            if operation.get("side_effects") == "writes_data" and isinstance(arguments, dict):
+                _register_generated_output_name(arguments.get("output_name"), generated_names)
+    workflow["steps"] = kept_steps
 
 
 def apply_project_output_location(workflow: Dict[str, Any], catalog: OperationCatalog, context: Dict[str, Any]) -> None:
@@ -164,8 +190,8 @@ def validate_workflow_semantics(workflow: Dict[str, Any], catalog: OperationCata
 
 def friendly_validation_message(error: Exception) -> str:
     message = str(error)
-    if "Workflow action must be execute, clarify, or unsupported." in message:
-        return "任务类型不明确。请说明是要执行操作、继续补充信息，还是这个能力当前不支持。"
+    if "Workflow action must be execute" in message:
+        return "任务类型不明确。请说明是要执行操作、普通回答、继续补充信息，还是这个能力当前不支持。"
     if "Step missing field: operation" in message:
         return "我还不能确定要执行哪一种 GIS 操作。请把任务再说具体一点，比如要缓冲、裁剪、选择、导出，还是添加图层。"
     if "Step missing field: arguments" in message:
@@ -251,24 +277,39 @@ def _validate_layer_references(
     for name in _layer_argument_names(operation):
         if name not in arguments:
             continue
-        values = arguments[name] if isinstance(arguments[name], list) else [arguments[name]]
-        for value in values:
-            if not isinstance(value, str):
-                continue
-            if value.startswith("from_step:"):
-                ref = value[len("from_step:"):]
-                if ref not in seen_step_ids:
-                    raise ValidationError("步骤引用“%s”还没有产生。请检查工作流顺序。" % value)
-                continue
-            matches = _matching_layers(value, available_layers)
-            if len(matches) == 1:
-                continue
-            if len(matches) > 1:
-                raise ValidationError("“%s”匹配到多个图层。请说明要使用哪一个图层。" % value)
-            candidates = _closest_candidates(value, [layer["name"] for layer in available_layers if layer.get("name")])
-            if candidates:
-                raise ValidationError("当前地图里没有“%s”图层。可用图层有：%s。请确认要使用哪个图层。" % (value, "、".join(candidates)))
-            raise ValidationError("当前地图里没有“%s”图层。请先添加图层，或说明要使用哪个已有图层。" % value)
+        if isinstance(arguments[name], list):
+            arguments[name] = [
+                _validate_and_normalize_layer_reference(value, available_layers, seen_step_ids)
+                for value in arguments[name]
+            ]
+        else:
+            arguments[name] = _validate_and_normalize_layer_reference(arguments[name], available_layers, seen_step_ids)
+
+
+def _validate_and_normalize_layer_reference(
+    value: Any,
+    available_layers: List[Dict[str, Any]],
+    seen_step_ids: set[str]
+) -> Any:
+    if not isinstance(value, str):
+        return value
+    if value.startswith("from_step:"):
+        ref = value[len("from_step:"):]
+        if ref not in seen_step_ids:
+            raise ValidationError("步骤引用“%s”还没有产生。请检查工作流顺序。" % value)
+        return value
+    matches = _matching_layers_exact(value, available_layers)
+    if len(matches) == 1:
+        layer_ref = matches[0].get("layer_ref")
+        if isinstance(layer_ref, str) and layer_ref:
+            return layer_ref
+        return value
+    if len(matches) > 1:
+        raise ValidationError("“%s”匹配到多个图层。请说明要使用哪一个图层。" % value)
+    candidates = _available_layer_names(available_layers)
+    if candidates:
+        raise ValidationError("当前地图里没有精确匹配“%s”的图层。可用图层有：%s。请从当前图层列表中选择一个。" % (value, "、".join(candidates)))
+    raise ValidationError("当前地图里没有“%s”图层。请先添加图层，或说明要使用哪个已有图层。" % value)
 
 
 def _validate_field_references(
@@ -299,7 +340,7 @@ def _validate_field_references(
     layer_value = _primary_layer_value(operation, arguments)
     layers = available_layers
     if layer_value:
-        matched = _matching_layers(layer_value, available_layers)
+        matched = _matching_layers_exact(layer_value, available_layers)
         if len(matched) == 1:
             layers = matched
     if any(layer.get("fields_unknown") for layer in layers):
@@ -375,6 +416,7 @@ def _initial_layer_index(context: Dict[str, Any]) -> List[Dict[str, Any]]:
             "layer_ref": layer.get("layer_ref"),
             "name": layer.get("name"),
             "longName": layer.get("longName"),
+            "dataSource": layer.get("dataSource"),
             "fields": layer.get("fields", []),
             "fields_unknown": layer.get("fields_unknown", False)
         })
@@ -384,24 +426,26 @@ def _initial_layer_index(context: Dict[str, Any]) -> List[Dict[str, Any]]:
 def _layer_argument_names(operation: Dict[str, Any]) -> List[str]:
     properties = operation.get("parameters_schema", {}).get("properties", {})
     names = []
-    for name in properties:
+    for name, property_schema in properties.items():
+        if isinstance(property_schema, dict) and property_schema.get("x-geopilot-kind") == "layer":
+            names.append(name)
+            continue
         lowered = name.lower()
         if "layer" in lowered and "output" not in lowered:
             names.append(name)
     return names
 
 
-def _matching_layers(value: str, layers: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _matching_layers_exact(value: str, layers: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     raw = value[len("layer_ref:"):] if value.startswith("layer_ref:") else value
     matches = []
     for layer in layers:
-        if raw in (layer.get("layer_ref"), layer.get("name"), layer.get("longName")):
-            matches.append(layer)
-    if matches:
-        return matches
-    lowered = raw.lower()
-    for layer in layers:
-        if lowered in ((layer.get("name") or "").lower(), (layer.get("longName") or "").lower(), (layer.get("layer_ref") or "").lower()):
+        if raw in (
+            layer.get("layer_ref"),
+            layer.get("name"),
+            layer.get("longName"),
+            layer.get("dataSource")
+        ):
             matches.append(layer)
     return matches
 
@@ -431,14 +475,15 @@ def _condition_fields(condition: Any) -> List[str]:
     return [str(field)] if field else []
 
 
-def _closest_candidates(value: str, names: List[str]) -> List[str]:
-    if not names:
-        return []
-    lowered = value.lower()
-    matches = [name for name in names if lowered in name.lower() or name.lower() in lowered]
-    if matches:
-        return matches[:5]
-    return names[:5]
+def _available_layer_names(layers: List[Dict[str, Any]]) -> List[str]:
+    names = []
+    for layer in layers:
+        name = layer.get("name")
+        if name and name not in names:
+            names.append(str(name))
+        if len(names) >= 10:
+            break
+    return names
 
 
 def _default_output_name_for_step(operation_id: str, arguments: Dict[str, Any]) -> str | None:
@@ -462,3 +507,26 @@ def _safe_output_name(value: str) -> str:
 
 def _has_timestamp_suffix(value: str) -> bool:
     return bool(re.search(r"(?:^|_)\d{8}(?:_\d{6})?$", value))
+
+
+def _register_generated_output_name(output_name: Any, generated_names: set[str]) -> None:
+    if not output_name:
+        return
+    text = str(output_name).lower()
+    generated_names.add(text)
+    generated_names.add(_without_timestamp_suffix(text))
+
+
+def _path_points_to_generated_output(path: Any, generated_names: set[str]) -> bool:
+    if not path or not generated_names:
+        return False
+    value = str(path).replace("/", "\\")
+    name = Path(value).stem.lower()
+    return name in generated_names or _without_timestamp_suffix(name) in generated_names
+
+
+def _without_timestamp_suffix(value: str) -> str:
+    match = re.match(r"^(.*)_\d{8}_\d{6}$", value)
+    if match:
+        return match.group(1)
+    return value

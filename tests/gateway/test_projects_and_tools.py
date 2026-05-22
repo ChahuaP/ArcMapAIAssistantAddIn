@@ -1,6 +1,7 @@
 import contextlib
 import pathlib
 import tempfile
+import time
 import unittest
 
 from gateway_py3 import tool_builder
@@ -76,6 +77,36 @@ class ProjectAndToolTests(unittest.TestCase):
             self.assertEqual(store.list_project_memories(project["id"]), [])
             self.assertEqual(store.list_project_events(project["id"]), [])
 
+    def test_project_order_does_not_change_when_activated(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            first_dir = root / "first"
+            second_dir = root / "second"
+            first_dir.mkdir()
+            second_dir.mkdir()
+            store = WorkflowStore(root / "workflows.sqlite")
+
+            first = store.create_project("first", str(first_dir))
+            time.sleep(0.01)
+            second = store.create_project("second", str(second_dir))
+            store.set_active_project(first["id"])
+            projects = store.list_projects()
+
+        self.assertEqual([project["id"] for project in projects], [second["id"], first["id"]])
+
+    def test_workflow_order_does_not_change_when_status_changes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            store = WorkflowStore(root / "workflows.sqlite")
+            first = store.create_draft("first", "hash", {"action": "clarify", "summary": "继续补充。", "steps": []}, [])
+            time.sleep(0.01)
+            second = store.create_draft("second", "hash", {"action": "clarify", "summary": "继续补充。", "steps": []}, [])
+
+            store.approve(first["id"])
+            rows = store.list_recent(limit=2)
+
+        self.assertEqual([row["id"] for row in rows], [second["id"], first["id"]])
+
     def test_toolbuilder_creates_disabled_pending_tool(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
@@ -147,6 +178,88 @@ class ProjectAndToolTests(unittest.TestCase):
 
                 with self.assertRaises(Exception):
                     tool_builder.enable_tool(store, tool["id"])
+
+    def test_toolbuilder_deletes_pending_tool_files_and_row(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            store = WorkflowStore(root / "workflows.sqlite")
+            runtime = AgentToolRuntime(self.catalog, store, _context())
+
+            with _temporary_tool_roots(root):
+                result = runtime.handle("toolbuilder_create_draft", {
+                    "name": "测试工具",
+                    "capability": "执行测试能力",
+                    "operation_spec": _custom_spec(),
+                    "executor_code": "def execute(context, arguments, step_outputs):\n    return {'ok': True}\n",
+                    "tests": []
+                })
+                tool_id = result["tool"]["id"]
+                pending_dir = tool_builder.PENDING_ROOT / tool_id
+
+                deleted = tool_builder.delete_tool(store, tool_id)
+
+                self.assertTrue(deleted["ok"])
+                self.assertFalse(pending_dir.exists())
+                with self.assertRaises(KeyError):
+                    store.get_pending_tool(tool_id)
+
+    def test_toolbuilder_deletes_enabled_tool_and_catalog_entry(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            store = WorkflowStore(root / "workflows.sqlite")
+            runtime = AgentToolRuntime(self.catalog, store, _context())
+
+            with _temporary_tool_roots(root):
+                result = runtime.handle("toolbuilder_create_draft", {
+                    "name": "测试工具",
+                    "capability": "执行测试能力",
+                    "operation_spec": _custom_spec(),
+                    "executor_code": "def execute(context, arguments, step_outputs):\n    return {'ok': True}\n",
+                    "tests": []
+                })
+                tool_id = result["tool"]["id"]
+                tool_builder.enable_tool(store, tool_id)
+                enabled_dir = tool_builder.ENABLED_ROOT / tool_id
+                self.assertIn("custom.demo_tool", OperationCatalog().operations)
+
+                deleted = tool_builder.delete_tool(store, tool_id)
+
+                self.assertTrue(deleted["ok"])
+                self.assertFalse(enabled_dir.exists())
+                self.assertNotIn("custom.demo_tool", OperationCatalog().operations)
+
+    def test_enabled_tool_is_loaded_into_catalog_with_canonical_schema(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            store = WorkflowStore(root / "workflows.sqlite")
+            runtime = AgentToolRuntime(self.catalog, store, _context())
+            spec = _custom_spec()
+            spec["parameters_schema"] = {
+                "input_layer": {"type": "layer", "required": True, "description": "输入图层"},
+                "output_name": {"type": "string", "required": True, "description": "输出名称"},
+                "output_workspace": {"type": "string", "required": False, "description": "输出目录"}
+            }
+            spec["context_requirements"] = "需要图层"
+            spec["output_policy"] = "写出新数据"
+
+            with _temporary_tool_roots(root):
+                result = runtime.handle("toolbuilder_create_draft", {
+                    "name": "测试工具",
+                    "capability": "执行测试能力",
+                    "operation_spec": spec,
+                    "executor_code": "def execute(context, arguments, step_outputs):\n    return {'ok': True}\n",
+                    "tests": []
+                })
+                tool_builder.enable_tool(store, result["tool"]["id"])
+                catalog = OperationCatalog()
+
+        operation = catalog.get("custom.demo_tool")
+        schema = operation["parameters_schema"]
+        self.assertEqual(schema["type"], "object")
+        self.assertEqual(schema["required"], ["input_layer", "output_name"])
+        self.assertEqual(schema["properties"]["input_layer"]["type"], "string")
+        self.assertEqual(operation["context_requirements"], {})
+        self.assertEqual(operation["output_policy"], {})
 
 
 def _context():

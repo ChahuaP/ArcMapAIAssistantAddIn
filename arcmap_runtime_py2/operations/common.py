@@ -37,50 +37,42 @@ def find_layer(context, layer_value, step_outputs=None):
     if not layer_value:
         raise OperationError("Layer is required.")
     raw = _text(layer_value)
-    explicit_layer_ref = False
     if raw.startswith(u"layer_ref:"):
         raw = raw[len(u"layer_ref:"):]
-        explicit_layer_ref = True
     if raw.startswith(u"layer:"):
-        explicit_layer_ref = True
+        return _find_layer_by_ref(raw)
     if raw.startswith(u"from_step:"):
         return _find_layer_from_step(raw[len(u"from_step:"):], step_outputs or {})
 
     matches = []
     for layer in context.get("layers", []):
-        if raw == layer.get("layer_ref") or raw == layer.get("name") or raw == layer.get("longName"):
+        if raw in (layer.get("layer_ref"), layer.get("name"), layer.get("longName"), layer.get("dataSource")):
             matches.append(layer)
-    if not matches:
-        lowered = raw.lower()
-        for layer in context.get("layers", []):
-            if lowered == (layer.get("name") or "").lower() or lowered == (layer.get("longName") or "").lower():
-                matches.append(layer)
-    mxd = current_mxd()
-    df = active_data_frame(mxd)
-    layers = arcpy.mapping.ListLayers(mxd, "", df)
 
     if len(matches) != 1:
-        live_match = _find_live_layer(raw, layers)
+        live_match = _find_live_layer_exact(raw)
         if live_match is not None:
             return live_match
         if not matches:
             raise OperationError(u"Layer not found: %s" % raw)
         raise OperationError(u"Layer is ambiguous: %s" % raw)
 
-    if not explicit_layer_ref:
-        live_match = _find_live_layer(raw, layers)
-        if live_match is not None:
-            return live_match
-
     layer_ref = matches[0].get("layer_ref", "")
     if layer_ref.startswith("from_step:"):
         return _find_layer_from_step(layer_ref[len("from_step:"):], step_outputs or {})
     if not layer_ref.startswith("layer:"):
-        live_match = _find_live_layer(raw, layers)
+        live_match = _find_live_layer_exact(raw)
         if live_match is not None:
             return live_match
         raise OperationError(u"Layer metadata is not executable: %s" % raw)
+    return _find_layer_by_ref(layer_ref)
+
+
+def _find_layer_by_ref(layer_ref):
     index = int(layer_ref.split(":")[1])
+    mxd = current_mxd()
+    df = active_data_frame(mxd)
+    layers = arcpy.mapping.ListLayers(mxd, "", df)
     if index >= len(layers):
         raise OperationError("Layer index no longer exists: %s" % layer_ref)
     return layers[index]
@@ -213,7 +205,7 @@ def _layer_source_exists(mxd, df, path):
 
 
 def _find_layer_from_step(step_id, step_outputs):
-    result = step_outputs.get(step_id)
+    result = _step_output(step_outputs, step_id)
     if not isinstance(result, dict):
         raise OperationError(u"Step output not found: %s" % step_id)
     source = result.get("output") or result.get("added_layer")
@@ -222,29 +214,45 @@ def _find_layer_from_step(step_id, step_outputs):
     mxd = current_mxd()
     df = active_data_frame(mxd)
     layers = arcpy.mapping.ListLayers(mxd, "", df)
-    match = _find_live_layer(_text(source), layers)
+    match = _find_live_layer_exact(_text(source), layers)
     if match is not None:
         return match
-    name = os.path.splitext(os.path.basename(_text(source)))[0]
-    match = _find_live_layer(name, layers)
-    if match is not None:
-        return match
+    name = result.get("layer_name")
+    if name:
+        match = _find_live_layer_exact(_text(name), layers)
+        if match is not None:
+            return match
+    output_name = result.get("output_name")
+    if output_name:
+        match = _find_live_layer_exact(_text(output_name), layers)
+        if match is not None:
+            return match
     raise OperationError(u"Layer from step not found in map: %s" % step_id)
 
 
-def _find_live_layer(raw, layers):
+def _step_output(step_outputs, step_id):
+    if step_id in step_outputs:
+        return step_outputs.get(step_id)
+    expected = _text(step_id)
+    for key, value in step_outputs.items():
+        if _text(key) == expected:
+            return value
+    return None
+
+
+def _find_live_layer_exact(raw, layers=None):
     value = _text(raw)
     expected_path = _normalize_path(value)
-    expected_name = os.path.splitext(os.path.basename(value))[0] if value else value
+    if layers is None:
+        mxd = current_mxd()
+        df = active_data_frame(mxd)
+        layers = arcpy.mapping.ListLayers(mxd, "", df)
     matches = []
     for layer in layers:
         layer_name = getattr(layer, "name", "")
         long_name = getattr(layer, "longName", layer_name)
         source = _safe_data_source(layer)
         if value in (layer_name, long_name):
-            matches.append(layer)
-            continue
-        if expected_name and expected_name in (layer_name, long_name):
             matches.append(layer)
             continue
         if source and _normalize_path(source) == expected_path:

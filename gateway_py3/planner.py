@@ -26,7 +26,8 @@ Hard rules:
 - Never invent ArcPy tools. Workflow steps may only use registered operation ids from the catalog.
 - Never execute anything. You only propose a workflow; the user and ArcGIS runtime execute later.
 - The final proposal must be submitted with workflow_propose, or as a JSON object with action, summary, and steps.
-- action must be exactly execute, clarify, or unsupported.
+- action must be exactly execute, clarify, unsupported, or answer.
+- answer is for normal conversation that does not need ArcGIS execution, such as explaining previous project activity.
 - clarify must be one clear Chinese question the user can answer.
 - unsupported must explain the missing capability in Chinese and contain no executable steps.
 - execute must contain ordered steps with id, operation, arguments, and reason.
@@ -43,12 +44,16 @@ Hard rules:
 - Do not stop after the first file_resolve clarify when child_directories is not empty. You must try at least one plausible child directory before asking the user.
 - Only ask the user to clarify after file_resolve has no useful child_directories, too many equal candidates, or no plausible next directory remains.
 - Final clarify text must be a normal Chinese question. Summarize what was checked briefly; do not dump long directory lists unless the user explicitly needs choices.
+- All current ArcGIS layers are listed in arcgis_context.layers. You choose the intended layer from that list.
+- For existing ArcGIS layers, pass the chosen layer_ref, such as layer:0, in layer arguments. Do not pass a similar layer name when layer names are close.
 - If a later step uses a dataset produced by an earlier step, reference it as from_step:step_id when the layer name is not enough.
+- Writes_data operations add their generated output layer to ArcGIS automatically. Do not add layer.add_layer for outputs created by earlier workflow steps.
 - Do not mention JSON, schema, tool calls, operation ids, catalog internals, or validation internals to the user.
 - Do not overwrite existing data.
 - If the current mode is full_agent, prefer the active project workdir for local data lookup and output planning.
 - In full_agent mode, generated data should use arcgis_context.project_output_workspace when the user does not provide an output location.
 - If existing tools cannot satisfy the user, return unsupported with a clear missing_capability summary. If the user explicitly asks to create that missing tool, call toolbuilder_create_draft and explain that the tool waits for review before it can be enabled.
+- Custom operations already present in operation_index are enabled and reviewed. Do not tell the user they still need review.
 """
 
 
@@ -141,11 +146,9 @@ class AgenticPlanner:
                         messages.append(_file_search_nudge_message())
                         file_search_nudges += 1
                         continue
-                    summary = (
-                        content_text
-                        if content_text and not _generic_clarification(content_text)
-                        else pending_question or "这个任务还不够明确，请补充要操作的数据、处理方式或输出位置。"
-                    )
+                    if content_text and not _generic_clarification(content_text):
+                        return self._store_answer(command, context, content_text, trace, mode, project_id)
+                    summary = pending_question or "这个任务还不够明确，请补充要操作的数据、处理方式或输出位置。"
                     return self._store_clarification(command, context, summary, trace, mode, project_id)
                 if (
                     _premature_file_clarification(content_workflow, trace)
@@ -203,6 +206,7 @@ class AgenticPlanner:
             "arcgis_context": _context_summary(context),
             "project": _project_summary(project, self.store) if project else None,
             "operation_index": operation_index,
+            "custom_tools": _custom_tool_status(self.store),
             "recent_conversation": _recent_conversation(self.store, project.get("id") if project else None, 18 if mode == FULL_AGENT_MODE else 6)
         }
         return [
@@ -265,6 +269,23 @@ class AgenticPlanner:
         })
         return row
 
+    def _store_answer(
+        self,
+        command: str,
+        context: Dict[str, Any],
+        summary: str,
+        trace: List[Dict[str, Any]],
+        mode: str = "semi_agent",
+        project_id: str | None = None
+    ) -> Dict[str, Any]:
+        workflow = {"action": "answer", "summary": summary, "steps": []}
+        row = self.store.create_draft(command, context_hash(context), workflow, trace, mode=mode, project_id=project_id or "")
+        write_event("agent.final_workflow", {
+            "workflow_id": row["id"],
+            "workflow": workflow
+        })
+        return row
+
 
 def _context_summary(context: Dict[str, Any]) -> Dict[str, Any]:
     layers = []
@@ -277,7 +298,8 @@ def _context_summary(context: Dict[str, Any]) -> Dict[str, Any]:
             "field_types": {field.get("name"): field.get("type") for field in layer.get("fields", [])[:80] if field.get("name")},
             "selected_count": layer.get("selected_count"),
             "visible": layer.get("visible"),
-            "geometry_type": layer.get("geometry_type")
+            "geometry_type": layer.get("geometry_type"),
+            "dataSource": layer.get("dataSource")
         })
     return {
         "mxd_path": context.get("mxd_path"),
@@ -319,6 +341,22 @@ def _context_for_project(context: Dict[str, Any], project: Dict[str, Any]) -> Di
 
 def _project_output_workspace(project: Dict[str, Any]) -> Path:
     return Path(project["workdir"]).expanduser().resolve() / "GeoPilot_Output"
+
+
+def _custom_tool_status(store: WorkflowStore) -> List[Dict[str, str]]:
+    tools = []
+    try:
+        rows = store.list_pending_tools()
+    except Exception:
+        return tools
+    for row in rows:
+        spec = (row.get("payload") or {}).get("operation_spec") or {}
+        tools.append({
+            "name": str(row.get("name") or ""),
+            "status": str(row.get("status") or ""),
+            "operation_id": str(spec.get("id") or "")
+        })
+    return tools
 
 
 def _recent_conversation(store: WorkflowStore, project_id: str | None = None, limit: int = 6) -> List[Dict[str, Any]]:
