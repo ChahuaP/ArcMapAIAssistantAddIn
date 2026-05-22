@@ -30,7 +30,12 @@ class DiagnosticsTests(unittest.TestCase):
                 _write(install_dir / "StartGateway.cmd", "")
                 _write(install_dir / "VERSION", "0.10.5")
                 _write(addin_dir / "arcmapaiassistantaddin.esriaddin", "")
-                _write(appdata / "ArcMapAIAssistant" / "config.json", json.dumps({"deepseek_api_key": "sk-test"}))
+                _write(appdata / "ArcMapAIAssistant" / "config.json", json.dumps({
+                    "providers": {
+                        "deepseek": {"api_key": "unit-test-key"},
+                        "minimax": {"api_key": "unit-test-key"}
+                    }
+                }))
                 _write(
                     appdata / "ArcMapAIAssistant" / "install.json",
                     json.dumps({"install_dir": str(install_dir), "app_version": "0.10.5", "addin_dir": str(addin_dir)}),
@@ -42,7 +47,7 @@ class DiagnosticsTests(unittest.TestCase):
                 self.assertEqual(checks["installed_catalog"]["status"], "ok")
                 self.assertEqual(checks["installed_version"]["status"], "ok")
                 self.assertEqual(checks["installed_addin"]["status"], "ok")
-                self.assertEqual(checks["deepseek_key"]["status"], "ok")
+            self.assertEqual(checks["provider_key"]["status"], "ok")
         finally:
             _restore_env("APPDATA", old_appdata)
             _restore_env("LOCALAPPDATA", old_localappdata)

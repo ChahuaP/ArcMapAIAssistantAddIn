@@ -29,9 +29,16 @@
       --violet-soft: #f1f0ff;
       --shadow: 0 18px 44px rgba(8, 58, 78, .12);
       --soft-shadow: 0 10px 24px rgba(14, 27, 42, .07);
+      --mode-panel: rgba(255, 255, 255, .9);
+      --mode-panel-head: rgba(255, 255, 255, .72);
+      --mode-chat-user: #087c91;
+      --mode-chat-assistant: #ffffff;
+      --mode-task-bg: #ffffff;
+      --mode-top-accent: rgba(8, 124, 145, .18);
     }
 
     * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
     html, body { width: 100%; height: 100%; min-width: 100%; }
     body {
       margin: 0;
@@ -42,6 +49,57 @@
         repeating-linear-gradient(90deg, rgba(8, 124, 145, .035) 0, rgba(8, 124, 145, .035) 1px, transparent 1px, transparent 32px);
       font: 15px/1.55 "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", Arial, sans-serif;
       overflow: hidden;
+    }
+    body.mode-full {
+      --page: #0c0c0e;
+      --ink: #efe6d1;
+      --ink-strong: #fff7df;
+      --muted: #d8c99c;
+      --subtle: #a9925d;
+      --line: #5d4b25;
+      --line-strong: #8a7134;
+      --panel: #14120f;
+      --panel-soft: #211b12;
+      --primary: #c9a646;
+      --primary-strong: #f0cf72;
+      --primary-soft: #30240f;
+      --green: #c9a646;
+      --green-soft: #30240f;
+      --amber: #f0cf72;
+      --amber-soft: #302512;
+      --red: #e16b5f;
+      --red-soft: #321c19;
+      --shadow: 0 24px 70px rgba(0, 0, 0, .42);
+      --soft-shadow: 0 14px 34px rgba(0, 0, 0, .28);
+      --mode-panel: #14120f;
+      --mode-panel-head: #1b160e;
+      --mode-chat-user: #b78a22;
+      --mode-chat-assistant: #1b160e;
+      --mode-task-bg: #1b160e;
+      --mode-top-accent: rgba(201, 166, 70, .18);
+      background:
+        linear-gradient(180deg, #10100f, #09090b),
+        radial-gradient(circle at 20% 0, rgba(201, 166, 70, .18), transparent 32%),
+        repeating-linear-gradient(90deg, rgba(201, 166, 70, .045) 0, rgba(201, 166, 70, .045) 1px, transparent 1px, transparent 36px);
+    }
+    body.mode-semi {
+      --mode-panel: rgba(255, 255, 255, .9);
+      --mode-panel-head: rgba(255, 255, 255, .72);
+      --mode-chat-user: #087c91;
+      --mode-chat-assistant: #ffffff;
+      --mode-task-bg: #ffffff;
+      --mode-top-accent: rgba(8, 124, 145, .18);
+    }
+    body.mode-full .brand-mark {
+      background: linear-gradient(135deg, #2b2415, #c9a646);
+      color: #1a1307;
+      box-shadow: 0 16px 34px rgba(201, 166, 70, .22);
+    }
+    body.mode-full .brand h1 {
+      color: var(--ink-strong);
+    }
+    body.mode-full .brand p {
+      color: var(--muted);
     }
 
     button, input, textarea { font: inherit; }
@@ -94,7 +152,7 @@
       outline-offset: 2px;
     }
 
-    input, textarea {
+    input, textarea, select {
       width: 100%;
       border: 1px solid var(--line);
       border-radius: 8px;
@@ -103,11 +161,11 @@
       padding: 10px 12px;
       transition: border-color .18s ease, box-shadow .18s ease;
     }
-    input:focus, textarea:focus {
+    input:focus, textarea:focus, select:focus {
       border-color: rgba(8, 124, 145, .48);
       box-shadow: 0 0 0 4px rgba(8, 124, 145, .10);
     }
-    textarea { resize: vertical; min-height: 72px; }
+    textarea { resize: vertical; min-height: 96px; }
     label { display: block; margin-bottom: 7px; color: var(--ink-strong); font-weight: 720; }
 
     .app {
@@ -120,11 +178,17 @@
     header {
       padding: 18px 22px 12px;
     }
+    body.mode-full header {
+      background: linear-gradient(180deg, rgba(201, 166, 70, .10), transparent);
+    }
+    body.mode-semi header {
+      background: linear-gradient(180deg, rgba(8, 124, 145, .08), transparent);
+    }
     .topbar {
       max-width: 1760px;
       margin: 0 auto;
       display: grid;
-      grid-template-columns: minmax(280px, 1fr) minmax(600px, 820px);
+      grid-template-columns: minmax(250px, 1fr) minmax(380px, 520px) minmax(520px, 760px);
       gap: 18px;
       align-items: center;
     }
@@ -174,6 +238,77 @@
       display: grid;
       gap: 10px;
     }
+    .mode-hub {
+      min-width: 0;
+      padding: 8px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, .9);
+      box-shadow: var(--soft-shadow);
+    }
+    body.mode-full .mode-hub {
+      background: rgba(19, 17, 14, .94);
+      border-color: #6f5a2e;
+      color: var(--ink);
+    }
+    body.mode-full .mode-label {
+      color: var(--muted);
+    }
+    body.mode-full .mode-option {
+      color: var(--muted);
+    }
+    body.mode-full .mode-option:hover {
+      background: #241d11;
+      border-color: #4d3e20;
+    }
+    body.mode-full .mode-option.active {
+      color: #17110a;
+      background: linear-gradient(135deg, #c9a646, #f0cf72);
+      border-color: #f0cf72;
+      box-shadow: 0 16px 34px rgba(201, 166, 70, .24);
+    }
+    .mode-label {
+      margin: 0 0 6px 3px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 760;
+    }
+    .mode-switch {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 7px;
+    }
+    .mode-option {
+      min-height: 54px;
+      text-align: left;
+      border-color: transparent;
+      background: transparent;
+      color: var(--muted);
+      box-shadow: none;
+    }
+    .mode-option strong,
+    .mode-option span {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .mode-option strong {
+      color: inherit;
+      font-size: 14px;
+      line-height: 1.2;
+    }
+    .mode-option span {
+      margin-top: 4px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+    .mode-option.active {
+      color: #fff;
+      background: var(--primary);
+      border-color: var(--primary);
+      box-shadow: 0 12px 26px rgba(8, 124, 145, .22);
+    }
     .quick-actions {
       display: flex;
       justify-content: flex-end;
@@ -187,6 +322,27 @@
       padding: 10px 12px;
       background: rgba(255, 255, 255, .88);
       box-shadow: var(--soft-shadow);
+    }
+    body.mode-full button.ghost {
+      background: #171513;
+      border-color: #4d3e20;
+      color: var(--ink);
+    }
+    body.mode-full button.ghost:hover {
+      background: #241d11;
+      border-color: #7b642f;
+      color: var(--primary-strong);
+    }
+    body.mode-full button.primary {
+      color: #17110a;
+      background: linear-gradient(135deg, #c9a646, #f0cf72);
+      border-color: #f0cf72;
+      box-shadow: 0 16px 34px rgba(201, 166, 70, .22);
+    }
+    body.mode-full button.success {
+      color: #17110a;
+      background: linear-gradient(135deg, #c9a646, #f0cf72);
+      border-color: #f0cf72;
     }
     .status-tile span {
       display: block;
@@ -204,6 +360,24 @@
     .status-tile.ok { background: var(--green-soft); border-color: #a8e6bd; }
     .status-tile.warn { background: var(--amber-soft); border-color: #f5d48d; }
     .status-tile.bad { background: var(--red-soft); border-color: #ffc8c8; }
+    body.mode-full .status-tile.ok {
+      background: #e9f9ef;
+      border-color: #a8e6bd;
+    }
+    body.mode-full .status-tile.warn {
+      background: #fff6df;
+      border-color: #f5d48d;
+    }
+    body.mode-full .status-tile.bad {
+      background: #fff0f0;
+      border-color: #ffc8c8;
+    }
+    body.mode-full .status-tile span {
+      color: #66758a;
+    }
+    body.mode-full .status-tile strong {
+      color: #071421;
+    }
 
     main {
       min-height: 0;
@@ -212,8 +386,242 @@
       margin: 0 auto;
       padding: 0 22px 22px;
       display: grid;
-      grid-template-columns: minmax(560px, 1fr) minmax(330px, 400px);
+      grid-template-columns: 260px minmax(560px, 1fr) minmax(330px, 400px);
       gap: 16px;
+    }
+    .project-sidebar {
+      min-height: 0;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      border-radius: 8px;
+      border: 1px solid #243040;
+      background: #1f232a;
+      color: #d8dde5;
+      box-shadow: var(--shadow);
+    }
+    .sidebar-head {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 15px 14px 9px;
+    }
+    .sidebar-head h2 {
+      margin: 0;
+      color: #9aa4b2;
+      font-size: 13px;
+      font-weight: 740;
+    }
+    .sidebar-head button {
+      min-height: 30px;
+      padding: 4px 9px;
+      border-color: rgba(255, 255, 255, .10);
+      background: rgba(255, 255, 255, .08);
+      color: #e8edf4;
+    }
+    .mode-note {
+      margin: 0 10px 12px;
+      padding: 10px;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, .07);
+      border: 1px solid rgba(255, 255, 255, .08);
+    }
+    .mode-note strong {
+      display: block;
+      color: #fff;
+      font-size: 13px;
+    }
+    .mode-note span {
+      display: block;
+      margin-top: 3px;
+      color: #aeb7c5;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .sidebar-project-form {
+      flex: 0 0 auto;
+      margin: 0 10px 12px;
+      padding: 10px;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, .07);
+      border: 1px solid rgba(255, 255, 255, .08);
+      display: grid;
+      gap: 8px;
+    }
+    .sidebar-project-form[hidden] { display: none; }
+    .sidebar-project-form label {
+      margin: 0;
+      color: #d8dde5;
+      font-size: 12px;
+    }
+    .sidebar-project-form input {
+      min-height: 34px;
+      padding: 7px 9px;
+      background: #11151b;
+      border-color: #333c4a;
+      color: #eef3f8;
+      font-size: 13px;
+    }
+    .sidebar-scroll {
+      min-height: 0;
+      overflow: auto;
+      padding: 0 8px 12px;
+    }
+    .sidebar-section-title {
+      margin: 12px 5px 7px;
+      color: #8c96a5;
+      font-size: 12px;
+      font-weight: 760;
+    }
+    .sidebar-project,
+    .sidebar-session,
+    .sidebar-session-main {
+      width: 100%;
+      display: grid;
+      gap: 3px;
+      border-radius: 8px;
+      padding: 8px 10px;
+      background: transparent;
+      color: #c8d0da;
+      text-align: left;
+      border: 1px solid transparent;
+      box-shadow: none;
+    }
+    .sidebar-session {
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 6px;
+      padding: 3px;
+    }
+    .sidebar-session-main {
+      min-width: 0;
+      padding: 7px;
+    }
+    .sidebar-delete {
+      width: 30px;
+      min-height: 30px;
+      padding: 0;
+      color: var(--red);
+      background: transparent;
+      border-color: transparent;
+      box-shadow: none;
+    }
+    .sidebar-delete:hover {
+      background: var(--red-soft);
+      border-color: #ffd0d0;
+    }
+    .sidebar-project:hover,
+    .sidebar-session:hover,
+    .sidebar-session-main:hover {
+      background: rgba(255, 255, 255, .07);
+      border-color: rgba(255, 255, 255, .06);
+    }
+    .sidebar-project.active,
+    .sidebar-session.active {
+      background: rgba(255, 255, 255, .10);
+      color: #fff;
+      border-color: rgba(255, 255, 255, .10);
+    }
+    .sidebar-project strong,
+    .sidebar-session strong {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 13px;
+      line-height: 1.25;
+    }
+    .sidebar-project span,
+    .sidebar-session span {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: #8f9aaa;
+      font-size: 12px;
+      font-weight: 500;
+    }
+    body.mode-full .project-sidebar {
+      border-color: #5d4b25;
+      background: #14120f;
+      color: #efe6d1;
+    }
+    body.mode-full .sidebar-head h2,
+    body.mode-full .sidebar-section-title {
+      color: #d8c99c;
+    }
+    body.mode-full .sidebar-head button,
+    body.mode-full .mode-note,
+    body.mode-full .sidebar-project-form {
+      background: #1b160e;
+      border-color: #4d3e20;
+      color: #efe6d1;
+    }
+    body.mode-full .mode-note strong,
+    body.mode-full .sidebar-project strong,
+    body.mode-full .sidebar-session strong {
+      color: #fff7df;
+    }
+    body.mode-full .mode-note span,
+    body.mode-full .sidebar-project span,
+    body.mode-full .sidebar-session span {
+      color: #d8c99c;
+    }
+    body.mode-full .sidebar-project:hover,
+    body.mode-full .sidebar-session:hover,
+    body.mode-full .sidebar-session-main:hover {
+      background: #241d11;
+      border-color: #5d4b25;
+    }
+    body.mode-full .sidebar-project.active,
+    body.mode-full .sidebar-session.active {
+      background: linear-gradient(135deg, #30240f, #241d11);
+      border-color: #c9a646;
+      color: #fff7df;
+    }
+    body.mode-full .sidebar-delete:hover {
+      background: #361a17;
+      border-color: #7b332d;
+      color: #ffc8c0;
+    }
+    body.mode-semi .project-sidebar {
+      border-color: rgba(198, 214, 226, .95);
+      background: rgba(255, 255, 255, .88);
+      color: var(--ink);
+    }
+    body.mode-semi .sidebar-head h2,
+    body.mode-semi .sidebar-section-title,
+    body.mode-semi .sidebar-project span,
+    body.mode-semi .sidebar-session span,
+    body.mode-semi .mode-note span {
+      color: var(--muted);
+    }
+    body.mode-semi .sidebar-head button,
+    body.mode-semi .mode-note,
+    body.mode-semi .sidebar-project-form,
+    body.mode-semi .sidebar-project:hover,
+    body.mode-semi .sidebar-session:hover,
+    body.mode-semi .sidebar-session-main:hover,
+    body.mode-semi .sidebar-project.active,
+    body.mode-semi .sidebar-session.active {
+      background: #eef6f8;
+      border-color: var(--line);
+      color: var(--ink);
+    }
+    body.mode-semi .sidebar-project-form label {
+      color: var(--ink-strong);
+    }
+    body.mode-semi .sidebar-project-form input {
+      background: #fff;
+      border-color: var(--line);
+      color: var(--ink);
+    }
+    body.mode-semi .mode-note strong,
+    body.mode-semi .sidebar-project.active strong,
+    body.mode-semi .sidebar-session.active strong {
+      color: var(--ink-strong);
     }
 
     .panel {
@@ -223,7 +631,7 @@
       overflow: hidden;
       border: 1px solid rgba(198, 214, 226, .9);
       border-radius: 8px;
-      background: rgba(255, 255, 255, .9);
+      background: var(--mode-panel);
       box-shadow: var(--shadow);
       backdrop-filter: blur(10px);
     }
@@ -235,7 +643,31 @@
       gap: 12px;
       padding: 15px 16px;
       border-bottom: 1px solid var(--line);
-      background: rgba(255, 255, 255, .72);
+      background: var(--mode-panel-head);
+    }
+    body.mode-full .panel {
+      border-color: #4d3e20;
+    }
+    body.mode-full .chat-panel {
+      box-shadow: 0 24px 70px rgba(0, 0, 0, .42);
+    }
+    body.mode-full .panel-title h2,
+    body.mode-full .task-title,
+    body.mode-full .empty-chat strong,
+    body.mode-full label {
+      color: var(--ink-strong);
+    }
+    body.mode-full input,
+    body.mode-full textarea,
+    body.mode-full select {
+      background: #0f0e0c;
+      border-color: #8a7134;
+      color: #fff7df;
+      box-shadow: inset 0 0 0 1px rgba(240, 207, 114, .08);
+    }
+    body.mode-full input::placeholder,
+    body.mode-full textarea::placeholder {
+      color: #c7b681;
     }
     .panel-title h2 {
       margin: 0;
@@ -259,7 +691,7 @@
     .section-card {
       border: 1px solid var(--line);
       border-radius: 8px;
-      background: #fff;
+      background: var(--mode-task-bg);
       padding: 14px;
     }
     .section-card h3 {
@@ -338,6 +770,10 @@
       overflow: hidden;
       background: #fff;
     }
+    body.mode-full .table-wrap {
+      background: #17130d;
+      border-color: #5d4b25;
+    }
     table {
       width: 100%;
       border-collapse: collapse;
@@ -355,6 +791,13 @@
       color: var(--muted);
       background: #f4f9fb;
       font-weight: 720;
+    }
+    body.mode-full th {
+      color: #f0cf72;
+      background: #241d11;
+    }
+    body.mode-full td {
+      color: #efe6d1;
     }
     tr:last-child td { border-bottom: 0; }
 
@@ -376,6 +819,18 @@
       background:
         linear-gradient(180deg, rgba(255, 255, 255, .64), rgba(247, 251, 252, .74)),
         repeating-linear-gradient(90deg, rgba(8, 124, 145, .035) 0, rgba(8, 124, 145, .035) 1px, transparent 1px, transparent 34px);
+    }
+    body.mode-full .chat-log {
+      background-color: #0f0e0c;
+      background-image:
+        linear-gradient(180deg, #17130d 0, #0f0e0c 100%),
+        repeating-linear-gradient(90deg, rgba(201, 166, 70, .07) 0, rgba(201, 166, 70, .07) 1px, transparent 1px, transparent 34px);
+    }
+    body.mode-full .empty-chat {
+      color: #d8c99c;
+    }
+    body.mode-full .empty-chat strong {
+      color: #fff7df;
     }
     .empty-chat {
       height: 100%;
@@ -406,19 +861,40 @@
     }
     .bubble-row.assistant .bubble {
       color: var(--ink);
-      background: #fff;
+      background: var(--mode-chat-assistant);
       border: 1px solid var(--line);
     }
     .bubble-row.user .bubble {
       color: #fff;
-      background: linear-gradient(135deg, var(--primary), #0f8f73);
+      background: linear-gradient(135deg, var(--mode-chat-user), var(--primary-strong));
       border: 1px solid rgba(255, 255, 255, .3);
+    }
+    body.mode-full .bubble-row.user .bubble {
+      color: #17110a;
+    }
+    body.mode-full .bubble-row.assistant .bubble {
+      color: #efe6d1;
+      border-color: #5d4b25;
+      background: #1b160e;
     }
     .composer {
       flex: 0 0 auto;
       padding: 14px;
       border-top: 1px solid var(--line);
-      background: rgba(255, 255, 255, .92);
+      background: var(--mode-panel-head);
+    }
+    body.mode-full .composer {
+      border-color: #5d4b25;
+      background: #17130d;
+    }
+    body.mode-full .composer textarea {
+      background: #fffaf0;
+      border-color: #f0cf72;
+      color: #17110a;
+      box-shadow: inset 0 0 0 1px rgba(23, 17, 10, .08);
+    }
+    body.mode-full .composer textarea::placeholder {
+      color: #6f5a2e;
     }
     .composer-row {
       display: grid;
@@ -427,7 +903,7 @@
       align-items: end;
     }
     .composer textarea {
-      min-height: 62px;
+      min-height: 104px;
       max-height: 180px;
     }
 
@@ -440,8 +916,18 @@
       border: 1px solid var(--line);
       border-radius: 8px;
       padding: 14px;
-      background: #fff;
+      background: var(--mode-task-bg);
       box-shadow: 0 10px 24px rgba(14, 27, 42, .05);
+    }
+    body.mode-full .task-card {
+      border-color: #5d4b25;
+      background: #1b160e;
+      box-shadow: 0 12px 28px rgba(0, 0, 0, .18);
+    }
+    body.mode-full .task-meta,
+    body.mode-full .task-note,
+    body.mode-full summary {
+      color: #d8c99c;
     }
     .task-top {
       display: flex;
@@ -478,6 +964,21 @@
       background: var(--red-soft);
       color: #991b1b;
     }
+    body.mode-full .task-note {
+      background: #241d11;
+      color: #efe6d1;
+      border: 1px solid #4d3e20;
+    }
+    body.mode-full .task-note.warn {
+      background: #372913;
+      color: #f8d880;
+      border-color: #6f5a2e;
+    }
+    body.mode-full .task-note.error {
+      background: #361a17;
+      color: #ffc8c0;
+      border-color: #7b332d;
+    }
     .tag {
       display: inline-flex;
       align-items: center;
@@ -492,6 +993,22 @@
     .tag.clarify { color: #8b5300; background: var(--amber-soft); }
     .tag.unsupported { color: #991b1b; background: var(--red-soft); }
     .tag.done { color: #126b34; background: var(--green-soft); }
+    body.mode-full .tag.execute {
+      color: #17110a;
+      background: #f0cf72;
+    }
+    body.mode-full .tag.clarify {
+      color: #17110a;
+      background: #e8bb55;
+    }
+    body.mode-full .tag.unsupported {
+      color: #fff7df;
+      background: #7b332d;
+    }
+    body.mode-full .tag.done {
+      color: #062412;
+      background: #9be2b0;
+    }
     details {
       margin-top: 10px;
       border-top: 1px solid var(--line);
@@ -518,25 +1035,34 @@
       font-size: 12px;
       line-height: 1.45;
     }
+    body.mode-full pre {
+      background: #0f0e0c;
+      color: #efe6d1;
+      border: 1px solid #3a3022;
+    }
 
     @media (max-width: 1280px) {
       body { overflow: auto; }
       .app { height: auto; min-height: 100%; }
       .topbar { grid-template-columns: 1fr; }
       .status-line { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-      main { grid-template-columns: minmax(0, 1fr); }
+      main { grid-template-columns: minmax(230px, 300px) minmax(0, 1fr); }
       .task-panel { min-height: 360px; }
       .chat-panel { min-height: 640px; }
+      .task-panel { grid-column: 2; }
     }
 
     @media (max-width: 820px) {
       header { padding: 14px 12px 10px; }
       main { grid-template-columns: 1fr; padding: 0 12px 12px; }
+      .task-panel { grid-column: auto; }
       .status-line { grid-template-columns: 1fr; }
+      .mode-switch { grid-template-columns: 1fr; }
       .brand h1 { font-size: 20px; }
       .chat-panel { min-height: 620px; }
       .composer-row { grid-template-columns: 1fr; }
       .bubble { max-width: 94%; }
+      .project-sidebar { min-height: 320px; }
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -565,6 +1091,15 @@
       background: #fff;
       box-shadow: 0 24px 70px rgba(7, 20, 33, .28);
     }
+    body.mode-full .modal {
+      background: rgba(3, 3, 4, .72);
+    }
+    body.mode-full .modal-panel {
+      border-color: #5d4b25;
+      background: #14120f;
+      color: #efe6d1;
+      box-shadow: 0 28px 80px rgba(0, 0, 0, .52);
+    }
     .modal-body {
       min-height: 0;
       overflow: auto;
@@ -580,6 +1115,10 @@
       overflow: hidden;
       background: #fff;
     }
+    body.mode-full .capability-group {
+      background: #17130d;
+      border-color: #5d4b25;
+    }
     .capability-group h3 {
       margin: 0;
       padding: 11px 13px;
@@ -587,6 +1126,11 @@
       border-bottom: 1px solid var(--line);
       color: var(--ink-strong);
       font-size: 14px;
+    }
+    body.mode-full .capability-group h3 {
+      background: #241d11;
+      border-color: #5d4b25;
+      color: #fff7df;
     }
     .capability-list {
       display: grid;
@@ -599,6 +1143,10 @@
       border-radius: 8px;
       padding: 11px 12px;
       background: var(--panel-soft);
+    }
+    body.mode-full .capability-card {
+      background: #1b160e;
+      border-color: #4d3e20;
     }
     .capability-card strong {
       display: block;
@@ -632,9 +1180,28 @@
       padding: 12px;
       background: var(--panel-soft);
     }
+    body.mode-full .diagnostic-card {
+      background: #1b160e;
+      border-color: #4d3e20;
+    }
     .diagnostic-card.ok { border-color: #a8e6bd; background: var(--green-soft); }
     .diagnostic-card.warn { border-color: #f5d48d; background: var(--amber-soft); }
     .diagnostic-card.bad { border-color: #ffc8c8; background: var(--red-soft); }
+    body.mode-full .diagnostic-card.ok {
+      background: #e9f9ef;
+      border-color: #a8e6bd;
+      color: #071421;
+    }
+    body.mode-full .diagnostic-card.warn {
+      background: #fff6df;
+      border-color: #f5d48d;
+      color: #071421;
+    }
+    body.mode-full .diagnostic-card.bad {
+      background: #fff0f0;
+      border-color: #ffc8c8;
+      color: #071421;
+    }
     .diagnostic-state {
       display: inline-flex;
       justify-content: center;
@@ -647,6 +1214,30 @@
     .diagnostic-card.ok .diagnostic-state { color: #126b34; }
     .diagnostic-card.warn .diagnostic-state { color: #8b5300; }
     .diagnostic-card.bad .diagnostic-state { color: #991b1b; }
+    .compact-list {
+      display: grid;
+      gap: 10px;
+    }
+    .compact-item {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      background: #fff;
+    }
+    body.mode-full .compact-item {
+      background: #1b160e;
+      border-color: #4d3e20;
+    }
+    .compact-item strong {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--ink-strong);
+    }
+    .compact-item p {
+      margin: 0 0 8px;
+      color: var(--muted);
+      overflow-wrap: anywhere;
+    }
     .diagnostic-card strong {
       display: block;
       margin-bottom: 4px;
@@ -672,7 +1263,7 @@
     }
   </style>
 </head>
-<body>
+<body class="mode-semi">
   <div class="app">
     <header>
       <div class="topbar">
@@ -689,15 +1280,29 @@
             <p>自然语言 GIS 工作流，确认后在 ArcGIS 执行</p>
           </div>
         </div>
+        <div class="mode-hub" aria-label="工作模式">
+          <div class="mode-label">工作模式</div>
+          <div class="mode-switch">
+            <button id="semiModeButton" class="mode-option active" type="button" onclick="setMode('semi_agent')">
+              <strong>半代理模式</strong>
+              <span>单次任务，短上下文</span>
+            </button>
+            <button id="fullModeButton" class="mode-option" type="button" onclick="setMode('full_agent')">
+              <strong>全代理模式</strong>
+              <span>项目记忆，工作目录</span>
+            </button>
+          </div>
+        </div>
         <div class="top-controls">
           <div class="status-line" aria-live="polite">
             <div class="status-tile warn" id="gatewayState"><span>网关</span><strong>检查中</strong></div>
             <div class="status-tile warn" id="arcgisState"><span>地图上下文</span><strong>未同步</strong></div>
-            <div class="status-tile warn" id="restartState"><span>重启提示</span><strong>检查中</strong></div>
+            <div class="status-tile warn" id="restartState"><span>当前模式</span><strong>检查中</strong></div>
           </div>
           <div class="quick-actions" aria-label="常用信息">
             <button class="ghost small" onclick="openCapabilities()">能力范围</button>
             <button class="ghost small" onclick="openModal('contextModal')">地图快照</button>
+            <button class="ghost small" onclick="openPendingTools()">待审核工具</button>
             <button class="ghost small" onclick="openDiagnostics()">系统诊断</button>
             <button class="ghost small" onclick="openModal('keyModal')"><span id="keyActionText">API Key</span></button>
           </div>
@@ -706,6 +1311,34 @@
     </header>
 
     <main>
+      <aside class="project-sidebar" aria-label="对话与项目">
+        <div class="sidebar-head">
+          <h2 id="sidebarTitle">对话</h2>
+          <button id="newProjectButton" type="button" onclick="toggleProjectForm()" hidden>新建</button>
+        </div>
+        <div id="modeNote" class="mode-note">
+          <strong>半代理模式</strong>
+          <span>一次对话处理一个明确任务，不使用项目工作目录。</span>
+        </div>
+        <form id="sidebarProjectForm" class="sidebar-project-form" hidden onsubmit="event.preventDefault(); createProject();">
+          <label for="projectName">项目名称</label>
+          <input id="projectName" type="text" placeholder="南京分析项目">
+          <label for="projectWorkdir">工作目录</label>
+          <input id="projectWorkdir" type="text" placeholder="D:\Data\NanjingProject">
+          <button type="submit" class="primary small">创建项目</button>
+        </form>
+        <div class="sidebar-scroll">
+          <div id="projectHistoryTitle" class="sidebar-section-title" hidden>项目</div>
+          <div id="sidebarProjects" class="compact-list" hidden>
+            <div class="sidebar-session"><div><strong>暂无项目</strong><span>创建项目后会显示在这里</span></div></div>
+          </div>
+          <div id="sidebarHistoryTitle" class="sidebar-section-title">对话</div>
+          <div id="sidebarHistory" class="compact-list">
+            <div class="sidebar-session"><div><strong>暂无对话</strong><span>生成任务后会显示在这里</span></div></div>
+          </div>
+        </div>
+      </aside>
+
       <section class="panel chat-panel">
         <div class="panel-head">
           <div class="panel-title">
@@ -726,8 +1359,8 @@
       <aside class="panel task-panel">
         <div class="panel-head">
           <div class="panel-title">
-            <h2>任务队列</h2>
-            <p>确认后回到 ArcGIS 执行</p>
+            <h2>任务</h2>
+            <p>左侧选中哪条，这里就显示哪条</p>
           </div>
           <button class="ghost small" onclick="refreshWorkflows()">刷新</button>
         </div>
@@ -802,6 +1435,26 @@
     </div>
   </div>
 
+  <div class="modal" id="toolsModal" hidden onclick="closeOnBackdrop(event)">
+    <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="toolsTitle">
+      <div class="panel-head">
+        <div class="panel-title">
+          <h2 id="toolsTitle">待审核工具</h2>
+          <p id="toolsSummary">Agent 生成的新工具默认不会启用。</p>
+        </div>
+        <div class="button-row modal-actions">
+          <button class="ghost small" onclick="loadPendingTools()">刷新</button>
+          <button class="ghost small" onclick="closeModal('toolsModal')">关闭</button>
+        </div>
+      </div>
+      <div class="modal-body">
+        <div id="pendingToolsList" class="compact-list">
+          <div class="section-card">正在读取...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="modal" id="keyModal" hidden onclick="closeOnBackdrop(event)">
     <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="keyTitle">
       <div class="panel-head">
@@ -818,8 +1471,20 @@
             <strong id="keyBadge">Key 检查中</strong>
           </div>
           <form onsubmit="event.preventDefault(); saveConfig();">
-            <label for="apiKey">DeepSeek API Key</label>
-            <input id="apiKey" type="password" placeholder="sk-..." autocomplete="off">
+            <label for="semiProvider">半代理模型</label>
+            <select id="semiProvider">
+              <option value="deepseek">DeepSeek</option>
+              <option value="minimax">MiniMax</option>
+            </select>
+            <label for="fullProvider">全代理模型</label>
+            <select id="fullProvider">
+              <option value="minimax">MiniMax</option>
+              <option value="deepseek">DeepSeek</option>
+            </select>
+            <label for="deepseekKey">DeepSeek API Key</label>
+            <input id="deepseekKey" type="password" placeholder="sk-..." autocomplete="off">
+            <label for="minimaxKey">MiniMax API Key</label>
+            <input id="minimaxKey" type="password" placeholder="MiniMax Token Plan Key" autocomplete="off">
             <div class="button-row">
               <button type="submit" class="primary small">保存</button>
               <button type="button" class="ghost small" onclick="openHealth()">检查网关</button>
@@ -833,12 +1498,16 @@
   </div>
 
   <script>
-    const EXPECTED_GATEWAY_VERSION = '0.10.6';
+    const EXPECTED_GATEWAY_VERSION = '0.11.0';
     const POLL_INTERVAL_MS = 2500;
     const HEALTH_INTERVAL_MS = 10000;
     let lastHealthCheck = 0;
     let pollBusy = false;
     let capabilitiesLoaded = false;
+    let currentMode = 'semi_agent';
+    let activeProject = null;
+    let cachedWorkflows = [];
+    let selectedWorkflowId = '';
 
     function offlineMessage() {
       return '本地网关未连接。请回到 ArcGIS 工具栏点击“启动网关”或“打开助手”。页面会自动恢复状态。';
@@ -876,6 +1545,11 @@
     async function openDiagnostics() {
       openModal('diagnosticsModal');
       await loadDiagnostics();
+    }
+
+    async function openPendingTools() {
+      openModal('toolsModal');
+      await loadPendingTools();
     }
 
     async function loadDiagnostics() {
@@ -1000,7 +1674,7 @@
       const version = data.app_version || '旧版本';
       setTile('gatewayState', 'ok', `已启动，${data.operation_count} 个能力`);
       if (data.app_version === EXPECTED_GATEWAY_VERSION) {
-        setTile('restartState', 'ok', '无需重启');
+        updateProjectStatus();
       } else {
         setTile('restartState', 'warn', '需要重启网关');
       }
@@ -1010,32 +1684,86 @@
 
     async function loadConfig() {
       const data = await api('/config');
-      const ok = data.config.has_deepseek_api_key;
-      document.getElementById('keyBadge').textContent = ok ? 'Key 已保存' : 'Key 未配置';
-      document.getElementById('keyActionText').textContent = ok ? 'Key 已配置' : '配置 Key';
+      const providers = data.config.providers || {};
+      const deepseekOk = providers.deepseek && providers.deepseek.has_api_key;
+      const minimaxOk = providers.minimax && providers.minimax.has_api_key;
+      const ok = deepseekOk || minimaxOk;
+      currentMode = data.config.default_mode || currentMode;
+      updateModeUI();
+      document.getElementById('semiProvider').value = data.config.semi_agent_provider || 'deepseek';
+      document.getElementById('fullProvider').value = data.config.full_agent_provider || 'minimax';
+      document.getElementById('keyBadge').textContent = providerKeyLabel(deepseekOk, minimaxOk);
+      document.getElementById('keyActionText').textContent = ok ? '模型已配置' : '配置模型';
       document.getElementById('configPathHint').textContent = `配置文件：${data.config.config_path || '未知'}`;
       setDot('keyDot', ok, !ok);
     }
 
     async function saveConfig() {
-      const key = document.getElementById('apiKey').value.trim();
-      if (!key) {
-        setStatus('请输入 DeepSeek API Key。');
-        return;
-      }
+      const deepseekKey = document.getElementById('deepseekKey').value.trim();
+      const minimaxKey = document.getElementById('minimaxKey').value.trim();
       const data = await api('/config', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({deepseek_api_key: key})
+        body: JSON.stringify({
+          default_mode: currentMode,
+          semi_agent_provider: document.getElementById('semiProvider').value,
+          full_agent_provider: document.getElementById('fullProvider').value,
+          providers: {
+            deepseek: {api_key: deepseekKey},
+            minimax: {api_key: minimaxKey}
+          }
+        })
       });
-      document.getElementById('apiKey').value = '';
-      const ok = data.config.has_deepseek_api_key;
-      document.getElementById('keyBadge').textContent = ok ? 'Key 已保存' : 'Key 未配置';
-      document.getElementById('keyActionText').textContent = ok ? 'Key 已配置' : '配置 Key';
+      document.getElementById('deepseekKey').value = '';
+      document.getElementById('minimaxKey').value = '';
+      const providers = data.config.providers || {};
+      const deepseekOk = providers.deepseek && providers.deepseek.has_api_key;
+      const minimaxOk = providers.minimax && providers.minimax.has_api_key;
+      const ok = deepseekOk || minimaxOk;
+      document.getElementById('keyBadge').textContent = providerKeyLabel(deepseekOk, minimaxOk);
+      document.getElementById('keyActionText').textContent = ok ? '模型已配置' : '配置模型';
       document.getElementById('configPathHint').textContent = `配置文件：${data.config.config_path || '未知'}`;
       setDot('keyDot', ok, !ok);
-      setStatus('Key 已保存。');
+      setStatus('模型配置已保存。');
       closeModal('keyModal');
+    }
+
+    function providerKeyLabel(deepseekOk, minimaxOk) {
+      if (deepseekOk && minimaxOk) return 'DeepSeek 与 MiniMax 已保存';
+      if (deepseekOk) return 'DeepSeek 已保存';
+      if (minimaxOk) return 'MiniMax 已保存';
+      return 'Key 未配置';
+    }
+
+    async function setMode(mode) {
+      currentMode = mode;
+      updateModeUI();
+      setStatus(mode === 'full_agent' ? '已切换到全代理模式。' : '已切换到半代理模式。');
+    }
+
+    function updateModeUI() {
+      const fullMode = currentMode === 'full_agent';
+      document.body.classList.toggle('mode-full', fullMode);
+      document.body.classList.toggle('mode-semi', !fullMode);
+      document.getElementById('semiModeButton').classList.toggle('active', !fullMode);
+      document.getElementById('fullModeButton').classList.toggle('active', fullMode);
+      document.getElementById('sidebarTitle').textContent = fullMode ? '项目' : '对话';
+      document.getElementById('newProjectButton').hidden = !fullMode;
+      document.getElementById('sidebarProjectForm').hidden = true;
+      document.getElementById('projectHistoryTitle').hidden = !fullMode;
+      document.getElementById('sidebarProjects').hidden = !fullMode;
+      document.getElementById('sidebarHistoryTitle').textContent = fullMode ? '对话' : '对话';
+      const note = document.getElementById('modeNote');
+      if (fullMode) {
+        note.innerHTML = '<strong>全代理模式</strong><span>围绕当前项目工作目录规划，保留项目记忆。</span>';
+      } else {
+        note.innerHTML = '<strong>半代理模式</strong><span>一次对话处理一个明确任务，不使用项目工作目录。</span>';
+      }
+      updateProjectStatus();
+      ensureSelectedWorkflow();
+      renderSidebarItems(cachedWorkflows);
+      renderTasks(cachedWorkflows);
+      renderConversation(cachedWorkflows);
     }
 
     async function loadContext() {
@@ -1068,21 +1796,155 @@
       });
     }
 
+    async function loadProjects() {
+      const data = await api('/projects');
+      activeProject = data.active_project || null;
+      renderProjects(data.projects || []);
+      updateProjectStatus();
+    }
+
+    function toggleProjectForm() {
+      if (currentMode !== 'full_agent') {
+        setStatus('半代理模式不使用项目。切换到全代理模式后再创建项目。');
+        return;
+      }
+      const form = document.getElementById('sidebarProjectForm');
+      form.hidden = !form.hidden;
+      if (!form.hidden) document.getElementById('projectName').focus();
+    }
+
+    async function createProject() {
+      if (currentMode !== 'full_agent') {
+        setStatus('半代理模式不使用项目。切换到全代理模式后再创建项目。');
+        return;
+      }
+      const name = document.getElementById('projectName').value.trim();
+      const workdir = document.getElementById('projectWorkdir').value.trim();
+      if (!workdir) {
+        setStatus('请输入项目工作目录。');
+        return;
+      }
+      const data = await api('/projects', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({name, workdir})
+      });
+      activeProject = data.project;
+      document.getElementById('projectName').value = '';
+      document.getElementById('projectWorkdir').value = '';
+      document.getElementById('sidebarProjectForm').hidden = true;
+      setStatus(`当前项目：${activeProject.name}`);
+      await loadProjects();
+      await refreshWorkflows();
+    }
+
+    async function activateProject(id) {
+      const data = await api('/projects/active', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({project_id: id})
+      });
+      activeProject = data.project;
+      setStatus(`当前项目：${activeProject.name}`);
+      await loadProjects();
+      await refreshWorkflows();
+    }
+
+    function renderProjects(projects) {
+      const sidebar = document.getElementById('sidebarProjects');
+      if (!projects.length) {
+        sidebar.innerHTML = '<div class="sidebar-session"><div><strong>暂无项目</strong><span>创建项目后会显示在这里</span></div></div>';
+        return;
+      }
+      sidebar.innerHTML = '';
+      projects.forEach(project => {
+        const active = activeProject && activeProject.id === project.id;
+        const sidebarButton = document.createElement('button');
+        sidebarButton.type = 'button';
+        sidebarButton.className = `sidebar-project${active ? ' active' : ''}`;
+        sidebarButton.onclick = () => activateProject(project.id);
+        sidebarButton.innerHTML = `
+          <strong>${escapeHtml(project.name)}</strong>
+          <span>${escapeHtml(project.workdir)}</span>
+        `;
+        sidebar.appendChild(sidebarButton);
+      });
+    }
+
+    function updateProjectStatus() {
+      if (currentMode === 'full_agent') {
+        setTile('restartState', activeProject ? 'ok' : 'warn', activeProject ? `项目：${activeProject.name}` : '请选择项目');
+      } else {
+        setTile('restartState', 'ok', '半代理模式');
+      }
+    }
+
+    async function loadPendingTools() {
+      const data = await api('/tools/pending');
+      renderPendingTools(data.tools || []);
+    }
+
+    function renderPendingTools(tools) {
+      const box = document.getElementById('pendingToolsList');
+      if (!tools.length) {
+        box.innerHTML = '<div class="section-card">暂无待审核工具。</div>';
+        return;
+      }
+      box.innerHTML = '';
+      tools.forEach(tool => {
+        const card = document.createElement('div');
+        card.className = 'compact-item';
+        card.innerHTML = `
+          <strong>${escapeHtml(tool.name)} · ${escapeHtml(tool.status)}</strong>
+          <p>${escapeHtml(tool.capability)}</p>
+          <p class="hint">${escapeHtml((tool.payload.operation_spec || {}).id || '')}</p>
+        `;
+        if (tool.status === 'pending_review') {
+          const actions = document.createElement('div');
+          actions.className = 'button-row';
+          actions.innerHTML = `
+            <button class="success small" onclick="enableTool('${escapeHtml(tool.id)}')">启用</button>
+            <button class="danger small" onclick="rejectTool('${escapeHtml(tool.id)}')">拒绝</button>
+          `;
+          card.appendChild(actions);
+        }
+        box.appendChild(card);
+      });
+    }
+
+    async function enableTool(id) {
+      await api(`/tools/${id}/enable`, {method: 'POST', body: '{}'});
+      capabilitiesLoaded = false;
+      setStatus('工具已启用，后续规划可以使用。');
+      await loadPendingTools();
+    }
+
+    async function rejectTool(id) {
+      await api(`/tools/${id}/reject`, {method: 'POST', body: '{}'});
+      setStatus('已拒绝该工具。');
+      await loadPendingTools();
+    }
+
     async function submitPlan() {
       const input = document.getElementById('command');
       const command = input.value.trim();
       if (!command) return;
+      if (currentMode === 'full_agent' && !activeProject) {
+        setStatus('全代理模式需要先在左侧创建或选择项目工作目录。');
+        return;
+      }
       input.value = '';
-      appendBubble('user', command);
+      selectedWorkflowId = '';
+      renderConversation([]);
       try {
         setStatus('正在生成任务...');
         const data = await api('/plan', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({command})
+          body: JSON.stringify({command, mode: currentMode, project_id: activeProject ? activeProject.id : ''})
         });
-        appendAssistantForWorkflow(data.workflow);
-        await refreshWorkflows(false);
+        selectedWorkflowId = data.workflow.id;
+        await refreshWorkflows();
       } catch (err) {
         appendBubble('assistant', err.message);
         setStatus(err.message);
@@ -1091,40 +1953,52 @@
 
     async function approve(id) {
       await api(`/workflows/${id}/approve`, {method: 'POST', body: '{}'});
+      selectedWorkflowId = id;
       setStatus('已发送到 ArcGIS，等待你在 ArcGIS 工具栏点击“执行任务”。');
-      appendBubble('assistant', '已发送到 ArcGIS。请回到 ArcGIS 工具栏点击“执行任务”，ArcGIS 才会真正执行。');
       await refreshWorkflows();
     }
 
     async function clearConversation() {
-      await api('/workflows/clear', {method: 'POST', body: '{}'});
+      if (currentMode === 'full_agent' && !activeProject) {
+        setStatus('全代理模式需要先选择项目，才能清空项目对话。');
+        return;
+      }
+      await api('/workflows/clear', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(clearScope())
+      });
+      selectedWorkflowId = '';
       setStatus('已清空。');
       await refreshWorkflows();
     }
 
     async function deleteWorkflow(id) {
       await api(`/workflows/${id}/delete`, {method: 'POST', body: '{}'});
+      if (selectedWorkflowId === id) selectedWorkflowId = '';
       setStatus('已删除。');
       await refreshWorkflows();
     }
 
     async function refreshWorkflows(renderChat = true) {
       const data = await api('/api/workflows');
-      renderTasks(data.workflows);
-      if (renderChat) renderConversation(data.workflows);
+      cachedWorkflows = data.workflows || [];
+      ensureSelectedWorkflow();
+      renderTasks(cachedWorkflows);
+      renderSidebarItems(cachedWorkflows);
+      if (renderChat) renderConversation(cachedWorkflows);
     }
 
     function renderConversation(workflows) {
       const chat = document.getElementById('chatLog');
       chat.innerHTML = '';
-      if (!workflows.length) {
+      const item = selectedWorkflow(workflows);
+      if (!item) {
         renderEmptyChat();
         return;
       }
-      workflows.slice().reverse().forEach(item => {
-        appendBubble('user', item.command, false);
-        appendAssistantForWorkflow(item, false);
-      });
+      appendBubble('user', item.command, false);
+      appendAssistantForWorkflow(item, false);
       chat.scrollTop = chat.scrollHeight;
     }
 
@@ -1168,15 +2042,79 @@
     function renderTasks(workflows) {
       const box = document.getElementById('tasks');
       box.innerHTML = '';
-      const visible = workflows.filter(item => (item.workflow.action || 'execute') === 'execute').slice(0, 20);
-      if (!visible.length) {
-        box.innerHTML = '<div class="section-card">暂无可执行任务。需要补充的信息会留在中间对话里。</div>';
+      const item = selectedWorkflow(workflows);
+      if (!item) {
+        box.innerHTML = '<div class="section-card">左侧选择一条对话后，这里会显示对应任务。</div>';
         return;
       }
       const list = document.createElement('div');
       list.className = 'task-list';
-      visible.forEach(item => list.appendChild(taskCard(item)));
+      list.appendChild(taskCard(item));
       box.appendChild(list);
+    }
+
+    function renderSidebarItems(workflows) {
+      const box = document.getElementById('sidebarHistory');
+      const visible = visibleWorkflows(workflows).slice(0, 12);
+      if (!visible.length) {
+        const emptyHint = currentMode === 'full_agent' ? '这个项目还没有对话' : '生成任务后会显示在这里';
+        box.innerHTML = `<div class="sidebar-session"><div><strong>暂无对话</strong><span>${emptyHint}</span></div></div>`;
+        return;
+      }
+      box.innerHTML = '';
+      visible.forEach(item => {
+        const node = document.createElement('div');
+        node.className = `sidebar-session${item.id === selectedWorkflowId ? ' active' : ''}`;
+        node.innerHTML = `
+          <button type="button" class="sidebar-session-main" onclick="selectWorkflow('${escapeJs(item.id)}')">
+            <strong>${escapeHtml(shortCommand(item.command || ''))}</strong>
+            <span>${escapeHtml(statusText(item))}</span>
+          </button>
+          <button type="button" class="sidebar-delete" title="删除" aria-label="删除" onclick="deleteWorkflow('${escapeJs(item.id)}')">×</button>
+        `;
+        box.appendChild(node);
+      });
+    }
+
+    function selectWorkflow(id) {
+      selectedWorkflowId = id;
+      renderSidebarItems(cachedWorkflows);
+      renderTasks(cachedWorkflows);
+      renderConversation(cachedWorkflows);
+    }
+
+    function ensureSelectedWorkflow() {
+      const visible = visibleWorkflows(cachedWorkflows);
+      if (!visible.length) {
+        selectedWorkflowId = '';
+        return;
+      }
+      if (!visible.some(item => item.id === selectedWorkflowId)) {
+        selectedWorkflowId = visible[0].id;
+      }
+    }
+
+    function selectedWorkflow(workflows) {
+      return visibleWorkflows(workflows).find(item => item.id === selectedWorkflowId) || null;
+    }
+
+    function workflowMode(item) {
+      return item.mode || 'semi_agent';
+    }
+
+    function visibleWorkflows(workflows) {
+      return (workflows || []).filter(item => {
+        if (workflowMode(item) !== currentMode) return false;
+        if (currentMode !== 'full_agent') return true;
+        return Boolean(activeProject && item.project_id === activeProject.id);
+      });
+    }
+
+    function clearScope() {
+      if (currentMode === 'full_agent') {
+        return {mode: currentMode, project_id: activeProject.id};
+      }
+      return {mode: currentMode};
     }
 
     function taskCard(item) {
@@ -1282,10 +2220,15 @@
       return String(value).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
     }
 
+    function escapeJs(value) {
+      return String(value).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    }
+
     async function refreshAll() {
       try {
         await loadConfig();
         await openHealth({silent: true});
+        await loadProjects();
         await loadContext();
         await refreshWorkflows();
       } catch (err) {
@@ -1304,6 +2247,7 @@
           await loadConfig();
           await openHealth({silent: true});
         }
+        await loadProjects();
         await loadContext();
         await refreshWorkflows(false);
       } catch (err) {

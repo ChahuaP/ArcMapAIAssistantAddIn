@@ -2,6 +2,7 @@
 from __future__ import absolute_import
 
 import importlib
+import imp
 import json
 import os
 
@@ -9,6 +10,12 @@ import context_reader
 
 
 CATALOG_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "operation_catalog"))
+CUSTOM_TOOLS_ROOT = os.path.join(
+    os.environ.get("APPDATA", os.path.expanduser("~")),
+    "ArcMapAIAssistant",
+    "custom_tools",
+    "enabled"
+)
 
 
 class WorkflowExecutionError(Exception):
@@ -51,6 +58,14 @@ def _load_operations():
             pack = json.load(f)
         for operation in pack["operations"]:
             operations[operation["id"]] = operation
+    if os.path.isdir(CUSTOM_TOOLS_ROOT):
+        for name in sorted(os.listdir(CUSTOM_TOOLS_ROOT)):
+            spec_path = os.path.join(CUSTOM_TOOLS_ROOT, name, "operation_spec.json")
+            if not os.path.isfile(spec_path):
+                continue
+            with open(spec_path, "r") as f:
+                operation = json.load(f)
+            operations[operation["id"]] = operation
     return operations
 
 
@@ -86,6 +101,8 @@ def _validate_arguments(step_id, arguments, schema):
 
 
 def _call_executor(executor_path, context, arguments, step_outputs):
+    if executor_path.startswith("custom_tool:"):
+        return _call_custom_executor(executor_path, context, arguments, step_outputs)
     module_name, function_name = executor_path.rsplit(".", 1)
     if module_name.startswith("operations."):
         common = importlib.import_module("operations.common")
@@ -101,7 +118,19 @@ def _call_executor(executor_path, context, arguments, step_outputs):
     return function(context, arguments, step_outputs)
 
 
+def _call_custom_executor(executor_path, context, arguments, step_outputs):
+    module, function_name = _load_custom_module(executor_path)
+    function = getattr(module, function_name)
+    return function(context, arguments, step_outputs)
+
+
 def _call_estimator(executor_path, context, arguments, step_outputs):
+    if executor_path.startswith("custom_tool:"):
+        module, function_name = _load_custom_module(executor_path)
+        estimator = getattr(module, "estimate_" + function_name, None)
+        if estimator is None:
+            return {"summary": u"该任务会直接修改原始数据。是否继续？"}
+        return estimator(context, arguments, step_outputs)
     module_name, function_name = executor_path.rsplit(".", 1)
     module = importlib.import_module(module_name)
     module = reload(module)
@@ -109,3 +138,16 @@ def _call_estimator(executor_path, context, arguments, step_outputs):
     if estimator is None:
         return {"summary": u"该任务会直接修改原始数据。是否继续？"}
     return estimator(context, arguments, step_outputs)
+
+
+def _load_custom_module(executor_path):
+    parts = executor_path.split(":")
+    if len(parts) != 3:
+        raise WorkflowExecutionError(u"自定义工具 executor 格式不正确。")
+    tool_id = parts[1]
+    function_name = parts[2]
+    executor_file = os.path.join(CUSTOM_TOOLS_ROOT, tool_id, "executor.py")
+    if not os.path.isfile(executor_file):
+        raise WorkflowExecutionError(u"自定义工具文件不存在：%s" % executor_file)
+    module = imp.load_source("geopilot_custom_%s" % tool_id.replace("-", "_"), executor_file)
+    return module, function_name

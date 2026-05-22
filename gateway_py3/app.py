@@ -8,17 +8,18 @@ from urllib.parse import urlparse
 
 from gateway_py3.catalog_loader import OperationCatalog
 from gateway_py3.diagnostics import collect_diagnostics
-from gateway_py3.deepseek_client import DeepSeekError, public_config, save_config
+from gateway_py3.llm_providers import FULL_AGENT_MODE, ProviderError, public_config, save_config
 from gateway_py3.logs import write_event
 from gateway_py3.paths import WEB_ROOT
 from gateway_py3.planner import AgenticPlanner, PlannerError
+from gateway_py3.tool_builder import ToolBuilderError, enable_tool, reject_tool
 from gateway_py3.validators import ValidationError, validate_catalog
 from gateway_py3.workflow_store import WorkflowStore
 
 
 HOST = "127.0.0.1"
 PORT = 8765
-APP_VERSION = "0.10.6"
+APP_VERSION = "0.11.0"
 
 
 class GatewayState:
@@ -27,6 +28,11 @@ class GatewayState:
         validate_catalog(self.catalog)
         self.store = WorkflowStore()
         self.store.clear_state("arcmap_context")
+        self.planner = AgenticPlanner(catalog=self.catalog, store=self.store)
+
+    def reload_catalog(self):
+        self.catalog = OperationCatalog()
+        validate_catalog(self.catalog)
         self.planner = AgenticPlanner(catalog=self.catalog, store=self.store)
 
 
@@ -52,6 +58,18 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"context": STATE.store.get_state("arcmap_context")})
             elif path == "/api/workflows":
                 self._json({"workflows": STATE.store.list_recent()})
+            elif path == "/projects":
+                self._json({"projects": STATE.store.list_projects(), "active_project": STATE.store.get_active_project()})
+            elif path == "/projects/active":
+                self._json({"project": STATE.store.get_active_project()})
+            elif path.startswith("/projects/") and path.endswith("/memory"):
+                project_id = path.split("/")[2]
+                self._json({"memories": STATE.store.list_project_memories(project_id)})
+            elif path.startswith("/projects/") and path.endswith("/events"):
+                project_id = path.split("/")[2]
+                self._json({"events": STATE.store.list_project_events(project_id)})
+            elif path == "/tools/pending":
+                self._json({"tools": STATE.store.list_pending_tools()})
             elif path == "/api/capabilities":
                 self._json({
                     "catalog_version": STATE.catalog.version,
@@ -70,7 +88,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._static(path)
             else:
                 self._json({"error": "Not found"}, 404)
-        except (PlannerError, DeepSeekError, ValidationError, ValueError) as exc:
+        except (KeyError, PlannerError, ProviderError, ToolBuilderError, ValidationError, ValueError) as exc:
             write_event("http.rejected", {"path": path, "error": str(exc)})
             self._json({"error": _public_error(exc)}, 400)
         except Exception as exc:
@@ -88,10 +106,25 @@ class Handler(BaseHTTPRequestHandler):
                     if not stored_context:
                         raise ValueError("请先在 ArcGIS 工具栏点击“同步上下文”。")
                     context = stored_context["value"]
-                row = STATE.planner.plan(payload["command"], context)
+                mode = payload.get("mode") or public_config()["default_mode"]
+                project_id = payload.get("project_id") or ""
+                if mode == FULL_AGENT_MODE and not project_id:
+                    active_project = STATE.store.get_active_project()
+                    project_id = active_project["id"] if active_project else ""
+                row = STATE.planner.plan(payload["command"], context, mode=mode, project_id=project_id)
                 self._json({"workflow": row})
             elif path == "/config":
                 self._json({"config": save_config(_config_payload(payload))})
+            elif path == "/projects":
+                name = payload.get("name") or ""
+                workdir = payload.get("workdir") or ""
+                self._json({"project": STATE.store.create_project(name, workdir)})
+            elif path == "/projects/active":
+                project_id = payload.get("project_id") or ""
+                self._json({"project": STATE.store.set_active_project(project_id)})
+            elif path.startswith("/projects/") and path.endswith("/delete"):
+                project_id = path.split("/")[2]
+                self._json(STATE.store.delete_project(project_id))
             elif path == "/context":
                 context = payload.get("context")
                 if not isinstance(context, dict):
@@ -112,13 +145,21 @@ class Handler(BaseHTTPRequestHandler):
                 result = payload.get("result", {})
                 self._json({"workflow": STATE.store.finish(workflow_id, status, result)})
             elif path == "/workflows/clear":
-                self._json(STATE.store.clear_workflows())
+                self._json(STATE.store.clear_workflows(payload.get("project_id"), payload.get("mode")))
             elif path.startswith("/workflows/") and path.endswith("/delete"):
                 workflow_id = path.split("/")[2]
                 self._json(STATE.store.delete(workflow_id))
+            elif path.startswith("/tools/") and path.endswith("/enable"):
+                tool_id = path.split("/")[2]
+                tool = enable_tool(STATE.store, tool_id)
+                STATE.reload_catalog()
+                self._json({"tool": tool, "operation_count": len(STATE.catalog.operations)})
+            elif path.startswith("/tools/") and path.endswith("/reject"):
+                tool_id = path.split("/")[2]
+                self._json({"tool": reject_tool(STATE.store, tool_id)})
             else:
                 self._json({"error": "Not found"}, 404)
-        except (PlannerError, DeepSeekError, ValidationError, ValueError) as exc:
+        except (KeyError, PlannerError, ProviderError, ToolBuilderError, ValidationError, ValueError) as exc:
             write_event("http.rejected", {"path": path, "error": str(exc)})
             self._json({"error": _public_error(exc)}, 400)
         except Exception as exc:
@@ -167,15 +208,23 @@ def main():
 
 def _config_payload(payload):
     allowed = {}
-    if payload.get("deepseek_api_key"):
-        key = payload["deepseek_api_key"].strip()
-        if not key.startswith("sk-"):
+    for key in ("default_mode", "semi_agent_provider", "full_agent_provider"):
+        if payload.get(key):
+            allowed[key] = payload[key]
+    providers = payload.get("providers") if isinstance(payload.get("providers"), dict) else {}
+    allowed_providers = {}
+    for provider_id in ("deepseek", "minimax"):
+        source = providers.get(provider_id) or {}
+        item = {}
+        for field in ("api_key", "model", "base_url"):
+            if isinstance(source.get(field), str) and source[field].strip():
+                item[field] = source[field].strip()
+        if provider_id == "deepseek" and item.get("api_key") and not item["api_key"].startswith("sk-"):
             raise ValueError("DeepSeek API key must start with sk-.")
-        allowed["deepseek_api_key"] = key
-    if payload.get("model"):
-        allowed["model"] = payload["model"].strip()
-    if payload.get("base_url"):
-        allowed["base_url"] = payload["base_url"].strip().rstrip("/")
+        if item:
+            allowed_providers[provider_id] = item
+    if allowed_providers:
+        allowed["providers"] = allowed_providers
     return allowed
 
 
@@ -196,6 +245,8 @@ def _public_operation(operation):
 def _public_error(exc):
     if isinstance(exc, ValidationError):
         return "任务信息不完整或参数不符合要求。请换一种更明确的说法。"
+    if isinstance(exc, KeyError):
+        return "没有找到对应记录，请刷新页面后再试。"
     message = str(exc)
     if message.startswith("DeepSeek API key must start with sk-."):
         return "DeepSeek API Key 格式不对，请检查后重新填写。"

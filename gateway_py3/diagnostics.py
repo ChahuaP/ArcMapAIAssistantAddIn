@@ -6,7 +6,7 @@ import socket
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
-from .deepseek_client import public_config
+from .llm_providers import public_config
 from .paths import CATALOG_ROOT, appdata_dir, config_path, log_dir
 
 
@@ -27,7 +27,7 @@ def collect_diagnostics(app_version: str, catalog_version: str, operation_count:
         checks.append(_item("install_dir", "安装目录", "warn", "没有找到安装目录记录。开发模式可忽略。"))
     checks.append(_check_addin(install))
     if network_check:
-        checks.extend(_check_deepseek_network(config))
+        checks.extend(_check_provider_network(config))
     checks.append(_check_log_dir())
     return {
         "ok": all(item["status"] == "ok" for item in checks),
@@ -68,11 +68,15 @@ def _check_gateway(app_version: str, catalog_version: str, operation_count: int)
 
 def _check_config(config: Dict[str, Any]) -> Dict[str, Any]:
     path = Path(config.get("config_path") or str(config_path()))
-    if config.get("has_deepseek_api_key"):
-        return _item("deepseek_key", "DeepSeek Key", "ok", "已读取 Key。", path)
+    providers = config.get("providers") or {}
+    required = sorted(set([config.get("semi_agent_provider"), config.get("full_agent_provider")]))
+    missing = [provider for provider in required if provider and not (providers.get(provider) or {}).get("has_api_key")]
+    if not missing:
+        labels = "、".join((providers.get(provider) or {}).get("label", provider) for provider in required)
+        return _item("provider_key", "模型 Key", "ok", "已读取 %s Key。" % labels, path)
     if path.exists():
-        return _item("deepseek_key", "DeepSeek Key", "bad", "配置文件存在，但没有 deepseek_api_key 字段。", path)
-    return _item("deepseek_key", "DeepSeek Key", "bad", "还没有保存 DeepSeek API Key。", path)
+        return _item("provider_key", "模型 Key", "bad", "配置文件存在，但缺少模型 Key：%s。" % "、".join(missing), path)
+    return _item("provider_key", "模型 Key", "bad", "还没有保存模型 API Key。", path)
 
 
 def _check_gateway_catalog() -> Dict[str, Any]:
@@ -138,28 +142,41 @@ def _check_addin(install: Dict[str, Any]) -> Dict[str, Any]:
     return _item("installed_addin", "ArcMap 插件", "bad", "插件文件不存在。", path)
 
 
-def _check_deepseek_network(config: Dict[str, Any]) -> List[Dict[str, Any]]:
-    base_url = config.get("base_url") or "https://api.deepseek.com"
+def _check_provider_network(config: Dict[str, Any]) -> List[Dict[str, Any]]:
+    checks = []
+    providers = config.get("providers") or {}
+    required = sorted(set([config.get("semi_agent_provider"), config.get("full_agent_provider")]))
+    for provider_id in required:
+        provider = providers.get(provider_id) or {}
+        if not provider.get("has_api_key"):
+            continue
+        checks.extend(_check_one_provider_network(provider_id, provider))
+    return checks
+
+
+def _check_one_provider_network(provider_id: str, provider: Dict[str, Any]) -> List[Dict[str, Any]]:
+    label = provider.get("label") or provider_id
+    base_url = provider.get("base_url") or ""
     parsed = urlparse(base_url)
     host = parsed.hostname
     port = parsed.port or (443 if parsed.scheme == "https" else 80)
     if not host:
-        return [_item("deepseek_url", "DeepSeek 地址", "bad", "DeepSeek Base URL 不正确：%s。" % base_url)]
-    checks = [_item("deepseek_url", "DeepSeek 地址", "ok", base_url)]
+        return [_item("%s_url" % provider_id, "%s 地址" % label, "bad", "%s Base URL 不正确：%s。" % (label, base_url))]
+    checks = [_item("%s_url" % provider_id, "%s 地址" % label, "ok", base_url)]
     try:
         addresses = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
-        checks.append(_item("deepseek_dns", "DeepSeek DNS", "ok", "域名可解析：%s。" % host))
+        checks.append(_item("%s_dns" % provider_id, "%s DNS" % label, "ok", "域名可解析：%s。" % host))
     except Exception as exc:
-        checks.append(_item("deepseek_dns", "DeepSeek DNS", "bad", "域名解析失败：%s。" % exc))
-        checks.append(_item("deepseek_tcp", "DeepSeek 连接", "bad", "DNS 失败，未尝试连接。"))
+        checks.append(_item("%s_dns" % provider_id, "%s DNS" % label, "bad", "域名解析失败：%s。" % exc))
+        checks.append(_item("%s_tcp" % provider_id, "%s 连接" % label, "bad", "DNS 失败，未尝试连接。"))
         return checks
     try:
         address = addresses[0][4]
         with socket.create_connection(address, timeout=3):
             pass
-        checks.append(_item("deepseek_tcp", "DeepSeek 连接", "ok", "可以连接 %s:%s。" % (host, port)))
+        checks.append(_item("%s_tcp" % provider_id, "%s 连接" % label, "ok", "可以连接 %s:%s。" % (host, port)))
     except Exception as exc:
-        checks.append(_item("deepseek_tcp", "DeepSeek 连接", "bad", "连接失败：%s。" % exc))
+        checks.append(_item("%s_tcp" % provider_id, "%s 连接" % label, "bad", "连接失败：%s。" % exc))
     return checks
 
 

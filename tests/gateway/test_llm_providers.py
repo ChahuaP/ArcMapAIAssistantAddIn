@@ -3,14 +3,14 @@ import pathlib
 import tempfile
 import unittest
 
-from gateway_py3 import deepseek_client
+from gateway_py3 import llm_providers
 
 
-class DeepSeekConfigTests(unittest.TestCase):
+class ProviderConfigTests(unittest.TestCase):
     def setUp(self):
         self._old_env = {
             name: os.environ.get(name)
-            for name in ("APPDATA", "LOCALAPPDATA", "DEEPSEEK_API_KEY", "ARCMAP_AI_CONFIG")
+            for name in ("APPDATA", "LOCALAPPDATA", "DEEPSEEK_API_KEY", "MINIMAX_API_KEY", "ARCMAP_AI_CONFIG")
         }
         for name in self._old_env:
             os.environ.pop(name, None)
@@ -22,7 +22,7 @@ class DeepSeekConfigTests(unittest.TestCase):
             else:
                 os.environ[name] = value
 
-    def test_load_config_accepts_utf8_bom(self):
+    def test_legacy_deepseek_config_is_migrated_in_memory(self):
         with tempfile.TemporaryDirectory() as directory:
             appdata = pathlib.Path(directory) / "Roaming"
             localappdata = pathlib.Path(directory) / "Local"
@@ -31,11 +31,15 @@ class DeepSeekConfigTests(unittest.TestCase):
             config_dir = appdata / "ArcMapAIAssistant"
             config_dir.mkdir(parents=True)
             config_path = config_dir / "config.json"
-            config_path.write_text('{"deepseek_api_key": "sk-test", "model": "deepseek-chat"}', encoding="utf-8-sig")
+            config_path.write_text('{"deepseek_api_key": "unit-test-key", "model": "deepseek-chat"}', encoding="utf-8-sig")
 
-            self.assertEqual(deepseek_client.load_api_key(), "sk-test")
+            config = llm_providers.load_config()
 
-    def test_public_config_reports_active_path(self):
+        self.assertEqual(config["providers"]["deepseek"]["api_key"], "unit-test-key")
+        self.assertEqual(config["semi_agent_provider"], "deepseek")
+        self.assertEqual(config["full_agent_provider"], "minimax")
+
+    def test_public_config_reports_both_providers(self):
         with tempfile.TemporaryDirectory() as directory:
             appdata = pathlib.Path(directory) / "Roaming"
             localappdata = pathlib.Path(directory) / "Local"
@@ -43,15 +47,15 @@ class DeepSeekConfigTests(unittest.TestCase):
             os.environ["LOCALAPPDATA"] = str(localappdata)
             path = appdata / "ArcMapAIAssistant" / "config.json"
             path.parent.mkdir(parents=True)
-            path.write_text('{"deepseek_api_key": "sk-test"}', encoding="utf-8")
+            path.write_text('{"providers":{"deepseek":{"api_key":"unit-test-key"},"minimax":{"api_key":"unit-test-key"}}}', encoding="utf-8")
 
-            config = deepseek_client.public_config()
+            config = llm_providers.public_config()
 
-        self.assertTrue(config["has_deepseek_api_key"])
+        self.assertTrue(config["providers"]["deepseek"]["has_api_key"])
+        self.assertTrue(config["providers"]["minimax"]["has_api_key"])
         self.assertEqual(config["config_path"], str(path))
-        self.assertTrue(config["config_file_exists"])
 
-    def test_missing_key_message_names_wrong_field(self):
+    def test_missing_key_message_names_provider_field(self):
         with tempfile.TemporaryDirectory() as directory:
             appdata = pathlib.Path(directory) / "Roaming"
             localappdata = pathlib.Path(directory) / "Local"
@@ -59,12 +63,12 @@ class DeepSeekConfigTests(unittest.TestCase):
             os.environ["LOCALAPPDATA"] = str(localappdata)
             path = appdata / "ArcMapAIAssistant" / "config.json"
             path.parent.mkdir(parents=True)
-            path.write_text('{"api_key": "sk-test"}', encoding="utf-8")
+            path.write_text('{"providers":{"minimax":{"model":"MiniMax-M2.7"}}}', encoding="utf-8")
 
-            message = deepseek_client.missing_api_key_message()
+            message = llm_providers.missing_api_key_message("minimax")
 
         self.assertIn(str(path), message)
-        self.assertIn("deepseek_api_key", message)
+        self.assertIn("providers.minimax.api_key", message)
 
 
 if __name__ == "__main__":

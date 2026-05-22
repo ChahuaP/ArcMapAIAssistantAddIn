@@ -139,6 +139,8 @@ Copy-TreeFiltered (Join-Path $repoRoot "operation_catalog") (Join-Path $ReleaseR
 Copy-Item -LiteralPath $gatewayDist -Destination (Join-Path $ReleaseRoot "app\gateway") -Recurse -Force
 Copy-CmdFile (Join-Path $repoRoot "OpenAssistantWeb.cmd") (Join-Path $ReleaseRoot "app\OpenAssistantWeb.cmd")
 Copy-CmdFile (Join-Path $repoRoot "StartGateway.cmd") (Join-Path $ReleaseRoot "app\StartGateway.cmd")
+Copy-Item -LiteralPath (Join-Path $repoRoot "gateway_py3\web\help.html") -Destination (Join-Path $ReleaseRoot "app\help.html") -Force
+Copy-Item -LiteralPath (Join-Path $repoRoot "packaging\uninstall.ico") -Destination (Join-Path $ReleaseRoot "app\uninstall.ico") -Force
 Copy-Item -LiteralPath (Join-Path $repoRoot "ArcMapAIAssistantAddIn\ArcMapAIAssistantAddIn.esriaddin") -Destination (Join-Path $ReleaseRoot "ArcMapAIAssistantAddIn\ArcMapAIAssistantAddIn.esriaddin") -Force
 Copy-PowerShellFile (Join-Path $repoRoot "packaging\install.ps1") (Join-Path $ReleaseRoot "packaging\install.ps1")
 Copy-PowerShellFile (Join-Path $repoRoot "packaging\uninstall.ps1") (Join-Path $ReleaseRoot "packaging\uninstall.ps1")

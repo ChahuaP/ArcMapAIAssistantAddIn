@@ -67,6 +67,8 @@ class CatalogTests(unittest.TestCase):
         self.assertIn('"operation_catalog"', build_script)
         self.assertIn('"app\\operation_catalog"', build_script)
         self.assertIn('"app\\VERSION"', build_script)
+        self.assertIn('"app\\help.html"', build_script)
+        self.assertIn('"app\\uninstall.ico"', build_script)
         self.assertIn("Get-AppVersion", build_script)
         self.assertIn('"operation_catalog"', install_script)
         self.assertIn('"catalog.json"', install_script)
@@ -94,6 +96,11 @@ class CatalogTests(unittest.TestCase):
         self.assertIn(r"DefaultDirName={autopf}\GeoPilot", inno_script)
         self.assertIn("RunOnceId", inno_script)
         self.assertNotIn("ChineseSimplified.isl", inno_script)
+        self.assertIn(r'Name: "{autoprograms}\GeoPilot\帮助"', inno_script)
+        self.assertIn(r'Name: "{autoprograms}\GeoPilot\卸载 GeoPilot"', inno_script)
+        self.assertIn('IconFilename: "{app}\\uninstall.ico"', inno_script)
+        self.assertNotIn("打开 GeoPilot", inno_script)
+        self.assertNotIn("启动 AI 后台", inno_script)
 
 
 def _load_json(path):

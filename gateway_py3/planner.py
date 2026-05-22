@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 from .agent_tools import AgentToolError, AgentToolRuntime
 from .catalog_loader import OperationCatalog
-from .deepseek_client import DeepSeekClient
 from .file_resolver import FileResolver
+from .llm_providers import FULL_AGENT_MODE, ChatProvider, create_provider
 from .logs import write_event
 from .validators import ValidationError, context_hash, friendly_validation_message, prepare_workflow
 from .workflow_store import WorkflowStore
@@ -15,7 +16,7 @@ from .workflow_store import WorkflowStore
 MAX_TOOL_ROUNDS = 8
 MAX_FILE_SEARCH_NUDGES = 1
 
-SYSTEM_PROMPT = """You are ArcMap AI Assistant.
+SYSTEM_PROMPT = """You are GeoPilot.
 You help non-technical ArcGIS/ArcMap users turn natural Chinese requests into safe GIS workflow drafts.
 
 Hard rules:
@@ -38,13 +39,16 @@ Hard rules:
 - Do not invent or expand file paths. Use path/folder_path only when the user provided that exact path. If the user only provided a drive and file name, call file_resolve with drive and file_name only.
 - Do not reuse path components from recent_conversation unless the user explicitly refers to the same folder or previous result.
 - If the user asks to open local files and then process those opened files, call file_resolve and use the resolved layer_name values as later step inputs.
-- If file_resolve returns status clarify with child_directories, the question is only a fallback for the user. First use those directory names as local facts and call file_resolve again on a small number of plausible next directories. Do not blindly enumerate every directory, and do not recursively scan a drive root.
+- If file_resolve returns status clarify with child_directories, that question is only for the user after local search choices are exhausted. First use those directory names as local facts and call file_resolve again on a small number of plausible next directories. Do not blindly enumerate every directory, and do not recursively scan a drive root.
 - Do not stop after the first file_resolve clarify when child_directories is not empty. You must try at least one plausible child directory before asking the user.
 - Only ask the user to clarify after file_resolve has no useful child_directories, too many equal candidates, or no plausible next directory remains.
 - Final clarify text must be a normal Chinese question. Summarize what was checked briefly; do not dump long directory lists unless the user explicitly needs choices.
 - If a later step uses a dataset produced by an earlier step, reference it as from_step:step_id when the layer name is not enough.
 - Do not mention JSON, schema, tool calls, operation ids, catalog internals, or validation internals to the user.
 - Do not overwrite existing data.
+- If the current mode is full_agent, prefer the active project workdir for local data lookup and output planning.
+- In full_agent mode, generated data should use arcgis_context.project_output_workspace when the user does not provide an output location.
+- If existing tools cannot satisfy the user, return unsupported with a clear missing_capability summary. If the user explicitly asks to create that missing tool, call toolbuilder_create_draft and explain that the tool waits for review before it can be enabled.
 """
 
 
@@ -56,32 +60,46 @@ class AgenticPlanner:
     def __init__(
         self,
         catalog: OperationCatalog | None = None,
-        client: DeepSeekClient | None = None,
+        client: ChatProvider | None = None,
         store: WorkflowStore | None = None,
         file_resolver: FileResolver | None = None
     ):
         self.catalog = catalog or OperationCatalog()
-        self.client = client or DeepSeekClient()
+        self.client = client
         self.store = store or WorkflowStore()
         self.file_resolver = file_resolver or FileResolver()
 
-    def plan(self, command: str, context: Dict[str, Any]) -> Dict[str, Any]:
-        tool_runtime = AgentToolRuntime(self.catalog, self.store, context, self.file_resolver)
+    def plan(
+        self,
+        command: str,
+        context: Dict[str, Any],
+        mode: str = "semi_agent",
+        project_id: str | None = None
+    ) -> Dict[str, Any]:
+        project = self.store.get_project(project_id) if project_id else None
+        if mode == FULL_AGENT_MODE and not project:
+            raise PlannerError("全代理模式需要先选择一个项目工作目录。")
+        if project:
+            context = _context_for_project(context, project)
+        client = self.client or create_provider(mode=mode)
+        tool_runtime = AgentToolRuntime(self.catalog, self.store, context, self.file_resolver, project)
         tools = tool_runtime.tools()
-        messages = self._messages(command, context, tool_runtime.operation_index())
+        messages = self._messages(command, context, tool_runtime.operation_index(), mode, project)
         trace: List[Dict[str, Any]] = []
 
         write_event("agent.request", {
             "command": command,
             "context_hash": context_hash(context),
-            "operation_count": len(self.catalog.operations)
+            "operation_count": len(self.catalog.operations),
+            "mode": mode,
+            "project_id": project_id or ""
         })
 
         validation_feedback_count = 0
         pending_question = ""
         file_search_nudges = 0
         for _ in range(MAX_TOOL_ROUNDS):
-            response = self.client.chat_agent(messages, tools)
+            response = client.chat_agent(messages, tools)
             assistant_message = response["message"]
             usage = response.get("usage", {})
             messages.append(_message_for_history(assistant_message))
@@ -90,7 +108,7 @@ class AgenticPlanner:
             try:
                 proposal = self._proposal_from_message(assistant_message)
             except AgentToolError as exc:
-                return self._store_clarification(command, context, friendly_validation_message(exc), trace)
+                return self._store_clarification(command, context, friendly_validation_message(exc), trace, mode, project_id)
             if proposal is not None:
                 if (
                     _premature_file_clarification(proposal, trace)
@@ -101,12 +119,12 @@ class AgenticPlanner:
                     file_search_nudges += 1
                     continue
                 proposal = _merge_pending_question(proposal, pending_question)
-                finalized, feedback = self._try_finalize(command, context, proposal, trace)
+                finalized, feedback = self._try_finalize(command, context, proposal, trace, mode, project_id)
                 if finalized is not None:
                     return finalized
                 validation_feedback_count += 1
                 if validation_feedback_count > 1:
-                    return self._store_clarification(command, context, feedback, trace)
+                    return self._store_clarification(command, context, feedback, trace, mode, project_id)
                 messages.append(_tool_message(_proposal_tool_call_id(assistant_message), {"ok": False, "error": feedback}))
                 continue
 
@@ -128,7 +146,7 @@ class AgenticPlanner:
                         if content_text and not _generic_clarification(content_text)
                         else pending_question or "这个任务还不够明确，请补充要操作的数据、处理方式或输出位置。"
                     )
-                    return self._store_clarification(command, context, summary, trace)
+                    return self._store_clarification(command, context, summary, trace, mode, project_id)
                 if (
                     _premature_file_clarification(content_workflow, trace)
                     and _generic_clarification(str(content_workflow.get("summary", "")))
@@ -138,10 +156,10 @@ class AgenticPlanner:
                     file_search_nudges += 1
                     continue
                 content_workflow = _merge_pending_question(content_workflow, pending_question)
-                finalized, feedback = self._try_finalize(command, context, content_workflow, trace)
+                finalized, feedback = self._try_finalize(command, context, content_workflow, trace, mode, project_id)
                 if finalized is not None:
                     return finalized
-                return self._store_clarification(command, context, feedback, trace)
+                return self._store_clarification(command, context, feedback, trace, mode, project_id)
 
             for tool_call in tool_calls:
                 try:
@@ -162,21 +180,30 @@ class AgenticPlanner:
 
                 if name == "workflow_propose":
                     if result.get("ok"):
-                        return self._store_workflow(command, context, result["workflow"], trace)
+                        return self._store_workflow(command, context, result["workflow"], trace, mode, project_id)
                     validation_feedback_count += 1
                     if validation_feedback_count > 1:
-                        return self._store_clarification(command, context, result.get("error", "这个任务信息还不完整。"), trace)
+                        return self._store_clarification(command, context, result.get("error", "这个任务信息还不完整。"), trace, mode, project_id)
 
                 messages.append(_tool_message(tool_call.get("id"), result))
 
-        return self._store_clarification(command, context, pending_question or "这个任务还不够明确，请补充要操作的数据、处理方式或输出位置。", trace)
+        return self._store_clarification(command, context, pending_question or "这个任务还不够明确，请补充要操作的数据、处理方式或输出位置。", trace, mode, project_id)
 
-    def _messages(self, command: str, context: Dict[str, Any], operation_index: List[Dict[str, str]]) -> List[Dict[str, Any]]:
+    def _messages(
+        self,
+        command: str,
+        context: Dict[str, Any],
+        operation_index: List[Dict[str, str]],
+        mode: str,
+        project: Dict[str, Any] | None
+    ) -> List[Dict[str, Any]]:
         payload = {
             "user_request": command,
+            "mode": mode,
             "arcgis_context": _context_summary(context),
+            "project": _project_summary(project, self.store) if project else None,
             "operation_index": operation_index,
-            "recent_conversation": _recent_conversation(self.store)
+            "recent_conversation": _recent_conversation(self.store, project.get("id") if project else None, 18 if mode == FULL_AGENT_MODE else 6)
         }
         return [
             {"role": "system", "content": SYSTEM_PROMPT},
@@ -195,25 +222,43 @@ class AgenticPlanner:
         command: str,
         context: Dict[str, Any],
         workflow: Dict[str, Any],
-        trace: List[Dict[str, Any]]
+        trace: List[Dict[str, Any]],
+        mode: str,
+        project_id: str | None
     ) -> Tuple[Dict[str, Any] | None, str]:
         try:
             prepared = prepare_workflow(workflow, self.catalog, context)
         except ValidationError as exc:
             return None, friendly_validation_message(exc)
-        return self._store_workflow(command, context, prepared, trace), ""
+        return self._store_workflow(command, context, prepared, trace, mode, project_id), ""
 
-    def _store_workflow(self, command: str, context: Dict[str, Any], workflow: Dict[str, Any], trace: List[Dict[str, Any]]) -> Dict[str, Any]:
-        row = self.store.create_draft(command, context_hash(context), workflow, trace)
+    def _store_workflow(
+        self,
+        command: str,
+        context: Dict[str, Any],
+        workflow: Dict[str, Any],
+        trace: List[Dict[str, Any]],
+        mode: str = "semi_agent",
+        project_id: str | None = None
+    ) -> Dict[str, Any]:
+        row = self.store.create_draft(command, context_hash(context), workflow, trace, mode=mode, project_id=project_id or "")
         write_event("agent.final_workflow", {
             "workflow_id": row["id"],
             "workflow": workflow
         })
         return row
 
-    def _store_clarification(self, command: str, context: Dict[str, Any], summary: str, trace: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def _store_clarification(
+        self,
+        command: str,
+        context: Dict[str, Any],
+        summary: str,
+        trace: List[Dict[str, Any]],
+        mode: str = "semi_agent",
+        project_id: str | None = None
+    ) -> Dict[str, Any]:
         workflow = {"action": "clarify", "summary": summary, "steps": []}
-        row = self.store.create_draft(command, context_hash(context), workflow, trace)
+        row = self.store.create_draft(command, context_hash(context), workflow, trace, mode=mode, project_id=project_id or "")
         write_event("agent.final_workflow", {
             "workflow_id": row["id"],
             "workflow": workflow
@@ -238,16 +283,48 @@ def _context_summary(context: Dict[str, Any]) -> Dict[str, Any]:
         "mxd_path": context.get("mxd_path"),
         "is_saved": context.get("is_saved"),
         "default_gdb": context.get("default_gdb"),
+        "project_output_workspace": context.get("project_output_workspace"),
+        "project": context.get("project"),
         "active_view": context.get("active_view"),
         "spatial_reference": context.get("spatial_reference"),
         "layers": layers
     }
 
 
-def _recent_conversation(store: WorkflowStore) -> List[Dict[str, Any]]:
+def _project_summary(project: Dict[str, Any], store: WorkflowStore) -> Dict[str, Any]:
+    return {
+        "id": project["id"],
+        "name": project["name"],
+        "workdir": project["workdir"],
+        "output_workspace": str(_project_output_workspace(project)),
+        "memory": store.list_project_memories(project["id"], limit=12),
+    }
+
+
+def _context_for_project(context: Dict[str, Any], project: Dict[str, Any]) -> Dict[str, Any]:
+    result = dict(context or {})
+    output_workspace = _project_output_workspace(project)
+    try:
+        output_workspace.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise PlannerError("项目输出目录不可用：%s" % exc)
+    result["project"] = {
+        "id": project["id"],
+        "name": project["name"],
+        "workdir": project["workdir"],
+    }
+    result["project_output_workspace"] = str(output_workspace)
+    return result
+
+
+def _project_output_workspace(project: Dict[str, Any]) -> Path:
+    return Path(project["workdir"]).expanduser().resolve() / "GeoPilot_Output"
+
+
+def _recent_conversation(store: WorkflowStore, project_id: str | None = None, limit: int = 6) -> List[Dict[str, Any]]:
     history = []
     try:
-        rows = store.list_recent(limit=6)
+        rows = store.list_recent(limit=limit, project_id=project_id)
     except Exception:
         return history
     for row in reversed(rows):

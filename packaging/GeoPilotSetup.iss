@@ -32,8 +32,8 @@ Source: "{#MySourceDir}\*"; DestDir: "{tmp}\GeoPilotPackage"; Flags: recursesubd
 Source: "{#MySourceDir}\packaging\uninstall.ps1"; DestDir: "{app}\packaging"; Flags: ignoreversion
 
 [Icons]
-Name: "{autoprograms}\GeoPilot\打开 GeoPilot"; Filename: "{app}\OpenAssistantWeb.cmd"; WorkingDir: "{app}"
-Name: "{autoprograms}\GeoPilot\启动 AI 后台"; Filename: "{app}\StartGateway.cmd"; WorkingDir: "{app}"
+Name: "{autoprograms}\GeoPilot\帮助"; Filename: "{app}\help.html"; WorkingDir: "{app}"
+Name: "{autoprograms}\GeoPilot\卸载 GeoPilot"; Filename: "{uninstallexe}"; IconFilename: "{app}\uninstall.ico"
 
 [Run]
 Filename: "powershell.exe"; Parameters: "-NoLogo -NoProfile -ExecutionPolicy Bypass -File ""{tmp}\GeoPilotPackage\packaging\install.ps1"" -InstallDir ""{app}"" -Quiet"; StatusMsg: "正在安装 GeoPilot..."; Flags: runhidden waituntilterminated

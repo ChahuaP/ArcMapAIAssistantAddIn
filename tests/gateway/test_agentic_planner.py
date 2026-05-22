@@ -282,6 +282,31 @@ class AgenticPlannerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValidationError, "输出位置"):
             prepare_workflow(workflow, self.catalog, _context(is_saved=False))
 
+    def test_full_agent_project_output_workspace_is_applied_to_writes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            store = WorkflowStore(root / "workflows.sqlite")
+            project = store.create_project("project", str(root))
+            client = FakeAgentClient([
+                _assistant_tool_call("call_1", "workflow_propose", {
+                    "action": "execute",
+                    "summary": "将对 nanjing 生成缓冲区。",
+                    "steps": [
+                        _step("step_1", "analysis.buffer", {
+                            "input_layer": "nanjing",
+                            "distance": "10 Meters",
+                            "output_name": "nanjing_buffer"
+                        }, "缓冲")
+                    ]
+                })
+            ])
+            planner = AgenticPlanner(catalog=self.catalog, client=client, store=store)
+            row = planner.plan("给 nanjing 做 10 米缓冲区", _context(is_saved=False), mode="full_agent", project_id=project["id"])
+
+            arguments = row["workflow"]["steps"][0]["arguments"]
+            self.assertEqual(arguments["output_workspace"], str(root / "GeoPilot_Output"))
+            self.assertTrue((root / "GeoPilot_Output").exists())
+
     def test_split_by_field_workflow_is_prepared_with_timestamp(self):
         workflow = {
             "action": "execute",

@@ -41,6 +41,7 @@ def prepare_workflow(workflow: Dict[str, Any], catalog: OperationCatalog, contex
     prepared = copy.deepcopy(workflow)
     normalize_workflow(prepared)
     apply_default_output_names(prepared, catalog)
+    apply_project_output_location(prepared, catalog, context)
     apply_output_name_timestamp(prepared, catalog)
     validate_workflow(prepared, catalog)
     validate_workflow_semantics(prepared, catalog, context)
@@ -113,6 +114,31 @@ def apply_output_name_timestamp(workflow: Dict[str, Any], catalog: OperationCata
         if not output_name or _has_timestamp_suffix(str(output_name)):
             continue
         arguments["output_name"] = "%s_%s" % (output_name, suffix)
+
+
+def apply_project_output_location(workflow: Dict[str, Any], catalog: OperationCatalog, context: Dict[str, Any]) -> None:
+    if workflow.get("action") != "execute":
+        return
+    project_output = context.get("project_output_workspace")
+    if not isinstance(project_output, str) or not project_output.strip():
+        return
+    for step in workflow.get("steps") or []:
+        operation_id = step.get("operation")
+        if operation_id not in catalog.operations:
+            continue
+        operation = catalog.operations[operation_id]
+        if operation.get("side_effects") != "writes_data":
+            continue
+        arguments = step.get("arguments")
+        if not isinstance(arguments, dict):
+            continue
+        if arguments.get("output_workspace") or arguments.get("output_folder"):
+            continue
+        properties = (operation.get("parameters_schema") or {}).get("properties") or {}
+        if "output_workspace" in properties:
+            arguments["output_workspace"] = project_output.strip()
+        elif "output_folder" in properties:
+            arguments["output_folder"] = project_output.strip()
 
 
 def validate_workflow_semantics(workflow: Dict[str, Any], catalog: OperationCatalog, context: Dict[str, Any]) -> None:

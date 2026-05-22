@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
 from .paths import CATALOG_ROOT
+from .tool_builder import enabled_operation_specs
 
 
 class CatalogError(Exception):
@@ -33,10 +34,15 @@ class OperationCatalog:
             pack = _load_json(self.root / rel_path)
             self.packs.append(pack)
             for operation in pack["operations"]:
-                operation_id = operation["id"]
-                if operation_id in self.operations:
-                    raise CatalogError(f"Duplicate operation id: {operation_id}")
-                self.operations[operation_id] = operation
+                self._register_operation(operation)
+        for operation in enabled_operation_specs():
+            self._register_operation(operation)
+
+    def _register_operation(self, operation: Dict[str, Any]) -> None:
+        operation_id = operation["id"]
+        if operation_id in self.operations:
+            raise CatalogError(f"Duplicate operation id: {operation_id}")
+        self.operations[operation_id] = operation
 
     def get(self, operation_id: str) -> Dict[str, Any]:
         if operation_id not in self.operations:

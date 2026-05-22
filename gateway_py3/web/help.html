@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GeoPilot 帮助</title>
+  <style>
+    :root {
+      --ink: #123140;
+      --muted: #5f7280;
+      --line: #d9e7ed;
+      --page: #ecfeff;
+      --panel: #ffffff;
+      --primary: #0891b2;
+      --green: #16a34a;
+      --soft: #f7fcfd;
+      --shadow: 0 20px 48px rgba(18, 49, 64, .12);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        linear-gradient(180deg, rgba(236, 254, 255, .94), rgba(248, 253, 254, 1)),
+        repeating-linear-gradient(90deg, rgba(8, 145, 178, .04) 0, rgba(8, 145, 178, .04) 1px, transparent 1px, transparent 36px);
+      font: 15px/1.65 "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", Arial, sans-serif;
+    }
+    .wrap {
+      width: min(1120px, calc(100% - 40px));
+      margin: 0 auto;
+      padding: 42px 0 56px;
+    }
+    .hero {
+      display: grid;
+      gap: 14px;
+      padding: 34px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, .92);
+      box-shadow: var(--shadow);
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-weight: 800;
+      letter-spacing: 0;
+    }
+    .mark {
+      width: 42px;
+      height: 42px;
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      color: #fff;
+      background: linear-gradient(135deg, #075d70, #10a37f);
+    }
+    h1, h2, h3, p { margin-top: 0; }
+    h1 {
+      margin-bottom: 4px;
+      font-size: clamp(30px, 5vw, 54px);
+      line-height: 1.05;
+      letter-spacing: 0;
+      color: #071421;
+    }
+    .lead {
+      max-width: 780px;
+      margin-bottom: 0;
+      color: var(--muted);
+      font-size: 18px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+      margin-top: 18px;
+    }
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      padding: 20px;
+      box-shadow: 0 10px 28px rgba(18, 49, 64, .07);
+    }
+    .card h2 {
+      margin-bottom: 10px;
+      color: #071421;
+      font-size: 19px;
+    }
+    .card p, li { color: var(--muted); }
+    ol, ul {
+      margin: 0;
+      padding-left: 22px;
+    }
+    li + li { margin-top: 8px; }
+    code {
+      color: #075d70;
+      background: #e6f7fa;
+      border: 1px solid #c6edf3;
+      border-radius: 6px;
+      padding: 2px 6px;
+      font-family: Consolas, "Cascadia Mono", monospace;
+      font-size: 13px;
+    }
+    .wide { grid-column: span 2; }
+    .callout {
+      margin-top: 18px;
+      border-left: 4px solid var(--green);
+      background: #f0fdf4;
+      padding: 14px 16px;
+      color: #14532d;
+      border-radius: 6px;
+    }
+    @media (max-width: 900px) {
+      .grid { grid-template-columns: 1fr; }
+      .wide { grid-column: auto; }
+      .hero { padding: 24px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <section class="hero">
+      <div class="brand"><span class="mark">G</span><span>GeoPilot</span></div>
+      <h1>用自然语言完成 ArcGIS 工作流</h1>
+      <p class="lead">GeoPilot 会把你的中文指令转换为可确认的 GIS 工作流。确认后，ArcMap 工具栏负责真正执行，原始数据不会被模型直接操作。</p>
+      <div class="callout">首次使用：打开 ArcMap，点击 GeoPilot 工具栏里的“启动AI后台”或“显示控制台”，在网页右上角配置模型 Key。</div>
+    </section>
+
+    <section class="grid">
+      <article class="card">
+        <h2>启动</h2>
+        <ol>
+          <li>打开 ArcMap。</li>
+          <li>点击工具栏“启动AI后台”。</li>
+          <li>点击“显示控制台”打开 GeoPilot 页面。</li>
+          <li>点击“同步上下文”，让页面读取当前地图图层。</li>
+        </ol>
+      </article>
+
+      <article class="card">
+        <h2>模型配置</h2>
+        <p>半代理模式默认使用 DeepSeek。全代理模式默认使用 MiniMax。Key 只保存在当前 Windows 用户目录。</p>
+        <p>配置入口：页面右上角 <code>配置模型</code>。</p>
+      </article>
+
+      <article class="card">
+        <h2>执行任务</h2>
+        <ol>
+          <li>在对话框输入任务。</li>
+          <li>查看生成的任务卡片。</li>
+          <li>确认后发送到 ArcGIS。</li>
+          <li>回到 ArcMap 点击“执行工作流”。</li>
+        </ol>
+      </article>
+
+      <article class="card wide">
+        <h2>两种模式</h2>
+        <ul>
+          <li><strong>半代理模式：</strong>适合单次任务，例如缓冲区、相交、选择、导出。</li>
+          <li><strong>全代理模式：</strong>需要先创建项目工作目录，后续会优先在该目录中查找数据并保留项目记忆。</li>
+        </ul>
+      </article>
+
+      <article class="card">
+        <h2>工具进化</h2>
+        <p>如果当前能力不够，GeoPilot 可以生成“待审核工具包”。启用前它不会进入 ArcMap 执行目录。</p>
+      </article>
+
+      <article class="card">
+        <h2>常见问题</h2>
+        <ul>
+          <li>页面打不开：先在 ArcMap 点击“启动AI后台”。</li>
+          <li>地图不对：点击“同步上下文”。</li>
+          <li>任务没执行：确认任务后，还要回 ArcMap 点击“执行工作流”。</li>
+        </ul>
+      </article>
+    </section>
+  </main>
+</body>
+</html>

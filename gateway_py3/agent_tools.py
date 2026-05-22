@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from typing import Any, Dict, List
 
 from .catalog_loader import CatalogError, OperationCatalog
 from .file_resolver import FileResolver
+from .tool_builder import ToolBuilderError, create_draft_tool
 from .validators import ValidationError, friendly_validation_message, prepare_workflow
 from .workflow_store import WorkflowStore
 
@@ -18,12 +21,14 @@ class AgentToolRuntime:
         catalog: OperationCatalog,
         store: WorkflowStore,
         context: Dict[str, Any],
-        file_resolver: FileResolver | None = None
+        file_resolver: FileResolver | None = None,
+        project: Dict[str, Any] | None = None
     ):
         self.catalog = catalog
         self.store = store
         self.context = context
         self.file_resolver = file_resolver or FileResolver()
+        self.project = project
 
     def tools(self) -> List[Dict[str, Any]]:
         return [
@@ -46,6 +51,38 @@ class AgentToolRuntime:
                 "arcgis_get_context",
                 "Get the latest ArcGIS context snapshot synchronized from ArcMap.",
                 {"type": "object", "properties": {}, "additionalProperties": False}
+            ),
+            _tool(
+                "project_get_context",
+                "Get the active GeoPilot project workdir and saved project memories. Use only in full_agent mode.",
+                {"type": "object", "properties": {}, "additionalProperties": False}
+            ),
+            _tool(
+                "project_list_files",
+                "List GIS files under the active project workdir from structured path arguments. This does not parse natural language.",
+                {
+                    "type": "object",
+                    "properties": {
+                        "relative_path": {"type": "string", "description": "Folder under project workdir, for example data\\roads."},
+                        "file_name": {"type": "string", "description": "Exact file name to find, for example roads.shp."},
+                        "extensions": {"type": "array", "items": {"type": "string"}, "description": "Allowed extensions, for example ['shp']."},
+                        "max_depth": {"type": "integer", "description": "Search depth under relative_path. Defaults to 2, maximum 5."}
+                    },
+                    "additionalProperties": False
+                }
+            ),
+            _tool(
+                "project_remember",
+                "Save a concise project memory for future full_agent planning.",
+                {
+                    "type": "object",
+                    "required": ["content"],
+                    "properties": {
+                        "content": {"type": "string"},
+                        "kind": {"type": "string"}
+                    },
+                    "additionalProperties": False
+                }
             ),
             _tool(
                 "file_resolve",
@@ -89,6 +126,22 @@ class AgentToolRuntime:
                     },
                     "additionalProperties": False
                 }
+            ),
+            _tool(
+                "toolbuilder_create_draft",
+                "Create a disabled draft ArcPy operation package after the user explicitly agrees to create a missing tool. The draft waits for human review before enablement.",
+                {
+                    "type": "object",
+                    "required": ["name", "capability", "operation_spec", "executor_code", "tests"],
+                    "properties": {
+                        "name": {"type": "string"},
+                        "capability": {"type": "string"},
+                        "operation_spec": {"type": "object"},
+                        "executor_code": {"type": "string"},
+                        "tests": {"type": "array", "items": {"type": "object"}}
+                    },
+                    "additionalProperties": False
+                }
             )
         ]
 
@@ -111,6 +164,12 @@ class AgentToolRuntime:
             return self._catalog_get_operation_schema(arguments)
         if name == "arcgis_get_context":
             return {"context": self.context}
+        if name == "project_get_context":
+            return self._project_get_context()
+        if name == "project_list_files":
+            return self._project_list_files(arguments)
+        if name == "project_remember":
+            return self._project_remember(arguments)
         if name == "file_resolve":
             return self._file_resolve(arguments)
         if name == "workflow_validate":
@@ -119,6 +178,8 @@ class AgentToolRuntime:
             return self._workflow_validate({
                 "workflow": _workflow_from_arguments(arguments)
             })
+        if name == "toolbuilder_create_draft":
+            return self._toolbuilder_create_draft(arguments)
         raise AgentToolError("Unknown agent tool: %s" % name)
 
     def _catalog_get_operation_schema(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
@@ -133,6 +194,55 @@ class AgentToolRuntime:
         _reject_unknown(arguments, {"path", "folder_path", "drive", "directory", "directory_parts", "file_name", "extensions"})
         return self.file_resolver.resolve(arguments).to_tool_result()
 
+    def _project_get_context(self) -> Dict[str, Any]:
+        if not self.project:
+            return {"ok": False, "error": "当前没有活动项目。"}
+        output_workspace = _project_output_workspace(self.project)
+        try:
+            output_workspace.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            return {"ok": False, "error": "项目输出目录不可用：%s" % exc}
+        return {
+            "ok": True,
+            "project": self.project,
+            "output_workspace": str(output_workspace),
+            "memories": self.store.list_project_memories(self.project["id"], limit=20)
+        }
+
+    def _project_list_files(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        _reject_unknown(arguments, {"relative_path", "file_name", "extensions", "max_depth"})
+        if not self.project:
+            return {"ok": False, "error": "当前没有活动项目。"}
+        root = Path(self.project["workdir"]).resolve()
+        relative = _optional_string(arguments, "relative_path")
+        search_root = (root / relative).resolve() if relative else root
+        if not str(search_root).lower().startswith(str(root).lower()):
+            raise AgentToolError("relative_path 超出项目工作目录。")
+        if not search_root.exists() or not search_root.is_dir():
+            return {"ok": False, "status": "clarify", "question": "项目里没有这个目录：%s。" % relative}
+        extensions = _extensions(arguments)
+        file_name = _optional_string(arguments, "file_name")
+        max_depth = min(max(int(arguments.get("max_depth") or 2), 0), 5)
+        files = _list_project_files(search_root, root, extensions, file_name, max_depth)
+        child_directories = _child_directories(search_root, root)
+        return {
+            "ok": True,
+            "status": "resolved" if files else "clarify",
+            "project_id": self.project["id"],
+            "workdir": str(root),
+            "files": files,
+            "child_directories": child_directories,
+            "question": "" if files else "项目工作目录里没有找到符合条件的数据，请补充更具体的文件名或子目录。"
+        }
+
+    def _project_remember(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        _reject_unknown(arguments, {"content", "kind"})
+        if not self.project:
+            return {"ok": False, "error": "当前没有活动项目。"}
+        content = _required_string(arguments, "content")
+        kind = arguments.get("kind") if isinstance(arguments.get("kind"), str) else "note"
+        return {"ok": True, "memory": self.store.add_project_memory(self.project["id"], content, kind=kind)}
+
     def _workflow_validate(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
         _reject_unknown(arguments, {"workflow"})
         workflow = arguments.get("workflow")
@@ -143,6 +253,18 @@ class AgentToolRuntime:
         except ValidationError as exc:
             return {"ok": False, "error": friendly_validation_message(exc)}
         return {"ok": True, "workflow": prepared}
+
+    def _toolbuilder_create_draft(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            tool = create_draft_tool(self.store, arguments)
+        except ToolBuilderError as exc:
+            return {"ok": False, "error": str(exc)}
+        return {
+            "ok": True,
+            "status": "pending_review",
+            "tool": tool,
+            "message": "新工具已生成待审核包，启用前不会进入 ArcGIS 执行目录。"
+        }
 
 
 def _tool(name: str, description: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
@@ -161,6 +283,71 @@ def _required_string(arguments: Dict[str, Any], key: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise AgentToolError("%s must be a non-empty string." % key)
     return value.strip()
+
+
+def _optional_string(arguments: Dict[str, Any], key: str) -> str:
+    value = arguments.get(key)
+    return value.strip() if isinstance(value, str) and value.strip() else ""
+
+
+def _extensions(arguments: Dict[str, Any]) -> set[str]:
+    values = arguments.get("extensions")
+    if not isinstance(values, list) or not values:
+        values = ["shp", "lyr", "tif", "img", "sde", "gdb"]
+    extensions = set()
+    for value in values:
+        item = str(value).strip().lower()
+        if not item:
+            continue
+        extensions.add(item if item.startswith(".") else "." + item)
+    return extensions
+
+
+def _list_project_files(search_root: Path, project_root: Path, extensions: set[str], file_name: str, max_depth: int) -> List[Dict[str, str]]:
+    results: List[Dict[str, str]] = []
+    target = file_name.lower() if file_name else ""
+    root_depth = len(search_root.parts)
+    for current_root, directory_names, file_names in os.walk(str(search_root)):
+        current = Path(current_root)
+        depth = len(current.parts) - root_depth
+        if depth >= max_depth:
+            directory_names[:] = []
+        directory_names[:] = [name for name in directory_names if name.lower() not in ("$recycle.bin", "system volume information", "__pycache__")]
+        for name in file_names:
+            path = current / name
+            if path.suffix.lower() not in extensions:
+                continue
+            if target and name.lower() != target:
+                continue
+            results.append({
+                "path": str(path),
+                "relative_path": str(path.relative_to(project_root)),
+                "layer_name": path.stem,
+                "name": path.stem,
+                "kind": "shapefile" if path.suffix.lower() == ".shp" else "gis_file",
+            })
+            if len(results) >= 50:
+                return results
+    return results
+
+
+def _child_directories(search_root: Path, project_root: Path) -> List[str]:
+    result = []
+    try:
+        children = sorted(search_root.iterdir(), key=lambda item: item.name.lower())
+    except OSError:
+        return result
+    for child in children:
+        if not child.is_dir():
+            continue
+        if child.name.lower() in ("$recycle.bin", "system volume information", "__pycache__"):
+            continue
+        result.append(str(child.relative_to(project_root)))
+    return result[:80]
+
+
+def _project_output_workspace(project: Dict[str, Any]) -> Path:
+    return Path(project["workdir"]).expanduser().resolve() / "GeoPilot_Output"
 
 
 def _reject_unknown(arguments: Dict[str, Any], allowed: set[str]) -> None:

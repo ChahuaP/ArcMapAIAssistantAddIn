@@ -8,7 +8,7 @@ The project is built for ArcGIS Desktop / ArcMap, not ArcGIS Pro.
 
 - Opens local GIS files and folders from natural language requests.
 - Reads the current ArcMap context: layers, fields, selections, coordinate system, MXD status, and default geodatabase.
-- Plans workflows with DeepSeek through a local Python 3 gateway.
+- Plans workflows with a local Python 3 gateway and selectable LLM providers.
 - Executes approved ArcPy operations from a fixed operation catalog.
 - Supports common map, layer, selection, analysis, table, and export operations.
 - Provides a local Web console for conversation, task review, API key configuration, capabilities, and workflow queue.
@@ -16,12 +16,12 @@ The project is built for ArcGIS Desktop / ArcMap, not ArcGIS Pro.
 
 ## Safety Model
 
-DeepSeek never runs arbitrary Python and never calls ArcPy directly.
+The model never runs arbitrary Python and never calls ArcPy directly.
 
 The execution path is:
 
 1. ArcMap synchronizes the current GIS context to the local gateway.
-2. DeepSeek plans a workflow by using whitelist tools exposed by the gateway.
+2. The selected model plans a workflow by using whitelist tools exposed by the gateway.
 3. The gateway validates the workflow against the operation catalog.
 4. The user approves the task in the Web console.
 5. ArcMap pulls the approved workflow and executes only registered ArcPy operations.
@@ -34,7 +34,7 @@ For end users:
 
 - Windows
 - ArcGIS Desktop / ArcMap
-- DeepSeek API key
+- DeepSeek API key or MiniMax API key
 - A release package built from this repository
 
 For developers:
@@ -79,7 +79,7 @@ Customize > Toolbars > ArcMap AI Assistant
 
 1. Click `启动AI后台` in the ArcMap toolbar.
 2. Click `显示控制台` to open the local Web console.
-3. Configure the DeepSeek API key in the Web console.
+3. Configure the model API key in the Web console.
 4. Click `同步上下文` in ArcMap.
 5. Type a GIS task in the Web console.
 6. Review and approve the generated task.
@@ -154,7 +154,7 @@ python -m unittest discover -s tests -p "test_*.py" -v
 ```text
 ArcMapAIAssistantAddIn/   ArcMap Python Add-in shell
 arcmap_runtime_py2/       ArcMap-side Python 2 runtime and ArcPy executor
-gateway_py3/              Local Python 3 gateway, Web console, DeepSeek planner
+gateway_py3/              Local Python 3 gateway, Web console, agent planner
 operation_catalog/        Registered GIS operation specs and schemas
 packaging/                Installer, uninstaller, and PyInstaller build scripts
 tests/                    Gateway and fake ArcMap runtime tests
