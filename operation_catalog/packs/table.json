@@ -1,6 +1,5 @@
 {
   "pack": "table",
-  "version": "0.1.0",
   "operations": [
     {
       "id": "table.add_field",

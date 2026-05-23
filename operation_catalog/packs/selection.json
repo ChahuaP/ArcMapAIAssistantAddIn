@@ -1,6 +1,5 @@
 {
   "pack": "selection",
-  "version": "0.1.0",
   "operations": [
     {
       "id": "selection.select_by_attribute",

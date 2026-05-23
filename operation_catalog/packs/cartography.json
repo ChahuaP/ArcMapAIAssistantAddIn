@@ -1,0 +1,179 @@
+{
+  "pack": "cartography",
+  "operations": [
+    {
+      "id": "cartography.apply_symbology_from_layer",
+      "version": "1.0",
+      "category": "cartography",
+      "summary": "把 .lyr 样式模板或已有图层符号系统应用到当前图层。",
+      "keywords": ["apply symbology", "套用样式", "图层样式", "配图模板", "lyr", "符号系统"],
+      "model_card": "Use cartography.apply_symbology_from_layer to change a layer's renderer, color ramp, classification method, raster stretch, or other ArcMap-authored layer properties by applying a .lyr template or another map layer through arcpy.mapping.UpdateLayer. Arguments: target_layer, then either template_path or source_layer, symbology_only optional default true. This is the correct operation when the user asks for renderer types that ArcMap arcpy.mapping cannot switch directly, such as changing simple features to unique values, natural breaks, min-max stretch, or a specific custom color ramp. After applying the template, use the more specific cartography operations to adjust field, class values, breaks, transparency, or raster bands.",
+      "parameters_schema": {
+        "type": "object",
+        "required": ["target_layer"],
+        "properties": {
+          "target_layer": {"type": "string"},
+          "template_path": {"type": "string"},
+          "source_layer": {"type": "string"},
+          "symbology_only": {"type": "boolean"}
+        },
+        "additionalProperties": false
+      },
+      "context_requirements": {"requires_layers": true},
+      "side_effects": "changes_map",
+      "output_policy": {"writes_output": false},
+      "executor": "operations.cartography_ops.apply_symbology_from_layer",
+      "examples": [{"user": "把 roads 套用 D:/styles/road_unique.lyr 的样式", "arguments": {"target_layer": "roads", "template_path": "D:/styles/road_unique.lyr", "symbology_only": true}}]
+    },
+    {
+      "id": "cartography.set_unique_values",
+      "version": "1.0",
+      "category": "cartography",
+      "summary": "更新唯一值设色图层的字段和值列表。",
+      "keywords": ["unique values", "唯一值设色", "按字段设色", "分类设色"],
+      "model_card": "Use cartography.set_unique_values only when the target layer already uses ArcMap UNIQUE_VALUES symbology. It can change the value field, refresh all values, set explicit class values, and control other values. Arguments: layer, field, class_values optional, class_labels optional, show_other_values optional. If the layer is currently simple/default symbology, first use cartography.apply_symbology_from_layer with a unique-values .lyr template; do not invent direct renderer-switch APIs.",
+      "parameters_schema": {
+        "type": "object",
+        "required": ["layer", "field"],
+        "properties": {
+          "layer": {"type": "string"},
+          "field": {"type": "string"},
+          "class_values": {"type": "array", "items": {"type": "string"}},
+          "class_labels": {"type": "array", "items": {"type": "string"}},
+          "show_other_values": {"type": "boolean"}
+        },
+        "additionalProperties": false
+      },
+      "context_requirements": {"requires_layers": true, "requires_fields": true, "field_arguments": ["field"]},
+      "side_effects": "changes_map",
+      "output_policy": {"writes_output": false},
+      "executor": "operations.cartography_ops.set_unique_values",
+      "examples": [{"user": "roads 按 TYPE 字段刷新唯一值设色", "arguments": {"layer": "roads", "field": "TYPE", "show_other_values": false}}]
+    },
+    {
+      "id": "cartography.set_graduated_colors",
+      "version": "1.0",
+      "category": "cartography",
+      "summary": "更新分级色图层的字段、分类数或手动断点。",
+      "keywords": ["graduated colors", "分级色", "自然间断点", "分级设色", "class breaks"],
+      "model_card": "Use cartography.set_graduated_colors only when the target feature layer already uses ArcMap GRADUATED_COLORS symbology. It can set value field, normalization field, num_classes, or explicit manual class_break_values/class_break_labels. ArcMap arcpy.mapping cannot directly change classification method; for natural breaks, equal interval, min-max themed templates, or color ramps, first apply a .lyr template with cartography.apply_symbology_from_layer, then adjust fields/classes here.",
+      "parameters_schema": {
+        "type": "object",
+        "required": ["layer", "field"],
+        "properties": {
+          "layer": {"type": "string"},
+          "field": {"type": "string"},
+          "normalization_field": {"type": "string"},
+          "num_classes": {"type": "integer"},
+          "class_break_values": {"type": "array", "items": {"type": "number"}},
+          "class_break_labels": {"type": "array", "items": {"type": "string"}},
+          "reclassify": {"type": "boolean"}
+        },
+        "additionalProperties": false
+      },
+      "context_requirements": {"requires_layers": true, "requires_fields": true, "field_arguments": ["field", "normalization_field"]},
+      "side_effects": "changes_map",
+      "output_policy": {"writes_output": false},
+      "executor": "operations.cartography_ops.set_graduated_colors",
+      "examples": [{"user": "counties 用 POP 字段做 5 级分级色", "arguments": {"layer": "counties", "field": "POP", "num_classes": 5, "reclassify": true}}]
+    },
+    {
+      "id": "cartography.set_raster_classified",
+      "version": "1.0",
+      "category": "cartography",
+      "summary": "更新栅格分级渲染的分类数、断点或排除值。",
+      "keywords": ["raster classified", "栅格分级", "tiff分级", "栅格断点"],
+      "model_card": "Use cartography.set_raster_classified only when the raster layer already uses ArcMap RASTER_CLASSIFIED symbology. It can set num_classes, manual class_break_values/class_break_labels, excluded_values, value_field, normalization_field, and reclassify. ArcMap arcpy.mapping cannot directly switch a stretched raster into another renderer or change classification method; use cartography.apply_symbology_from_layer with a raster .lyr template for those changes.",
+      "parameters_schema": {
+        "type": "object",
+        "required": ["layer"],
+        "properties": {
+          "layer": {"type": "string"},
+          "value_field": {"type": "string"},
+          "normalization_field": {"type": "string"},
+          "num_classes": {"type": "integer"},
+          "class_break_values": {"type": "array", "items": {"type": "number"}},
+          "class_break_labels": {"type": "array", "items": {"type": "string"}},
+          "excluded_values": {"type": "string"},
+          "reclassify": {"type": "boolean"}
+        },
+        "additionalProperties": false
+      },
+      "context_requirements": {"requires_layers": true},
+      "side_effects": "changes_map",
+      "output_policy": {"writes_output": false},
+      "executor": "operations.cartography_ops.set_raster_classified",
+      "examples": [{"user": "dem 栅格按当前方法重分成 7 级", "arguments": {"layer": "dem", "num_classes": 7, "reclassify": true}}]
+    },
+    {
+      "id": "cartography.set_raster_bands",
+      "version": "1.0",
+      "category": "cartography",
+      "summary": "按指定波段重新创建栅格显示图层。",
+      "keywords": ["rgb bands", "指定波段", "rgb合成", "tiff波段", "栅格波段"],
+      "model_card": "Use cartography.set_raster_bands to display an existing raster layer with specified band indices, such as [1,2,3] for RGB or [4,3,2] for false color. Arguments: layer, band_indices, layer_name optional, replace optional default true. This creates a new ArcMap raster layer with MakeRasterLayer band_index and can replace the old display layer.",
+      "parameters_schema": {
+        "type": "object",
+        "required": ["layer", "band_indices"],
+        "properties": {
+          "layer": {"type": "string"},
+          "band_indices": {"type": "array", "items": {"type": "integer"}, "minItems": 1},
+          "layer_name": {"type": "string"},
+          "replace": {"type": "boolean"}
+        },
+        "additionalProperties": false
+      },
+      "context_requirements": {"requires_layers": true},
+      "side_effects": "changes_map",
+      "output_policy": {"writes_output": false},
+      "executor": "operations.cartography_ops.set_raster_bands",
+      "examples": [{"user": "把 landsat 调成 4 3 2 假彩色", "arguments": {"layer": "landsat", "band_indices": [4, 3, 2], "replace": true}}]
+    },
+    {
+      "id": "cartography.set_transparency",
+      "version": "1.0",
+      "category": "cartography",
+      "summary": "设置图层透明度。",
+      "keywords": ["transparency", "透明度", "半透明"],
+      "model_card": "Use cartography.set_transparency to set a layer transparency percentage from 0 to 100. Arguments: layer, transparency.",
+      "parameters_schema": {
+        "type": "object",
+        "required": ["layer", "transparency"],
+        "properties": {
+          "layer": {"type": "string"},
+          "transparency": {"type": "integer"}
+        },
+        "additionalProperties": false
+      },
+      "context_requirements": {"requires_layers": true},
+      "side_effects": "changes_map",
+      "output_policy": {"writes_output": false},
+      "executor": "operations.cartography_ops.set_transparency",
+      "examples": [{"user": "把 dem 图层透明度设为 45%", "arguments": {"layer": "dem", "transparency": 45}}]
+    },
+    {
+      "id": "cartography.save_layer_file",
+      "version": "1.0",
+      "category": "cartography",
+      "summary": "把当前图层符号系统保存成可复用 .lyr 文件。",
+      "keywords": ["save layer file", "保存样式", "生成lyr", "导出符号系统", "保存配图模板"],
+      "model_card": "Use cartography.save_layer_file to generate a reusable .lyr layer file from a current ArcMap layer after its symbology has been applied or adjusted. Arguments: layer, output_name, output_folder optional when MXD is unsaved, is_relative_path optional ABSOLUTE|RELATIVE default ABSOLUTE. Important: .lyr is a binary ArcMap layer file, not text. Do not ask a custom tool or LLM to write a .lyr file from raw bytes. To create a new style template, first apply an existing template/source layer or adjust an already-supported renderer, then save it with this operation.",
+      "parameters_schema": {
+        "type": "object",
+        "required": ["layer", "output_name"],
+        "properties": {
+          "layer": {"type": "string"},
+          "output_name": {"type": "string"},
+          "output_folder": {"type": "string"},
+          "is_relative_path": {"type": "string", "enum": ["ABSOLUTE", "RELATIVE"]}
+        },
+        "additionalProperties": false
+      },
+      "context_requirements": {"requires_layers": true, "requires_output_location_when_unsaved": true},
+      "side_effects": "writes_data",
+      "output_policy": {"writes_output": true, "workspace": "mxd_default_or_output_folder", "overwrite": false},
+      "executor": "operations.cartography_ops.save_layer_file",
+      "examples": [{"user": "把当前 roads 的配图保存成模板", "arguments": {"layer": "roads", "output_name": "roads_style", "is_relative_path": "ABSOLUTE"}}]
+    }
+  ]
+}

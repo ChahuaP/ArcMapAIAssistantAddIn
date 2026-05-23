@@ -1,6 +1,5 @@
 {
   "pack": "map_context",
-  "version": "0.1.0",
   "operations": [
     {
       "id": "context.list_layers",

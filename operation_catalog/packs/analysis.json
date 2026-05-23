@@ -1,6 +1,5 @@
 {
   "pack": "analysis",
-  "version": "0.1.0",
   "operations": [
     {
       "id": "analysis.buffer",

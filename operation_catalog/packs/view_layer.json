@@ -1,6 +1,5 @@
 {
   "pack": "view_layer",
-  "version": "0.1.0",
   "operations": [
     {
       "id": "layer.add_layer",
@@ -8,7 +7,7 @@
       "category": "view_layer",
       "summary": "向当前地图添加图层文件或数据集。",
       "keywords": ["add layer", "添加图层", "加载图层"],
-      "model_card": "Use layer.add_layer to add a dataset or layer file to the active data frame. Arguments: path.",
+      "model_card": "Use layer.add_layer to add a dataset or layer file to the active data frame. Arguments: path. When loading a TIFF with at least three bands, the runtime creates an RGB raster layer with bands 1;2;3 instead of ArcMap's default stretched single-band display.",
       "parameters_schema": {
         "type": "object",
         "required": ["path"],

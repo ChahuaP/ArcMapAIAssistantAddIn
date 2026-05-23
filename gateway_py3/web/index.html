@@ -1703,7 +1703,7 @@
   </div>
 
   <script>
-    const EXPECTED_GATEWAY_VERSION = '0.12.1';
+    const EXPECTED_GATEWAY_VERSION = '0.13.2';
     const API_ORIGIN = window.location.protocol === 'file:' ? 'http://127.0.0.1:8765' : '';
     const POLL_INTERVAL_MS = 2500;
     const HEALTH_INTERVAL_MS = 10000;
@@ -1815,7 +1815,8 @@
       try {
         const data = await api('/api/capabilities');
         capabilitiesLoaded = true;
-        document.getElementById('capabilitiesSummary').textContent = `当前目录 ${data.operation_count} 个能力，版本 ${data.catalog_version}。`;
+        document.getElementById('capabilitiesSummary').textContent =
+          `应用版本 ${data.app_version || EXPECTED_GATEWAY_VERSION}，${data.operation_count} 个能力。`;
         renderCapabilities(data.operations || []);
       } catch (err) {
         box.innerHTML = `<div class="section-card">${escapeHtml(err.message)}</div>`;
@@ -2747,7 +2748,9 @@
         'export.map_png',
         'export.map_pdf',
         'export.table_csv',
-        'export.split_by_field'
+        'export.layer_kml',
+        'export.split_by_field',
+        'cartography.save_layer_file'
       ].includes(step.operation));
     }
 

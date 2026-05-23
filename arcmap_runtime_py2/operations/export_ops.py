@@ -34,6 +34,19 @@ def export_table_csv(context, arguments, step_outputs):
     return {"output": output}
 
 
+def export_layer_kml(context, arguments, step_outputs):
+    layer = common.find_layer(context, arguments["layer"], step_outputs)
+    output = common.output_file(context, arguments["output_name"], ".kmz", arguments.get("output_folder"))
+    scale = int(arguments.get("layer_output_scale", 0))
+    is_composite = arguments.get("is_composite", "NO_COMPOSITE")
+    arcpy.LayerToKML_conversion(layer, output, scale, is_composite)
+    return {
+        "output": output,
+        "selected_only": bool(arguments.get("selected_only", False)),
+        "format": "kmz"
+    }
+
+
 def split_by_field(context, arguments, step_outputs):
     layer = common.find_layer(context, arguments["layer"], step_outputs)
     field = condition_utils.require_field(layer, arguments["field"])

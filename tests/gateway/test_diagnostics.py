@@ -41,7 +41,7 @@ class DiagnosticsTests(unittest.TestCase):
                     json.dumps({"install_dir": str(install_dir), "app_version": "0.10.5", "addin_dir": str(addin_dir)}),
                 )
 
-                result = collect_diagnostics("0.10.5", "0.1.0", 39, network_check=False)
+                result = collect_diagnostics("0.10.5", 39, network_check=False)
                 checks = {item["id"]: item for item in result["checks"]}
                 self.assertTrue(result["ok"])
                 self.assertEqual(checks["installed_catalog"]["status"], "ok")

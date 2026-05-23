@@ -1,11 +1,11 @@
 {
-  "version": "0.1.0",
   "packs": [
     "packs/map_context.json",
     "packs/view_layer.json",
     "packs/selection.json",
     "packs/analysis.json",
     "packs/table.json",
+    "packs/cartography.json",
     "packs/export.json"
   ]
 }

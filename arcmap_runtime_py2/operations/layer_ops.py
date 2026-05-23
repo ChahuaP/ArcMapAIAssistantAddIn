@@ -8,16 +8,89 @@ import arcpy
 from operations import common
 
 
+RASTER_RGB_EXTENSIONS = (".tif", ".tiff")
+RGB_BAND_INDEX = "1;2;3"
+
+
 def add_layer(context, arguments, step_outputs):
     path = arguments["path"]
     if not os.path.exists(path) and not arcpy.Exists(path):
         raise common.OperationError("Layer path not found: %s" % path)
     mxd = common.current_mxd()
     df = common.active_data_frame(mxd)
-    layer = arcpy.mapping.Layer(path)
-    arcpy.mapping.AddLayer(df, layer, "TOP")
+    layer, needs_add = _layer_for_path(path, mxd, df)
+    if needs_add:
+        arcpy.mapping.AddLayer(df, layer, "TOP")
     common.refresh()
     return {"added_layer": path, "layer_name": getattr(layer, "name", os.path.splitext(os.path.basename(path))[0])}
+
+
+def _layer_for_path(path, mxd, df):
+    if _is_rgb_raster_path(path):
+        layer_name = os.path.basename(path)
+        before_count = _matching_layer_count(mxd, df, path, None)
+        result = _make_raster_layer(path, layer_name)
+        layer = _layer_from_result(result)
+        if _matching_layer_count(mxd, df, path, layer) > before_count:
+            return _last_matching_layer(mxd, df, path, layer) or layer, False
+        return layer, True
+    return arcpy.mapping.Layer(path), True
+
+
+def _make_raster_layer(path, layer_name):
+    add_outputs_to_map = arcpy.env.addOutputsToMap
+    arcpy.env.addOutputsToMap = False
+    try:
+        return arcpy.MakeRasterLayer_management(path, layer_name, "", "", RGB_BAND_INDEX)
+    finally:
+        arcpy.env.addOutputsToMap = add_outputs_to_map
+
+
+def _is_rgb_raster_path(path):
+    if not _looks_like_rgb_raster(path):
+        return False
+    desc = arcpy.Describe(path)
+    band_count = getattr(desc, "bandCount", None)
+    if band_count is None:
+        return False
+    return int(band_count) >= 3
+
+
+def _looks_like_rgb_raster(path):
+    return os.path.splitext(path)[1].lower() in RASTER_RGB_EXTENSIONS
+
+
+def _layer_from_result(result):
+    output = result.getOutput(0) if hasattr(result, "getOutput") else result
+    if hasattr(output, "supports") or hasattr(output, "name"):
+        return output
+    return arcpy.mapping.Layer(output)
+
+
+def _matching_layer_count(mxd, df, path, layer):
+    return len(_matching_layers(mxd, df, path, layer))
+
+
+def _last_matching_layer(mxd, df, path, layer):
+    matches = _matching_layers(mxd, df, path, layer)
+    return matches[-1] if matches else None
+
+
+def _matching_layers(mxd, df, path, layer):
+    layers = arcpy.mapping.ListLayers(mxd, "", df)
+    return [item for item in layers if _matches_layer(item, path, layer)]
+
+
+def _matches_layer(item, path, layer):
+    if layer is not None and item is layer:
+        return True
+    expected_path = common._normalize_path(path)
+    source = common._safe_data_source(item)
+    if source and common._normalize_path(source) == expected_path:
+        return True
+    if layer is not None and getattr(item, "name", "") == getattr(layer, "name", None):
+        return True
+    return getattr(item, "name", "") == os.path.basename(path)
 
 
 def set_layer_visibility(context, arguments, step_outputs):

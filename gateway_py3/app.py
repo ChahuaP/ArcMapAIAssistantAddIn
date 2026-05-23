@@ -20,7 +20,7 @@ from gateway_py3.workflow_store import WorkflowStore
 
 HOST = "127.0.0.1"
 PORT = 8765
-APP_VERSION = "0.12.1"
+APP_VERSION = "0.13.2"
 
 
 class GatewayState:
@@ -55,7 +55,6 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({
                     "ok": True,
                     "app_version": APP_VERSION,
-                    "catalog_version": STATE.catalog.version,
                     "operation_count": len(STATE.catalog.operations)
                 })
             elif path == "/config":
@@ -78,14 +77,13 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"tools": STATE.store.list_pending_tools()})
             elif path == "/api/capabilities":
                 self._json({
-                    "catalog_version": STATE.catalog.version,
+                    "app_version": APP_VERSION,
                     "operation_count": len(STATE.catalog.operations),
                     "operations": [_public_operation(operation) for operation in STATE.catalog.all_operations()]
                 })
             elif path == "/api/diagnostics":
                 self._json(collect_diagnostics(
                     APP_VERSION,
-                    STATE.catalog.version,
                     len(STATE.catalog.operations)
                 ))
             elif path == "/pending":

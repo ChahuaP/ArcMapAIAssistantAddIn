@@ -71,7 +71,10 @@ def handle_command(command_text):
         elif command_text == "/health":
             gateway_client.ensure_running()
             health = gateway_client.health()
-            show_message(u"网关正常：%s 个操作，catalog %s。" % (health.get("operation_count"), health.get("catalog_version")))
+            show_message(u"网关正常：版本 %s，%s 个操作。" % (
+                health.get("app_version"),
+                health.get("operation_count")
+            ))
         elif command_text == "/execute":
             gateway_client.ensure_running()
             _execute_pending()

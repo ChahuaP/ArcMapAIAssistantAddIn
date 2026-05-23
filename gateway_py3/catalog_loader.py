@@ -25,10 +25,6 @@ class OperationCatalog:
         self.packs: List[Dict[str, Any]] = []
         self._load()
 
-    @property
-    def version(self) -> str:
-        return self.catalog["version"]
-
     def _load(self) -> None:
         for rel_path in self.catalog["packs"]:
             pack = _load_json(self.root / rel_path)

@@ -298,6 +298,8 @@ def _validate_type(step_id: str, name: str, value: Any, schema: Dict[str, Any]) 
         raise ValidationError(f"{step_id}.{name} must be boolean.")
     if expected == "integer" and not isinstance(value, int):
         raise ValidationError(f"{step_id}.{name} must be integer.")
+    if expected == "number" and not isinstance(value, (int, float)):
+        raise ValidationError(f"{step_id}.{name} must be number.")
     if expected == "array":
         if not isinstance(value, list):
             raise ValidationError(f"{step_id}.{name} must be array.")

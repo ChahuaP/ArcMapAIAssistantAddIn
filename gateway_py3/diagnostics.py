@@ -10,13 +10,13 @@ from .llm_providers import public_config
 from .paths import CATALOG_ROOT, appdata_dir, config_path, log_dir
 
 
-def collect_diagnostics(app_version: str, catalog_version: str, operation_count: int, network_check: bool = True) -> Dict[str, Any]:
+def collect_diagnostics(app_version: str, operation_count: int, network_check: bool = True) -> Dict[str, Any]:
     config = public_config()
     install = _read_install_config()
     install_dir = Path(install.get("install_dir") or "") if install.get("install_dir") else None
     installed_version = install.get("app_version") or ""
     checks = [
-        _check_gateway(app_version, catalog_version, operation_count),
+        _check_gateway(app_version, operation_count),
         _check_config(config),
         _check_gateway_catalog(),
         _check_install_config(install),
@@ -57,12 +57,12 @@ def _install_config_path() -> Path:
     return appdata_dir() / "install.json"
 
 
-def _check_gateway(app_version: str, catalog_version: str, operation_count: int) -> Dict[str, Any]:
+def _check_gateway(app_version: str, operation_count: int) -> Dict[str, Any]:
     return _item(
         "gateway",
         "本地网关",
         "ok",
-        "已启动，版本 %s，能力 %s 个，目录版本 %s。" % (app_version, operation_count, catalog_version),
+        "已启动，版本 %s，能力 %s 个。" % (app_version, operation_count),
     )
 
 
