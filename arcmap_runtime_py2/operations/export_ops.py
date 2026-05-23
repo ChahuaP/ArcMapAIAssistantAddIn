@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
 from __future__ import absolute_import
 
+import json
 import os
 import re
 import uuid
+import zipfile
 
 import arcpy
 
@@ -37,12 +39,25 @@ def export_table_csv(context, arguments, step_outputs):
 def export_layer_kml(context, arguments, step_outputs):
     layer = common.find_layer(context, arguments["layer"], step_outputs)
     output = common.output_file(context, arguments["output_name"], ".kmz", arguments.get("output_folder"))
-    scale = int(arguments.get("layer_output_scale", 0))
+    selected_only = bool(arguments.get("selected_only", False))
+    if _is_feature_layer(layer):
+        source = _feature_kml_source(layer, selected_only)
+        feature_count = _feature_count(source)
+        if feature_count <= 0:
+            raise common.OperationError(u"KML 导出的图层没有要素，已停止生成空 KMZ。")
+        written_count = _write_feature_kmz(source, getattr(layer, "name", "layer"), output)
+        return {
+            "output": output,
+            "selected_only": selected_only,
+            "format": "kmz",
+            "feature_count": written_count
+        }
+    scale = _kml_output_scale(arguments)
     is_composite = arguments.get("is_composite", "NO_COMPOSITE")
     arcpy.LayerToKML_conversion(layer, output, scale, is_composite)
     return {
         "output": output,
-        "selected_only": bool(arguments.get("selected_only", False)),
+        "selected_only": selected_only,
         "format": "kmz"
     }
 
@@ -85,6 +100,296 @@ def split_by_field(context, arguments, step_outputs):
 
     common.refresh()
     return {"outputs": outputs, "count": len(outputs), "output_format": output_format}
+
+
+def _kml_output_scale(arguments):
+    if "layer_output_scale" in arguments:
+        return int(arguments["layer_output_scale"])
+    try:
+        mxd = common.current_mxd()
+        df = common.active_data_frame(mxd)
+        scale = int(round(float(getattr(df, "scale", 0))))
+        if scale > 0:
+            return scale
+    except Exception:
+        pass
+    return 1
+
+
+def _is_feature_layer(layer):
+    desc = arcpy.Describe(layer)
+    data_type = common._text(getattr(desc, "dataType", "")).lower()
+    if data_type in ("featurelayer", "feature class", "shapefile"):
+        return True
+    return bool(getattr(desc, "shapeType", None))
+
+
+def _feature_kml_source(layer, selected_only):
+    if selected_only:
+        _require_selection(layer)
+        return layer
+    return common._safe_data_source(layer) or layer
+
+
+def _require_selection(layer):
+    desc = arcpy.Describe(layer)
+    fid_set = getattr(desc, "FIDSet", None)
+    if fid_set is not None and not common._text(fid_set).strip():
+        raise common.OperationError(u"当前图层没有已选要素，不能按 selected_only 导出 KML。")
+
+
+def _feature_count(layer):
+    result = arcpy.GetCount_management(layer)
+    value = result.getOutput(0) if hasattr(result, "getOutput") else result
+    return int(value)
+
+
+def _write_feature_kmz(source, layer_name, output):
+    document_name = _xml_text(layer_name or "layer")
+    spatial_reference = _require_spatial_reference(source)
+    wgs84 = arcpy.SpatialReference(4326)
+    fields = _kml_attribute_fields(source)
+    field_names = [field.name for field in fields]
+    parts = [
+        u'<?xml version="1.0" encoding="UTF-8"?>',
+        u'<kml xmlns="http://www.opengis.net/kml/2.2">',
+        u"<Document>",
+        u"<name>%s</name>" % document_name,
+        u'<Style id="feature_style">',
+        u"<LineStyle><color>ff6e6e6e</color><width>1.2</width></LineStyle>",
+        u"<PolyStyle><color>7d5ca6ff</color><outline>1</outline></PolyStyle>",
+        u"</Style>"
+    ]
+    written_count = 0
+    cursor_fields = ["SHAPE@"] + field_names
+    with arcpy.da.SearchCursor(source, cursor_fields) as cursor:
+        for index, row in enumerate(cursor, 1):
+            geometry = _project_geometry(row[0], spatial_reference, wgs84)
+            if geometry is None:
+                continue
+            geometry_xml = _geometry_kml(geometry)
+            if not geometry_xml:
+                continue
+            values = row[1:]
+            name = _feature_name(fields, values, index)
+            parts.append(u"<Placemark>")
+            parts.append(u"<name>%s</name>" % _xml_text(name))
+            parts.append(u"<styleUrl>#feature_style</styleUrl>")
+            parts.append(_extended_data_kml(fields, values))
+            parts.append(geometry_xml)
+            parts.append(u"</Placemark>")
+            written_count += 1
+    if written_count <= 0:
+        raise common.OperationError(u"KML 导出的图层没有可写入的几何，已停止生成空 KMZ。")
+    parts.append(u"</Document>")
+    parts.append(u"</kml>")
+    kml_text = u"\n".join(parts).encode("utf-8")
+    with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("doc.kml", kml_text)
+    return written_count
+
+
+def _require_spatial_reference(source):
+    desc = arcpy.Describe(source)
+    spatial_reference = getattr(desc, "spatialReference", None)
+    name = common._text(getattr(spatial_reference, "name", "") if spatial_reference else "")
+    if not spatial_reference or not name or name.lower() == "unknown":
+        raise common.OperationError(u"KML 导出要求图层有明确空间参考。请先定义投影。")
+    return spatial_reference
+
+
+def _kml_attribute_fields(source):
+    excluded = set(["Geometry", "Blob", "Raster"])
+    return [field for field in arcpy.ListFields(source) if field.type not in excluded]
+
+
+def _project_geometry(geometry, spatial_reference, wgs84):
+    if geometry is None or bool(getattr(geometry, "isEmpty", False)):
+        return None
+    factory_code = getattr(spatial_reference, "factoryCode", None)
+    name = common._text(getattr(spatial_reference, "name", ""))
+    if factory_code == 4326 or name == u"GCS_WGS_1984":
+        return geometry
+    return geometry.projectAs(wgs84)
+
+
+def _geometry_kml(geometry):
+    data = json.loads(common._text(geometry.JSON))
+    if "curveRings" in data or "curvePaths" in data:
+        raise common.OperationError(u"KML 导出暂不支持曲线几何，请先转为普通要素。")
+    if "x" in data and "y" in data:
+        return _point_kml([data.get("x"), data.get("y"), data.get("z")])
+    if "points" in data:
+        return _multi_geometry([_point_kml(point) for point in data.get("points") or []])
+    if "paths" in data:
+        return _multi_geometry([_line_kml(path) for path in data.get("paths") or []])
+    if "rings" in data:
+        return _polygon_kml(data.get("rings") or [])
+    raise common.OperationError(u"KML 导出遇到不支持的几何 JSON。")
+
+
+def _point_kml(point):
+    return u"<Point><coordinates>%s</coordinates></Point>" % _coordinate_text(point)
+
+
+def _line_kml(path):
+    coordinates = _coordinates_text(path, False)
+    if not coordinates:
+        return u""
+    return u"<LineString><tessellate>1</tessellate><coordinates>%s</coordinates></LineString>" % coordinates
+
+
+def _polygon_kml(rings):
+    groups = _polygon_ring_groups(rings)
+    polygons = []
+    for group in groups:
+        outer = _coordinates_text(group["outer"], True)
+        if not outer:
+            continue
+        parts = [
+            u"<Polygon><tessellate>1</tessellate>",
+            u"<outerBoundaryIs><LinearRing><coordinates>%s</coordinates></LinearRing></outerBoundaryIs>" % outer
+        ]
+        for hole in group["holes"]:
+            inner = _coordinates_text(hole, True)
+            if inner:
+                parts.append(u"<innerBoundaryIs><LinearRing><coordinates>%s</coordinates></LinearRing></innerBoundaryIs>" % inner)
+        parts.append(u"</Polygon>")
+        polygons.append(u"".join(parts))
+    return _multi_geometry(polygons)
+
+
+def _multi_geometry(items):
+    items = [item for item in items if item]
+    if not items:
+        return u""
+    if len(items) == 1:
+        return items[0]
+    return u"<MultiGeometry>%s</MultiGeometry>" % u"".join(items)
+
+
+def _polygon_ring_groups(rings):
+    valid_rings = [_closed_ring(ring) for ring in rings if len(ring or []) >= 3]
+    if len(valid_rings) <= 1:
+        return [{"outer": ring, "holes": []} for ring in valid_rings]
+    groups = []
+    holes = []
+    for ring in valid_rings:
+        if _signed_area(ring) < 0:
+            groups.append({"outer": ring, "holes": []})
+        else:
+            holes.append(ring)
+    if not groups:
+        return [{"outer": ring, "holes": []} for ring in valid_rings]
+    for hole in holes:
+        owner = _containing_group(hole, groups)
+        if owner is None:
+            groups.append({"outer": hole, "holes": []})
+        else:
+            owner["holes"].append(hole)
+    return groups
+
+
+def _containing_group(ring, groups):
+    point = _first_xy(ring)
+    if point is None:
+        return None
+    containers = [group for group in groups if _point_in_ring(point, group["outer"])]
+    if not containers:
+        return None
+    return sorted(containers, key=lambda group: abs(_signed_area(group["outer"])))[0]
+
+
+def _closed_ring(ring):
+    points = [point for point in ring if point and len(point) >= 2]
+    if points and _xy(points[0]) != _xy(points[-1]):
+        points.append(points[0])
+    return points
+
+
+def _coordinates_text(points, close_ring):
+    items = _closed_ring(points) if close_ring else [point for point in points if point and len(point) >= 2]
+    return u" ".join([_coordinate_text(point) for point in items])
+
+
+def _coordinate_text(point):
+    z = point[2] if len(point) > 2 and point[2] is not None else 0
+    return u"%.12g,%.12g,%.12g" % (float(point[0]), float(point[1]), float(z))
+
+
+def _signed_area(ring):
+    area = 0.0
+    points = _closed_ring(ring)
+    for index in range(len(points) - 1):
+        x1, y1 = _xy(points[index])
+        x2, y2 = _xy(points[index + 1])
+        area += x1 * y2 - x2 * y1
+    return area / 2.0
+
+
+def _point_in_ring(point, ring):
+    x, y = point
+    inside = False
+    points = _closed_ring(ring)
+    for index in range(len(points) - 1):
+        x1, y1 = _xy(points[index])
+        x2, y2 = _xy(points[index + 1])
+        intersects = ((y1 > y) != (y2 > y)) and (x < (x2 - x1) * (y - y1) / ((y2 - y1) or 1e-12) + x1)
+        if intersects:
+            inside = not inside
+    return inside
+
+
+def _first_xy(ring):
+    for point in ring:
+        if point and len(point) >= 2:
+            return _xy(point)
+    return None
+
+
+def _xy(point):
+    return (float(point[0]), float(point[1]))
+
+
+def _feature_name(fields, values, index):
+    for expected in ("NAME", "Name", "name"):
+        for field, value in zip(fields, values):
+            if field.name == expected and value not in (None, ""):
+                return common._text(value)
+    for value in values:
+        if value not in (None, ""):
+            return common._text(value)
+    return u"feature_%s" % index
+
+
+def _extended_data_kml(fields, values):
+    if not fields:
+        return u""
+    parts = [u"<ExtendedData>"]
+    for field, value in zip(fields, values):
+        parts.append(
+            u'<Data name="%s"><value>%s</value></Data>'
+            % (_xml_text(field.name), _xml_text(_value_text(value)))
+        )
+    parts.append(u"</ExtendedData>")
+    return u"".join(parts)
+
+
+def _value_text(value):
+    if value is None:
+        return u""
+    return common._text(value)
+
+
+def _xml_text(value):
+    text = common._text(value)
+    return (
+        text.replace(u"&", u"&amp;")
+        .replace(u"<", u"&lt;")
+        .replace(u">", u"&gt;")
+        .replace(u'"', u"&quot;")
+        .replace(u"'", u"&apos;")
+    )
 
 
 def _unique_field_values(layer, field_name, include_null, selected_only):

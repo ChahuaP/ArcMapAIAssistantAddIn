@@ -64,7 +64,7 @@
       "category": "export",
       "summary": "导出图层为 KML/KMZ 文件。",
       "keywords": ["export kml", "export kmz", "导出KML", "导出KMZ", "shp转kml", "导出选中为KML"],
-      "model_card": "Use export.layer_kml to export a feature or raster layer to a KML-compatible KMZ file. Arguments: layer, output_name, selected_only optional, output_folder optional when MXD is unsaved, layer_output_scale optional integer default 0, is_composite optional COMPOSITE|NO_COMPOSITE default NO_COMPOSITE. If the user describes only some features, first use selection.select_by_attribute or selection.select_by_location, then call export.layer_kml with selected_only=true.",
+      "model_card": "Use export.layer_kml to export a feature or raster layer to a KML-compatible KMZ file. Arguments: layer, output_name, selected_only optional, output_folder optional when MXD is unsaved, layer_output_scale optional integer default current map scale for raster exports, is_composite optional COMPOSITE|NO_COMPOSITE default NO_COMPOSITE for raster exports. Feature layers are written directly from ArcPy geometry into KML coordinates with ExtendedData attributes, so point/line/polygon geometry is preserved instead of relying on LayerToKML. If the user describes only some features, first use selection.select_by_attribute or selection.select_by_location, then call export.layer_kml with selected_only=true.",
       "parameters_schema": {
         "type": "object",
         "required": ["layer", "output_name"],
