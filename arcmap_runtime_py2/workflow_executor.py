@@ -87,11 +87,27 @@ def _load_operations():
 def _canonicalize_operation(operation):
     result = dict(operation)
     result["parameters_schema"] = _canonicalize_parameters_schema(result.get("parameters_schema", {}))
+    _ensure_managed_output_workspace_parameter(result)
     if not isinstance(result.get("context_requirements"), dict):
         result["context_requirements"] = {}
     if not isinstance(result.get("output_policy"), dict):
         result["output_policy"] = {}
     return result
+
+
+def _ensure_managed_output_workspace_parameter(operation):
+    if operation.get("side_effects") != "writes_data":
+        return
+    schema = operation.get("parameters_schema")
+    if not isinstance(schema, dict):
+        return
+    properties = schema.setdefault("properties", {})
+    if not isinstance(properties, dict):
+        return
+    properties.setdefault("output_workspace", {
+        "type": "string",
+        "description": "Optional output folder or geodatabase. GeoPilot resolves output_path from this value."
+    })
 
 
 def _canonicalize_parameters_schema(schema):

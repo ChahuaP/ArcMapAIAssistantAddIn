@@ -1703,7 +1703,7 @@
   </div>
 
   <script>
-    const EXPECTED_GATEWAY_VERSION = '0.11.16';
+    const EXPECTED_GATEWAY_VERSION = '0.11.22';
     const API_ORIGIN = window.location.protocol === 'file:' ? 'http://127.0.0.1:8765' : '';
     const POLL_INTERVAL_MS = 2500;
     const HEALTH_INTERVAL_MS = 10000;
@@ -2129,6 +2129,8 @@
       sidebar.innerHTML = '';
       projects.forEach(project => {
         const active = activeProject && activeProject.id === project.id;
+        const node = document.createElement('div');
+        node.className = `sidebar-session${active ? ' active' : ''}`;
         const sidebarButton = document.createElement('button');
         sidebarButton.type = 'button';
         sidebarButton.className = `sidebar-project${active ? ' active' : ''}`;
@@ -2137,8 +2139,31 @@
           <strong>${escapeHtml(project.name)}</strong>
           <span>${escapeHtml(project.workdir)}</span>
         `;
-        sidebar.appendChild(sidebarButton);
+        const deleteButton = document.createElement('button');
+        deleteButton.type = 'button';
+        deleteButton.className = 'sidebar-delete';
+        deleteButton.title = '删除项目';
+        deleteButton.setAttribute('aria-label', '删除项目');
+        deleteButton.textContent = '×';
+        deleteButton.onclick = () => deleteProject(project.id, project.name);
+        node.appendChild(sidebarButton);
+        node.appendChild(deleteButton);
+        sidebar.appendChild(node);
       });
+    }
+
+    async function deleteProject(id, name) {
+      if (!window.confirm(`确定删除项目“${name}”吗？这会清空该项目的对话、记忆和任务记录，但不会删除磁盘文件。`)) return;
+      await api(`/projects/${encodeURIComponent(id)}/delete`, {method: 'POST', body: '{}'});
+      if (activeProject && activeProject.id === id) {
+        activeProject = null;
+        selectedWorkflowId = '';
+        transientUserMessage = '';
+        transientAssistantMessage = '';
+      }
+      setStatus('项目已删除。');
+      await loadProjects();
+      await refreshWorkflows();
     }
 
     function updateProjectStatus() {
@@ -2165,10 +2190,11 @@
         const statusText = {pending_review: '待审核', enabled: '已启用', rejected: '已拒绝'}[tool.status] || tool.status;
         const card = document.createElement('div');
         card.className = 'compact-item';
+        const revision = ((tool.payload || {}).revision || {}).number || 1;
         card.innerHTML = `
           <strong>${escapeHtml(tool.name)} · ${escapeHtml(statusText)}</strong>
           <p>${escapeHtml(tool.capability)}</p>
-          <p class="hint">${escapeHtml((tool.payload.operation_spec || {}).id || '')}</p>
+          <p class="hint">${escapeHtml((tool.payload.operation_spec || {}).id || '')} · rev ${escapeHtml(revision)}</p>
         `;
         if (tool.status === 'pending_review') {
           const actions = document.createElement('div');
@@ -2265,7 +2291,8 @@
       selectedWorkflowId = '';
       transientUserMessage = '';
       transientAssistantMessage = '';
-      setStatus('已清空。');
+      setStatus(currentMode === 'full_agent' ? '已清空项目对话和上下文。' : '已清空。');
+      if (currentMode === 'full_agent') await loadProjects();
       await refreshWorkflows();
     }
 

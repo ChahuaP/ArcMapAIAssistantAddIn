@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Tuple
 
 from .agent_tools import AgentToolError, AgentToolRuntime
 from .catalog_loader import OperationCatalog
+from .custom_tool_contract import PLANNER_CUSTOM_TOOL_CONTRACT
 from .file_resolver import FileResolver
 from .llm_providers import FULL_AGENT_MODE, ChatProvider, create_provider
 from .logs import write_event
@@ -38,7 +39,9 @@ Hard rules:
 - clarify must be one clear Chinese question the user can answer.
 - unsupported must explain the missing capability in Chinese and contain no executable steps.
 - execute must contain ordered steps with id, operation, arguments, and reason.
+- Every execute step must include reason. workflow_validate and workflow_propose require it. If validation says reason is missing, add the missing reason yourself and continue; do not ask the user to clarify.
 - Do not invent argument names. If the operation index is not enough, call catalog_get_operation_schema before proposing that operation.
+- When the user provides a numeric size with a unit, map it to the operation schema exactly. For example, "外接圆半径0.001度" is a concrete radius, not a clarification request; if the schema has radius_unit, set it to degrees.
 - output_name must use ASCII letters, numbers, and underscores only, and must not start with a number.
 - If the user asks for default GDB output, read arcgis_context.default_gdb or call arcgis_get_context, then pass that exact path as output_workspace.
 - You parse natural language into structured tool arguments. Tools do not parse natural language for you.
@@ -59,7 +62,11 @@ Hard rules:
 - Do not overwrite existing data.
 - If the current mode is full_agent, prefer the active project workdir for local data lookup and output planning.
 - In full_agent mode, generated data should use arcgis_context.project_output_workspace when the user does not provide an output location.
-- If existing tools cannot satisfy the user, return unsupported with a clear missing_capability summary. If the user explicitly asks to create that missing tool, call toolbuilder_create_draft and explain that the tool waits for review before it can be enabled.
+- If existing tools cannot satisfy the user but the capability is feasible as a reusable ArcPy algorithm, call toolbuilder_create_draft to create a disabled draft tool package. Do not stop at unsupported just because no built-in operation exists.
+- toolbuilder_create_draft is an agent tool, not an ArcGIS operation id. Never call catalog_get_operation_schema for toolbuilder.create_draft or toolbuilder_create_draft.
+- When the user reports a custom tool bug, bad parameter design, or wants a review change, find the matching entry in custom_tools, call toolbuilder_get_draft, then call toolbuilder_revise_draft with the same tool_id. Do not create a duplicate custom tool for revisions.
+- toolbuilder_get_draft and toolbuilder_revise_draft accept an internal UUID, a custom.* operation id such as custom.feature_to_star_polygon, or a custom_tool:<uuid>:execute executor reference. Never ask the user to provide existing custom tool executor code.
+- If a workflow using a custom.* operation fails validation because an argument is unknown or the schema is missing a needed workflow argument, revise that custom tool schema in place instead of asking the user to rephrase.
 - Custom tool executor_code is not free-form application code. It must run inside ArcMap Python 2.7 as one small function: def execute(context, arguments, step_outputs): ...
 - Custom tool executor_code must start with # -*- coding: utf-8 -*- and use Python 2.7-compatible syntax only. Do not use f-strings, type annotations, pathlib, dataclasses, async, or raise ... from ...
 - Custom tool executor_code must not use ArcGIS Pro APIs: no arcpy.mp and no ArcGISProject. It must not call arcpy.mapping.MapDocument, arcpy.mapping.ListLayers, or inspect CURRENT maps.
@@ -69,6 +76,9 @@ Hard rules:
 - Keep executor_code ASCII except the encoding header. Put Chinese descriptions in operation_spec, not in Python comments or string literals.
 - Prefer stable ArcMap geoprocessing calls and arcpy.da cursors. When a built-in ArcPy tool exists, call it directly instead of manually reimplementing geometry logic.
 - Custom operations already present in operation_index are enabled and reviewed. Do not tell the user they still need review.
+- Custom geometry tools that add offsets to X/Y coordinates operate in the input coordinate system units. If the current spatial reference is geographic, raw coordinate radii are degrees; never invent a meter default for those tools.
+Custom tool development contract:
+""" + PLANNER_CUSTOM_TOOL_CONTRACT + """
 """
 
 
@@ -376,11 +386,16 @@ def _custom_tool_status(store: WorkflowStore) -> List[Dict[str, str]]:
     except Exception:
         return tools
     for row in rows:
-        spec = (row.get("payload") or {}).get("operation_spec") or {}
+        payload = row.get("payload") or {}
+        spec = payload.get("operation_spec") or {}
+        revision = payload.get("revision") or {}
         tools.append({
+            "id": str(row.get("id") or ""),
             "name": str(row.get("name") or ""),
+            "capability": str(row.get("capability") or ""),
             "status": str(row.get("status") or ""),
-            "operation_id": str(spec.get("id") or "")
+            "operation_id": str(spec.get("id") or ""),
+            "revision": str(revision.get("number") or "1")
         })
     return tools
 

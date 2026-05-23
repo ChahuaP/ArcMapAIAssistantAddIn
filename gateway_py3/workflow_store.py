@@ -217,12 +217,25 @@ class WorkflowStore:
     def clear_workflows(self, project_id: str | None = None, mode: str | None = None) -> Dict[str, Any]:
         with self._connection() as conn:
             if project_id:
-                conn.execute("DELETE FROM workflows WHERE project_id = ?", (project_id,))
+                workflow_count = conn.execute("DELETE FROM workflows WHERE project_id = ?", (project_id,)).rowcount
+                memory_count = conn.execute("DELETE FROM project_memories WHERE project_id = ?", (project_id,)).rowcount
+                event_count = conn.execute("DELETE FROM project_events WHERE project_id = ?", (project_id,)).rowcount
             elif mode:
-                conn.execute("DELETE FROM workflows WHERE mode = ?", (mode,))
+                workflow_count = conn.execute("DELETE FROM workflows WHERE mode = ?", (mode,)).rowcount
+                memory_count = 0
+                event_count = 0
             else:
-                conn.execute("DELETE FROM workflows")
-        return {"ok": True}
+                workflow_count = conn.execute("DELETE FROM workflows").rowcount
+                memory_count = conn.execute("DELETE FROM project_memories").rowcount
+                event_count = conn.execute("DELETE FROM project_events").rowcount
+        return {
+            "ok": True,
+            "cleared": {
+                "workflows": workflow_count,
+                "project_memories": memory_count,
+                "project_events": event_count,
+            }
+        }
 
     def clear_state(self, key: str) -> Dict[str, Any]:
         with self._connection() as conn:
@@ -516,6 +529,38 @@ class WorkflowStore:
             raise ValueError(status)
         with self._connection() as conn:
             conn.execute("UPDATE pending_tools SET status = ?, updated_at = ? WHERE id = ?", (status, time.time(), tool_id))
+        return self.get_pending_tool(tool_id)
+
+    def update_pending_tool(
+        self,
+        tool_id: str,
+        status: str,
+        name: str,
+        capability: str,
+        payload: Dict[str, Any],
+        files: Dict[str, str]
+    ) -> Dict[str, Any]:
+        if status not in ("pending_review", "enabled", "rejected"):
+            raise ValueError(status)
+        with self._connection() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE pending_tools
+                SET status = ?, name = ?, capability = ?, payload_json = ?, files_json = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    status,
+                    name,
+                    capability,
+                    json.dumps(payload, ensure_ascii=False, sort_keys=True),
+                    json.dumps(files, ensure_ascii=False, sort_keys=True),
+                    time.time(),
+                    tool_id,
+                )
+            )
+        if cursor.rowcount == 0:
+            raise KeyError(tool_id)
         return self.get_pending_tool(tool_id)
 
     def delete_pending_tool(self, tool_id: str) -> Dict[str, Any]:

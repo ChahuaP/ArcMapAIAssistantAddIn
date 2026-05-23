@@ -1,12 +1,14 @@
+import contextlib
 import json
 import pathlib
 import tempfile
 import unittest
 
+from gateway_py3 import tool_builder
 from gateway_py3.agent_tools import AgentToolError, AgentToolRuntime
 from gateway_py3.catalog_loader import OperationCatalog
 from gateway_py3.file_resolver import FileResolver
-from gateway_py3.planner import AgenticPlanner
+from gateway_py3.planner import AgenticPlanner, SYSTEM_PROMPT
 from gateway_py3.validators import ValidationError, prepare_workflow, validate_workflow
 from gateway_py3.workflow_store import WorkflowStore
 
@@ -26,6 +28,11 @@ class FakeAgentClient:
 class AgenticPlannerTests(unittest.TestCase):
     def setUp(self):
         self.catalog = OperationCatalog()
+
+    def test_prompt_treats_explicit_degree_radius_as_actionable(self):
+        self.assertIn("外接圆半径0.001度", SYSTEM_PROMPT)
+        self.assertIn("radius_unit", SYSTEM_PROMPT)
+        self.assertIn("geographic", SYSTEM_PROMPT)
 
     def test_agentic_planner_uses_file_tool_then_proposes_intersect_workflow(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -97,6 +104,25 @@ class AgenticPlannerTests(unittest.TestCase):
                         "steps": [_step("step_1", "view.refresh_view", {}, "刷新地图")]
                     }
                 })
+
+    def test_workflow_validate_missing_reason_is_repair_feedback(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = WorkflowStore(pathlib.Path(directory) / "workflows.sqlite")
+            runtime = AgentToolRuntime(self.catalog, store, _context())
+            workflow = {
+                "action": "execute",
+                "summary": "列出图层",
+                "steps": [
+                    {"id": "1", "operation": "context.list_layers", "arguments": {}}
+                ]
+            }
+
+            result = runtime.handle("workflow_validate", {"workflow": workflow})
+
+        self.assertFalse(result["ok"])
+        self.assertIn("reason", result["error"])
+        self.assertIn("不要向用户追问", result["error"])
+        self.assertNotIn("输出位置", result["error"])
 
     def test_tool_clarification_question_is_preserved_when_model_stops(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -265,6 +291,48 @@ class AgenticPlannerTests(unittest.TestCase):
         self.assertEqual(row["workflow"]["action"], "execute")
         self.assertEqual(row["workflow"]["steps"][0]["operation"], "view.refresh_view")
 
+    def test_toolbuilder_catalog_misuse_can_recover_to_star_tool_draft(self):
+        client = FakeAgentClient([
+            _assistant_tool_call("call_1", "catalog_get_operation_schema", {"operation_id": "toolbuilder.create_draft"}),
+            _assistant_tool_call("call_2", "toolbuilder_create_draft", _star_tool_arguments()),
+            {"role": "assistant", "content": "已生成面转五角星面自定义工具草稿，审核启用后可以执行。"}
+        ])
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            store = WorkflowStore(root / "workflows.sqlite")
+            planner = AgenticPlanner(catalog=self.catalog, client=client, store=store)
+            with _temporary_tool_roots(root):
+                row = planner.plan("创建工具：将 taihu test area 面图层转换为五角星面图层，每个面根据中心点生成一个五角星面", _context())
+
+        self.assertEqual(row["workflow"]["action"], "answer")
+        tool_results = [item for item in row["agent_trace"] if item.get("type") == "tool"]
+        self.assertEqual(tool_results[0]["result"]["status"], "wrong_tool_namespace")
+        self.assertTrue(tool_results[1]["result"]["ok"])
+        self.assertEqual(tool_results[1]["result"]["tool"]["payload"]["operation_spec"]["id"], "custom.polygon_to_star")
+
+    def test_custom_tool_change_request_revises_existing_tool(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            store = WorkflowStore(root / "workflows.sqlite")
+            with _temporary_tool_roots(root):
+                runtime = AgentToolRuntime(self.catalog, store, _context())
+                created = runtime.handle("toolbuilder_create_draft", _star_tool_arguments())
+                tool_id = created["tool"]["id"]
+                client = FakeAgentClient([
+                    _assistant_tool_call("call_1", "toolbuilder_get_draft", {"tool_id": tool_id}),
+                    _assistant_tool_call("call_2", "toolbuilder_revise_draft", _star_tool_revision_arguments(tool_id)),
+                    {"role": "assistant", "content": "已在原工具上修订，重新等待审核。"}
+                ])
+                planner = AgenticPlanner(catalog=self.catalog, client=client, store=store)
+                row = planner.plan("刚才那个五角星工具半径太大，改小一点，不要新建工具", _context())
+
+        self.assertEqual(row["workflow"]["action"], "answer")
+        tool_results = [item for item in row["agent_trace"] if item.get("type") == "tool"]
+        self.assertEqual(tool_results[0]["name"], "toolbuilder_get_draft")
+        self.assertEqual(tool_results[1]["name"], "toolbuilder_revise_draft")
+        self.assertEqual(tool_results[1]["result"]["tool"]["id"], tool_id)
+        self.assertEqual(tool_results[1]["result"]["tool"]["payload"]["revision"]["number"], 2)
+
     def test_unknown_operation_is_rejected_by_validation_boundary(self):
         workflow = {
             "action": "execute",
@@ -281,6 +349,23 @@ class AgenticPlannerTests(unittest.TestCase):
             "steps": [_step("step_1", "view.refresh_view", {"python": "print(1)"}, "bad")]
         }
         with self.assertRaises(ValidationError):
+            prepare_workflow(workflow, self.catalog, _context())
+
+    def test_custom_unknown_argument_feedback_names_tool_and_allowed_arguments(self):
+        self.catalog.operations["custom.feature_to_point"] = _custom_writes_data_spec()
+        workflow = {
+            "action": "execute",
+            "summary": "bad",
+            "steps": [
+                _step("step_1", "custom.feature_to_point", {
+                    "input_layer": "nanjing",
+                    "output_name": "out",
+                    "bad_argument": "x"
+                }, "bad")
+            ]
+        }
+
+        with self.assertRaisesRegex(ValidationError, "custom.feature_to_point.*bad_argument.*input_layer"):
             prepare_workflow(workflow, self.catalog, _context())
 
     def test_attribute_condition_rejects_contains_before_runtime_execution(self):
@@ -667,8 +752,118 @@ def _custom_writes_data_spec():
         "side_effects": "writes_data",
         "output_policy": {},
         "executor": "custom_tool:demo:execute",
-        "examples": []
+        "examples": [{"input_layer": "nanjing", "output_name": "nanjing_points"}]
     }
+
+
+def _star_tool_arguments():
+    return {
+        "name": "面转五角星面",
+        "capability": "将输入面图层的每个面按中心点生成一个五角星面。",
+        "operation_spec": {
+            "id": "custom.polygon_to_star",
+            "version": "0.1.0",
+            "category": "custom",
+            "summary": "面要素转五角星面",
+            "model_card": "将输入面图层的每个面按中心点和外接范围生成一个五角星面。",
+            "parameters_schema": {
+                "type": "object",
+                "required": ["input_layer", "output_name"],
+                "properties": {
+                    "input_layer": {"type": "layer"},
+                    "output_name": {"type": "string"},
+                    "output_workspace": {"type": "string"},
+                    "radius_ratio": {"type": "number"}
+                },
+                "additionalProperties": False
+            },
+            "context_requirements": {"requires_layers": True, "geometry_type": "Polygon"},
+            "side_effects": "writes_data",
+            "output_policy": {"type": "feature_class", "geometry_type": "Polygon"},
+            "executor": "will_be_overridden",
+            "examples": [
+                {
+                    "input_layer": "taihu_test_area",
+                    "output_name": "taihu_stars",
+                    "radius_ratio": 0.35
+                }
+            ]
+        },
+        "executor_code": """# -*- coding: utf-8 -*-
+import math
+import os
+
+INNER_RATIO = 0.3819660112501051
+
+
+def execute(context, arguments, step_outputs):
+    input_layer = arguments["input_layer"]
+    output_path = arguments["output_path"]
+    radius_ratio = float(arguments.get("radius_ratio", 0.35))
+    spatial_reference = arcpy.Describe(input_layer).spatialReference
+    arcpy.CreateFeatureclass_management(os.path.dirname(output_path), os.path.basename(output_path), "POLYGON", "", "DISABLED", "DISABLED", spatial_reference)
+    arcpy.AddField_management(output_path, "SRC_OID", "LONG")
+    count = 0
+    with arcpy.da.SearchCursor(input_layer, ["OID@", "SHAPE@"]) as search_cursor:
+        with arcpy.da.InsertCursor(output_path, ["SRC_OID", "SHAPE@"]) as insert_cursor:
+            for source_oid, geometry in search_cursor:
+                extent = geometry.extent
+                radius = min(float(extent.XMax - extent.XMin), float(extent.YMax - extent.YMin)) * radius_ratio
+                star = _star_polygon(geometry.trueCentroid.X, geometry.trueCentroid.Y, radius, spatial_reference)
+                insert_cursor.insertRow([source_oid, star])
+                count += 1
+    return {"output": output_path, "created_count": count}
+
+
+def _star_polygon(center_x, center_y, radius, spatial_reference):
+    points = arcpy.Array()
+    for index in range(10):
+        angle = -math.pi / 2.0 + index * math.pi / 5.0
+        current_radius = radius if index % 2 == 0 else radius * INNER_RATIO
+        points.add(arcpy.Point(center_x + math.cos(angle) * current_radius, center_y + math.sin(angle) * current_radius))
+    points.add(points.getObject(0))
+    return arcpy.Polygon(points, spatial_reference)
+""",
+        "tests": [
+            {
+                "name": "one star per polygon",
+                "arguments": {
+                    "input_layer": "layer:taihu test area",
+                    "output_name": "taihu_stars",
+                    "radius_ratio": 0.35
+                },
+                "expected": {"output_geometry": "Polygon", "created_count": "same as input polygon count"},
+                "assertions": [
+                    "output is written to arguments['output_path']",
+                    "each source polygon creates one star polygon"
+                ]
+            }
+        ]
+    }
+
+
+def _star_tool_revision_arguments(tool_id):
+    arguments = _star_tool_arguments()
+    arguments["tool_id"] = tool_id
+    arguments["change_summary"] = "默认半径比例从 0.35 改为 0.25"
+    arguments["executor_code"] = arguments["executor_code"].replace(
+        'arguments.get("radius_ratio", 0.35)',
+        'arguments.get("radius_ratio", 0.25)'
+    )
+    return arguments
+
+
+@contextlib.contextmanager
+def _temporary_tool_roots(root):
+    old_pending = tool_builder.PENDING_ROOT
+    old_enabled = tool_builder.ENABLED_ROOT
+    tool_builder.PENDING_ROOT = root / "pending_tools"
+    tool_builder.ENABLED_ROOT = root / "enabled_tools"
+    try:
+        yield
+    finally:
+        tool_builder.PENDING_ROOT = old_pending
+        tool_builder.ENABLED_ROOT = old_enabled
 
 
 if __name__ == "__main__":

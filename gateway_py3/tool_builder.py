@@ -8,6 +8,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict
 
+from .custom_tool_contract import CustomToolContractError, build_review_payload
 from .paths import appdata_dir
 PENDING_ROOT = appdata_dir() / "pending_tools"
 ENABLED_ROOT = appdata_dir() / "custom_tools" / "enabled"
@@ -57,37 +58,48 @@ class ToolBuilderError(Exception):
 
 
 def create_draft_tool(store, arguments: Dict[str, Any]) -> Dict[str, Any]:
-    name = _required_string(arguments, "name")
-    capability = _required_string(arguments, "capability")
-    operation_spec = arguments.get("operation_spec")
-    executor_code = _normalize_executor_code(_required_string(arguments, "executor_code"))
-    tests = arguments.get("tests", [])
-    if not isinstance(operation_spec, dict):
-        raise ToolBuilderError("operation_spec 必须是对象。")
-    if not isinstance(tests, list):
-        raise ToolBuilderError("tests 必须是数组。")
-    spec = canonicalize_operation_spec(operation_spec)
-    _validate_executor_contract(spec, executor_code)
+    package = _prepare_package(arguments)
+    existing = _find_existing_tool_by_operation_id(store, package["spec"]["id"])
+    if existing:
+        reason = "同一个 operation_id 已存在，按原工具修订。"
+        return _write_revision(store, existing, package, reason)
 
     draft_id = str(uuid.uuid4())
-    draft_dir = PENDING_ROOT / draft_id
-    draft_dir.mkdir(parents=True, exist_ok=True)
-    spec["executor"] = "custom_tool:%s:execute" % draft_id
-    spec = canonicalize_operation_spec(spec)
+    package = _package_for_tool_id(package, draft_id)
+    files = _write_package_files(draft_id, package)
+    payload = _payload_for_package(package, revision_number=1, change_summary="initial draft")
+    return store.create_pending_tool(package["name"], package["capability"], payload, files, tool_id=draft_id)
 
-    files = {
-        "operation_spec": str(draft_dir / "operation_spec.json"),
-        "executor": str(draft_dir / "executor.py"),
-        "tests": str(draft_dir / "tests.json"),
-    }
-    _write_text(Path(files["operation_spec"]), json.dumps(spec, ensure_ascii=False, indent=2, sort_keys=True))
-    _write_text(Path(files["executor"]), executor_code)
-    _write_text(Path(files["tests"]), json.dumps(tests, ensure_ascii=False, indent=2, sort_keys=True))
-    payload = {
-        "operation_spec": spec,
-        "tests": tests,
-    }
-    return store.create_pending_tool(name, capability, payload, files, tool_id=draft_id)
+
+def revise_draft_tool(store, arguments: Dict[str, Any]) -> Dict[str, Any]:
+    tool_ref = _required_string(arguments, "tool_id")
+    change_summary = _required_string(arguments, "change_summary")
+    current = _resolve_tool_reference(store, tool_ref)
+    package = _prepare_package(arguments)
+    previous_spec = (current.get("payload") or {}).get("operation_spec") or {}
+    previous_operation_id = str(previous_spec.get("id") or "")
+    if previous_operation_id and package["spec"]["id"] != previous_operation_id:
+        raise ToolBuilderError("修订已有工具不能改变 operation_id：当前是 %s。" % previous_operation_id)
+    return _write_revision(store, current, package, change_summary)
+
+
+def get_tool_package(store, tool_id: str) -> Dict[str, Any]:
+    tool = _resolve_tool_reference(store, tool_id)
+    resolved_tool_id = tool["id"]
+    result = dict(tool)
+    package_dir = _tool_package_dir(resolved_tool_id, tool.get("status"))
+    executor_path = package_dir / "executor.py"
+    spec_path = package_dir / "operation_spec.json"
+    tests_path = package_dir / "tests.json"
+    if executor_path.exists():
+        result["executor_code"] = executor_path.read_text(encoding="utf-8")
+    if spec_path.exists():
+        with spec_path.open("r", encoding="utf-8") as handle:
+            result["operation_spec"] = canonicalize_operation_spec(json.load(handle), source=spec_path)
+    if tests_path.exists():
+        with tests_path.open("r", encoding="utf-8") as handle:
+            result["tests"] = json.load(handle)
+    return result
 
 
 def enable_tool(store, tool_id: str) -> Dict[str, Any]:
@@ -118,6 +130,159 @@ def delete_tool(store, tool_id: str) -> Dict[str, Any]:
     return {"ok": True, "id": tool_id, "status": tool["status"], "name": tool["name"]}
 
 
+def _prepare_package(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    name = _required_string(arguments, "name")
+    capability = _required_string(arguments, "capability")
+    operation_spec = arguments.get("operation_spec")
+    executor_code = _normalize_executor_code(_required_string(arguments, "executor_code"))
+    tests = arguments.get("tests", [])
+    if not isinstance(operation_spec, dict):
+        raise ToolBuilderError("operation_spec 必须是对象。")
+    spec = canonicalize_operation_spec(operation_spec)
+    try:
+        review = build_review_payload(spec, tests)
+    except CustomToolContractError as exc:
+        raise ToolBuilderError(str(exc))
+    _validate_executor_contract(spec, executor_code)
+    return {
+        "name": name,
+        "capability": capability,
+        "spec": spec,
+        "executor_code": executor_code,
+        "tests": tests,
+        "review": review,
+    }
+
+
+def _write_revision(store, current: Dict[str, Any], package: Dict[str, Any], change_summary: str) -> Dict[str, Any]:
+    tool_id = current["id"]
+    package = _package_for_tool_id(package, tool_id)
+    files = _write_package_files(tool_id, package)
+    previous_payload = current.get("payload") or {}
+    previous_revision = _revision_number(previous_payload)
+    history = list(previous_payload.get("revision_history") or [])
+    history.append(_history_entry(current, previous_revision))
+    payload = _payload_for_package(
+        package,
+        revision_number=previous_revision + 1,
+        change_summary=change_summary,
+        revision_history=history[-12:]
+    )
+    if current.get("status") == "enabled":
+        _delete_child_directory(ENABLED_ROOT, tool_id)
+    return store.update_pending_tool(tool_id, "pending_review", package["name"], package["capability"], payload, files)
+
+
+def _package_for_tool_id(package: Dict[str, Any], tool_id: str) -> Dict[str, Any]:
+    result = dict(package)
+    spec = dict(result["spec"])
+    spec["executor"] = "custom_tool:%s:execute" % tool_id
+    spec = canonicalize_operation_spec(spec)
+    try:
+        review = build_review_payload(spec, result["tests"])
+    except CustomToolContractError as exc:
+        raise ToolBuilderError(str(exc))
+    result["spec"] = spec
+    result["review"] = review
+    return result
+
+
+def _write_package_files(tool_id: str, package: Dict[str, Any]) -> Dict[str, str]:
+    draft_dir = PENDING_ROOT / tool_id
+    draft_dir.mkdir(parents=True, exist_ok=True)
+    files = {
+        "operation_spec": str(draft_dir / "operation_spec.json"),
+        "executor": str(draft_dir / "executor.py"),
+        "tests": str(draft_dir / "tests.json"),
+    }
+    _write_text(Path(files["operation_spec"]), json.dumps(package["spec"], ensure_ascii=False, indent=2, sort_keys=True))
+    _write_text(Path(files["executor"]), package["executor_code"])
+    _write_text(Path(files["tests"]), json.dumps(package["tests"], ensure_ascii=False, indent=2, sort_keys=True))
+    return files
+
+
+def _payload_for_package(
+    package: Dict[str, Any],
+    revision_number: int,
+    change_summary: str,
+    revision_history: list[Dict[str, Any]] | None = None
+) -> Dict[str, Any]:
+    return {
+        "operation_spec": package["spec"],
+        "tests": package["tests"],
+        "review": package["review"],
+        "revision": {
+            "number": revision_number,
+            "change_summary": change_summary,
+        },
+        "revision_history": revision_history or [],
+    }
+
+
+def _history_entry(tool: Dict[str, Any], revision_number: int) -> Dict[str, Any]:
+    payload = tool.get("payload") or {}
+    spec = payload.get("operation_spec") or {}
+    revision = payload.get("revision") or {}
+    return {
+        "number": revision_number,
+        "status": str(tool.get("status") or ""),
+        "operation_id": str(spec.get("id") or ""),
+        "summary": str(spec.get("summary") or ""),
+        "change_summary": str(revision.get("change_summary") or ""),
+        "updated_at": tool.get("updated_at"),
+    }
+
+
+def _revision_number(payload: Dict[str, Any]) -> int:
+    revision = payload.get("revision") or {}
+    try:
+        return max(1, int(revision.get("number") or 1))
+    except (TypeError, ValueError):
+        return 1
+
+
+def _find_existing_tool_by_operation_id(store, operation_id: str) -> Dict[str, Any] | None:
+    try:
+        tools = store.list_pending_tools()
+    except Exception:
+        return None
+    for tool in tools:
+        spec = (tool.get("payload") or {}).get("operation_spec") or {}
+        if spec.get("id") == operation_id:
+            return tool
+    return None
+
+
+def _resolve_tool_reference(store, value: str) -> Dict[str, Any]:
+    identifier = _tool_identifier(value)
+    try:
+        return store.get_pending_tool(identifier)
+    except KeyError:
+        pass
+    if identifier.startswith("custom."):
+        tool = _find_existing_tool_by_operation_id(store, identifier)
+        if tool:
+            return tool
+    raise KeyError(value)
+
+
+def _tool_identifier(value: str) -> str:
+    identifier = str(value or "").strip()
+    if identifier.startswith("custom_tool:"):
+        parts = identifier.split(":")
+        if len(parts) >= 2 and parts[1]:
+            return parts[1]
+    return identifier
+
+
+def _tool_package_dir(tool_id: str, status: str | None) -> Path:
+    if status == "enabled":
+        enabled = ENABLED_ROOT / tool_id
+        if enabled.exists():
+            return enabled
+    return PENDING_ROOT / tool_id
+
+
 def enabled_operation_specs() -> list[Dict[str, Any]]:
     specs = []
     if not ENABLED_ROOT.exists():
@@ -138,12 +303,28 @@ def canonicalize_operation_spec(spec: Dict[str, Any], source: Path | None = None
     except ToolBuilderError as exc:
         label = "：%s" % source if source else ""
         raise ToolBuilderError("operation_spec 参数定义不合法%s：%s" % (label, exc))
+    _ensure_managed_output_workspace_parameter(result)
     if not isinstance(result.get("context_requirements"), dict):
         result["context_requirements"] = {}
     if not isinstance(result.get("output_policy"), dict):
         result["output_policy"] = {}
     _validate_spec_shape(result)
     return result
+
+
+def _ensure_managed_output_workspace_parameter(spec: Dict[str, Any]) -> None:
+    if spec.get("side_effects") != "writes_data":
+        return
+    schema = spec.get("parameters_schema")
+    if not isinstance(schema, dict):
+        return
+    properties = schema.setdefault("properties", {})
+    if not isinstance(properties, dict):
+        return
+    properties.setdefault("output_workspace", {
+        "type": "string",
+        "description": "Optional output folder or geodatabase. GeoPilot resolves output_path from this value."
+    })
 
 
 def _canonical_parameters_schema(schema: Any) -> Dict[str, Any]:
@@ -234,6 +415,8 @@ def _validate_spec_shape(spec: Dict[str, Any]) -> None:
         raise ToolBuilderError("context_requirements 必须是对象。")
     if not isinstance(spec.get("output_policy"), dict):
         raise ToolBuilderError("output_policy 必须是对象。")
+    if not isinstance(spec.get("examples"), list) or not spec.get("examples"):
+        raise ToolBuilderError("operation_spec.examples 必须至少提供 1 个真实调用示例。")
 
 
 def _validate_tool_files(source_dir: Path, tool_id: str) -> None:
@@ -244,6 +427,15 @@ def _validate_tool_files(source_dir: Path, tool_id: str) -> None:
     with spec_path.open("r", encoding="utf-8") as handle:
         spec = json.load(handle)
     spec = canonicalize_operation_spec(spec, source=spec_path)
+    tests_path = source_dir / "tests.json"
+    if not tests_path.exists():
+        raise ToolBuilderError("待审核工具包缺少 tests.json。")
+    with tests_path.open("r", encoding="utf-8") as handle:
+        tests = json.load(handle)
+    try:
+        build_review_payload(spec, tests)
+    except CustomToolContractError as exc:
+        raise ToolBuilderError(str(exc))
     expected_executor = "custom_tool:%s:execute" % tool_id
     if spec.get("executor") != expected_executor:
         raise ToolBuilderError("operation_spec executor 与待审核工具目录不一致。")

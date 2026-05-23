@@ -5,8 +5,18 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from .catalog_loader import CatalogError, OperationCatalog
+from .custom_tool_contract import (
+    TOOLBUILDER_GET_TOOL_DESCRIPTION,
+    TOOLBUILDER_GET_TOOL_PARAMETERS,
+    TOOLBUILDER_REVISE_TOOL_DESCRIPTION,
+    TOOLBUILDER_REVISE_TOOL_PARAMETERS,
+    TOOLBUILDER_TOOL_DESCRIPTION,
+    TOOLBUILDER_TOOL_PARAMETERS,
+    is_toolbuilder_catalog_id,
+    toolbuilder_catalog_misuse_result,
+)
 from .file_resolver import FileResolver
-from .tool_builder import ToolBuilderError, create_draft_tool
+from .tool_builder import ToolBuilderError, create_draft_tool, get_tool_package, revise_draft_tool
 from .validators import ValidationError, friendly_validation_message, prepare_workflow
 from .workflow_store import WorkflowStore
 
@@ -115,7 +125,7 @@ class AgentToolRuntime:
             ),
             _tool(
                 "workflow_validate",
-                "Validate a proposed workflow locally before final proposal. Returns normalized workflow or a Chinese correction question.",
+                "Validate a proposed workflow locally before final proposal. Every execute step must include id, operation, arguments, and reason. Returns normalized workflow or a Chinese correction question.",
                 {
                     "type": "object",
                     "required": ["workflow"],
@@ -141,19 +151,18 @@ class AgentToolRuntime:
             ),
             _tool(
                 "toolbuilder_create_draft",
-                "Create a disabled draft ArcMap ArcPy operation package after the user explicitly agrees to create a missing tool. executor_code must be ArcMap Python 2.7 compatible, define execute(context, arguments, step_outputs), use runtime-provided layer objects and arguments['output_path'], and avoid arcpy.mp/arcpy.mapping current-map access or getOutput. The draft waits for human review before enablement.",
-                {
-                    "type": "object",
-                    "required": ["name", "capability", "operation_spec", "executor_code", "tests"],
-                    "properties": {
-                        "name": {"type": "string"},
-                        "capability": {"type": "string"},
-                        "operation_spec": {"type": "object"},
-                        "executor_code": {"type": "string"},
-                        "tests": {"type": "array", "items": {"type": "object"}}
-                    },
-                    "additionalProperties": False
-                }
+                TOOLBUILDER_TOOL_DESCRIPTION,
+                TOOLBUILDER_TOOL_PARAMETERS
+            ),
+            _tool(
+                "toolbuilder_get_draft",
+                TOOLBUILDER_GET_TOOL_DESCRIPTION,
+                TOOLBUILDER_GET_TOOL_PARAMETERS
+            ),
+            _tool(
+                "toolbuilder_revise_draft",
+                TOOLBUILDER_REVISE_TOOL_DESCRIPTION,
+                TOOLBUILDER_REVISE_TOOL_PARAMETERS
             )
         ]
 
@@ -194,10 +203,16 @@ class AgentToolRuntime:
             })
         if name == "toolbuilder_create_draft":
             return self._toolbuilder_create_draft(arguments)
+        if name == "toolbuilder_get_draft":
+            return self._toolbuilder_get_draft(arguments)
+        if name == "toolbuilder_revise_draft":
+            return self._toolbuilder_revise_draft(arguments)
         raise AgentToolError("Unknown agent tool: %s" % name)
 
     def _catalog_get_operation_schema(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
         operation_id = _required_string(arguments, "operation_id")
+        if is_toolbuilder_catalog_id(operation_id):
+            return toolbuilder_catalog_misuse_result(operation_id)
         try:
             operation = self.catalog.get(operation_id)
         except CatalogError as exc:
@@ -300,6 +315,25 @@ class AgentToolRuntime:
             "status": "pending_review",
             "tool": tool,
             "message": "新工具已生成待审核包，启用前不会进入 ArcGIS 执行目录。"
+        }
+
+    def _toolbuilder_get_draft(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            tool = get_tool_package(self.store, _required_string(arguments, "tool_id"))
+        except (KeyError, ToolBuilderError) as exc:
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True, "tool": tool}
+
+    def _toolbuilder_revise_draft(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            tool = revise_draft_tool(self.store, arguments)
+        except (KeyError, ToolBuilderError) as exc:
+            return {"ok": False, "error": str(exc)}
+        return {
+            "ok": True,
+            "status": "pending_review",
+            "tool": tool,
+            "message": "工具已在原工具上修订，重新进入待审核状态。"
         }
 
 

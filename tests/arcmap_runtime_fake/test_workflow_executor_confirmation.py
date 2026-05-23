@@ -75,6 +75,29 @@ class WorkflowExecutorConfirmationTests(unittest.TestCase):
         self.assertEqual(calls["add_output_layer"], r"C:\work\ArcMapAI_Output.gdb\taihucenterpoints")
         self.assertEqual(result["steps"][0]["result"]["output"], r"C:\work\ArcMapAI_Output.gdb\taihucenterpoints")
 
+    def test_custom_write_schema_accepts_managed_output_workspace_when_enabled_spec_is_old(self):
+        operation = self.workflow_executor._canonicalize_operation({
+            "side_effects": "writes_data",
+            "parameters_schema": {
+                "type": "object",
+                "required": ["input_layer", "output_name"],
+                "properties": {
+                    "input_layer": {"type": "string", "x-geopilot-kind": "layer"},
+                    "output_name": {"type": "string"}
+                },
+                "additionalProperties": False
+            },
+            "executor": "custom_tool:tool_1:execute"
+        })
+
+        self.workflow_executor._validate_arguments("1", {
+            "input_layer": "taihutestarea",
+            "output_name": "stars",
+            "output_workspace": r"C:\work"
+        }, operation["parameters_schema"])
+
+        self.assertIn("output_workspace", operation["parameters_schema"]["properties"])
+
     def test_custom_executor_receives_arcpy_global(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)

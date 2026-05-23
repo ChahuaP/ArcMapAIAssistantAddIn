@@ -234,12 +234,14 @@ def friendly_validation_message(error: Exception) -> str:
         return "我还不能确定要执行哪一种 GIS 操作。请把任务再说具体一点，比如要缓冲、裁剪、选择、导出，还是添加图层。"
     if "Step missing field: arguments" in message:
         return "这个任务的参数还不完整。请补充图层名、字段名、距离、输出名等必要信息。"
+    if "Step missing field: reason" in message:
+        return "每个执行步骤都必须带 reason，说明这一步为什么这样做。请补上 reason 后继续生成 workflow，不要向用户追问。"
     if "Step missing field:" in message:
         return "这个任务信息还不完整。请把要操作的图层、参数和输出位置再说清楚一点。"
     if "missing required argument:" in message:
         return "这个操作还缺少必要参数“%s”。请补充后我再继续。" % message.rsplit(":", 1)[-1].strip()
     if "has unknown arguments:" in message:
-        return "有些参数我没看懂。请换一种更明确的说法，说明图层、字段、距离、输出名或输出位置。"
+        return message
     if "Unknown operation" in message:
         return "当前版本还不支持这个操作。请换成已有能力，或告诉我你想完成的 GIS 处理目标。"
     if message:
@@ -260,10 +262,10 @@ def _validate_step(step: Dict[str, Any], catalog: OperationCatalog, seen_step_id
     arguments = step["arguments"]
     if not isinstance(arguments, dict):
         raise ValidationError(f"{step['id']} arguments must be an object.")
-    _validate_arguments(step["id"], arguments, operation["parameters_schema"])
+    _validate_arguments(step["id"], step["operation"], arguments, operation["parameters_schema"])
 
 
-def _validate_arguments(step_id: str, arguments: Dict[str, Any], schema: Dict[str, Any]) -> None:
+def _validate_arguments(step_id: str, operation_id: str, arguments: Dict[str, Any], schema: Dict[str, Any]) -> None:
     required = schema.get("required", [])
     properties = schema.get("properties", {})
     additional = schema.get("additionalProperties", True)
@@ -274,6 +276,13 @@ def _validate_arguments(step_id: str, arguments: Dict[str, Any], schema: Dict[st
     if additional is False:
         extra = sorted(set(arguments) - set(properties))
         if extra:
+            allowed = sorted(properties)
+            if operation_id.startswith("custom."):
+                raise ValidationError(
+                    "%s（%s）不认识参数：%s。这个自建工具当前允许的参数是：%s。"
+                    "如果这些参数本来就应该支持，请修订这个自建工具的 operation_spec，而不是新建工具。"
+                    % (step_id, operation_id, "、".join(extra), "、".join(allowed))
+                )
             raise ValidationError(f"{step_id} has unknown arguments: {extra}")
 
     for name, value in arguments.items():

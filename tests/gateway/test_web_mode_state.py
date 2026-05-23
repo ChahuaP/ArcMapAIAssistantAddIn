@@ -62,6 +62,20 @@ class WebModeStateTests(unittest.TestCase):
         self.assertIn("api(`/tools/${id}/delete`", html)
         self.assertIn("自建工具已删除。", html)
 
+    def test_projects_can_be_deleted_from_ui(self):
+        html = (ROOT / "gateway_py3" / "web" / "index.html").read_text(encoding="utf-8")
+
+        self.assertIn("async function deleteProject(id, name)", html)
+        self.assertIn("api(`/projects/${encodeURIComponent(id)}/delete`", html)
+        self.assertIn("不会删除磁盘文件", html)
+        self.assertIn("项目已删除。", html)
+
+    def test_clear_project_conversation_refreshes_context_state(self):
+        html = (ROOT / "gateway_py3" / "web" / "index.html").read_text(encoding="utf-8")
+
+        self.assertIn("已清空项目对话和上下文。", html)
+        self.assertIn("if (currentMode === 'full_agent') await loadProjects();", html)
+
     def test_file_loaded_page_calls_local_gateway_api(self):
         html = (ROOT / "gateway_py3" / "web" / "index.html").read_text(encoding="utf-8")
 

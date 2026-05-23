@@ -20,7 +20,7 @@ from gateway_py3.workflow_store import WorkflowStore
 
 HOST = "127.0.0.1"
 PORT = 8765
-APP_VERSION = "0.11.16"
+APP_VERSION = "0.11.22"
 
 
 class GatewayState:
@@ -118,6 +118,7 @@ class Handler(BaseHTTPRequestHandler):
                     active_project = STATE.store.get_active_project()
                     project_id = active_project["id"] if active_project else ""
                 row = STATE.planner.plan(payload["command"], context, mode=mode, project_id=project_id)
+                STATE.reload_catalog()
                 self._json({"workflow": row})
             elif path == "/config":
                 self._json({"config": save_config(_config_payload(payload))})
