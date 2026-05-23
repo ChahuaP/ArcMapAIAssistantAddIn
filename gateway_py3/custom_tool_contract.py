@@ -40,12 +40,17 @@ PLANNER_CUSTOM_TOOL_CONTRACT = """- Custom tools are for new reusable ArcPy algo
 - operation_spec describes the reusable operation: custom.* id, parameters_schema, context_requirements, side_effects, output_policy, and examples.
 - executor_code is real ArcMap ArcPy implementation code, not pseudo-code and not a workflow that chains GeoPilot operation ids.
 - executor_code must be one ArcMap Python 2.7-compatible module with def execute(context, arguments, step_outputs): ...
+- ArcMap uses Python 2.7. Do not use Python 3-only exception/classes or APIs such as FileNotFoundError, FileExistsError, PermissionError, ModuleNotFoundError, os.scandir, pathlib, dataclasses, keyword-only arguments, or os.makedirs(..., exist_ok=True).
+- Every helper function called by executor_code must be defined in the same executor module or imported from an allowed Python 2.7 standard module. Do not invent helper functions and assume GeoPilot or ArcPy provides them.
 - The runtime injects arcpy and resolves layer parameters before execute runs. Use arguments["input_layer"] or other layer parameters directly as ArcMap Layer objects.
 - For writes_data tools, declare required output_name and write the output dataset to arguments["output_path"]. Do not read arguments["output_workspace"] or arguments["output_name"] inside executor_code.
 - For writes_data tools, output_workspace is a GeoPilot-managed optional workflow argument. Include it in operation_spec or let GeoPilot add it; executor_code still must not read it.
 - For writes_data tools, do not add the output layer yourself; GeoPilot adds arguments["output_path"] to the map after execute returns.
 - It is allowed to implement geometry algorithms with arcpy.Geometry, arcpy.Array, arcpy.Point, arcpy.Polygon, arcpy.da.SearchCursor, and arcpy.da.InsertCursor.
 - It is allowed to split arguments["output_path"] with os.path.dirname/basename when ArcPy requires workspace and dataset name separately.
+- ArcPy calls must be real ArcMap ArcPy APIs. Do not invent arcpy function names. Use known ArcMap calls such as CopyFeatures_management, CreateFeatureclass_management, AddField_management, FeatureToPoint_management, arcpy.da.SearchCursor, and arcpy.da.InsertCursor.
+- When using arcpy.CreateFeatureclass_management, split arguments["output_path"] into os.path.dirname(output_path) and os.path.basename(output_path), then pass spatial_reference from arcpy.Describe(input_layer).spatialReference. Do not pass the full output_path as workspace, do not manually create or append .gdb, and do not pass context["spatial_reference"], spatialReference.name, factoryCode, ordinary strings, or layer.spatialReference.
+- Never create or write ArcGIS system fields such as OBJECTID, FID, OID, Shape, Shape_Length, or Shape_Area. To preserve source feature ids, read "OID@" from the input cursor and write it to a custom LONG field such as SRC_OID.
 - Geometry algorithms that add or compare X/Y distances must define the unit contract explicitly. Do not describe a parameter as meters if the executor directly adds that value to coordinate X/Y values.
 - Radius, distance, width, height, length, offset, buffer, or tolerance parameters must either be dimensionless ratios such as radius_ratio, or they must have a matching unit parameter such as radius_unit / distance_unit with enum values map_units, degrees, meters. This is a hard contract, not a style preference.
 - If the input spatial reference is geographic, raw X/Y geometry math uses degrees; do not use a meter default. If meters are requested on geographic coordinates, either implement a real projection/geodesic method or raise a clear error instead of approximating silently.
@@ -233,6 +238,9 @@ def build_review_payload(spec: Dict[str, Any], tests: Any) -> Dict[str, Any]:
             "layer parameters are runtime-resolved ArcMap Layer objects",
             "writes_data output dataset is arguments['output_path']",
             "GeoPilot adds writes_data outputs to ArcGIS after execute returns",
+        "CreateFeatureclass splits arguments['output_path'] with os.path.dirname/basename",
+        "CreateFeatureclass spatial_reference comes from arcpy.Describe(input_layer).spatialReference",
+        "executor does not create or write ArcGIS system OID/Shape fields",
         ],
         "acceptance_checklist": _acceptance_checklist(spec),
         "test_count": len(normalized_tests),

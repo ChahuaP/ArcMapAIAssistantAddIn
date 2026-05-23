@@ -33,6 +33,7 @@ class AgenticPlannerTests(unittest.TestCase):
         self.assertIn("外接圆半径0.001度", SYSTEM_PROMPT)
         self.assertIn("radius_unit", SYSTEM_PROMPT)
         self.assertIn("geographic", SYSTEM_PROMPT)
+        self.assertIn("only exception is executor_code inside toolbuilder_create_draft", SYSTEM_PROMPT)
 
     def test_agentic_planner_uses_file_tool_then_proposes_intersect_workflow(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -310,6 +311,77 @@ class AgenticPlannerTests(unittest.TestCase):
         self.assertTrue(tool_results[1]["result"]["ok"])
         self.assertEqual(tool_results[1]["result"]["tool"]["payload"]["operation_spec"]["id"], "custom.polygon_to_star")
 
+    def test_generic_unsupported_is_rejected_and_model_creates_custom_tool(self):
+        client = FakeAgentClient([
+            _assistant_tool_call("call_1", "workflow_propose", {
+                "action": "unsupported",
+                "summary": "当前版本还不支持这个操作。请换成已有能力，或告诉我你想完成的 GIS 处理目标。",
+                "steps": []
+            }),
+            _assistant_tool_call("call_2", "toolbuilder_create_draft", _star_tool_arguments()),
+            {"role": "assistant", "content": "已生成自定义工具草稿，审核启用后可以执行。"}
+        ])
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            store = WorkflowStore(root / "workflows.sqlite")
+            planner = AgenticPlanner(catalog=self.catalog, client=client, store=store)
+            with _temporary_tool_roots(root):
+                row = planner.plan("创建工具：把面图层转换成五角星面", _context())
+
+        self.assertEqual(row["workflow"]["action"], "answer")
+        tool_results = [item for item in row["agent_trace"] if item.get("type") == "tool"]
+        self.assertEqual(tool_results[0]["name"], "toolbuilder_create_draft")
+        self.assertTrue(tool_results[0]["result"]["ok"])
+        self.assertIn("toolbuilder_create_draft", json.dumps(client.calls[1]["messages"], ensure_ascii=False))
+
+    def test_internal_feedback_after_toolbuilder_success_is_not_user_visible(self):
+        client = FakeAgentClient([
+            _assistant_tool_call("call_1", "toolbuilder_create_draft", _star_tool_arguments()),
+            {
+                "role": "assistant",
+                "content": json.dumps({
+                    "action": "unsupported",
+                    "summary": "当前版本还不支持这个操作。请换成已有能力，或告诉我你想完成的 GIS 处理目标。",
+                    "steps": []
+                }, ensure_ascii=False)
+            }
+        ])
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            store = WorkflowStore(root / "workflows.sqlite")
+            planner = AgenticPlanner(catalog=self.catalog, client=client, store=store)
+            with _temporary_tool_roots(root):
+                row = planner.plan("创建工具：把面图层转换成五角星面", _context())
+
+        self.assertEqual(row["workflow"]["action"], "answer")
+        summary = row["workflow"]["summary"]
+        self.assertIn("custom.polygon_to_star", summary)
+        self.assertIn("等待审核", summary)
+        self.assertNotIn("不要输出", summary)
+        self.assertNotIn("toolbuilder_create_draft", summary)
+        self.assertNotIn("当前版本还不支持", summary)
+
+    def test_repeated_generic_unsupported_feedback_is_sanitized_for_user(self):
+        client = FakeAgentClient([
+            _assistant_tool_call("call_1", "workflow_propose", {
+                "action": "unsupported",
+                "summary": "当前版本还不支持这个操作。请换成已有能力，或告诉我你想完成的 GIS 处理目标。",
+                "steps": []
+            }),
+            _assistant_tool_call("call_2", "workflow_propose", {
+                "action": "unsupported",
+                "summary": "当前版本还不支持这个操作。请换成已有能力，或告诉我你想完成的 GIS 处理目标。",
+                "steps": []
+            })
+        ])
+        row = self._plan(client, "把面图层转换成五角星面", _context())
+
+        self.assertEqual(row["workflow"]["action"], "clarify")
+        summary = row["workflow"]["summary"]
+        self.assertNotIn("不要输出", summary)
+        self.assertNotIn("toolbuilder_create_draft", summary)
+        self.assertNotIn("当前版本还不支持", summary)
+
     def test_custom_tool_change_request_revises_existing_tool(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
@@ -332,6 +404,31 @@ class AgenticPlannerTests(unittest.TestCase):
         self.assertEqual(tool_results[1]["name"], "toolbuilder_revise_draft")
         self.assertEqual(tool_results[1]["result"]["tool"]["id"], tool_id)
         self.assertEqual(tool_results[1]["result"]["tool"]["payload"]["revision"]["number"], 2)
+
+    def test_custom_tool_failure_repair_request_revises_existing_tool(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            store = WorkflowStore(root / "workflows.sqlite")
+            with _temporary_tool_roots(root):
+                runtime = AgentToolRuntime(self.catalog, store, _context())
+                created = runtime.handle("toolbuilder_create_draft", _star_tool_arguments())
+                tool_id = created["tool"]["id"]
+                client = FakeAgentClient([
+                    _assistant_tool_call("call_1", "toolbuilder_get_draft", {"tool_id": "custom.polygon_to_star"}),
+                    _assistant_tool_call("call_2", "toolbuilder_revise_draft", _star_tool_revision_arguments(tool_id)),
+                    {"role": "assistant", "content": "已根据执行失败信息修订原工具，等待审核。"}
+                ])
+                planner = AgenticPlanner(catalog=self.catalog, client=client, store=store)
+                row = planner.plan(
+                    "进入自定义工具开发修复流程。上一次执行 custom.polygon_to_star 失败：ERROR 000840: 该值不是 空间参考。请读取原工具并修订同一个工具。",
+                    _context()
+                )
+
+        self.assertEqual(row["workflow"]["action"], "answer")
+        tool_results = [item for item in row["agent_trace"] if item.get("type") == "tool"]
+        self.assertEqual(tool_results[0]["name"], "toolbuilder_get_draft")
+        self.assertEqual(tool_results[1]["name"], "toolbuilder_revise_draft")
+        self.assertEqual(tool_results[1]["result"]["tool"]["id"], tool_id)
 
     def test_unknown_operation_is_rejected_by_validation_boundary(self):
         workflow = {

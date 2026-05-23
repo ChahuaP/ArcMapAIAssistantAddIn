@@ -22,7 +22,7 @@ You help non-technical ArcGIS/ArcMap users turn natural Chinese requests into sa
 
 Hard rules:
 - Use tool calls when you need local file resolution, operation schemas, current ArcGIS context, or workflow validation.
-- Never write Python code.
+- Never write Python code in final user-facing answers or normal workflow steps. The only exception is executor_code inside toolbuilder_create_draft or toolbuilder_revise_draft tool calls.
 - Never write SQL where clauses. Attribute filters must use structured where objects only.
 - Attribute where operators are limited to: eq, ne, gt, gte, lt, lte, between, in, like, is_null, is_not_null, and, or, not.
 - Use like with SQL wildcards for text patterns. Text contains must be {"field":"NAME","op":"like","value":"%南京%"}. Do not use contains, starts_with, ends_with, regex, or raw SQL.
@@ -73,9 +73,11 @@ Hard rules:
 - Custom tool executor_code must not call getOutput. GeoPilot passes ArcMap Layer objects, not geoprocessing Result objects.
 - Custom tool executor_code receives already-resolved arguments from GeoPilot. For layer parameters, arguments["input_layer"] is the ArcMap layer object; do not search for layers by name.
 - For writes_data custom tools, define required output_name in operation_spec and write to arguments["output_path"]. Do not read arguments["output_workspace"] or arguments["output_name"] inside executor_code, and do not build output paths from arcpy.env.workspace, output_workspace, or output_name. Variable names like output_path_full do not count; the code must read arguments["output_path"] or arguments.get("output_path").
+- For CreateFeatureclass_management, split arguments["output_path"] with os.path.dirname/basename and pass spatial_reference from arcpy.Describe(input_layer).spatialReference. Do not pass context["spatial_reference"], spatialReference.name, factoryCode, strings, or layer.spatialReference.
 - Keep executor_code ASCII except the encoding header. Put Chinese descriptions in operation_spec, not in Python comments or string literals.
 - Prefer stable ArcMap geoprocessing calls and arcpy.da cursors. When a built-in ArcPy tool exists, call it directly instead of manually reimplementing geometry logic.
 - Custom operations already present in operation_index are enabled and reviewed. Do not tell the user they still need review.
+- Custom tools listed in custom_tools with pending_review or rejected status are known tools, not unsupported capabilities. Do not use them as executable workflow operations until enabled. If the user wants to run them, answer that they need review/enablement first; if the user reports a bug or requests a change, revise the same tool in place.
 - Custom geometry tools that add offsets to X/Y coordinates operate in the input coordinate system units. If the current spatial reference is geographic, raw coordinate radii are degrees; never invent a meter default for those tools.
 Custom tool development contract:
 """ + PLANNER_CUSTOM_TOOL_CONTRACT + """
@@ -154,7 +156,7 @@ class AgenticPlanner:
                     return finalized
                 validation_feedback_count += 1
                 if validation_feedback_count > 1:
-                    return self._store_clarification(command, context, feedback, trace, mode, project_id)
+                    return self._store_unfinalized_feedback(command, context, feedback, trace, mode, project_id)
                 messages.append(_tool_message(_proposal_tool_call_id(assistant_message), {"ok": False, "error": feedback}))
                 continue
 
@@ -172,6 +174,8 @@ class AgenticPlanner:
                         file_search_nudges += 1
                         continue
                     if content_text and not _generic_clarification(content_text):
+                        if _needs_public_rewrite(content_text):
+                            return self._store_unfinalized_feedback(command, context, content_text, trace, mode, project_id)
                         return self._store_answer(command, context, content_text, trace, mode, project_id)
                     summary = pending_question or "这个任务还不够明确，请补充要操作的数据、处理方式或输出位置。"
                     return self._store_clarification(command, context, summary, trace, mode, project_id)
@@ -187,7 +191,7 @@ class AgenticPlanner:
                 finalized, feedback = self._try_finalize(command, context, content_workflow, trace, mode, project_id)
                 if finalized is not None:
                     return finalized
-                return self._store_clarification(command, context, feedback, trace, mode, project_id)
+                return self._store_unfinalized_feedback(command, context, feedback, trace, mode, project_id)
 
             for tool_call in tool_calls:
                 try:
@@ -213,16 +217,16 @@ class AgenticPlanner:
                             return finalized
                         validation_feedback_count += 1
                         if validation_feedback_count > 1:
-                            return self._store_clarification(command, context, feedback, trace, mode, project_id)
+                            return self._store_unfinalized_feedback(command, context, feedback, trace, mode, project_id)
                         messages.append(_tool_message(tool_call.get("id"), {"ok": False, "error": feedback}))
                         continue
                     validation_feedback_count += 1
                     if validation_feedback_count > 1:
-                        return self._store_clarification(command, context, result.get("error", "这个任务信息还不完整。"), trace, mode, project_id)
+                        return self._store_unfinalized_feedback(command, context, result.get("error", "这个任务信息还不完整。"), trace, mode, project_id)
 
                 messages.append(_tool_message(tool_call.get("id"), result))
 
-        return self._store_clarification(command, context, pending_question or "这个任务还不够明确，请补充要操作的数据、处理方式或输出位置。", trace, mode, project_id)
+        return self._store_unfinalized_feedback(command, context, pending_question or "这个任务还不够明确，请补充要操作的数据、处理方式或输出位置。", trace, mode, project_id)
 
     def _messages(
         self,
@@ -262,6 +266,9 @@ class AgenticPlanner:
         mode: str,
         project_id: str | None
     ) -> Tuple[Dict[str, Any] | None, str]:
+        generic_unsupported_feedback = _generic_unsupported_feedback(workflow, trace)
+        if generic_unsupported_feedback:
+            return None, generic_unsupported_feedback
         exploration_feedback = _attribute_exploration_feedback(workflow, trace)
         if exploration_feedback:
             return None, exploration_feedback
@@ -270,6 +277,20 @@ class AgenticPlanner:
         except ValidationError as exc:
             return None, friendly_validation_message(exc)
         return self._store_workflow(command, context, prepared, trace, mode, project_id), ""
+
+    def _store_unfinalized_feedback(
+        self,
+        command: str,
+        context: Dict[str, Any],
+        feedback: str,
+        trace: List[Dict[str, Any]],
+        mode: str = "semi_agent",
+        project_id: str | None = None
+    ) -> Dict[str, Any]:
+        summary, as_answer = _public_unfinalized_feedback(feedback, trace)
+        if as_answer:
+            return self._store_answer(command, context, summary, trace, mode, project_id)
+        return self._store_clarification(command, context, summary, trace, mode, project_id)
 
     def _store_workflow(
         self,
@@ -474,6 +495,116 @@ def _attribute_exploration_feedback(workflow: Dict[str, Any], trace: List[Dict[s
     if _trace_has_tool(trace, "arcgis_get_layer_profile") or _trace_has_tool(trace, "arcgis_get_context"):
         return ""
     return "属性条件需要先查看目标图层的字段和值样例。请先调用 arcgis_get_layer_profile 或 arcgis_get_context，基于真实字段和值样例理解用户意图后，再生成结构化 where。"
+
+
+def _generic_unsupported_feedback(workflow: Dict[str, Any], trace: List[Dict[str, Any]]) -> str:
+    if workflow.get("action") not in ("clarify", "unsupported"):
+        return ""
+    summary = str(workflow.get("summary") or "")
+    if "当前版本" not in summary or "不支持" not in summary:
+        return ""
+    if "请换成已有能力" not in summary and "GIS 处理目标" not in summary:
+        return ""
+    pending_custom = _trace_pending_custom_tool(trace)
+    if pending_custom:
+        return (
+            "不要把已存在但未启用的自定义工具说成当前版本不支持。"
+            "工具 %s 当前状态是 %s；请回复用户需要先在自建工具审核列表启用，"
+            "如果用户是在反馈工具问题或要求修改，则调用 toolbuilder_get_draft 后用 toolbuilder_revise_draft 修订同一个工具。"
+        ) % (pending_custom.get("operation_id", "custom.*"), pending_custom.get("status", "pending_review"))
+    return (
+        "不要输出“当前版本还不支持这个操作。请换成已有能力...”这种通用拒绝。"
+        "如果已有 catalog operation 可以完成，请生成 workflow；如果现有能力缺失但可用 ArcPy 实现，请调用 toolbuilder_create_draft 创建待审核自定义工具；"
+        "只有确认 ArcPy/ArcMap 也无法可靠实现时，才返回 unsupported。"
+    )
+
+
+def _public_unfinalized_feedback(feedback: str, trace: List[Dict[str, Any]]) -> Tuple[str, bool]:
+    text = str(feedback or "").strip()
+    if not _needs_public_rewrite(text):
+        return text, False
+    tool = _latest_successful_toolbuilder_tool(trace)
+    if tool:
+        return _toolbuilder_public_summary(tool), True
+    pending_custom = _trace_pending_custom_tool(trace)
+    if pending_custom:
+        operation_id = pending_custom.get("operation_id") or "custom.*"
+        return (
+            "自定义工具 %s 已存在但还没有启用。请先在自建工具审核列表启用；需要修改时直接告诉我修改点。"
+            % operation_id,
+            True
+        )
+    return "这个任务还没有形成可执行方案。请补充要处理的图层、输出名称或更具体的 GIS 处理目标。", False
+
+
+def _needs_public_rewrite(feedback: str) -> bool:
+    return _is_internal_planner_feedback(feedback) or _is_generic_unsupported_text(feedback)
+
+
+def _is_internal_planner_feedback(feedback: str) -> bool:
+    text = str(feedback or "")
+    markers = (
+        "不要输出",
+        "不要把已存在但未启用的自定义工具说成当前版本不支持",
+        "请先调用 arcgis_get_layer_profile",
+        "基于真实字段和值样例理解用户意图",
+        "toolbuilder_create_draft 创建待审核自定义工具",
+        "toolbuilder_revise_draft 修订同一个工具",
+    )
+    return any(marker in text for marker in markers)
+
+
+def _is_generic_unsupported_text(feedback: str) -> bool:
+    text = str(feedback or "")
+    return (
+        "当前版本" in text
+        and "不支持" in text
+        and ("请换成已有能力" in text or "GIS 处理目标" in text)
+    )
+
+
+def _latest_successful_toolbuilder_tool(trace: List[Dict[str, Any]]) -> Dict[str, Any] | None:
+    for item in reversed(trace):
+        if item.get("type") != "tool":
+            continue
+        if item.get("name") not in ("toolbuilder_create_draft", "toolbuilder_revise_draft"):
+            continue
+        result = item.get("result") or {}
+        tool = result.get("tool")
+        if result.get("ok") and isinstance(tool, dict):
+            return tool
+    return None
+
+
+def _toolbuilder_public_summary(tool: Dict[str, Any]) -> str:
+    payload = tool.get("payload") if isinstance(tool.get("payload"), dict) else {}
+    spec = payload.get("operation_spec") if isinstance(payload.get("operation_spec"), dict) else {}
+    revision = payload.get("revision") if isinstance(payload.get("revision"), dict) else {}
+    operation_id = str(spec.get("id") or tool.get("operation_id") or "custom.*")
+    revision_number = _safe_int(revision.get("number"), 1)
+    verb = "已修订" if revision_number > 1 else "已生成"
+    return "%s自定义工具 %s，当前等待审核。请先在自建工具审核列表启用；启用后我会用它生成可执行任务。" % (verb, operation_id)
+
+
+def _safe_int(value: Any, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _trace_pending_custom_tool(trace: List[Dict[str, Any]]) -> Dict[str, str] | None:
+    for item in reversed(trace):
+        if item.get("type") != "tool":
+            continue
+        result = item.get("result") or {}
+        if result.get("status") != "custom_tool_not_enabled":
+            continue
+        return {
+            "operation_id": str(result.get("operation_id") or ""),
+            "status": str(result.get("tool_status") or ""),
+        }
+    return None
 
 
 def _workflow_uses_attribute_where(workflow: Dict[str, Any]) -> bool:

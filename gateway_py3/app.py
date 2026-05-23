@@ -20,7 +20,7 @@ from gateway_py3.workflow_store import WorkflowStore
 
 HOST = "127.0.0.1"
 PORT = 8765
-APP_VERSION = "0.11.22"
+APP_VERSION = "0.12.1"
 
 
 class GatewayState:
@@ -155,6 +155,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"workflow": STATE.store.finish(workflow_id, status, result)})
             elif path == "/workflows/clear":
                 self._json(STATE.store.clear_workflows(payload.get("project_id"), payload.get("mode")))
+            elif path.startswith("/workflows/") and path.endswith("/repair-custom-tool"):
+                workflow_id = path.split("/")[2]
+                self._json(_repair_custom_tool_workflow(workflow_id, payload))
             elif path.startswith("/workflows/") and path.endswith("/delete"):
                 workflow_id = path.split("/")[2]
                 self._json(STATE.store.delete(workflow_id))
@@ -259,6 +262,77 @@ def _public_operation(operation):
         "parameters": sorted(properties.keys()),
         "example": (operation.get("examples") or [{}])[0].get("user", "")
     }
+
+
+def _repair_custom_tool_workflow(workflow_id, payload):
+    source = STATE.store.get(workflow_id)
+    if source.get("status") != "failed":
+        raise ValueError("只有执行失败的任务可以一键迭代自建工具。")
+    operation_ids = _custom_operation_ids(source.get("workflow") or {})
+    if not operation_ids:
+        raise ValueError("这个失败任务没有使用自建工具，不能进入自建工具迭代。")
+    context = payload.get("context")
+    if context is None:
+        stored_context = STATE.store.get_state("arcmap_context")
+        if not stored_context:
+            raise ValueError("请先在 ArcGIS 工具栏点击“同步上下文”。")
+        context = stored_context["value"]
+    if not isinstance(context, dict):
+        raise ValueError("context must be an object.")
+    mode = source.get("mode") or public_config()["default_mode"]
+    project_id = source.get("project_id") or ""
+    command = _custom_tool_repair_command(source, operation_ids, payload.get("feedback") or "")
+    row = STATE.planner.plan(command, context, mode=mode, project_id=project_id)
+    STATE.reload_catalog()
+    return {"workflow": row}
+
+
+def _custom_operation_ids(workflow):
+    result = []
+    for step in workflow.get("steps") or []:
+        if not isinstance(step, dict):
+            continue
+        operation_id = step.get("operation")
+        if isinstance(operation_id, str) and operation_id.startswith("custom.") and operation_id not in result:
+            result.append(operation_id)
+    return result
+
+
+def _custom_tool_repair_command(source, operation_ids, feedback):
+    result = source.get("result") or {}
+    error = result.get("error") if isinstance(result, dict) else ""
+    traceback_text = result.get("traceback") if isinstance(result, dict) else ""
+    extra = ""
+    if isinstance(error, str) and "000840" in error and "空间参考" in error:
+        extra = (
+            "\n这个错误通常表示 CreateFeatureclass_management 的 spatial_reference 参数不是 ArcPy SpatialReference。"
+            "修复时必须从输入图层读取：spatial_reference = arcpy.Describe(input_layer).spatialReference，"
+            "不要传 context['spatial_reference']、spatialReference.name、factoryCode、字符串或 layer.spatialReference。"
+        )
+    if isinstance(feedback, str) and feedback.strip():
+        feedback_text = "\n用户补充意见：%s" % feedback.strip()
+    else:
+        feedback_text = ""
+    return (
+        "进入自定义工具开发修复流程。上一次执行自建工具失败，请根据失败结果修订原工具。"
+        "必须先调用 toolbuilder_get_draft 读取原工具，再调用 toolbuilder_revise_draft 修订同一个 tool_id；"
+        "不要创建新工具，不要要求用户提供 executor 代码。"
+        "\n涉及的自建 operation_id：%s"
+        "\n原始用户请求：%s"
+        "\n失败错误：%s"
+        "%s"
+        "%s"
+        "\n失败工作流：%s"
+        "\n失败 traceback：%s"
+    ) % (
+        "、".join(operation_ids),
+        source.get("command") or "",
+        error or "",
+        extra,
+        feedback_text,
+        json.dumps(source.get("workflow") or {}, ensure_ascii=False, sort_keys=True),
+        traceback_text or "",
+    )
 
 
 def _public_error(exc):

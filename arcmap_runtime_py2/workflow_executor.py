@@ -19,6 +19,11 @@ try:
 except NameError:
     basestring = (str,)
 
+try:
+    unicode
+except NameError:
+    unicode = str
+
 
 CATALOG_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "operation_catalog"))
 CUSTOM_TOOLS_ROOT = os.path.join(
@@ -47,16 +52,21 @@ def execute(workflow_row, context, confirm_callback=None):
     for step in workflow["steps"]:
         step_id = str(step["id"])
         operation_id = step["operation"]
-        if operation_id not in operations:
-            raise WorkflowExecutionError("Unknown operation: %s" % operation_id)
-        operation = operations[operation_id]
-        arguments = step["arguments"]
-        _validate_arguments(step_id, arguments, operation["parameters_schema"])
-        _validate_write_policy(operation, context, arguments)
-        runtime_arguments = _prepare_runtime_arguments(operation, context, arguments, step_outputs)
-        _confirm_edit_if_needed(operation, context, runtime_arguments, step_outputs, confirm_callback)
-        result = _call_executor(operation["executor"], context, runtime_arguments, step_outputs)
-        result = _finalize_runtime_result(operation, context, runtime_arguments, result)
+        try:
+            if operation_id not in operations:
+                raise WorkflowExecutionError("Unknown operation: %s" % operation_id)
+            operation = operations[operation_id]
+            arguments = step["arguments"]
+            _validate_arguments(step_id, arguments, operation["parameters_schema"])
+            _validate_write_policy(operation, context, arguments)
+            runtime_arguments = _prepare_runtime_arguments(operation, context, arguments, step_outputs)
+            _confirm_edit_if_needed(operation, context, runtime_arguments, step_outputs, confirm_callback)
+            result = _call_executor(operation["executor"], context, runtime_arguments, step_outputs)
+            result = _finalize_runtime_result(operation, context, runtime_arguments, result)
+        except WorkflowExecutionError:
+            raise
+        except Exception as exc:
+            raise WorkflowExecutionError(u"步骤 %s（%s）执行失败：%s" % (step_id, operation_id, _exception_text(exc)))
         step_outputs[step_id] = result
         results.append({"step_id": step_id, "operation": operation_id, "result": result})
 
@@ -268,6 +278,16 @@ def _resolve_layer_argument(common, context, value, step_outputs):
 def _operations_common():
     common = importlib.import_module("operations.common")
     return reload(common)
+
+
+def _exception_text(exc):
+    try:
+        return unicode(exc)
+    except Exception:
+        try:
+            return str(exc).decode("utf-8", "replace")
+        except Exception:
+            return u"<unprintable exception>"
 
 
 def _call_custom_executor(executor_path, context, arguments, step_outputs):

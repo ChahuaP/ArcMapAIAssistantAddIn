@@ -1703,7 +1703,7 @@
   </div>
 
   <script>
-    const EXPECTED_GATEWAY_VERSION = '0.11.22';
+    const EXPECTED_GATEWAY_VERSION = '0.12.1';
     const API_ORIGIN = window.location.protocol === 'file:' ? 'http://127.0.0.1:8765' : '';
     const POLL_INTERVAL_MS = 2500;
     const HEALTH_INTERVAL_MS = 10000;
@@ -1719,6 +1719,7 @@
     let selectedWorkflowId = '';
     let transientUserMessage = '';
     let transientAssistantMessage = '';
+    let repairingWorkflowIds = new Set();
     const taskDetailsState = new Map();
     let mentionState = null;
 
@@ -2303,6 +2304,35 @@
       await refreshWorkflows();
     }
 
+    async function repairCustomTool(id) {
+      if (repairingWorkflowIds.has(id)) return;
+      repairingWorkflowIds.add(id);
+      selectedWorkflowId = id;
+      transientUserMessage = '让 AI 修工具';
+      transientAssistantMessage = '正在读取失败信息并修订原工具...';
+      setStatus('正在让 AI 读取失败信息并修订工具...');
+      renderSidebarItems(cachedWorkflows);
+      renderTasks(cachedWorkflows);
+      renderConversation(cachedWorkflows);
+      try {
+        const data = await api(`/workflows/${id}/repair-custom-tool`, {method: 'POST', body: '{}'});
+        transientUserMessage = '';
+        transientAssistantMessage = '';
+        selectedWorkflowId = data.workflow.id;
+        setStatus('已生成工具修订，等待审核。');
+        await loadPendingTools();
+        await refreshWorkflows();
+      } catch (err) {
+        transientAssistantMessage = err.message;
+        setStatus(err.message);
+        renderConversation(cachedWorkflows);
+      } finally {
+        repairingWorkflowIds.delete(id);
+        renderSidebarItems(cachedWorkflows);
+        renderTasks(cachedWorkflows);
+      }
+    }
+
     async function refreshWorkflows(renderChat = true) {
       const data = await api('/api/workflows');
       cachedWorkflows = data.workflows || [];
@@ -2329,7 +2359,7 @@
         appendTransientConversation(false);
         chat.scrollTop = chat.scrollHeight;
         const selected = selectedWorkflow(workflows);
-        if (selected) setStatus(statusText(selected));
+        if (selected && !repairingWorkflowIds.has(selected.id)) setStatus(statusText(selected));
         return;
       }
       const item = selectedWorkflow(workflows);
@@ -2588,6 +2618,7 @@
       renderSidebarItems(cachedWorkflows);
       renderTasks(cachedWorkflows);
       renderConversation(cachedWorkflows);
+      setStatus('已显示该任务会话。');
     }
 
     function ensureSelectedWorkflow() {
@@ -2639,6 +2670,7 @@
         ${action === 'answer' ? '<div class="task-note">这是一条普通回复，不需要发送到 ArcGIS。</div>' : ''}
         ${item.status === 'approved_for_arcmap' ? '<div class="task-note">已发送到 ArcGIS。请回到 ArcGIS 工具栏点击“执行任务”。</div>' : ''}
         ${failedMessage(item)}
+        ${repairingWorkflowIds.has(item.id) ? '<div class="task-note">AI 正在读取失败信息并修订原工具...</div>' : ''}
         ${writesData(item.workflow) ? '<div class="task-note warn">这个任务会写出新数据。若当前 MXD 未保存，需要在对话中说明输出文件夹或 GDB。</div>' : ''}
       `;
       const actions = document.createElement('div');
@@ -2650,12 +2682,14 @@
         approveButton.onclick = () => approve(item.id);
         actions.appendChild(approveButton);
       }
-      if (item.id !== selectedWorkflowId) {
-        const viewButton = document.createElement('button');
-        viewButton.className = 'ghost small';
-        viewButton.textContent = '查看对话';
-        viewButton.onclick = () => selectWorkflow(item.id);
-        actions.appendChild(viewButton);
+      if (item.status === 'failed' && usesCustomTool(item.workflow)) {
+        const repairButton = document.createElement('button');
+        const repairPending = repairingWorkflowIds.has(item.id);
+        repairButton.className = 'success small';
+        repairButton.textContent = repairPending ? '修复中...' : '让 AI 修工具';
+        repairButton.disabled = repairPending;
+        repairButton.onclick = () => repairCustomTool(item.id);
+        actions.appendChild(repairButton);
       }
       const deleteButton = document.createElement('button');
       deleteButton.className = 'danger small';
@@ -2715,6 +2749,10 @@
         'export.table_csv',
         'export.split_by_field'
       ].includes(step.operation));
+    }
+
+    function usesCustomTool(workflow) {
+      return (workflow.steps || []).some(step => typeof step.operation === 'string' && step.operation.startsWith('custom.'));
     }
 
     function failedMessage(item) {

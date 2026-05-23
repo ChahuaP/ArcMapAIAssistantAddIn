@@ -13,10 +13,13 @@ from .paths import appdata_dir
 PENDING_ROOT = appdata_dir() / "pending_tools"
 ENABLED_ROOT = appdata_dir() / "custom_tools" / "enabled"
 DISALLOWED_IMPORT_ROOTS = {
+    "asyncio",
     "ctypes",
+    "dataclasses",
     "ftplib",
     "http",
     "paramiko",
+    "pathlib",
     "requests",
     "shutil",
     "socket",
@@ -28,12 +31,14 @@ DISALLOWED_IMPORT_ROOTS = {
 }
 DISALLOWED_CALLS = {"__import__", "compile", "eval", "exec", "input", "open", "raw_input"}
 DISALLOWED_ATTR_CALLS = {
+    ("os", "fspath"),
     ("os", "popen"),
     ("os", "remove"),
     ("os", "removedirs"),
     ("os", "rename"),
     ("os", "replace"),
     ("os", "rmdir"),
+    ("os", "scandir"),
     ("os", "startfile"),
     ("os", "system"),
     ("os", "unlink"),
@@ -51,6 +56,133 @@ PYTHON2_UNSUPPORTED_NODE_NAMES = {
     "Nonlocal",
     "NamedExpr",
 }
+PYTHON2_UNSUPPORTED_NAMES = {
+    "BaseExceptionGroup",
+    "BlockingIOError",
+    "BrokenPipeError",
+    "ChildProcessError",
+    "ConnectionError",
+    "ExceptionGroup",
+    "FileExistsError",
+    "FileNotFoundError",
+    "InterruptedError",
+    "IsADirectoryError",
+    "ModuleNotFoundError",
+    "NotADirectoryError",
+    "PermissionError",
+    "ProcessLookupError",
+    "StopAsyncIteration",
+    "TimeoutError",
+}
+PYTHON2_UNSUPPORTED_KEYWORDS = {"exist_ok"}
+ALLOWED_BARE_CALLS = {
+    "Exception",
+    "RuntimeError",
+    "ValueError",
+    "TypeError",
+    "KeyError",
+    "IndexError",
+    "AttributeError",
+    "NotImplementedError",
+    "ArithmeticError",
+    "ZeroDivisionError",
+    "abs",
+    "all",
+    "any",
+    "bool",
+    "basestring",
+    "chr",
+    "dict",
+    "enumerate",
+    "filter",
+    "float",
+    "format",
+    "getattr",
+    "hasattr",
+    "int",
+    "isinstance",
+    "iter",
+    "len",
+    "list",
+    "long",
+    "map",
+    "max",
+    "min",
+    "next",
+    "ord",
+    "range",
+    "repr",
+    "reversed",
+    "round",
+    "set",
+    "setattr",
+    "slice",
+    "sorted",
+    "str",
+    "sum",
+    "tuple",
+    "unicode",
+    "unichr",
+    "xrange",
+    "zip",
+}
+ALLOWED_ARCPY_CALLS = {
+    ("arcpy", "AddFieldDelimiters"),
+    ("arcpy", "AddField_management"),
+    ("arcpy", "Append_management"),
+    ("arcpy", "Array"),
+    ("arcpy", "Buffer_analysis"),
+    ("arcpy", "Clip_analysis"),
+    ("arcpy", "CopyFeatures_management"),
+    ("arcpy", "CreateFeatureclass_management"),
+    ("arcpy", "CreateFileGDB_management"),
+    ("arcpy", "DeleteField_management"),
+    ("arcpy", "Delete_management"),
+    ("arcpy", "Describe"),
+    ("arcpy", "Dissolve_management"),
+    ("arcpy", "Erase_analysis"),
+    ("arcpy", "Exists"),
+    ("arcpy", "FeatureToPoint_management"),
+    ("arcpy", "GetCount_management"),
+    ("arcpy", "Geometry"),
+    ("arcpy", "Identity_analysis"),
+    ("arcpy", "Intersect_analysis"),
+    ("arcpy", "ListFields"),
+    ("arcpy", "MakeFeatureLayer_management"),
+    ("arcpy", "Merge_management"),
+    ("arcpy", "Multipoint"),
+    ("arcpy", "Point"),
+    ("arcpy", "PointGeometry"),
+    ("arcpy", "Polygon"),
+    ("arcpy", "Polyline"),
+    ("arcpy", "Project_management"),
+    ("arcpy", "SelectLayerByAttribute_management"),
+    ("arcpy", "SelectLayerByLocation_management"),
+    ("arcpy", "SpatialJoin_analysis"),
+    ("arcpy", "SpatialReference"),
+    ("arcpy", "SymDiff_analysis"),
+    ("arcpy", "Union_analysis"),
+    ("arcpy", "Update_analysis"),
+    ("arcpy", "da", "InsertCursor"),
+    ("arcpy", "da", "SearchCursor"),
+    ("arcpy", "da", "UpdateCursor"),
+    ("arcpy", "management", "AddField"),
+    ("arcpy", "management", "CopyFeatures"),
+    ("arcpy", "management", "CreateFeatureclass"),
+    ("arcpy", "management", "CreateFileGDB"),
+    ("arcpy", "management", "Delete"),
+    ("arcpy", "management", "GetCount"),
+    ("arcpy", "management", "MakeFeatureLayer"),
+}
+RESERVED_ARCGIS_FIELD_NAMES = {
+    "fid",
+    "objectid",
+    "oid",
+    "shape",
+    "shape_area",
+    "shape_length",
+}
+RESERVED_CURSOR_WRITE_FIELDS = RESERVED_ARCGIS_FIELD_NAMES | {"oid@"}
 
 
 class ToolBuilderError(Exception):
@@ -447,6 +579,7 @@ def _validate_tool_files(source_dir: Path, tool_id: str) -> None:
 
 def _validate_executor_contract(spec: Dict[str, Any], code: str) -> None:
     tree = _validate_executor_code(code)
+    _validate_reserved_field_usage(tree)
     if spec.get("side_effects") != "writes_data":
         return
     properties = (spec.get("parameters_schema") or {}).get("properties") or {}
@@ -460,6 +593,7 @@ def _validate_executor_contract(spec: Dict[str, Any], code: str) -> None:
     for forbidden_key in ("output_workspace", "output_name"):
         if _executor_uses_argument_key(tree, forbidden_key):
             raise ToolBuilderError("writes_data 自定义工具执行代码不能读取 arguments[\"%s\"]；请只使用 GeoPilot 生成的 arguments[\"output_path\"]。" % forbidden_key)
+    _validate_create_featureclass_spatial_reference(tree)
 
 
 def _normalize_executor_code(code: str) -> str:
@@ -489,6 +623,7 @@ def _validate_executor_code(code: str) -> ast.AST:
     if execute_func is None:
         raise ToolBuilderError("executor_code 必须定义 execute(context, arguments, step_outputs)。")
     _validate_execute_signature(execute_func)
+    defined_names = _callable_names(tree)
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
@@ -497,6 +632,10 @@ def _validate_executor_code(code: str) -> ast.AST:
             _validate_import(node.module or "")
         elif isinstance(node, ast.Call):
             _validate_call(node.func)
+            _validate_bare_call_is_defined(node.func, defined_names)
+            _validate_call_keywords_are_python2(node)
+        elif isinstance(node, ast.Name):
+            _validate_name_is_python2(node.id)
     return tree
 
 
@@ -518,12 +657,243 @@ def _validate_call(func: ast.AST) -> None:
         raise ToolBuilderError("自定义工具运行在 ArcMap Python 2.7，不能使用 ArcGIS Pro 的 arcpy.mp。")
     if chain[:2] == ("arcpy", "mapping"):
         raise ToolBuilderError("自定义工具不能直接访问当前地图；请使用 runtime 传入的图层参数。")
+    if chain and chain[0] == "arcpy" and chain not in ALLOWED_ARCPY_CALLS:
+        raise ToolBuilderError("自定义工具调用了未确认的 ArcMap ArcPy 函数：%s。请使用真实存在的 ArcMap ArcPy API，不要自己编造函数名。" % ".".join(chain))
     if chain and chain[-1] == "getOutput":
         raise ToolBuilderError("自定义工具不能调用 getOutput；GeoPilot 传入的是 ArcMap Layer 对象和 arguments[\"output_path\"]，不是地理处理 Result。")
     if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
         pair = (func.value.id, func.attr)
         if pair in DISALLOWED_ATTR_CALLS:
             raise ToolBuilderError("自定义工具不能调用不安全函数：%s.%s。" % pair)
+
+
+def _validate_create_featureclass_spatial_reference(tree: ast.AST) -> None:
+    describe_variables = _describe_variables(tree)
+    spatial_reference_variables = _spatial_reference_variables(tree, describe_variables)
+    output_path_variables = _argument_key_variables(tree, "output_path")
+    output_workspace_variables = _path_function_variables(tree, "dirname", output_path_variables)
+    output_name_variables = _path_function_variables(tree, "basename", output_path_variables)
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not _is_create_featureclass_call(node.func):
+            continue
+        workspace = _create_featureclass_argument(node, "out_path", 0)
+        name = _create_featureclass_argument(node, "out_name", 1)
+        if not _is_output_workspace_expression(workspace, output_path_variables, output_workspace_variables):
+            raise ToolBuilderError(
+                "CreateFeatureclass_management 的 out_path 必须是 os.path.dirname(arguments[\"output_path\"])；"
+                "不能把完整 output_path、手动拼出的 gdb 路径或输出名称当作 workspace。"
+            )
+        if not _is_output_name_expression(name, output_path_variables, output_name_variables):
+            raise ToolBuilderError(
+                "CreateFeatureclass_management 的 out_name 必须是 os.path.basename(arguments[\"output_path\"])；"
+                "不能自己拼输出名称或把完整 output_path 当作要素类名称。"
+            )
+        spatial_reference = _create_featureclass_spatial_reference_argument(node)
+        if spatial_reference is None:
+            raise ToolBuilderError(
+                "CreateFeatureclass_management 必须显式传入空间参考："
+                "请使用 arcpy.Describe(输入图层).spatialReference，不要省略 spatial_reference。"
+            )
+        if not _is_valid_spatial_reference_expression(spatial_reference, describe_variables, spatial_reference_variables):
+            raise ToolBuilderError(
+                "CreateFeatureclass_management 的 spatial_reference 必须来自 arcpy.Describe(输入图层).spatialReference；"
+                "不能传 context['spatial_reference']、spatialReference.name、factoryCode、普通字符串或图层属性。"
+            )
+
+
+def _validate_reserved_field_usage(tree: ast.AST) -> None:
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        chain = _call_chain(node.func)
+        if _is_add_field_call(chain):
+            field_name = _field_name_argument(node)
+            if isinstance(field_name, str) and field_name.lower() in RESERVED_ARCGIS_FIELD_NAMES:
+                raise ToolBuilderError("自定义工具不能创建 ArcGIS 系统字段 %s；如需保留源 OID，请创建 SRC_OID 这类普通 LONG 字段。" % field_name)
+        if _is_write_cursor_call(chain):
+            for field_name in _literal_string_list(_cursor_fields_argument(node)):
+                lowered = field_name.lower()
+                if lowered in RESERVED_CURSOR_WRITE_FIELDS:
+                    raise ToolBuilderError("自定义工具不能写入 ArcGIS 系统字段 %s；OID/FID/OBJECTID 只能读取，不能写入。" % field_name)
+
+
+def _is_add_field_call(chain: tuple[str, ...]) -> bool:
+    return chain in (
+        ("arcpy", "AddField_management"),
+        ("arcpy", "management", "AddField"),
+        ("AddField_management",),
+    )
+
+
+def _field_name_argument(node: ast.Call) -> str | None:
+    for keyword in node.keywords:
+        if keyword.arg in ("field_name", "field"):
+            return _literal_node_value(keyword.value)
+    if len(node.args) >= 2:
+        return _literal_node_value(node.args[1])
+    return None
+
+
+def _is_write_cursor_call(chain: tuple[str, ...]) -> bool:
+    return chain in (
+        ("arcpy", "da", "InsertCursor"),
+        ("arcpy", "da", "UpdateCursor"),
+    )
+
+
+def _cursor_fields_argument(node: ast.Call) -> ast.AST | None:
+    for keyword in node.keywords:
+        if keyword.arg in ("field_names", "fields"):
+            return keyword.value
+    if len(node.args) >= 2:
+        return node.args[1]
+    return None
+
+
+def _literal_string_list(node: ast.AST | None) -> list[str]:
+    if not isinstance(node, (ast.List, ast.Tuple)):
+        return []
+    result = []
+    for item in node.elts:
+        value = _literal_node_value(item)
+        if isinstance(value, str):
+            result.append(value)
+    return result
+
+
+def _is_create_featureclass_call(func: ast.AST) -> bool:
+    chain = _call_chain(func)
+    return chain in (
+        ("arcpy", "CreateFeatureclass_management"),
+        ("arcpy", "management", "CreateFeatureclass"),
+        ("CreateFeatureclass_management",),
+    )
+
+
+def _create_featureclass_argument(node: ast.Call, keyword_name: str, index: int) -> ast.AST | None:
+    for keyword in node.keywords:
+        if keyword.arg == keyword_name:
+            return keyword.value
+    if len(node.args) > index:
+        return node.args[index]
+    return None
+
+
+def _create_featureclass_spatial_reference_argument(node: ast.Call) -> ast.AST | None:
+    for keyword in node.keywords:
+        if keyword.arg == "spatial_reference":
+            return keyword.value
+    if len(node.args) >= 7:
+        return node.args[6]
+    return None
+
+
+def _argument_key_variables(tree: ast.AST, key: str) -> set[str]:
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        if _is_argument_key_expression(node.value, key):
+            names.update(_assignment_target_names(node))
+    return names
+
+
+def _path_function_variables(tree: ast.AST, function_name: str, output_path_variables: set[str]) -> set[str]:
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        if _is_path_function_expression(node.value, function_name, output_path_variables):
+            names.update(_assignment_target_names(node))
+    return names
+
+
+def _is_output_workspace_expression(
+    node: ast.AST | None,
+    output_path_variables: set[str],
+    output_workspace_variables: set[str]
+) -> bool:
+    if isinstance(node, ast.Name):
+        return node.id in output_workspace_variables and node.id not in output_path_variables
+    return _is_path_function_expression(node, "dirname", output_path_variables)
+
+
+def _is_output_name_expression(
+    node: ast.AST | None,
+    output_path_variables: set[str],
+    output_name_variables: set[str]
+) -> bool:
+    if isinstance(node, ast.Name):
+        return node.id in output_name_variables and node.id not in output_path_variables
+    return _is_path_function_expression(node, "basename", output_path_variables)
+
+
+def _is_path_function_expression(node: ast.AST | None, function_name: str, output_path_variables: set[str]) -> bool:
+    if not isinstance(node, ast.Call) or _call_chain(node.func) != ("os", "path", function_name):
+        return False
+    return bool(node.args) and _is_output_path_reference(node.args[0], output_path_variables)
+
+
+def _is_output_path_reference(node: ast.AST, output_path_variables: set[str]) -> bool:
+    return (
+        (isinstance(node, ast.Name) and node.id in output_path_variables)
+        or _is_argument_key_expression(node, "output_path")
+    )
+
+
+def _is_argument_key_expression(node: ast.AST, key: str) -> bool:
+    if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name) and node.value.id == "arguments":
+        return _literal_subscript_key(node) == key
+    if isinstance(node, ast.Call) and _attribute_chain(node.func) == ("arguments", "get"):
+        return bool(node.args) and _literal_node_value(node.args[0]) == key
+    return False
+
+
+def _describe_variables(tree: ast.AST) -> set[str]:
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign) or not _is_arcpy_describe_call(node.value):
+            continue
+        names.update(_assignment_target_names(node))
+    return names
+
+
+def _spatial_reference_variables(tree: ast.AST, describe_variables: set[str]) -> set[str]:
+    assignments = [node for node in ast.walk(tree) if isinstance(node, ast.Assign)]
+    names: set[str] = set()
+    changed = True
+    while changed:
+        changed = False
+        for node in assignments:
+            if not _is_valid_spatial_reference_expression(node.value, describe_variables, names):
+                continue
+            for target_name in _assignment_target_names(node):
+                if target_name not in names:
+                    names.add(target_name)
+                    changed = True
+    return names
+
+
+def _assignment_target_names(node: ast.Assign) -> list[str]:
+    return [target.id for target in node.targets if isinstance(target, ast.Name)]
+
+
+def _is_valid_spatial_reference_expression(
+    node: ast.AST,
+    describe_variables: set[str],
+    spatial_reference_variables: set[str]
+) -> bool:
+    if isinstance(node, ast.Name):
+        return node.id in spatial_reference_variables
+    if not isinstance(node, ast.Attribute) or node.attr != "spatialReference":
+        return False
+    if isinstance(node.value, ast.Name):
+        return node.value.id in describe_variables
+    return _is_arcpy_describe_call(node.value)
+
+
+def _is_arcpy_describe_call(node: ast.AST) -> bool:
+    return isinstance(node, ast.Call) and _call_chain(node.func) == ("arcpy", "Describe")
 
 
 def _validate_python2_subset(tree: ast.AST) -> None:
@@ -536,6 +906,40 @@ def _validate_python2_subset(tree: ast.AST) -> None:
             _validate_arguments_are_python2(node.args)
         if isinstance(node, ast.Raise) and getattr(node, "cause", None) is not None:
             raise ToolBuilderError("executor_code 不能使用 Python 3 的 raise ... from ... 语法。")
+
+
+def _validate_name_is_python2(name: str) -> None:
+    if name in PYTHON2_UNSUPPORTED_NAMES:
+        raise ToolBuilderError("executor_code 不能使用 Python 3 专属名称 %s；ArcMap 运行的是 Python 2.7。" % name)
+
+
+def _validate_call_keywords_are_python2(node: ast.Call) -> None:
+    for keyword in node.keywords:
+        if keyword.arg in PYTHON2_UNSUPPORTED_KEYWORDS:
+            raise ToolBuilderError("executor_code 不能使用 Python 3 专属关键字参数 %s；ArcMap 运行的是 Python 2.7。" % keyword.arg)
+
+
+def _callable_names(tree: ast.AST) -> set[str]:
+    names = set(ALLOWED_BARE_CALLS)
+    for node in ast.iter_child_nodes(tree):
+        if isinstance(node, ast.FunctionDef):
+            names.add(node.name)
+        elif isinstance(node, ast.ClassDef):
+            names.add(node.name)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                names.add(alias.asname or alias.name.split(".", 1)[0])
+        elif isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                names.add(alias.asname or alias.name)
+    return names
+
+
+def _validate_bare_call_is_defined(func: ast.AST, defined_names: set[str]) -> None:
+    if not isinstance(func, ast.Name):
+        return
+    if func.id not in defined_names:
+        raise ToolBuilderError("executor_code 调用了未定义函数 %s；请在 executor.py 内定义它，或改用真实存在的 ArcMap/Python 2.7 API。" % func.id)
 
 
 def _validate_arguments_are_python2(arguments: ast.arguments) -> None:
@@ -571,6 +975,12 @@ def _attribute_chain(node: ast.AST) -> tuple[str, ...]:
         parts.append(current.id)
         return tuple(reversed(parts))
     return ()
+
+
+def _call_chain(node: ast.AST) -> tuple[str, ...]:
+    if isinstance(node, ast.Name):
+        return (node.id,)
+    return _attribute_chain(node)
 
 
 def _executor_uses_argument_key(tree: ast.AST, key: str) -> bool:

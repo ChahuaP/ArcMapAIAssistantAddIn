@@ -42,6 +42,8 @@ class WebModeStateTests(unittest.TestCase):
         self.assertIn("items.forEach(item => list.appendChild(taskCard(item)));", html)
         self.assertIn("显示当前项目的全部任务", html)
         self.assertIn("显示半代理模式的全部任务", html)
+        self.assertNotIn("显示会话", html)
+        self.assertNotIn("查看对话", html)
 
     def test_project_form_is_not_closed_by_config_polling_in_full_mode(self):
         html = (ROOT / "gateway_py3" / "web" / "index.html").read_text(encoding="utf-8")
@@ -75,6 +77,21 @@ class WebModeStateTests(unittest.TestCase):
 
         self.assertIn("已清空项目对话和上下文。", html)
         self.assertIn("if (currentMode === 'full_agent') await loadProjects();", html)
+
+    def test_failed_custom_tool_workflow_can_request_ai_revision(self):
+        html = (ROOT / "gateway_py3" / "web" / "index.html").read_text(encoding="utf-8")
+        app = (ROOT / "gateway_py3" / "app.py").read_text(encoding="utf-8")
+
+        self.assertIn("function usesCustomTool(workflow)", html)
+        self.assertIn("让 AI 修工具", html)
+        self.assertIn("let repairingWorkflowIds = new Set();", html)
+        self.assertIn("repairingWorkflowIds.add(id);", html)
+        self.assertIn("修复中...", html)
+        self.assertIn("async function repairCustomTool(id)", html)
+        self.assertIn("api(`/workflows/${id}/repair-custom-tool`", html)
+        self.assertIn("repair-custom-tool", app)
+        self.assertIn("toolbuilder_get_draft", app)
+        self.assertIn("toolbuilder_revise_draft", app)
 
     def test_file_loaded_page_calls_local_gateway_api(self):
         html = (ROOT / "gateway_py3" / "web" / "index.html").read_text(encoding="utf-8")

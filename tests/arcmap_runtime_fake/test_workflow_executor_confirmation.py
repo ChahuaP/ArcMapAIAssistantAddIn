@@ -117,6 +117,31 @@ class WorkflowExecutorConfirmationTests(unittest.TestCase):
 
         self.assertEqual(result["marker"], "ok")
 
+    def test_step_failure_names_step_and_operation(self):
+        row = _custom_write_row()
+        operation = self.workflow_executor._canonicalize_operation(_custom_write_operation())
+        self.workflow_executor._load_operations = lambda: {"custom.feature_to_point": operation}
+
+        class Common(object):
+            @staticmethod
+            def find_layer(context, layer_value, step_outputs):
+                return "exact-layer-object"
+
+            @staticmethod
+            def output_feature_class(context, output_name, output_workspace=None):
+                return r"C:\work\ArcMapAI_Output.gdb\taihucenterpoints"
+
+        self.workflow_executor._operations_common = lambda: Common
+        self.workflow_executor._call_executor = lambda executor, context, arguments, step_outputs: (_ for _ in ()).throw(ValueError("bad spatial reference"))
+
+        with self.assertRaises(Exception) as raised:
+            self.workflow_executor.execute(row, {"is_saved": False})
+
+        message = str(raised.exception)
+        self.assertIn("step_1", message)
+        self.assertIn("custom.feature_to_point", message)
+        self.assertIn("bad spatial reference", message)
+
 
 def _row():
     return {

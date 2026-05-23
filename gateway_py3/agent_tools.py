@@ -216,6 +216,10 @@ class AgentToolRuntime:
         try:
             operation = self.catalog.get(operation_id)
         except CatalogError as exc:
+            if operation_id.startswith("custom."):
+                custom_status = _custom_tool_catalog_status(self.store, operation_id)
+                if custom_status:
+                    return custom_status
             raise AgentToolError(str(exc))
         return {"operation": operation}
 
@@ -346,6 +350,40 @@ def _tool(name: str, description: str, parameters: Dict[str, Any]) -> Dict[str, 
             "parameters": parameters
         }
     }
+
+
+def _custom_tool_catalog_status(store: WorkflowStore, operation_id: str) -> Dict[str, Any] | None:
+    try:
+        tools = store.list_pending_tools()
+    except Exception:
+        return None
+    for tool in tools:
+        spec = (tool.get("payload") or {}).get("operation_spec") or {}
+        if spec.get("id") != operation_id:
+            continue
+        status = str(tool.get("status") or "")
+        if status == "enabled":
+            return {
+                "ok": False,
+                "status": "custom_tool_catalog_stale",
+                "operation_id": operation_id,
+                "tool_id": tool.get("id"),
+                "tool_status": status,
+                "instruction": "这个自定义工具已启用，但当前 catalog 快照还没加载到它。请重新读取能力或稍后重试，不要说当前版本不支持。"
+            }
+        return {
+            "ok": False,
+            "status": "custom_tool_not_enabled",
+            "operation_id": operation_id,
+            "tool_id": tool.get("id"),
+            "tool_status": status,
+            "instruction": (
+                "这个自定义工具已存在但尚未启用，当前不能作为 workflow operation 执行。"
+                "不要说当前版本不支持；如果用户要执行，请告诉用户先在自建工具审核列表启用；"
+                "如果用户要修改或修复，请调用 toolbuilder_get_draft 后用 toolbuilder_revise_draft 修订同一个工具。"
+            )
+        }
+    return None
 
 
 def _required_string(arguments: Dict[str, Any], key: str) -> str:
