@@ -1703,7 +1703,7 @@
   </div>
 
   <script>
-    const EXPECTED_GATEWAY_VERSION = '0.13.4';
+    const EXPECTED_GATEWAY_VERSION = '0.13.5';
     const API_ORIGIN = window.location.protocol === 'file:' ? 'http://127.0.0.1:8765' : '';
     const POLL_INTERVAL_MS = 2500;
     const HEALTH_INTERVAL_MS = 10000;
@@ -2749,8 +2749,7 @@
         'export.map_pdf',
         'export.table_csv',
         'export.layer_kml',
-        'export.split_by_field',
-        'cartography.save_layer_file'
+        'export.split_by_field'
       ].includes(step.operation));
     }
 

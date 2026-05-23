@@ -5,7 +5,6 @@
     "packs/selection.json",
     "packs/analysis.json",
     "packs/table.json",
-    "packs/cartography.json",
     "packs/export.json"
   ]
 }
