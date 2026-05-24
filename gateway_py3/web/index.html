@@ -116,6 +116,12 @@
     }
     button:hover { background: #e1f0f3; border-color: #c9dbe4; }
     button:active { transform: translateY(1px); }
+    button:disabled {
+      cursor: default;
+      opacity: .62;
+      transform: none;
+      box-shadow: none;
+    }
     button.primary {
       color: #fff;
       background: var(--primary);
@@ -898,6 +904,85 @@
       border-color: #5d4b25;
       background: #1b160e;
     }
+    .model-wait {
+      min-width: min(520px, 72vw);
+      display: grid;
+      gap: 10px;
+    }
+    .model-wait-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 14px;
+    }
+    .model-wait-head strong {
+      color: var(--ink-strong);
+      font-size: 14px;
+    }
+    .model-wait-head span,
+    .model-wait-note {
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .model-wait-bar {
+      height: 6px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: rgba(8, 124, 145, .14);
+    }
+    .model-wait-bar span {
+      display: block;
+      width: 38%;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--primary), #29a8b6);
+      animation: model-wait-slide 1.35s ease-in-out infinite;
+    }
+    @keyframes model-wait-slide {
+      0% { transform: translateX(-105%); }
+      100% { transform: translateX(270%); }
+    }
+    .model-wait-steps {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 6px;
+    }
+    .model-wait-steps span {
+      min-width: 0;
+      border-radius: 8px;
+      padding: 6px 7px;
+      background: rgba(8, 124, 145, .08);
+      color: var(--muted);
+      font-size: 12px;
+      text-align: center;
+      white-space: nowrap;
+    }
+    .model-wait-steps span.active {
+      background: rgba(8, 124, 145, .16);
+      color: var(--primary-strong);
+      font-weight: 760;
+    }
+    body.mode-full .model-wait-head strong {
+      color: #fff7df;
+    }
+    body.mode-full .model-wait-head span,
+    body.mode-full .model-wait-note {
+      color: #d8c99c;
+    }
+    body.mode-full .model-wait-bar {
+      background: rgba(240, 207, 114, .16);
+    }
+    body.mode-full .model-wait-bar span {
+      background: linear-gradient(90deg, #f0cf72, #c77d3c);
+    }
+    body.mode-full .model-wait-steps span {
+      background: rgba(240, 207, 114, .11);
+      color: #d8c99c;
+    }
+    body.mode-full .model-wait-steps span.active {
+      background: rgba(240, 207, 114, .2);
+      color: #fff0b8;
+    }
     .markdown-body {
       display: grid;
       gap: 8px;
@@ -1248,6 +1333,8 @@
       .composer-row { grid-template-columns: 1fr; }
       .layer-mention-menu { right: 14px; }
       .bubble { max-width: 94%; }
+      .model-wait { min-width: 0; }
+      .model-wait-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .project-sidebar { min-height: 320px; }
     }
 
@@ -1556,7 +1643,7 @@
           <div id="mentionMenu" class="layer-mention-menu" hidden></div>
           <div class="composer-row">
             <textarea id="command" aria-label="任务输入" placeholder="输入任务，按 Enter 发送，Shift+Enter 换行"></textarea>
-            <button class="primary" onclick="submitPlan()">发送</button>
+            <button id="sendButton" class="primary" onclick="submitPlan()">发送</button>
           </div>
         </div>
       </section>
@@ -1678,16 +1765,22 @@
           <form onsubmit="event.preventDefault(); saveConfig();">
             <label for="semiProvider">半代理模型</label>
             <select id="semiProvider">
-              <option value="deepseek">DeepSeek</option>
-              <option value="minimax">MiniMax</option>
+              <option value="deepseek|deepseek-v4-flash">DeepSeek V4 Flash 思考</option>
+              <option value="deepseek|deepseek-v4-pro">DeepSeek V4 Pro 思考</option>
+              <option value="zhipu|glm-5.1">智谱 GLM-5.1</option>
+              <option value="minimax|MiniMax-M2.7">MiniMax M2.7</option>
             </select>
             <label for="fullProvider">全代理模型</label>
             <select id="fullProvider">
-              <option value="minimax">MiniMax</option>
-              <option value="deepseek">DeepSeek</option>
+              <option value="minimax|MiniMax-M2.7">MiniMax M2.7</option>
+              <option value="deepseek|deepseek-v4-pro">DeepSeek V4 Pro 思考</option>
+              <option value="deepseek|deepseek-v4-flash">DeepSeek V4 Flash 思考</option>
+              <option value="zhipu|glm-5.1">智谱 GLM-5.1</option>
             </select>
             <label for="deepseekKey">DeepSeek API Key</label>
             <input id="deepseekKey" type="password" placeholder="sk-..." autocomplete="off">
+            <label for="zhipuKey">智谱 API Key</label>
+            <input id="zhipuKey" type="password" placeholder="智谱开放平台 Key" autocomplete="off">
             <label for="minimaxKey">MiniMax API Key</label>
             <input id="minimaxKey" type="password" placeholder="MiniMax Token Plan Key" autocomplete="off">
             <div class="button-row">
@@ -1703,7 +1796,7 @@
   </div>
 
   <script>
-    const EXPECTED_GATEWAY_VERSION = '0.13.17';
+    const EXPECTED_GATEWAY_VERSION = '0.13.20';
     const API_ORIGIN = window.location.protocol === 'file:' ? 'http://127.0.0.1:8765' : '';
     const POLL_INTERVAL_MS = 2500;
     const HEALTH_INTERVAL_MS = 10000;
@@ -1719,6 +1812,8 @@
     let selectedWorkflowId = '';
     let transientUserMessage = '';
     let transientAssistantMessage = '';
+    let modelWait = null;
+    let modelWaitTimer = null;
     let repairingWorkflowIds = new Set();
     const taskDetailsState = new Map();
     let mentionState = null;
@@ -1877,6 +1972,74 @@
       document.getElementById('status').textContent = text;
     }
 
+    function startModelWait(label) {
+      stopModelWait();
+      modelWait = {label, startedAt: Date.now()};
+      updateModelWait();
+      modelWaitTimer = window.setInterval(updateModelWait, 1000);
+      const button = document.getElementById('sendButton');
+      if (button) button.disabled = true;
+    }
+
+    function stopModelWait() {
+      if (modelWaitTimer) {
+        window.clearInterval(modelWaitTimer);
+        modelWaitTimer = null;
+      }
+      modelWait = null;
+      const button = document.getElementById('sendButton');
+      if (button) button.disabled = false;
+    }
+
+    function updateModelWait() {
+      if (!modelWait) return;
+      setStatus(`${modelWait.label}，已等待 ${formatDuration(modelWaitElapsed())}`);
+      const bubble = document.getElementById('modelWaitBubble');
+      if (bubble) {
+        bubble.innerHTML = renderModelWait();
+      } else if (transientUserMessage) {
+        renderConversation(cachedWorkflows);
+      }
+    }
+
+    function modelWaitElapsed() {
+      return Math.max(0, Math.floor((Date.now() - modelWait.startedAt) / 1000));
+    }
+
+    function formatDuration(totalSeconds) {
+      const minutes = Math.floor(totalSeconds / 60);
+      const seconds = totalSeconds % 60;
+      return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+    }
+
+    function modelWaitStageIndex() {
+      return Math.min(3, Math.floor(modelWaitElapsed() / 18));
+    }
+
+    function renderModelWait() {
+      const stages = ['已提交', '思考中', '仍在处理', '等待返回'];
+      const notes = [
+        '请求已发给模型。',
+        '模型正在处理上下文和工具选择。',
+        '长任务还在运行，页面没有卡住。',
+        '还在等待模型返回结果。'
+      ];
+      const active = modelWaitStageIndex();
+      return `
+        <div class="model-wait" aria-live="polite">
+          <div class="model-wait-head">
+            <strong>${escapeHtml(modelWait.label)}</strong>
+            <span>${formatDuration(modelWaitElapsed())}</span>
+          </div>
+          <div class="model-wait-bar" aria-hidden="true"><span></span></div>
+          <div class="model-wait-steps">
+            ${stages.map((stage, index) => `<span class="${index === active ? 'active' : ''}">${stage}</span>`).join('')}
+          </div>
+          <div class="model-wait-note">${notes[active]}</div>
+        </div>
+      `;
+    }
+
     function setTile(id, state, text) {
       const tile = document.getElementById(id);
       tile.className = `status-tile ${state}`;
@@ -1922,17 +2085,16 @@
     async function loadConfig() {
       const data = await api('/config');
       const providers = data.config.providers || {};
-      const deepseekOk = providers.deepseek && providers.deepseek.has_api_key;
-      const minimaxOk = providers.minimax && providers.minimax.has_api_key;
-      const ok = deepseekOk || minimaxOk;
+      const keyStates = providerKeyStates(providers);
+      const ok = keyStates.some(item => item.ok);
       if (!modeInitialized) {
         currentMode = loadStoredMode() || data.config.default_mode || currentMode;
         modeInitialized = true;
       }
       updateModeUI();
-      document.getElementById('semiProvider').value = data.config.semi_agent_provider || 'deepseek';
-      document.getElementById('fullProvider').value = data.config.full_agent_provider || 'minimax';
-      document.getElementById('keyBadge').textContent = providerKeyLabel(deepseekOk, minimaxOk);
+      document.getElementById('semiProvider').value = modelChoiceValue(data.config.semi_agent_provider, data.config.semi_agent_model);
+      document.getElementById('fullProvider').value = modelChoiceValue(data.config.full_agent_provider, data.config.full_agent_model);
+      document.getElementById('keyBadge').textContent = providerKeyLabel(keyStates);
       document.getElementById('keyActionText').textContent = ok ? '模型已配置' : '配置模型';
       document.getElementById('configPathHint').textContent = `配置文件：${data.config.config_path || '未知'}`;
       setDot('keyDot', ok, !ok);
@@ -1940,27 +2102,33 @@
 
     async function saveConfig() {
       const deepseekKey = document.getElementById('deepseekKey').value.trim();
+      const zhipuKey = document.getElementById('zhipuKey').value.trim();
       const minimaxKey = document.getElementById('minimaxKey').value.trim();
+      const semiModel = parseModelChoice(document.getElementById('semiProvider').value);
+      const fullModel = parseModelChoice(document.getElementById('fullProvider').value);
       const data = await api('/config', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({
           default_mode: currentMode,
-          semi_agent_provider: document.getElementById('semiProvider').value,
-          full_agent_provider: document.getElementById('fullProvider').value,
+          semi_agent_provider: semiModel.provider,
+          semi_agent_model: semiModel.model,
+          full_agent_provider: fullModel.provider,
+          full_agent_model: fullModel.model,
           providers: {
             deepseek: {api_key: deepseekKey},
+            zhipu: {api_key: zhipuKey},
             minimax: {api_key: minimaxKey}
           }
         })
       });
       document.getElementById('deepseekKey').value = '';
+      document.getElementById('zhipuKey').value = '';
       document.getElementById('minimaxKey').value = '';
       const providers = data.config.providers || {};
-      const deepseekOk = providers.deepseek && providers.deepseek.has_api_key;
-      const minimaxOk = providers.minimax && providers.minimax.has_api_key;
-      const ok = deepseekOk || minimaxOk;
-      document.getElementById('keyBadge').textContent = providerKeyLabel(deepseekOk, minimaxOk);
+      const keyStates = providerKeyStates(providers);
+      const ok = keyStates.some(item => item.ok);
+      document.getElementById('keyBadge').textContent = providerKeyLabel(keyStates);
       document.getElementById('keyActionText').textContent = ok ? '模型已配置' : '配置模型';
       document.getElementById('configPathHint').textContent = `配置文件：${data.config.config_path || '未知'}`;
       setDot('keyDot', ok, !ok);
@@ -1968,10 +2136,29 @@
       closeModal('keyModal');
     }
 
-    function providerKeyLabel(deepseekOk, minimaxOk) {
-      if (deepseekOk && minimaxOk) return 'DeepSeek 与 MiniMax 已保存';
-      if (deepseekOk) return 'DeepSeek 已保存';
-      if (minimaxOk) return 'MiniMax 已保存';
+    function parseModelChoice(value) {
+      const parts = String(value || '').split('|');
+      return {provider: parts[0] || 'deepseek', model: parts[1] || 'deepseek-v4-flash'};
+    }
+
+    function modelChoiceValue(provider, model) {
+      const value = `${provider || 'deepseek'}|${model || 'deepseek-v4-flash'}`;
+      const options = Array.from(document.getElementById('semiProvider').options).map(option => option.value);
+      return options.includes(value) ? value : 'deepseek|deepseek-v4-flash';
+    }
+
+    function providerKeyStates(providers) {
+      return [
+        {label: 'DeepSeek', ok: providers.deepseek && providers.deepseek.has_api_key},
+        {label: '智谱', ok: providers.zhipu && providers.zhipu.has_api_key},
+        {label: 'MiniMax', ok: providers.minimax && providers.minimax.has_api_key}
+      ];
+    }
+
+    function providerKeyLabel(states) {
+      const saved = states.filter(item => item.ok).map(item => item.label);
+      if (saved.length > 1) return `${saved.join('、')} 已保存`;
+      if (saved.length === 1) return `${saved[0]} 已保存`;
       return 'Key 未配置';
     }
 
@@ -2239,6 +2426,7 @@
     }
 
     async function submitPlan() {
+      if (modelWait) return;
       const input = document.getElementById('command');
       const command = input.value.trim();
       if (!command) return;
@@ -2248,7 +2436,8 @@
       }
       input.value = '';
       transientUserMessage = command;
-      transientAssistantMessage = '正在思考...';
+      transientAssistantMessage = '';
+      startModelWait('模型正在思考');
       if (currentMode === 'full_agent') {
         renderConversation(cachedWorkflows);
       } else {
@@ -2267,9 +2456,12 @@
         selectedWorkflowId = data.workflow.id;
         await refreshWorkflows();
       } catch (err) {
+        stopModelWait();
         transientAssistantMessage = err.message;
         renderConversation(cachedWorkflows);
         setStatus(err.message);
+      } finally {
+        stopModelWait();
       }
     }
 
@@ -2310,8 +2502,8 @@
       repairingWorkflowIds.add(id);
       selectedWorkflowId = id;
       transientUserMessage = '让 AI 修工具';
-      transientAssistantMessage = '正在读取失败信息并修订原工具...';
-      setStatus('正在让 AI 读取失败信息并修订工具...');
+      transientAssistantMessage = '';
+      startModelWait('AI 正在修订工具');
       renderSidebarItems(cachedWorkflows);
       renderTasks(cachedWorkflows);
       renderConversation(cachedWorkflows);
@@ -2324,10 +2516,12 @@
         await loadPendingTools();
         await refreshWorkflows();
       } catch (err) {
+        stopModelWait();
         transientAssistantMessage = err.message;
         setStatus(err.message);
         renderConversation(cachedWorkflows);
       } finally {
+        stopModelWait();
         repairingWorkflowIds.delete(id);
         renderSidebarItems(cachedWorkflows);
         renderTasks(cachedWorkflows);
@@ -2379,7 +2573,11 @@
     function appendTransientConversation(scroll = true) {
       if (!transientUserMessage) return;
       appendBubble('user', transientUserMessage, false);
-      appendBubble('assistant', transientAssistantMessage || '正在思考...', scroll);
+      if (modelWait && !transientAssistantMessage) {
+        appendModelWaitBubble(scroll);
+      } else {
+        appendBubble('assistant', transientAssistantMessage || '正在思考...', scroll);
+      }
     }
 
     function renderEmptyChat() {
@@ -2421,6 +2619,20 @@
       } else {
         bubble.textContent = text;
       }
+      row.appendChild(bubble);
+      chat.appendChild(row);
+      if (scroll) chat.scrollTop = chat.scrollHeight;
+    }
+
+    function appendModelWaitBubble(scroll = true) {
+      removeEmptyChat();
+      const chat = document.getElementById('chatLog');
+      const row = document.createElement('div');
+      row.className = 'bubble-row assistant';
+      const bubble = document.createElement('div');
+      bubble.id = 'modelWaitBubble';
+      bubble.className = 'bubble markdown-bubble';
+      bubble.innerHTML = renderModelWait();
       row.appendChild(bubble);
       chat.appendChild(row);
       if (scroll) chat.scrollTop = chat.scrollHeight;

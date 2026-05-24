@@ -20,7 +20,14 @@ from gateway_py3.workflow_store import WorkflowStore
 
 HOST = "127.0.0.1"
 PORT = 8765
-APP_VERSION = "0.13.17"
+APP_VERSION = "0.13.20"
+POLL_ACCESS_PATHS = (
+    "/api/workflows",
+    "/config",
+    "/context",
+    "/health",
+    "/projects",
+)
 
 
 class GatewayState:
@@ -182,7 +189,10 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"error": "系统处理时遇到问题。请稍后重试，或查看运行日志。"}, 500)
 
     def log_message(self, fmt, *args):
-        write_event("http.access", {"message": fmt % args})
+        message = fmt % args
+        if _is_poll_access_message(message):
+            return
+        write_event("http.access", {"message": message})
 
     def _read_json(self):
         length = int(self.headers.get("Content-Length", "0"))
@@ -228,12 +238,12 @@ def main():
 
 def _config_payload(payload):
     allowed = {}
-    for key in ("default_mode", "semi_agent_provider", "full_agent_provider"):
+    for key in ("default_mode", "semi_agent_provider", "semi_agent_model", "full_agent_provider", "full_agent_model"):
         if payload.get(key):
             allowed[key] = payload[key]
     providers = payload.get("providers") if isinstance(payload.get("providers"), dict) else {}
     allowed_providers = {}
-    for provider_id in ("deepseek", "minimax"):
+    for provider_id in ("deepseek", "minimax", "zhipu"):
         source = providers.get(provider_id) or {}
         item = {}
         for field in ("api_key", "model", "base_url"):
@@ -260,6 +270,12 @@ def _public_operation(operation):
         "parameters": sorted(properties.keys()),
         "example": (operation.get("examples") or [{}])[0].get("user", "")
     }
+
+
+def _is_poll_access_message(message):
+    if " 200 " not in message:
+        return False
+    return any('"GET %s HTTP/' % path in message for path in POLL_ACCESS_PATHS)
 
 
 def _repair_custom_tool_workflow(workflow_id, payload):

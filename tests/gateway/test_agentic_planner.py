@@ -7,7 +7,7 @@ from gateway_py3.agent_tools import AgentToolError, AgentToolRuntime
 from gateway_py3.catalog_loader import OperationCatalog
 from gateway_py3.file_resolver import FileResolver
 from gateway_py3.output_folder_resolver import OutputFolderResolver
-from gateway_py3.planner import AgenticPlanner, SYSTEM_PROMPT
+from gateway_py3.planner import AgenticPlanner, SYSTEM_PROMPT, _message_for_history
 from gateway_py3.validators import ValidationError, prepare_workflow, validate_workflow
 from gateway_py3.workflow_store import WorkflowStore
 
@@ -38,6 +38,19 @@ class AgenticPlannerTests(unittest.TestCase):
         self.assertIn('Never use shorthand', SYSTEM_PROMPT)
         self.assertIn('folder_path is only for the file_resolve tool', SYSTEM_PROMPT)
         self.assertIn('output_folder_resolve', SYSTEM_PROMPT)
+
+    def test_reasoning_content_is_preserved_for_thinking_tool_rounds(self):
+        message = {
+            "role": "assistant",
+            "content": None,
+            "reasoning_content": "need inspect layers before proposing",
+            "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "context_list_layers", "arguments": "{}"}}],
+        }
+
+        history = _message_for_history(message)
+
+        self.assertEqual(history["reasoning_content"], "need inspect layers before proposing")
+        self.assertEqual(history["tool_calls"], message["tool_calls"])
         self.assertIn('Never use file_resolve for output folders', SYSTEM_PROMPT)
         self.assertIn('you must decide output_name yourself from user_request', SYSTEM_PROMPT)
         self.assertIn('It may be Chinese', SYSTEM_PROMPT)

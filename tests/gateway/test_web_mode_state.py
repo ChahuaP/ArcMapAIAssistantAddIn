@@ -57,6 +57,16 @@ class WebModeStateTests(unittest.TestCase):
         self.assertIn("function appendTransientConversation", html)
         self.assertIn("if (transientUserMessage && currentMode !== 'full_agent' && !selectedWorkflowId) return;", html)
 
+    def test_long_model_wait_has_visible_progress_state(self):
+        html = (ROOT / "gateway_py3" / "web" / "index.html").read_text(encoding="utf-8")
+
+        self.assertIn("let modelWait = null;", html)
+        self.assertIn("function startModelWait(label)", html)
+        self.assertIn("function renderModelWait()", html)
+        self.assertIn("modelWaitBubble", html)
+        self.assertIn("已等待", html)
+        self.assertIn("模型正在处理上下文和工具选择。", html)
+
     def test_custom_tools_can_be_deleted_from_ui(self):
         html = (ROOT / "gateway_py3" / "web" / "index.html").read_text(encoding="utf-8")
 

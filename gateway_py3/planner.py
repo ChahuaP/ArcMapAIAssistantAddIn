@@ -814,6 +814,8 @@ def _message_for_history(message: Dict[str, Any]) -> Dict[str, Any]:
         "role": message.get("role", "assistant"),
         "content": message.get("content")
     }
+    if message.get("reasoning_content"):
+        result["reasoning_content"] = message["reasoning_content"]
     if message.get("tool_calls"):
         result["tool_calls"] = message["tool_calls"]
     return result
@@ -839,5 +841,6 @@ def _redacted_message(message: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "role": message.get("role"),
         "content": message.get("content"),
+        "reasoning_content": message.get("reasoning_content"),
         "tool_calls": message.get("tool_calls")
     }

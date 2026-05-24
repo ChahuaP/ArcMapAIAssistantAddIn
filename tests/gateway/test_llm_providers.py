@@ -11,7 +11,7 @@ class ProviderConfigTests(unittest.TestCase):
     def setUp(self):
         self._old_env = {
             name: os.environ.get(name)
-            for name in ("APPDATA", "LOCALAPPDATA", "DEEPSEEK_API_KEY", "MINIMAX_API_KEY", "ARCMAP_AI_CONFIG")
+            for name in ("APPDATA", "LOCALAPPDATA", "DEEPSEEK_API_KEY", "MINIMAX_API_KEY", "ZHIPU_API_KEY", "BIGMODEL_API_KEY", "ARCMAP_AI_CONFIG")
         }
         for name in self._old_env:
             os.environ.pop(name, None)
@@ -37,7 +37,7 @@ class ProviderConfigTests(unittest.TestCase):
             with self.assertRaisesRegex(llm_providers.ProviderError, "旧字段"):
                 llm_providers.load_config()
 
-    def test_public_config_reports_both_providers(self):
+    def test_public_config_reports_all_providers(self):
         with tempfile.TemporaryDirectory() as directory:
             appdata = pathlib.Path(directory) / "Roaming"
             localappdata = pathlib.Path(directory) / "Local"
@@ -45,13 +45,46 @@ class ProviderConfigTests(unittest.TestCase):
             os.environ["LOCALAPPDATA"] = str(localappdata)
             path = appdata / "ArcMapAIAssistant" / "config.json"
             path.parent.mkdir(parents=True)
-            path.write_text('{"providers":{"deepseek":{"api_key":"unit-test-key"},"minimax":{"api_key":"unit-test-key"}}}', encoding="utf-8")
+            path.write_text(
+                '{"providers":{"deepseek":{"api_key":"unit-test-key"},"zhipu":{"api_key":"unit-test-key"},"minimax":{"api_key":"unit-test-key"}}}',
+                encoding="utf-8"
+            )
 
             config = llm_providers.public_config()
 
         self.assertTrue(config["providers"]["deepseek"]["has_api_key"])
+        self.assertTrue(config["providers"]["zhipu"]["has_api_key"])
         self.assertTrue(config["providers"]["minimax"]["has_api_key"])
+        self.assertEqual(config["providers"]["zhipu"]["model"], "glm-5.1")
+        self.assertIn({"provider": "zhipu", "model": "glm-5.1", "label": "智谱 GLM-5.1", "thinking": True}, config["model_options"])
         self.assertEqual(config["config_path"], str(path))
+
+    def test_mode_model_selection_is_used_when_creating_provider(self):
+        with tempfile.TemporaryDirectory() as directory:
+            appdata = pathlib.Path(directory) / "Roaming"
+            localappdata = pathlib.Path(directory) / "Local"
+            os.environ["APPDATA"] = str(appdata)
+            os.environ["LOCALAPPDATA"] = str(localappdata)
+            path = appdata / "ArcMapAIAssistant" / "config.json"
+            path.parent.mkdir(parents=True)
+            path.write_text(
+                json.dumps({
+                    "semi_agent_provider": "deepseek",
+                    "semi_agent_model": "deepseek-v4-flash",
+                    "full_agent_provider": "zhipu",
+                    "full_agent_model": "glm-5.1",
+                    "providers": {
+                        "deepseek": {"api_key": "unit-test-key"},
+                        "zhipu": {"api_key": "unit-test-key"},
+                    },
+                }),
+                encoding="utf-8"
+            )
+
+            provider = llm_providers.create_provider(mode=llm_providers.FULL_AGENT_MODE)
+
+        self.assertIsInstance(provider, llm_providers.ZhipuProvider)
+        self.assertEqual(provider.model, "glm-5.1")
 
     def test_minimax_default_uses_token_plan_endpoint(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -80,6 +113,27 @@ class ProviderConfigTests(unittest.TestCase):
             config = llm_providers.load_config()
 
         self.assertEqual(config["providers"]["minimax"]["base_url"], "https://example.test/v1")
+
+    def test_deepseek_v4_thinking_payload_uses_reasoning_effort(self):
+        provider = llm_providers.DeepSeekProvider(api_key="unit-test-key", model="deepseek-v4-pro")
+
+        body = provider._prepare_body({"model": provider.model, "messages": [], "temperature": 0})
+
+        self.assertEqual(body["thinking"], {"type": "enabled"})
+        self.assertEqual(body["reasoning_effort"], "max")
+        self.assertNotIn("temperature", body)
+
+    def test_zhipu_glm_51_payload_enables_thinking(self):
+        provider = llm_providers.ZhipuProvider(api_key="unit-test-key", model="glm-5.1")
+
+        body = provider._prepare_body({"model": provider.model, "messages": [], "temperature": 0})
+
+        self.assertEqual(body["thinking"], {"type": "enabled"})
+
+    def test_provider_default_timeout_allows_slow_thinking_models(self):
+        provider = llm_providers.ZhipuProvider(api_key="unit-test-key", model="glm-5.1")
+
+        self.assertEqual(provider.timeout, 300)
 
     def test_minimax_text_tool_call_is_normalized_by_provider_layer(self):
         message = llm_providers._normalize_minimax_agent_message({

@@ -15,9 +15,10 @@ except NameError:
 
 
 BASE_URL = "http://127.0.0.1:8765"
-EXPECTED_APP_VERSION = "0.13.17"
+EXPECTED_APP_VERSION = "0.13.20"
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 CREATE_NO_WINDOW = 0x08000000
+PLAN_TIMEOUT_SECONDS = 360
 
 
 def health():
@@ -117,7 +118,7 @@ def start_gateway():
 
 
 def plan(command, context):
-    return _post("/plan", {"command": command, "context": context})
+    return _post("/plan", {"command": command, "context": context}, timeout=PLAN_TIMEOUT_SECONDS)
 
 
 def pending():
@@ -167,12 +168,12 @@ def _is_expected_version(payload):
     return bool(payload and payload.get("app_version") == EXPECTED_APP_VERSION)
 
 
-def _post(path, payload):
+def _post(path, payload, timeout=120):
     data = json.dumps(payload, ensure_ascii=True)
     if not isinstance(data, bytes):
         data = data.encode("ascii")
     request = urllib2.Request(BASE_URL + path, data=data, headers={"Content-Type": "application/json; charset=utf-8"})
-    return _request_json(request, 120)
+    return _request_json(request, timeout)
 
 
 def _request_json(request, timeout):
