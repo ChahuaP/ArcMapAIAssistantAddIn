@@ -6,86 +6,238 @@
       "version": "1.0",
       "category": "selection",
       "summary": "按属性条件选择要素。",
-      "keywords": ["select", "where", "选择", "属性选择", "大于", "小于", "等于", "之间", "为空", "包含"],
-      "model_card": "Use selection.select_by_attribute to select features by structured where condition, not SQL text. Arguments: layer, where, selection_type optional. Allowed where ops: eq, ne, gt, gte, lt, lte, between, in, like, is_null, is_not_null, and, or, not. Text contains must use op like with SQL wildcard value such as %南京%; never use op contains.",
+      "keywords": [
+        "select",
+        "where",
+        "选择",
+        "属性选择",
+        "大于",
+        "小于",
+        "等于",
+        "之间",
+        "为空",
+        "包含"
+      ],
+      "model_card": "Use selection.select_by_attribute to select features by structured where condition, not SQL text. Arguments: layer, where, selection_type optional. Allowed where ops: eq, ne, gt, gte, lt, lte, between, in, like, is_null, is_not_null, and, or, not. Boolean filters must be {\"op\":\"and\",\"conditions\":[...]} or {\"op\":\"or\",\"conditions\":[...]}; never use shorthand {\"and\":[...]}. Text contains must use op like on text fields with SQL wildcard value such as %南京%; never use op contains.",
       "parameters_schema": {
         "type": "object",
-        "required": ["layer", "where"],
+        "required": [
+          "layer",
+          "where"
+        ],
         "properties": {
-          "layer": {"type": "string"},
-          "where": {"type": "object"},
-          "selection_type": {"type": "string", "enum": ["NEW_SELECTION", "ADD_TO_SELECTION", "REMOVE_FROM_SELECTION", "SUBSET_SELECTION", "SWITCH_SELECTION", "CLEAR_SELECTION"]}
+          "layer": {
+            "type": "string"
+          },
+          "where": {
+            "type": "object"
+          },
+          "selection_type": {
+            "type": "string",
+            "enum": [
+              "NEW_SELECTION",
+              "ADD_TO_SELECTION",
+              "REMOVE_FROM_SELECTION",
+              "SUBSET_SELECTION",
+              "SWITCH_SELECTION",
+              "CLEAR_SELECTION"
+            ]
+          }
         },
         "additionalProperties": false
       },
-      "context_requirements": {"requires_layers": true, "requires_fields": true, "condition_fields": true},
+      "context_requirements": {
+        "requires_layers": true,
+        "requires_fields": true,
+        "condition_fields": true
+      },
       "side_effects": "changes_map",
-      "output_policy": {"writes_output": false},
+      "output_policy": {
+        "writes_output": false
+      },
       "executor": "operations.selection_ops.select_by_attribute",
-      "examples": [{"user": "选择人口大于10000的县", "arguments": {"layer": "counties", "where": {"field": "POPULATION", "op": "gt", "value": 10000}}}]
+      "examples": [
+        {
+          "user": "选择人口大于10000的县",
+          "arguments": {
+            "layer": "counties",
+            "where": {
+              "field": "POPULATION",
+              "op": "gt",
+              "value": 10000
+            }
+          }
+        }
+      ]
     },
     {
       "id": "selection.select_by_location",
       "version": "1.0",
       "category": "selection",
       "summary": "按空间关系选择要素。",
-      "keywords": ["select by location", "空间选择", "相交", "within", "intersect", "包含", "距离内", "边界接触"],
+      "keywords": [
+        "select by location",
+        "空间选择",
+        "相交",
+        "within",
+        "intersect",
+        "包含",
+        "距离内",
+        "边界接触"
+      ],
       "model_card": "Use selection.select_by_location to select target features by spatial relation to another layer or its selected features. Arguments: target_layer, overlap_type, select_layer, selection_type optional, search_distance optional. overlap_type should be ArcPy SelectLayerByLocation values such as INTERSECT, WITHIN, CONTAINS, WITHIN_A_DISTANCE, BOUNDARY_TOUCHES, SHARE_A_LINE_SEGMENT_WITH, ARE_IDENTICAL_TO, HAVE_THEIR_CENTER_IN.",
       "parameters_schema": {
         "type": "object",
-        "required": ["target_layer", "overlap_type", "select_layer"],
+        "required": [
+          "target_layer",
+          "overlap_type",
+          "select_layer"
+        ],
         "properties": {
-          "target_layer": {"type": "string"},
-          "overlap_type": {"type": "string"},
-          "select_layer": {"type": "string"},
-          "selection_type": {"type": "string"},
-          "search_distance": {"type": "string"}
+          "target_layer": {
+            "type": "string"
+          },
+          "overlap_type": {
+            "type": "string"
+          },
+          "select_layer": {
+            "type": "string"
+          },
+          "selection_type": {
+            "type": "string"
+          },
+          "search_distance": {
+            "type": "string"
+          }
         },
         "additionalProperties": false
       },
-      "context_requirements": {"requires_layers": true},
+      "context_requirements": {
+        "requires_layers": true
+      },
       "side_effects": "changes_map",
-      "output_policy": {"writes_output": false},
+      "output_policy": {
+        "writes_output": false
+      },
       "executor": "operations.selection_ops.select_by_location",
-      "examples": [{"user": "选择和 rivers 相交的 parcels", "arguments": {"target_layer": "parcels", "overlap_type": "INTERSECT", "select_layer": "rivers"}}]
+      "examples": [
+        {
+          "user": "选择和 rivers 相交的 parcels",
+          "arguments": {
+            "target_layer": "parcels",
+            "overlap_type": "INTERSECT",
+            "select_layer": "rivers"
+          }
+        }
+      ]
     },
     {
       "id": "selection.clear_selection",
       "version": "1.0",
       "category": "selection",
       "summary": "清除图层选择。",
-      "keywords": ["clear selection", "清除选择", "取消选择"],
+      "keywords": [
+        "clear selection",
+        "清除选择",
+        "取消选择"
+      ],
       "model_card": "Use selection.clear_selection to clear selected features on one layer. Arguments: layer.",
       "parameters_schema": {
         "type": "object",
-        "required": ["layer"],
-        "properties": {"layer": {"type": "string"}},
+        "required": [
+          "layer"
+        ],
+        "properties": {
+          "layer": {
+            "type": "string"
+          }
+        },
         "additionalProperties": false
       },
-      "context_requirements": {"requires_layers": true},
+      "context_requirements": {
+        "requires_layers": true
+      },
       "side_effects": "changes_map",
-      "output_policy": {"writes_output": false},
+      "output_policy": {
+        "writes_output": false
+      },
       "executor": "operations.selection_ops.clear_selection",
-      "examples": [{"user": "清除 roads 选择", "arguments": {"layer": "roads"}}]
+      "examples": [
+        {
+          "user": "清除 roads 选择",
+          "arguments": {
+            "layer": "roads"
+          }
+        }
+      ]
     },
     {
       "id": "selection.export_selected_features",
       "version": "1.0",
       "category": "selection",
       "summary": "导出图层当前已选要素为新要素类。",
-      "keywords": ["export selected", "导出选择", "导出选中"],
-      "model_card": "Use selection.export_selected_features to export selected features. Arguments: layer, output_name, output_workspace optional when MXD is unsaved. output_workspace may be a folder or a .gdb path.",
+      "keywords": [
+        "export selected",
+        "导出选择",
+        "导出选中"
+      ],
+      "model_card": "Use selection.export_selected_features to export selected features. Arguments: layer, output_name, output_workspace optional for GDB output, output_folder optional for shapefile output, output_format optional: gdb or shp.",
       "parameters_schema": {
         "type": "object",
-        "required": ["layer", "output_name"],
-        "properties": {"layer": {"type": "string"}, "output_name": {"type": "string"}, "output_workspace": {"type": "string"}},
+        "required": [
+          "layer",
+          "output_name"
+        ],
+        "properties": {
+          "layer": {
+            "type": "string"
+          },
+          "output_name": {
+            "type": "string"
+          },
+          "output_workspace": {
+            "type": "string"
+          },
+          "output_folder": {
+            "type": "string"
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "gdb",
+              "shp"
+            ]
+          }
+        },
         "additionalProperties": false
       },
-      "context_requirements": {"requires_layers": true, "requires_output_location_when_unsaved": true},
+      "context_requirements": {
+        "requires_layers": true,
+        "requires_output_location_when_unsaved": true
+      },
       "side_effects": "writes_data",
-      "output_policy": {"writes_output": true, "workspace": "mxd_default_or_output_workspace", "overwrite": false},
+      "output_policy": {
+        "writes_output": true,
+        "type": "feature_class",
+        "formats": [
+          "gdb",
+          "shp"
+        ],
+        "default_format": "gdb",
+        "workspace": "mxd_default_or_output_workspace_or_output_folder",
+        "overwrite": false,
+        "add_to_map": true
+      },
       "executor": "operations.selection_ops.export_selected_features",
-      "examples": [{"user": "导出 roads 选中的要素", "arguments": {"layer": "roads", "output_name": "roads_selected"}}]
+      "examples": [
+        {
+          "user": "导出 roads 选中的要素",
+          "arguments": {
+            "layer": "roads",
+            "output_name": "roads_selected"
+          }
+        }
+      ]
     }
   ]
 }

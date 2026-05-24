@@ -6,85 +6,240 @@
       "version": "1.0",
       "category": "export",
       "summary": "导出当前地图为 PNG。",
-      "keywords": ["export png", "导出图片", "PNG"],
+      "keywords": [
+        "export png",
+        "导出图片",
+        "PNG"
+      ],
       "model_card": "Use export.map_png to export current map to PNG. Arguments: output_name, resolution optional, output_folder optional when MXD is unsaved.",
       "parameters_schema": {
         "type": "object",
-        "required": ["output_name"],
-        "properties": {"output_name": {"type": "string"}, "resolution": {"type": "integer"}, "output_folder": {"type": "string"}},
+        "required": [
+          "output_name"
+        ],
+        "properties": {
+          "output_name": {
+            "type": "string"
+          },
+          "resolution": {
+            "type": "integer"
+          },
+          "output_folder": {
+            "type": "string"
+          }
+        },
         "additionalProperties": false
       },
-      "context_requirements": {"requires_output_location_when_unsaved": true},
+      "context_requirements": {
+        "requires_output_location_when_unsaved": true
+      },
       "side_effects": "writes_data",
-      "output_policy": {"writes_output": true, "workspace": "mxd_default_or_output_folder", "overwrite": false},
+      "output_policy": {
+        "writes_output": true,
+        "type": "file",
+        "extension": ".png",
+        "workspace": "mxd_default_or_output_folder",
+        "overwrite": false,
+        "add_to_map": false
+      },
       "executor": "operations.export_ops.export_map_png",
-      "examples": [{"user": "导出当前地图为 png", "arguments": {"output_name": "current_map", "resolution": 150}}]
+      "examples": [
+        {
+          "user": "导出当前地图为 png",
+          "arguments": {
+            "output_name": "current_map",
+            "resolution": 150
+          }
+        }
+      ]
     },
     {
       "id": "export.map_pdf",
       "version": "1.0",
       "category": "export",
       "summary": "导出当前地图为 PDF。",
-      "keywords": ["export pdf", "导出PDF", "PDF"],
+      "keywords": [
+        "export pdf",
+        "导出PDF",
+        "PDF"
+      ],
       "model_card": "Use export.map_pdf to export current map to PDF. Arguments: output_name, resolution optional, output_folder optional when MXD is unsaved.",
       "parameters_schema": {
         "type": "object",
-        "required": ["output_name"],
-        "properties": {"output_name": {"type": "string"}, "resolution": {"type": "integer"}, "output_folder": {"type": "string"}},
+        "required": [
+          "output_name"
+        ],
+        "properties": {
+          "output_name": {
+            "type": "string"
+          },
+          "resolution": {
+            "type": "integer"
+          },
+          "output_folder": {
+            "type": "string"
+          }
+        },
         "additionalProperties": false
       },
-      "context_requirements": {"requires_output_location_when_unsaved": true},
+      "context_requirements": {
+        "requires_output_location_when_unsaved": true
+      },
       "side_effects": "writes_data",
-      "output_policy": {"writes_output": true, "workspace": "mxd_default_or_output_folder", "overwrite": false},
+      "output_policy": {
+        "writes_output": true,
+        "type": "file",
+        "extension": ".pdf",
+        "workspace": "mxd_default_or_output_folder",
+        "overwrite": false,
+        "add_to_map": false
+      },
       "executor": "operations.export_ops.export_map_pdf",
-      "examples": [{"user": "导出当前地图为 pdf", "arguments": {"output_name": "current_map_pdf", "resolution": 150}}]
+      "examples": [
+        {
+          "user": "导出当前地图为 pdf",
+          "arguments": {
+            "output_name": "current_map_pdf",
+            "resolution": 150
+          }
+        }
+      ]
     },
     {
       "id": "export.table_csv",
       "version": "1.0",
       "category": "export",
       "summary": "导出图层属性表为 CSV。",
-      "keywords": ["export csv", "导出表", "导出属性表", "CSV"],
+      "keywords": [
+        "export csv",
+        "导出表",
+        "导出属性表",
+        "CSV"
+      ],
       "model_card": "Use export.table_csv to export a layer table to CSV. Arguments: layer, output_name, selected_only optional, output_folder optional when MXD is unsaved.",
       "parameters_schema": {
         "type": "object",
-        "required": ["layer", "output_name"],
-        "properties": {"layer": {"type": "string"}, "output_name": {"type": "string"}, "selected_only": {"type": "boolean"}, "output_folder": {"type": "string"}},
+        "required": [
+          "layer",
+          "output_name"
+        ],
+        "properties": {
+          "layer": {
+            "type": "string"
+          },
+          "output_name": {
+            "type": "string"
+          },
+          "selected_only": {
+            "type": "boolean"
+          },
+          "output_folder": {
+            "type": "string"
+          }
+        },
         "additionalProperties": false
       },
-      "context_requirements": {"requires_layers": true, "requires_output_location_when_unsaved": true},
+      "context_requirements": {
+        "requires_layers": true,
+        "requires_output_location_when_unsaved": true
+      },
       "side_effects": "writes_data",
-      "output_policy": {"writes_output": true, "workspace": "mxd_default_or_output_folder", "overwrite": false},
+      "output_policy": {
+        "writes_output": true,
+        "type": "file",
+        "extension": ".csv",
+        "workspace": "mxd_default_or_output_folder",
+        "overwrite": false,
+        "add_to_map": false
+      },
       "executor": "operations.export_ops.export_table_csv",
-      "examples": [{"user": "导出 roads 属性表为 csv", "arguments": {"layer": "roads", "output_name": "roads_table", "selected_only": false}}]
+      "examples": [
+        {
+          "user": "导出 roads 属性表为 csv",
+          "arguments": {
+            "layer": "roads",
+            "output_name": "roads_table",
+            "selected_only": false
+          }
+        }
+      ]
     },
     {
       "id": "export.layer_kml",
       "version": "1.0",
       "category": "export",
       "summary": "导出图层为 KML/KMZ 文件。",
-      "keywords": ["export kml", "export kmz", "导出KML", "导出KMZ", "shp转kml", "导出选中为KML"],
-      "model_card": "Use export.layer_kml to export a feature or raster layer to a KML-compatible KMZ file. Arguments: layer, output_name, selected_only optional, output_folder optional when MXD is unsaved, layer_output_scale optional integer default current map scale for raster exports, is_composite optional COMPOSITE|NO_COMPOSITE default NO_COMPOSITE for raster exports. Feature layers are written directly from ArcPy geometry into KML coordinates with ExtendedData attributes, so point/line/polygon geometry is preserved instead of relying on LayerToKML. If the user describes only some features, first use selection.select_by_attribute or selection.select_by_location, then call export.layer_kml with selected_only=true.",
+      "keywords": [
+        "export kml",
+        "export kmz",
+        "导出KML",
+        "导出KMZ",
+        "shp转kml",
+        "导出选中为KML"
+      ],
+      "model_card": "Use export.layer_kml to export a feature or raster layer to a KMZ file readable by KML viewers. Arguments: layer, output_name, selected_only optional, output_folder optional when MXD is unsaved, layer_output_scale optional integer default current map scale for raster exports, is_composite optional COMPOSITE|NO_COMPOSITE default NO_COMPOSITE for raster exports. Feature layers are written directly from ArcPy geometry into KML coordinates with ExtendedData attributes, so point/line/polygon geometry is preserved instead of relying on LayerToKML. If the user describes only some features, first use selection.select_by_attribute or selection.select_by_location, then call export.layer_kml with selected_only=true.",
       "parameters_schema": {
         "type": "object",
-        "required": ["layer", "output_name"],
+        "required": [
+          "layer",
+          "output_name"
+        ],
         "properties": {
-          "layer": {"type": "string"},
-          "output_name": {"type": "string"},
-          "selected_only": {"type": "boolean"},
-          "output_folder": {"type": "string"},
-          "layer_output_scale": {"type": "integer"},
-          "is_composite": {"type": "string", "enum": ["NO_COMPOSITE", "COMPOSITE"]}
+          "layer": {
+            "type": "string"
+          },
+          "output_name": {
+            "type": "string"
+          },
+          "selected_only": {
+            "type": "boolean"
+          },
+          "output_folder": {
+            "type": "string"
+          },
+          "layer_output_scale": {
+            "type": "integer"
+          },
+          "is_composite": {
+            "type": "string",
+            "enum": [
+              "NO_COMPOSITE",
+              "COMPOSITE"
+            ]
+          }
         },
         "additionalProperties": false
       },
-      "context_requirements": {"requires_layers": true, "requires_output_location_when_unsaved": true},
+      "context_requirements": {
+        "requires_layers": true,
+        "requires_output_location_when_unsaved": true
+      },
       "side_effects": "writes_data",
-      "output_policy": {"writes_output": true, "workspace": "mxd_default_or_output_folder", "overwrite": false},
+      "output_policy": {
+        "writes_output": true,
+        "type": "file",
+        "extension": ".kmz",
+        "workspace": "mxd_default_or_output_folder",
+        "overwrite": false,
+        "add_to_map": false
+      },
       "executor": "operations.export_ops.export_layer_kml",
       "examples": [
-        {"user": "把 roads 导出为 KML", "arguments": {"layer": "roads", "output_name": "roads_kml"}},
-        {"user": "把 roads 当前选中的要素导出为 KML", "arguments": {"layer": "roads", "output_name": "roads_selected_kml", "selected_only": true}}
+        {
+          "user": "把 roads 导出为 KML",
+          "arguments": {
+            "layer": "roads",
+            "output_name": "roads_kml"
+          }
+        },
+        {
+          "user": "把 roads 当前选中的要素导出为 KML",
+          "arguments": {
+            "layer": "roads",
+            "output_name": "roads_selected_kml",
+            "selected_only": true
+          }
+        }
       ]
     },
     {
@@ -92,29 +247,106 @@
       "version": "1.0",
       "category": "export",
       "summary": "按字段唯一值把一个图层拆分导出为多个数据文件。",
-      "keywords": ["split by field", "按字段拆分", "按属性分组导出", "每类导出shp"],
-      "model_card": "Use export.split_by_field to export one output per unique value of a field. Arguments: layer, field, output_name as ASCII prefix, output_format optional shp|gdb, output_folder for shapefiles, output_workspace for gdb, include_null optional, selected_only optional, max_outputs optional. Use this when the user asks to split/export features by a field value.",
+      "keywords": [
+        "split by field",
+        "按字段拆分",
+        "按属性分组导出",
+        "每类导出shp",
+        "每类导出kml",
+        "每类导出kmz"
+      ],
+      "model_card": "Use export.split_by_field to export one output per unique value of a field. Arguments: layer, field, output_name as ASCII run id, output_format optional shp|gdb|kmz, output_folder for shp/kmz, output_workspace for gdb, name_template optional for kmz filenames, include_null optional, selected_only optional, max_outputs optional. If the user asks KML/KMZ per field value, set output_format=kmz; do not use shp/gdb. For kmz, name_template controls the final file name without extension. Placeholders: {value}=field value, {value_base}=field value with terminal community/village suffix removed, {prefix}=output_name, {index}=001. For a request like '命名为社区名+永农' with values such as '红光社区' and example '红光永农', use name_template='{value_base}永农'.",
       "parameters_schema": {
         "type": "object",
-        "required": ["layer", "field", "output_name"],
+        "required": [
+          "layer",
+          "field",
+          "output_name"
+        ],
         "properties": {
-          "layer": {"type": "string"},
-          "field": {"type": "string"},
-          "output_name": {"type": "string"},
-          "output_format": {"type": "string", "enum": ["shp", "gdb"]},
-          "output_folder": {"type": "string"},
-          "output_workspace": {"type": "string"},
-          "include_null": {"type": "boolean"},
-          "selected_only": {"type": "boolean"},
-          "max_outputs": {"type": "integer"}
+          "layer": {
+            "type": "string"
+          },
+          "field": {
+            "type": "string"
+          },
+          "output_name": {
+            "type": "string"
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "shp",
+              "gdb",
+              "kmz"
+            ]
+          },
+          "output_folder": {
+            "type": "string"
+          },
+          "output_workspace": {
+            "type": "string"
+          },
+          "name_template": {
+            "type": "string"
+          },
+          "include_null": {
+            "type": "boolean"
+          },
+          "selected_only": {
+            "type": "boolean"
+          },
+          "max_outputs": {
+            "type": "integer"
+          }
         },
         "additionalProperties": false
       },
-      "context_requirements": {"requires_layers": true, "requires_fields": true, "field_arguments": ["field"], "requires_output_location_when_unsaved": true},
+      "context_requirements": {
+        "requires_layers": true,
+        "requires_fields": true,
+        "field_arguments": [
+          "field"
+        ],
+        "requires_output_location_when_unsaved": true
+      },
       "side_effects": "writes_data",
-      "output_policy": {"writes_output": true, "workspace": "mxd_default_or_output_folder_or_output_workspace", "overwrite": false},
+      "output_policy": {
+        "writes_output": true,
+        "type": "file_collection",
+        "formats": [
+          "gdb",
+          "shp",
+          "kmz"
+        ],
+        "workspace": "mxd_default_or_output_folder_or_output_workspace",
+        "overwrite": false,
+        "add_to_map": true
+      },
       "executor": "operations.export_ops.split_by_field",
-      "examples": [{"user": "把 roads 按 type 字段拆分导出为 shp", "arguments": {"layer": "roads", "field": "type", "output_name": "roads_by_type", "output_format": "shp", "output_folder": "D:\\Data\\exports"}}]
+      "examples": [
+        {
+          "user": "把 roads 按 type 字段拆分导出为 shp",
+          "arguments": {
+            "layer": "roads",
+            "field": "type",
+            "output_name": "roads_by_type",
+            "output_format": "shp",
+            "output_folder": "D:\\Data\\exports"
+          }
+        },
+        {
+          "user": "按社区分别导出 KML，命名为社区名+永农，例如红光永农",
+          "arguments": {
+            "layer": "layer:0",
+            "field": "村名",
+            "output_name": "community_kmz",
+            "output_format": "kmz",
+            "output_folder": "D:\\Data\\exports",
+            "name_template": "{value_base}永农"
+          }
+        }
+      ]
     }
   ]
 }

@@ -1,28 +1,28 @@
-import contextlib
 import json
 import pathlib
 import tempfile
 import unittest
 
-from gateway_py3 import tool_builder
 from gateway_py3.agent_tools import AgentToolError, AgentToolRuntime
 from gateway_py3.catalog_loader import OperationCatalog
 from gateway_py3.file_resolver import FileResolver
+from gateway_py3.output_folder_resolver import OutputFolderResolver
 from gateway_py3.planner import AgenticPlanner, SYSTEM_PROMPT
 from gateway_py3.validators import ValidationError, prepare_workflow, validate_workflow
 from gateway_py3.workflow_store import WorkflowStore
 
-
-class FakeAgentClient:
-    def __init__(self, responses):
-        self.responses = list(responses)
-        self.calls = []
-
-    def chat_agent(self, messages, tools):
-        self.calls.append({"messages": list(messages), "tools": list(tools)})
-        if not self.responses:
-            raise AssertionError("No fake DeepSeek response left.")
-        return {"message": self.responses.pop(0), "usage": {}}
+from gateway.planner_test_utils import (
+    FakeAgentClient,
+    assistant_tool_call as _assistant_tool_call,
+    context as _context,
+    custom_writes_data_spec as _custom_writes_data_spec,
+    isolated_tool_roots as _isolated_tool_roots,
+    layer as _layer,
+    layer_with_ref as _layer_with_ref,
+    star_tool_arguments as _star_tool_arguments,
+    star_tool_revision_arguments as _star_tool_revision_arguments,
+    step as _step,
+)
 
 
 class AgenticPlannerTests(unittest.TestCase):
@@ -34,6 +34,11 @@ class AgenticPlannerTests(unittest.TestCase):
         self.assertIn("radius_unit", SYSTEM_PROMPT)
         self.assertIn("geographic", SYSTEM_PROMPT)
         self.assertIn("only exception is executor_code inside toolbuilder_create_draft", SYSTEM_PROMPT)
+        self.assertIn('"op":"and","conditions"', SYSTEM_PROMPT)
+        self.assertIn('Never use shorthand', SYSTEM_PROMPT)
+        self.assertIn('folder_path is only for the file_resolve tool', SYSTEM_PROMPT)
+        self.assertIn('output_folder_resolve', SYSTEM_PROMPT)
+        self.assertIn('Never use file_resolve for output folders', SYSTEM_PROMPT)
 
     def test_agentic_planner_uses_file_tool_then_proposes_intersect_workflow(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -91,6 +96,32 @@ class AgenticPlannerTests(unittest.TestCase):
             with self.assertRaises(AgentToolError):
                 runtime.handle("file_resolve", {"text": "打开 d 盘下的 nanjing.shp"})
 
+    def test_output_folder_resolve_uses_known_desktop_folder(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            target = root / "test"
+            target.mkdir()
+            store = WorkflowStore(root / "workflows.sqlite")
+            runtime = AgentToolRuntime(self.catalog, store, _context())
+            runtime.output_folder_resolver = OutputFolderResolver({"desktop": root})
+
+            result = runtime.handle("output_folder_resolve", {"known_folder": "desktop", "folder_name": "test"})
+
+        self.assertEqual(result["status"], "resolved")
+        self.assertEqual(result["path"], str(target))
+
+    def test_output_folder_resolve_rejects_missing_folder_before_workflow(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            store = WorkflowStore(root / "workflows.sqlite")
+            runtime = AgentToolRuntime(self.catalog, store, _context())
+            runtime.output_folder_resolver = OutputFolderResolver({"desktop": root})
+
+            result = runtime.handle("output_folder_resolve", {"known_folder": "desktop", "folder_name": "missing"})
+
+        self.assertEqual(result["status"], "clarify")
+        self.assertIn("输出文件夹不存在", result["question"])
+
     def test_workflow_validate_rejects_original_command_argument(self):
         with tempfile.TemporaryDirectory() as directory:
             store = WorkflowStore(pathlib.Path(directory) / "workflows.sqlite")
@@ -124,6 +155,28 @@ class AgenticPlannerTests(unittest.TestCase):
         self.assertIn("reason", result["error"])
         self.assertIn("不要向用户追问", result["error"])
         self.assertNotIn("输出位置", result["error"])
+
+    def test_workflow_validate_missing_op_is_repair_feedback(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = WorkflowStore(pathlib.Path(directory) / "workflows.sqlite")
+            runtime = AgentToolRuntime(self.catalog, store, _context())
+            workflow = {
+                "action": "execute",
+                "summary": "按名称选择。",
+                "steps": [
+                    _step("step_1", "selection.select_by_attribute", {
+                        "layer": "nanjing",
+                        "where": {"field": "NAME", "value": "南京"}
+                    }, "选择")
+                ]
+            }
+
+            result = runtime.handle("workflow_validate", {"workflow": workflow})
+
+        self.assertFalse(result["ok"])
+        self.assertIn('"op":"and"', result["error"])
+        self.assertIn("叶子条件必须写 op", result["error"])
+        self.assertIn("不要向用户追问", result["error"])
 
     def test_tool_clarification_question_is_preserved_when_model_stops(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -230,6 +283,7 @@ class AgenticPlannerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             store = WorkflowStore(pathlib.Path(directory) / "workflows.sqlite")
             store.create_draft("打开数据并相交", "hash", {"action": "clarify", "summary": "请确认要对哪些图层相交。", "steps": []}, [])
+            store.create_draft("全代理旧任务", "hash", {"action": "answer", "summary": "不应进入半代理上下文。", "steps": []}, [], mode="full_agent", project_id="project_1")
             client = FakeAgentClient([
                 _assistant_tool_call("call_1", "workflow_propose", {
                     "action": "execute",
@@ -247,6 +301,8 @@ class AgenticPlannerTests(unittest.TestCase):
 
         first_user_message = client.calls[0]["messages"][1]["content"]
         self.assertIn("recent_conversation", first_user_message)
+        self.assertIn("打开数据并相交", first_user_message)
+        self.assertNotIn("全代理旧任务", first_user_message)
         self.assertRegex(row["workflow"]["steps"][0]["arguments"]["output_name"], r"^p1_p2_intersect_\d{8}_\d{6}$")
 
     def test_bad_workflow_is_fed_back_once_then_repaired(self):
@@ -267,6 +323,42 @@ class AgenticPlannerTests(unittest.TestCase):
         feedback_messages = [m for m in client.calls[1]["messages"] if m.get("role") == "tool"]
         self.assertIn("还不能确定", feedback_messages[0]["content"])
         self.assertEqual(row["workflow"]["steps"][0]["operation"], "view.refresh_view")
+
+    def test_validation_error_summary_is_not_returned_to_user(self):
+        client = FakeAgentClient([
+            _assistant_tool_call("call_1", "workflow_validate", {
+                "workflow": {
+                    "summary": "按属性选择。",
+                    "steps": [
+                        _step("step_1", "selection.select_by_attribute", {
+                            "layer": "nanjing",
+                            "where": {"field": "NAME", "value": "南京"}
+                        }, "选择")
+                    ]
+                }
+            }),
+            _assistant_tool_call("call_2", "workflow_propose", {
+                "action": "clarify",
+                "summary": "属性条件缺少 op。",
+                "steps": []
+            }),
+            _assistant_tool_call("call_3", "arcgis_get_layer_profile", {"layer": "nanjing"}),
+            _assistant_tool_call("call_4", "workflow_propose", {
+                "action": "execute",
+                "summary": "按名称选择南京。",
+                "steps": [
+                    _step("step_1", "selection.select_by_attribute", {
+                        "layer": "nanjing",
+                        "where": {"field": "NAME", "op": "eq", "value": "南京"}
+                    }, "选择")
+                ]
+            })
+        ])
+        row = self._plan(client, "选择南京", _context())
+
+        self.assertEqual(len(client.calls), 4)
+        self.assertEqual(row["workflow"]["action"], "execute")
+        self.assertEqual(row["workflow"]["steps"][0]["arguments"]["where"]["op"], "eq")
 
     def test_tool_loop_allows_repair_after_fourth_assistant_turn(self):
         client = FakeAgentClient([
@@ -302,7 +394,7 @@ class AgenticPlannerTests(unittest.TestCase):
             root = pathlib.Path(directory)
             store = WorkflowStore(root / "workflows.sqlite")
             planner = AgenticPlanner(catalog=self.catalog, client=client, store=store)
-            with _temporary_tool_roots(root):
+            with _isolated_tool_roots(root):
                 row = planner.plan("创建工具：将 taihu test area 面图层转换为五角星面图层，每个面根据中心点生成一个五角星面", _context())
 
         self.assertEqual(row["workflow"]["action"], "answer")
@@ -325,7 +417,7 @@ class AgenticPlannerTests(unittest.TestCase):
             root = pathlib.Path(directory)
             store = WorkflowStore(root / "workflows.sqlite")
             planner = AgenticPlanner(catalog=self.catalog, client=client, store=store)
-            with _temporary_tool_roots(root):
+            with _isolated_tool_roots(root):
                 row = planner.plan("创建工具：把面图层转换成五角星面", _context())
 
         self.assertEqual(row["workflow"]["action"], "answer")
@@ -350,7 +442,7 @@ class AgenticPlannerTests(unittest.TestCase):
             root = pathlib.Path(directory)
             store = WorkflowStore(root / "workflows.sqlite")
             planner = AgenticPlanner(catalog=self.catalog, client=client, store=store)
-            with _temporary_tool_roots(root):
+            with _isolated_tool_roots(root):
                 row = planner.plan("创建工具：把面图层转换成五角星面", _context())
 
         self.assertEqual(row["workflow"]["action"], "answer")
@@ -386,7 +478,7 @@ class AgenticPlannerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
             store = WorkflowStore(root / "workflows.sqlite")
-            with _temporary_tool_roots(root):
+            with _isolated_tool_roots(root):
                 runtime = AgentToolRuntime(self.catalog, store, _context())
                 created = runtime.handle("toolbuilder_create_draft", _star_tool_arguments())
                 tool_id = created["tool"]["id"]
@@ -409,7 +501,7 @@ class AgenticPlannerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
             store = WorkflowStore(root / "workflows.sqlite")
-            with _temporary_tool_roots(root):
+            with _isolated_tool_roots(root):
                 runtime = AgentToolRuntime(self.catalog, store, _context())
                 created = runtime.handle("toolbuilder_create_draft", _star_tool_arguments())
                 tool_id = created["tool"]["id"]
@@ -493,6 +585,61 @@ class AgenticPlannerTests(unittest.TestCase):
         prepared = prepare_workflow(workflow, self.catalog, _context())
 
         self.assertEqual(prepared["steps"][0]["arguments"]["where"]["op"], "like")
+
+    def test_attribute_condition_is_canonicalized_before_validation(self):
+        workflow = {
+            "action": "execute",
+            "summary": "按名称和编号选择。",
+            "steps": [
+                _step("step_1", "selection.select_by_attribute", {
+                    "layer": "nanjing",
+                    "where": {
+                        "and": [
+                            {"field": "#NAME", "operator": "=", "value": "南京"},
+                            {"field": "OBJECTID", "operator": ">", "value": "10"}
+                        ]
+                    }
+                }, "选择")
+            ]
+        }
+        prepared = prepare_workflow(workflow, self.catalog, _context())
+
+        where = prepared["steps"][0]["arguments"]["where"]
+        self.assertEqual(where["op"], "and")
+        self.assertEqual(where["conditions"][0]["op"], "eq")
+        self.assertNotIn("operator", where["conditions"][0])
+        self.assertEqual(where["conditions"][0]["field"], "NAME")
+        self.assertEqual(where["conditions"][1]["op"], "gt")
+
+    def test_attribute_condition_rejects_like_on_numeric_field(self):
+        workflow = {
+            "action": "execute",
+            "summary": "按编号模糊选择。",
+            "steps": [
+                _step("step_1", "selection.select_by_attribute", {
+                    "layer": "nanjing",
+                    "where": {"field": "OBJECTID", "op": "like", "value": "%1%"}
+                }, "选择")
+            ]
+        }
+
+        with self.assertRaisesRegex(ValidationError, "like 条件只能用于文本字段"):
+            prepare_workflow(workflow, self.catalog, _context())
+
+    def test_attribute_condition_rejects_non_numeric_value_for_numeric_field(self):
+        workflow = {
+            "action": "execute",
+            "summary": "按编号选择。",
+            "steps": [
+                _step("step_1", "selection.select_by_attribute", {
+                    "layer": "nanjing",
+                    "where": {"field": "OBJECTID", "op": "gt", "value": "abc"}
+                }, "选择")
+            ]
+        }
+
+        with self.assertRaisesRegex(ValidationError, "必须是数字"):
+            prepare_workflow(workflow, self.catalog, _context())
 
     def test_select_by_attribute_validates_condition_field(self):
         workflow = {
@@ -581,65 +728,6 @@ class AgenticPlannerTests(unittest.TestCase):
         self.assertEqual(prepared["steps"][0]["arguments"]["layer"], "layer:nanjing")
         self.assertEqual(prepared["steps"][0]["arguments"]["where"]["field"], "NAME")
 
-    def test_unsaved_mxd_write_without_output_location_clarifies(self):
-        workflow = {
-            "action": "execute",
-            "summary": "将对 nanjing 生成缓冲区。",
-            "steps": [
-                _step("step_1", "analysis.buffer", {
-                    "input_layer": "nanjing",
-                    "distance": "10 Meters",
-                    "output_name": "nanjing_buffer"
-                }, "缓冲")
-            ]
-        }
-        with self.assertRaisesRegex(ValidationError, "输出位置"):
-            prepare_workflow(workflow, self.catalog, _context(is_saved=False))
-
-    def test_full_agent_project_output_workspace_is_applied_to_writes(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = pathlib.Path(directory)
-            store = WorkflowStore(root / "workflows.sqlite")
-            project = store.create_project("project", str(root))
-            client = FakeAgentClient([
-                _assistant_tool_call("call_1", "workflow_propose", {
-                    "action": "execute",
-                    "summary": "将对 nanjing 生成缓冲区。",
-                    "steps": [
-                        _step("step_1", "analysis.buffer", {
-                            "input_layer": "nanjing",
-                            "distance": "10 Meters",
-                            "output_name": "nanjing_buffer"
-                        }, "缓冲")
-                    ]
-                })
-            ])
-            planner = AgenticPlanner(catalog=self.catalog, client=client, store=store)
-            row = planner.plan("给 nanjing 做 10 米缓冲区", _context(is_saved=False), mode="full_agent", project_id=project["id"])
-
-            arguments = row["workflow"]["steps"][0]["arguments"]
-            self.assertEqual(arguments["output_workspace"], str(root / "GeoPilot_Output"))
-            self.assertTrue((root / "GeoPilot_Output").exists())
-
-    def test_split_by_field_workflow_is_prepared_with_timestamp(self):
-        workflow = {
-            "action": "execute",
-            "summary": "按字段拆分导出。",
-            "steps": [
-                _step("step_1", "export.split_by_field", {
-                    "layer": "nanjing",
-                    "field": "NAME",
-                    "output_name": "nanjing_by_name",
-                    "output_format": "shp",
-                    "output_folder": r"D:\exports"
-                }, "按 NAME 字段拆分导出")
-            ]
-        }
-        prepared = prepare_workflow(workflow, self.catalog, _context(is_saved=True))
-
-        output_name = prepared["steps"][0]["arguments"]["output_name"]
-        self.assertRegex(output_name, r"^nanjing_by_name_\d{8}_\d{6}$")
-
     def test_chinese_output_name_is_rejected_before_runtime_execution(self):
         workflow = {
             "action": "execute",
@@ -682,26 +770,27 @@ class AgenticPlannerTests(unittest.TestCase):
 
     def test_layer_reference_is_exact_and_normalized_to_layer_ref(self):
         self.catalog.operations["custom.feature_to_point"] = _custom_writes_data_spec()
-        context = {
-            "is_saved": False,
-            "layers": [
-                _layer_with_ref("layer:0", "taihu_test_area_select"),
-                _layer_with_ref("layer:1", "taihu_test_area")
-            ]
-        }
-        workflow = {
-            "action": "execute",
-            "summary": "将 taihu_test_area 转为中心点。",
-            "steps": [
-                _step("step_1", "custom.feature_to_point", {
-                    "input_layer": "taihu_test_area",
-                    "output_name": "taihu_center_points",
-                    "output_workspace": r"D:\out"
-                }, "面转点")
-            ]
-        }
+        with tempfile.TemporaryDirectory() as directory:
+            context = {
+                "is_saved": False,
+                "layers": [
+                    _layer_with_ref("layer:0", "taihu_test_area_select"),
+                    _layer_with_ref("layer:1", "taihu_test_area")
+                ]
+            }
+            workflow = {
+                "action": "execute",
+                "summary": "将 taihu_test_area 转为中心点。",
+                "steps": [
+                    _step("step_1", "custom.feature_to_point", {
+                        "input_layer": "taihu_test_area",
+                        "output_name": "taihu_center_points",
+                        "output_workspace": directory
+                    }, "面转点")
+                ]
+            }
 
-        prepared = prepare_workflow(workflow, self.catalog, context)
+            prepared = prepare_workflow(workflow, self.catalog, context)
 
         self.assertEqual(prepared["steps"][0]["arguments"]["input_layer"], "layer:1")
 
@@ -775,192 +864,6 @@ class AgenticPlannerTests(unittest.TestCase):
             store = WorkflowStore(pathlib.Path(directory) / "workflows.sqlite")
             planner = AgenticPlanner(catalog=self.catalog, client=client, store=store)
             return planner.plan(command, context)
-
-
-def _assistant_tool_call(call_id, name, arguments):
-    return {
-        "role": "assistant",
-        "content": None,
-        "tool_calls": [
-            {
-                "id": call_id,
-                "type": "function",
-                "function": {
-                    "name": name,
-                    "arguments": json.dumps(arguments, ensure_ascii=False)
-                }
-            }
-        ]
-    }
-
-
-def _step(step_id, operation, arguments, reason):
-    return {
-        "id": step_id,
-        "operation": operation,
-        "arguments": arguments,
-        "reason": reason
-    }
-
-
-def _context(is_saved=True):
-    return {
-        "is_saved": is_saved,
-        "default_gdb": r"D:\ArcGIS\Default.gdb",
-        "layers": [_layer("nanjing")]
-    }
-
-
-def _layer(name):
-    return {
-        "layer_ref": "layer:%s" % name,
-        "name": name,
-        "longName": name,
-        "fields": [{"name": "OBJECTID"}, {"name": "NAME"}],
-        "selected_count": 0,
-        "geometry_type": "Polygon"
-    }
-
-
-def _layer_with_ref(layer_ref, name):
-    layer = _layer(name)
-    layer["layer_ref"] = layer_ref
-    return layer
-
-
-def _custom_writes_data_spec():
-    return {
-        "id": "custom.feature_to_point",
-        "version": "0.1.0",
-        "category": "custom",
-        "summary": "面转点",
-        "model_card": "把面图层转换为中心点，并保留属性。",
-        "parameters_schema": {
-            "type": "object",
-            "required": ["input_layer", "output_name"],
-            "properties": {
-                "input_layer": {"type": "string"},
-                "output_name": {"type": "string"},
-                "output_workspace": {"type": "string"}
-            },
-            "additionalProperties": False
-        },
-        "context_requirements": {"requires_layers": True},
-        "side_effects": "writes_data",
-        "output_policy": {},
-        "executor": "custom_tool:demo:execute",
-        "examples": [{"input_layer": "nanjing", "output_name": "nanjing_points"}]
-    }
-
-
-def _star_tool_arguments():
-    return {
-        "name": "面转五角星面",
-        "capability": "将输入面图层的每个面按中心点生成一个五角星面。",
-        "operation_spec": {
-            "id": "custom.polygon_to_star",
-            "version": "0.1.0",
-            "category": "custom",
-            "summary": "面要素转五角星面",
-            "model_card": "将输入面图层的每个面按中心点和外接范围生成一个五角星面。",
-            "parameters_schema": {
-                "type": "object",
-                "required": ["input_layer", "output_name"],
-                "properties": {
-                    "input_layer": {"type": "layer"},
-                    "output_name": {"type": "string"},
-                    "output_workspace": {"type": "string"},
-                    "radius_ratio": {"type": "number"}
-                },
-                "additionalProperties": False
-            },
-            "context_requirements": {"requires_layers": True, "geometry_type": "Polygon"},
-            "side_effects": "writes_data",
-            "output_policy": {"type": "feature_class", "geometry_type": "Polygon"},
-            "executor": "will_be_overridden",
-            "examples": [
-                {
-                    "input_layer": "taihu_test_area",
-                    "output_name": "taihu_stars",
-                    "radius_ratio": 0.35
-                }
-            ]
-        },
-        "executor_code": """# -*- coding: utf-8 -*-
-import math
-import os
-
-INNER_RATIO = 0.3819660112501051
-
-
-def execute(context, arguments, step_outputs):
-    input_layer = arguments["input_layer"]
-    output_path = arguments["output_path"]
-    radius_ratio = float(arguments.get("radius_ratio", 0.35))
-    spatial_reference = arcpy.Describe(input_layer).spatialReference
-    arcpy.CreateFeatureclass_management(os.path.dirname(output_path), os.path.basename(output_path), "POLYGON", "", "DISABLED", "DISABLED", spatial_reference)
-    arcpy.AddField_management(output_path, "SRC_OID", "LONG")
-    count = 0
-    with arcpy.da.SearchCursor(input_layer, ["OID@", "SHAPE@"]) as search_cursor:
-        with arcpy.da.InsertCursor(output_path, ["SRC_OID", "SHAPE@"]) as insert_cursor:
-            for source_oid, geometry in search_cursor:
-                extent = geometry.extent
-                radius = min(float(extent.XMax - extent.XMin), float(extent.YMax - extent.YMin)) * radius_ratio
-                star = _star_polygon(geometry.trueCentroid.X, geometry.trueCentroid.Y, radius, spatial_reference)
-                insert_cursor.insertRow([source_oid, star])
-                count += 1
-    return {"output": output_path, "created_count": count}
-
-
-def _star_polygon(center_x, center_y, radius, spatial_reference):
-    points = arcpy.Array()
-    for index in range(10):
-        angle = -math.pi / 2.0 + index * math.pi / 5.0
-        current_radius = radius if index % 2 == 0 else radius * INNER_RATIO
-        points.add(arcpy.Point(center_x + math.cos(angle) * current_radius, center_y + math.sin(angle) * current_radius))
-    points.add(points.getObject(0))
-    return arcpy.Polygon(points, spatial_reference)
-""",
-        "tests": [
-            {
-                "name": "one star per polygon",
-                "arguments": {
-                    "input_layer": "layer:taihu test area",
-                    "output_name": "taihu_stars",
-                    "radius_ratio": 0.35
-                },
-                "expected": {"output_geometry": "Polygon", "created_count": "same as input polygon count"},
-                "assertions": [
-                    "output is written to arguments['output_path']",
-                    "each source polygon creates one star polygon"
-                ]
-            }
-        ]
-    }
-
-
-def _star_tool_revision_arguments(tool_id):
-    arguments = _star_tool_arguments()
-    arguments["tool_id"] = tool_id
-    arguments["change_summary"] = "默认半径比例从 0.35 改为 0.25"
-    arguments["executor_code"] = arguments["executor_code"].replace(
-        'arguments.get("radius_ratio", 0.35)',
-        'arguments.get("radius_ratio", 0.25)'
-    )
-    return arguments
-
-
-@contextlib.contextmanager
-def _temporary_tool_roots(root):
-    old_pending = tool_builder.PENDING_ROOT
-    old_enabled = tool_builder.ENABLED_ROOT
-    tool_builder.PENDING_ROOT = root / "pending_tools"
-    tool_builder.ENABLED_ROOT = root / "enabled_tools"
-    try:
-        yield
-    finally:
-        tool_builder.PENDING_ROOT = old_pending
-        tool_builder.ENABLED_ROOT = old_enabled
 
 
 if __name__ == "__main__":

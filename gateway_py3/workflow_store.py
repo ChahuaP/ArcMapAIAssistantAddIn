@@ -191,9 +191,19 @@ class WorkflowStore:
             raise KeyError(workflow_id)
         return _row_to_dict(row)
 
-    def list_recent(self, limit: int = 50, project_id: str | None = None) -> List[Dict[str, Any]]:
+    def list_recent(self, limit: int = 50, project_id: str | None = None, mode: str | None = None) -> List[Dict[str, Any]]:
         with self._connection() as conn:
-            if project_id:
+            if project_id and mode:
+                rows = conn.execute(
+                    """
+                    SELECT id, status, mode, project_id, command, context_hash, workflow_json, agent_trace_json, created_at, updated_at, result_json
+                    FROM workflows
+                    WHERE project_id = ? AND mode = ?
+                    ORDER BY created_at DESC LIMIT ?
+                    """,
+                    (project_id, mode, limit)
+                ).fetchall()
+            elif project_id:
                 rows = conn.execute(
                     """
                     SELECT id, status, mode, project_id, command, context_hash, workflow_json, agent_trace_json, created_at, updated_at, result_json
@@ -202,6 +212,16 @@ class WorkflowStore:
                     ORDER BY created_at DESC LIMIT ?
                     """,
                     (project_id, limit)
+                ).fetchall()
+            elif mode:
+                rows = conn.execute(
+                    """
+                    SELECT id, status, mode, project_id, command, context_hash, workflow_json, agent_trace_json, created_at, updated_at, result_json
+                    FROM workflows
+                    WHERE mode = ?
+                    ORDER BY created_at DESC LIMIT ?
+                    """,
+                    (mode, limit)
                 ).fetchall()
             else:
                 rows = conn.execute(

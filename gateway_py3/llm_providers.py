@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import html
 import json
 import os
+import re
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -15,9 +17,9 @@ MINIMAX_PROVIDER = "minimax"
 SEMI_AGENT_MODE = "semi_agent"
 FULL_AGENT_MODE = "full_agent"
 MINIMAX_TOKEN_PLAN_BASE_URL = "https://api.minimaxi.com/v1"
-MINIMAX_LEGACY_BASE_URLS = {
-    "https://api.minimax.io/v1",
-}
+MINIMAX_TEXT_TOOL_CALL_RE = re.compile(r"<minimax:tool_call>(.*?)</minimax:tool_call>", re.IGNORECASE | re.DOTALL)
+MINIMAX_TEXT_INVOKE_RE = re.compile(r"<invoke\s+name=\"([^\"]+)\">(.*?)</invoke>", re.IGNORECASE | re.DOTALL)
+MINIMAX_TEXT_PARAMETER_RE = re.compile(r"<parameter\s+name=\"([^\"]+)\">(.*?)</parameter>", re.IGNORECASE | re.DOTALL)
 
 DEFAULT_CONFIG = {
     "default_mode": SEMI_AGENT_MODE,
@@ -113,6 +115,19 @@ class DeepSeekProvider(ChatProvider):
 class MiniMaxProvider(ChatProvider):
     provider_id = MINIMAX_PROVIDER
 
+    def chat_agent(self, messages: List[Dict[str, Any]], tools: List[Dict[str, Any]]) -> Dict[str, Any]:
+        payload = self._post_chat_completion({
+            "model": self.model,
+            "messages": messages,
+            "tools": tools,
+            "tool_choice": "auto",
+            "temperature": 0,
+        })
+        return {
+            "message": _normalize_minimax_agent_message(payload["choices"][0]["message"]),
+            "usage": normalize_usage(self.provider_id, payload.get("usage", {})),
+        }
+
 
 def create_provider(mode: str | None = None, provider_id: str | None = None) -> ChatProvider:
     selected = provider_id or provider_for_mode(mode or public_config()["default_mode"])
@@ -137,7 +152,12 @@ def load_config() -> Dict[str, Any]:
 def save_config(config: Dict[str, Any]) -> Dict[str, Any]:
     path = config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    existing = load_config()
+    try:
+        existing = load_config()
+    except ProviderError as exc:
+        if "旧字段" not in str(exc):
+            raise
+        existing = _normalized_config({})
     merged = _merge_config(existing, config)
     with path.open("w", encoding="utf-8-sig") as f:
         json.dump(merged, f, ensure_ascii=False, indent=2, sort_keys=True)
@@ -256,6 +276,54 @@ def normalize_usage(provider_id: str, usage: Dict[str, Any]) -> Dict[str, Any]:
     return result
 
 
+def _normalize_minimax_agent_message(message: Dict[str, Any]) -> Dict[str, Any]:
+    if message.get("tool_calls"):
+        return message
+    calls = _minimax_text_tool_calls(message.get("content"))
+    if not calls:
+        return message
+    normalized = dict(message)
+    normalized["content"] = None
+    normalized["tool_calls"] = calls
+    return normalized
+
+
+def _minimax_text_tool_calls(content: Any) -> List[Dict[str, Any]]:
+    if not isinstance(content, str) or "<minimax:tool_call>" not in content.lower():
+        return []
+    calls = []
+    for block in MINIMAX_TEXT_TOOL_CALL_RE.findall(content):
+        for name, body in MINIMAX_TEXT_INVOKE_RE.findall(block):
+            calls.append({
+                "id": "minimax_text_call_%d" % (len(calls) + 1),
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "arguments": json.dumps(_minimax_text_tool_arguments(body), ensure_ascii=False)
+                }
+            })
+    return calls
+
+
+def _minimax_text_tool_arguments(body: str) -> Dict[str, Any]:
+    arguments: Dict[str, Any] = {}
+    for name, raw_value in MINIMAX_TEXT_PARAMETER_RE.findall(body):
+        arguments[name] = _parse_minimax_text_tool_parameter(raw_value)
+    return arguments
+
+
+def _parse_minimax_text_tool_parameter(raw_value: str) -> Any:
+    text = html.unescape(raw_value).strip()
+    if not text:
+        return ""
+    if text[0] in "[{\"" or text in ("true", "false", "null") or re.match(r"^-?\d+(\.\d+)?$", text):
+        try:
+            return json.loads(text)
+        except ValueError:
+            return text
+    return text
+
+
 def provider_label(provider_id: str) -> str:
     return {
         DEEPSEEK_PROVIDER: "DeepSeek",
@@ -296,27 +364,16 @@ def _normalized_config(config: Dict[str, Any]) -> Dict[str, Any]:
     providers = config.get("providers") if isinstance(config.get("providers"), dict) else {}
     for provider_id in (DEEPSEEK_PROVIDER, MINIMAX_PROVIDER):
         normalized["providers"][provider_id].update(providers.get(provider_id) or {})
-    _migrate_minimax_token_plan_defaults(normalized)
 
-    if config.get("deepseek_api_key"):
-        normalized["providers"][DEEPSEEK_PROVIDER]["api_key"] = config["deepseek_api_key"]
-    if config.get("model"):
-        normalized["providers"][DEEPSEEK_PROVIDER]["model"] = config["model"]
-    if config.get("base_url"):
-        normalized["providers"][DEEPSEEK_PROVIDER]["base_url"] = str(config["base_url"]).rstrip("/")
+    obsolete_keys = [key for key in ("deepseek_api_key", "model", "base_url") if key in config]
+    if obsolete_keys:
+        raise ProviderError("配置文件使用旧字段：%s。请在网页右上角重新保存 API Key。" % "、".join(obsolete_keys))
 
     for key in ("default_mode", "semi_agent_provider", "full_agent_provider"):
         if config.get(key):
             normalized[key] = config[key]
     _validate_config(normalized)
     return normalized
-
-
-def _migrate_minimax_token_plan_defaults(config: Dict[str, Any]) -> None:
-    minimax = config["providers"][MINIMAX_PROVIDER]
-    base_url = str(minimax.get("base_url") or "").strip().rstrip("/")
-    if base_url in MINIMAX_LEGACY_BASE_URLS:
-        minimax["base_url"] = MINIMAX_TOKEN_PLAN_BASE_URL
 
 
 def _merge_config(existing: Dict[str, Any], patch: Dict[str, Any]) -> Dict[str, Any]:

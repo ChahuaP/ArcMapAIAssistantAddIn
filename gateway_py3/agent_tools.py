@@ -16,6 +16,7 @@ from .custom_tool_contract import (
     toolbuilder_catalog_misuse_result,
 )
 from .file_resolver import FileResolver
+from .output_folder_resolver import OutputFolderResolver
 from .tool_builder import ToolBuilderError, create_draft_tool, get_tool_package, revise_draft_tool
 from .validators import ValidationError, friendly_validation_message, prepare_workflow
 from .workflow_store import WorkflowStore
@@ -32,12 +33,14 @@ class AgentToolRuntime:
         store: WorkflowStore,
         context: Dict[str, Any],
         file_resolver: FileResolver | None = None,
+        output_folder_resolver: OutputFolderResolver | None = None,
         project: Dict[str, Any] | None = None
     ):
         self.catalog = catalog
         self.store = store
         self.context = context
         self.file_resolver = file_resolver or FileResolver()
+        self.output_folder_resolver = output_folder_resolver or OutputFolderResolver()
         self.project = project
 
     def tools(self) -> List[Dict[str, Any]]:
@@ -124,6 +127,20 @@ class AgentToolRuntime:
                 }
             ),
             _tool(
+                "output_folder_resolve",
+                "Resolve an existing local output folder from structured arguments. Use this for export/output folders; never use file_resolve for output destinations.",
+                {
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string", "description": "Exact local output folder path, for example D:\\Data\\exports."},
+                        "parent_path": {"type": "string", "description": "Exact existing parent folder path, for example D:\\Data."},
+                        "known_folder": {"type": "string", "enum": ["desktop", "documents", "downloads", "project_output"], "description": "Known local folder root selected by the user."},
+                        "folder_name": {"type": "string", "description": "Direct child folder name under parent_path or known_folder, for example test."}
+                    },
+                    "additionalProperties": False
+                }
+            ),
+            _tool(
                 "workflow_validate",
                 "Validate a proposed workflow locally before final proposal. Every execute step must include id, operation, arguments, and reason. Returns normalized workflow or a Chinese correction question.",
                 {
@@ -195,6 +212,8 @@ class AgentToolRuntime:
             return self._project_remember(arguments)
         if name == "file_resolve":
             return self._file_resolve(arguments)
+        if name == "output_folder_resolve":
+            return self._output_folder_resolve(arguments)
         if name == "workflow_validate":
             return self._workflow_validate(arguments)
         if name == "workflow_propose":
@@ -248,6 +267,10 @@ class AgentToolRuntime:
     def _file_resolve(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
         _reject_unknown(arguments, {"path", "folder_path", "drive", "directory", "directory_parts", "file_name", "extensions"})
         return self.file_resolver.resolve(arguments).to_tool_result()
+
+    def _output_folder_resolve(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        _reject_unknown(arguments, {"path", "parent_path", "known_folder", "folder_name"})
+        return self.output_folder_resolver.resolve(arguments, str(self.context.get("project_output_workspace") or ""))
 
     def _project_get_context(self) -> Dict[str, Any]:
         if not self.project:

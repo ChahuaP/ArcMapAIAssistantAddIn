@@ -81,6 +81,36 @@ class OutputLayerTests(unittest.TestCase):
         self.assertTrue(output.endswith(r"ArcMapAI_Output.gdb\nanjing_buffer"))
         self.assertEqual(calls["created"][0][1], "ArcMapAI_Output.gdb")
 
+    def test_output_feature_dataset_can_create_shapefile_path(self):
+        fake_arcpy = types.SimpleNamespace()
+        fake_arcpy.Exists = lambda path: False
+        sys.modules["arcpy"] = fake_arcpy
+
+        spec = importlib.util.spec_from_file_location("common_output_shp", COMMON_PATH)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = module.output_feature_dataset({"mxd_path": ""}, "roads_export", output_folder=directory)
+
+        self.assertTrue(output.endswith("roads_export.shp"))
+        self.assertIn(directory, output)
+
+    def test_output_dataset_file_policy_creates_extension_path(self):
+        fake_arcpy = types.SimpleNamespace()
+        fake_arcpy.Exists = lambda path: False
+        sys.modules["arcpy"] = fake_arcpy
+
+        spec = importlib.util.spec_from_file_location("common_output_file_policy", COMMON_PATH)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = module.output_dataset({"mxd_path": ""}, "building_model", {"type": "file", "extension": ".obj"}, output_folder=directory)
+
+        self.assertTrue(output.endswith("building_model.obj"))
+        self.assertIn(directory, output)
+
     def test_find_layer_can_use_layer_added_by_previous_step_name(self):
         added_layer = FakeLayer(r"D:\Data\p1.shp", "p1")
 

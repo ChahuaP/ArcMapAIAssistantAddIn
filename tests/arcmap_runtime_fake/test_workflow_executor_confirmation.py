@@ -53,6 +53,11 @@ class WorkflowExecutorConfirmationTests(unittest.TestCase):
                 return r"C:\work\ArcMapAI_Output.gdb\taihucenterpoints"
 
             @staticmethod
+            def output_dataset(context, output_name, output_policy, output_workspace=None, output_folder=None, output_format=None):
+                calls["output_dataset"] = (output_name, output_workspace, output_folder, output_format)
+                return Common.output_feature_class(context, output_name, output_workspace)
+
+            @staticmethod
             def add_output_layer(path):
                 calls["add_output_layer"] = path
                 return {"added": True}
@@ -69,6 +74,7 @@ class WorkflowExecutorConfirmationTests(unittest.TestCase):
         result = self.workflow_executor.execute(_custom_write_row(), {"is_saved": False})
 
         self.assertEqual(calls["find_layer"], "taihutestarea")
+        self.assertEqual(calls["output_dataset"], ("taihucenterpoints", r"C:\work", None, None))
         self.assertEqual(calls["output_feature_class"], ("taihucenterpoints", r"C:\work"))
         self.assertEqual(calls["executor_arguments"]["input_layer"], "exact-layer-object")
         self.assertEqual(calls["executor_arguments"]["output_path"], r"C:\work\ArcMapAI_Output.gdb\taihucenterpoints")
@@ -97,6 +103,81 @@ class WorkflowExecutorConfirmationTests(unittest.TestCase):
         }, operation["parameters_schema"])
 
         self.assertIn("output_workspace", operation["parameters_schema"]["properties"])
+
+    def test_custom_file_output_gets_output_path_without_adding_layer(self):
+        calls = {"add_output_layer": 0}
+        temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(temp_dir.cleanup)
+        output_path = str(pathlib.Path(temp_dir.name) / "building_model.obj")
+
+        class Common(object):
+            @staticmethod
+            def find_layer(context, layer_value, step_outputs):
+                return "exact-layer-object"
+
+            @staticmethod
+            def output_dataset(context, output_name, output_policy, output_workspace=None, output_folder=None, output_format=None):
+                calls["output_dataset"] = (output_name, output_policy, output_folder)
+                return output_path
+
+            @staticmethod
+            def add_output_layer(path):
+                calls["add_output_layer"] += 1
+                return {"added": True}
+
+        def executor(executor_path, context, arguments, step_outputs):
+            calls["executor_arguments"] = dict(arguments)
+            with open(arguments["output_path"], "w") as handle:
+                handle.write("v 0 0 0\n")
+                handle.write("v 1 0 0\n")
+                handle.write("v 0 1 0\n")
+                handle.write("f 1 2 3\n")
+            return {"output": arguments["output_path"]}
+
+        self.workflow_executor._operations_common = lambda: Common
+        self.workflow_executor._call_executor = executor
+        operation = self.workflow_executor._canonicalize_operation(_custom_file_operation())
+        self.workflow_executor._load_operations = lambda: {"custom.export_obj": operation}
+
+        result = self.workflow_executor.execute(_custom_file_row(), {"is_saved": False})
+
+        self.assertEqual(calls["output_dataset"][0], "building_model")
+        self.assertEqual(calls["output_dataset"][1]["type"], "file")
+        self.assertEqual(calls["executor_arguments"]["output_path"], output_path)
+        self.assertEqual(calls["add_output_layer"], 0)
+        self.assertEqual(result["steps"][0]["result"]["output"], output_path)
+
+    def test_custom_obj_output_rejects_header_only_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output_path = str(pathlib.Path(directory) / "empty.obj")
+
+            class Common(object):
+                @staticmethod
+                def find_layer(context, layer_value, step_outputs):
+                    return "exact-layer-object"
+
+                @staticmethod
+                def output_dataset(context, output_name, output_policy, output_workspace=None, output_folder=None, output_format=None):
+                    return output_path
+
+                @staticmethod
+                def add_output_layer(path):
+                    return {"added": True}
+
+            def executor(executor_path, context, arguments, step_outputs):
+                with open(arguments["output_path"], "w") as handle:
+                    handle.write("# Exported from GeoPilot\n")
+                return {"vertex_count": 0, "face_count": 0}
+
+            self.workflow_executor._operations_common = lambda: Common
+            self.workflow_executor._call_executor = executor
+            operation = self.workflow_executor._canonicalize_operation(_custom_file_operation())
+            self.workflow_executor._load_operations = lambda: {"custom.export_obj": operation}
+
+            with self.assertRaises(Exception) as raised:
+                self.workflow_executor.execute(_custom_file_row(), {"is_saved": False})
+
+        self.assertIn("OBJ 输出没有有效顶点和面", str(raised.exception))
 
     def test_custom_executor_receives_arcpy_global(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -130,6 +211,10 @@ class WorkflowExecutorConfirmationTests(unittest.TestCase):
             @staticmethod
             def output_feature_class(context, output_name, output_workspace=None):
                 return r"C:\work\ArcMapAI_Output.gdb\taihucenterpoints"
+
+            @staticmethod
+            def output_dataset(context, output_name, output_policy, output_workspace=None, output_folder=None, output_format=None):
+                return Common.output_feature_class(context, output_name, output_workspace)
 
         self.workflow_executor._operations_common = lambda: Common
         self.workflow_executor._call_executor = lambda executor, context, arguments, step_outputs: (_ for _ in ()).throw(ValueError("bad spatial reference"))
@@ -203,6 +288,44 @@ def _custom_write_operation():
             "output_workspace": {"type": "string", "required": False}
         },
         "executor": "custom_tool:tool_1:execute"
+    }
+
+
+def _custom_file_row():
+    return {
+        "context_hash": "hash",
+        "workflow": {
+            "summary": "导出 OBJ。",
+            "steps": [
+                {
+                    "id": "step_1",
+                    "operation": "custom.export_obj",
+                    "arguments": {
+                        "input_layer": "buildings",
+                        "output_name": "building_model",
+                        "output_folder": r"C:\work"
+                    },
+                    "reason": "测试文件输出工具"
+                }
+            ]
+        }
+    }
+
+
+def _custom_file_operation():
+    return {
+        "side_effects": "writes_data",
+        "output_policy": {"type": "file", "extension": ".obj"},
+        "parameters_schema": {
+            "type": "object",
+            "required": ["input_layer", "output_name"],
+            "properties": {
+                "input_layer": {"type": "string", "x-geopilot-kind": "layer"},
+                "output_name": {"type": "string"}
+            },
+            "additionalProperties": False
+        },
+        "executor": "custom_tool:tool_2:execute"
     }
 
 

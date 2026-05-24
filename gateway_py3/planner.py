@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import re
 from typing import Any, Dict, List, Tuple
 
 from .agent_tools import AgentToolError, AgentToolRuntime
@@ -10,12 +11,14 @@ from .custom_tool_contract import PLANNER_CUSTOM_TOOL_CONTRACT
 from .file_resolver import FileResolver
 from .llm_providers import FULL_AGENT_MODE, ChatProvider, create_provider
 from .logs import write_event
+from .output_folder_resolver import OutputFolderResolver
 from .validators import ValidationError, context_hash, friendly_validation_message, prepare_workflow
 from .workflow_store import WorkflowStore
 
 
 MAX_TOOL_ROUNDS = 8
 MAX_FILE_SEARCH_NUDGES = 1
+MAX_VALIDATION_REPAIRS = 3
 
 SYSTEM_PROMPT = """You are GeoPilot.
 You help non-technical ArcGIS/ArcMap users turn natural Chinese requests into safe GIS workflow drafts.
@@ -25,9 +28,13 @@ Hard rules:
 - Never write Python code in final user-facing answers or normal workflow steps. The only exception is executor_code inside toolbuilder_create_draft or toolbuilder_revise_draft tool calls.
 - Never write SQL where clauses. Attribute filters must use structured where objects only.
 - Attribute where operators are limited to: eq, ne, gt, gte, lt, lte, between, in, like, is_null, is_not_null, and, or, not.
-- Use like with SQL wildcards for text patterns. Text contains must be {"field":"NAME","op":"like","value":"%南京%"}. Do not use contains, starts_with, ends_with, regex, or raw SQL.
+- Use like only on text fields and with SQL wildcards for text patterns. Text contains must be {"field":"NAME","op":"like","value":"%南京%"}. Do not use contains, starts_with, ends_with, regex, or raw SQL.
+- Boolean attribute filters must use full structured form: {"op":"and","conditions":[...]} or {"op":"or","conditions":[...]}. Never use shorthand such as {"and":[...]} or {"or":[...]}. Every leaf condition must include op.
 - between uses values with exactly two items. in uses a non-empty values list. eq/ne/gt/gte/lt/lte/like use value. is_null/is_not_null do not use value.
 - You are the planner. Tools only provide facts. Decide which tools to call, inspect the map/layers/fields/attribute samples when needed, then compose the workflow.
+- Prefer composing existing atomic operations into a multi-step workflow. For example: inspect fields and samples, select by attribute/location, export selected features, split by field, export KML/KMZ, clear selection, then refresh/zoom if needed.
+- Do not create a custom tool just because the user asks for a new workflow shape. Custom tools are only for reusable GIS algorithms or processing primitives that cannot be expressed by chaining the existing catalog operations.
+- If an existing catalog operation is a real batch primitive for the user's goal, use it directly. For example, export.split_by_field with output_format=kmz is valid for "按字段分别导出 KML/KMZ"; otherwise compose smaller selection/export steps.
 - Do not split user text into conditions by local string rules. Natural phrases are often partial or semantic: "k街道的乔木" may require inspecting a layer profile, finding that one field contains values like "xxx区k街道" and another field contains values like "乔木用地", then building an and condition with like wildcards.
 - Layer mentions may appear as @图层名 from the UI. Treat @ as a selection marker and use the matching ArcGIS layer.
 - Field mentions may appear as #字段名 from the UI. Treat # as a selection marker only. Workflow arguments must use the real field name without #.
@@ -41,6 +48,10 @@ Hard rules:
 - execute must contain ordered steps with id, operation, arguments, and reason.
 - Every execute step must include reason. workflow_validate and workflow_propose require it. If validation says reason is missing, add the missing reason yourself and continue; do not ask the user to clarify.
 - Do not invent argument names. If the operation index is not enough, call catalog_get_operation_schema before proposing that operation.
+- For workflow operation arguments, use output_folder when the schema says output_folder. folder_path is only for the file_resolve tool.
+- For output destinations, call output_folder_resolve with structured arguments only: path, parent_path, known_folder, folder_name. Use known_folder=desktop for the user's desktop, documents for documents, downloads for downloads, and project_output for the active project output folder.
+- Never use file_resolve for output folders. file_resolve is only for local GIS input files to open or process.
+- If the user names an output folder that does not resolve, ask one clear Chinese question or choose the active project output folder only when the user did not specify an output destination.
 - When the user provides a numeric size with a unit, map it to the operation schema exactly. For example, "外接圆半径0.001度" is a concrete radius, not a clarification request; if the schema has radius_unit, set it to degrees.
 - output_name must use ASCII letters, numbers, and underscores only, and must not start with a number.
 - If the user asks for default GDB output, read arcgis_context.default_gdb or call arcgis_get_context, then pass that exact path as output_workspace.
@@ -62,18 +73,21 @@ Hard rules:
 - Do not overwrite existing data.
 - If the current mode is full_agent, prefer the active project workdir for local data lookup and output planning.
 - In full_agent mode, generated data should use arcgis_context.project_output_workspace when the user does not provide an output location.
-- If existing tools cannot satisfy the user but the capability is feasible as a reusable ArcPy algorithm, call toolbuilder_create_draft to create a disabled draft tool package. Do not stop at unsupported just because no built-in operation exists.
+- If existing operation chains cannot satisfy the user but the capability is feasible as a reusable ArcPy algorithm, call toolbuilder_create_draft to create a disabled draft tool package. Do not stop at unsupported just because no built-in operation exists.
 - toolbuilder_create_draft is an agent tool, not an ArcGIS operation id. Never call catalog_get_operation_schema for toolbuilder.create_draft or toolbuilder_create_draft.
 - When the user reports a custom tool bug, bad parameter design, or wants a review change, find the matching entry in custom_tools, call toolbuilder_get_draft, then call toolbuilder_revise_draft with the same tool_id. Do not create a duplicate custom tool for revisions.
 - toolbuilder_get_draft and toolbuilder_revise_draft accept an internal UUID, a custom.* operation id such as custom.feature_to_star_polygon, or a custom_tool:<uuid>:execute executor reference. Never ask the user to provide existing custom tool executor code.
 - If a workflow using a custom.* operation fails validation because an argument is unknown or the schema is missing a needed workflow argument, revise that custom tool schema in place instead of asking the user to rephrase.
 - Custom tool executor_code is not free-form application code. It must run inside ArcMap Python 2.7 as one small function: def execute(context, arguments, step_outputs): ...
-- Custom tool executor_code must start with # -*- coding: utf-8 -*- and use Python 2.7-compatible syntax only. Do not use f-strings, type annotations, pathlib, dataclasses, async, or raise ... from ...
+- Custom tool executor_code must start with # -*- coding: utf-8 -*- and use syntax valid in Python 2.7 only. Do not use f-strings, type annotations, pathlib, dataclasses, async, or raise ... from ...
 - Custom tool executor_code must not use ArcGIS Pro APIs: no arcpy.mp and no ArcGISProject. It must not call arcpy.mapping.MapDocument, arcpy.mapping.ListLayers, or inspect CURRENT maps.
 - Custom tool executor_code must not call getOutput. GeoPilot passes ArcMap Layer objects, not geoprocessing Result objects.
 - Custom tool executor_code receives already-resolved arguments from GeoPilot. For layer parameters, arguments["input_layer"] is the ArcMap layer object; do not search for layers by name.
-- For writes_data custom tools, define required output_name in operation_spec and write to arguments["output_path"]. Do not read arguments["output_workspace"] or arguments["output_name"] inside executor_code, and do not build output paths from arcpy.env.workspace, output_workspace, or output_name. Variable names like output_path_full do not count; the code must read arguments["output_path"] or arguments.get("output_path").
+- Custom tool executor_code must not hide geometry or ArcPy failures with broad except/pass/continue. Unexpected errors must raise so the user can use "让 AI 修工具".
+- For writes_data custom tools, define required output_name in operation_spec and write only to arguments["output_path"]. Do not read managed output arguments such as output_workspace, output_folder, output_format, or output_name inside executor_code, and do not build output paths from arcpy.env.workspace or user arguments. Variable names like output_path_full do not count; the code must read arguments["output_path"] or arguments.get("output_path").
+- Use output_policy.type deliberately: feature_class for ArcGIS vector outputs with gdb/shp formats, file for ordinary files such as .obj/.json/.csv with a declared extension, and raster for .tif raster outputs. File outputs may call open(arguments["output_path"], "w" or "wb") and must not open any other path.
 - For CreateFeatureclass_management, split arguments["output_path"] with os.path.dirname/basename and pass spatial_reference from arcpy.Describe(input_layer).spatialReference. Do not pass context["spatial_reference"], spatialReference.name, factoryCode, strings, or layer.spatialReference.
+- For SHAPE@ Polygon geometry in ArcMap, geom.getPart(i) returns an Array of Point objects. Iterate points directly and handle None ring separators; do not treat part.getObject(j) as a ring object with .count.
 - Keep executor_code ASCII except the encoding header. Put Chinese descriptions in operation_spec, not in Python comments or string literals.
 - Prefer stable ArcMap geoprocessing calls and arcpy.da cursors. When a built-in ArcPy tool exists, call it directly instead of manually reimplementing geometry logic.
 - Custom operations already present in operation_index are enabled and reviewed. Do not tell the user they still need review.
@@ -94,12 +108,14 @@ class AgenticPlanner:
         catalog: OperationCatalog | None = None,
         client: ChatProvider | None = None,
         store: WorkflowStore | None = None,
-        file_resolver: FileResolver | None = None
+        file_resolver: FileResolver | None = None,
+        output_folder_resolver: OutputFolderResolver | None = None
     ):
         self.catalog = catalog or OperationCatalog()
         self.client = client
         self.store = store or WorkflowStore()
         self.file_resolver = file_resolver or FileResolver()
+        self.output_folder_resolver = output_folder_resolver or OutputFolderResolver()
 
     def plan(
         self,
@@ -114,7 +130,7 @@ class AgenticPlanner:
         if project:
             context = _context_for_project(context, project)
         client = self.client or create_provider(mode=mode)
-        tool_runtime = AgentToolRuntime(self.catalog, self.store, context, self.file_resolver, project)
+        tool_runtime = AgentToolRuntime(self.catalog, self.store, context, self.file_resolver, self.output_folder_resolver, project)
         tools = tool_runtime.tools()
         messages = self._messages(command, context, tool_runtime.operation_index(), mode, project)
         trace: List[Dict[str, Any]] = []
@@ -155,7 +171,7 @@ class AgenticPlanner:
                 if finalized is not None:
                     return finalized
                 validation_feedback_count += 1
-                if validation_feedback_count > 1:
+                if validation_feedback_count > _repair_limit_for_feedback(feedback):
                     return self._store_unfinalized_feedback(command, context, feedback, trace, mode, project_id)
                 messages.append(_tool_message(_proposal_tool_call_id(assistant_message), {"ok": False, "error": feedback}))
                 continue
@@ -191,7 +207,13 @@ class AgenticPlanner:
                 finalized, feedback = self._try_finalize(command, context, content_workflow, trace, mode, project_id)
                 if finalized is not None:
                     return finalized
-                return self._store_unfinalized_feedback(command, context, feedback, trace, mode, project_id)
+                if not _is_validation_repair_feedback(feedback):
+                    return self._store_unfinalized_feedback(command, context, feedback, trace, mode, project_id)
+                validation_feedback_count += 1
+                if validation_feedback_count > _repair_limit_for_feedback(feedback):
+                    return self._store_unfinalized_feedback(command, context, feedback, trace, mode, project_id)
+                messages.append(_assistant_repair_message(feedback))
+                continue
 
             for tool_call in tool_calls:
                 try:
@@ -216,13 +238,14 @@ class AgenticPlanner:
                         if finalized is not None:
                             return finalized
                         validation_feedback_count += 1
-                        if validation_feedback_count > 1:
+                        if validation_feedback_count > _repair_limit_for_feedback(feedback):
                             return self._store_unfinalized_feedback(command, context, feedback, trace, mode, project_id)
                         messages.append(_tool_message(tool_call.get("id"), {"ok": False, "error": feedback}))
                         continue
                     validation_feedback_count += 1
-                    if validation_feedback_count > 1:
-                        return self._store_unfinalized_feedback(command, context, result.get("error", "这个任务信息还不完整。"), trace, mode, project_id)
+                    error_text = result.get("error", "这个任务信息还不完整。")
+                    if validation_feedback_count > _repair_limit_for_feedback(error_text):
+                        return self._store_unfinalized_feedback(command, context, error_text, trace, mode, project_id)
 
                 messages.append(_tool_message(tool_call.get("id"), result))
 
@@ -243,7 +266,7 @@ class AgenticPlanner:
             "project": _project_summary(project, self.store) if project else None,
             "operation_index": operation_index,
             "custom_tools": _custom_tool_status(self.store),
-            "recent_conversation": _recent_conversation(self.store, project.get("id") if project else None, 18 if mode == FULL_AGENT_MODE else 6)
+            "recent_conversation": _recent_conversation(self.store, project.get("id") if project else None, mode, 18 if mode == FULL_AGENT_MODE else 6)
         }
         return [
             {"role": "system", "content": SYSTEM_PROMPT},
@@ -269,6 +292,9 @@ class AgenticPlanner:
         generic_unsupported_feedback = _generic_unsupported_feedback(workflow, trace)
         if generic_unsupported_feedback:
             return None, generic_unsupported_feedback
+        validation_clarification_feedback = _validation_clarification_feedback(workflow)
+        if validation_clarification_feedback:
+            return None, validation_clarification_feedback
         exploration_feedback = _attribute_exploration_feedback(workflow, trace)
         if exploration_feedback:
             return None, exploration_feedback
@@ -421,10 +447,10 @@ def _custom_tool_status(store: WorkflowStore) -> List[Dict[str, str]]:
     return tools
 
 
-def _recent_conversation(store: WorkflowStore, project_id: str | None = None, limit: int = 6) -> List[Dict[str, Any]]:
+def _recent_conversation(store: WorkflowStore, project_id: str | None = None, mode: str | None = None, limit: int = 6) -> List[Dict[str, Any]]:
     history = []
     try:
-        rows = store.list_recent(limit=limit, project_id=project_id)
+        rows = store.list_recent(limit=limit, project_id=project_id, mode=mode)
     except Exception:
         return history
     for row in reversed(rows):
@@ -519,6 +545,23 @@ def _generic_unsupported_feedback(workflow: Dict[str, Any], trace: List[Dict[str
     )
 
 
+def _validation_clarification_feedback(workflow: Dict[str, Any]) -> str:
+    if workflow.get("action") not in ("clarify", "answer"):
+        return ""
+    summary = str(workflow.get("summary") or "")
+    if not _looks_like_validation_feedback(summary):
+        return ""
+    return (
+        "不要把 workflow_validate 的校验错误原样返回给用户。请根据上一条校验错误修正 workflow 后继续提交。"
+        "属性 where 必须使用标准结构：{\"op\":\"and\",\"conditions\":[...]}，叶子条件必须有 op；"
+        "导出目录参数按 operation schema 使用 output_folder，不要写 folder_path。不要向用户追问。"
+    )
+
+
+def _repair_limit_for_feedback(feedback: str) -> int:
+    return MAX_VALIDATION_REPAIRS if _is_validation_repair_feedback(feedback) else 1
+
+
 def _public_unfinalized_feedback(feedback: str, trace: List[Dict[str, Any]]) -> Tuple[str, bool]:
     text = str(feedback or "").strip()
     if not _needs_public_rewrite(text):
@@ -548,8 +591,43 @@ def _is_internal_planner_feedback(feedback: str) -> bool:
         "不要把已存在但未启用的自定义工具说成当前版本不支持",
         "请先调用 arcgis_get_layer_profile",
         "基于真实字段和值样例理解用户意图",
+        "workflow_validate 的校验错误",
+        "不要向用户追问",
+        "<minimax:tool_call>",
         "toolbuilder_create_draft 创建待审核自定义工具",
         "toolbuilder_revise_draft 修订同一个工具",
+    )
+    return any(marker in text for marker in markers)
+
+
+def _is_validation_repair_feedback(feedback: str) -> bool:
+    text = str(feedback or "")
+    markers = (
+        "workflow 必须带 action",
+        "不要把 workflow_validate",
+        "属性条件 where 缺少 op",
+        "叶子条件必须写 op",
+        "叶子条件必须有 op",
+        "workflow operation 里不能使用 folder_path",
+        "输出文件夹不存在",
+        "输出工作空间不可用",
+        "输出位置还不明确",
+        "每个执行步骤都必须带 reason",
+        "Step missing field",
+        "Workflow action",
+    )
+    return any(marker in text for marker in markers)
+
+
+def _looks_like_validation_feedback(summary: str) -> bool:
+    text = summary.strip()
+    markers = (
+        "属性条件缺少 op",
+        "where 缺少 op",
+        "has unknown arguments",
+        "missing required argument",
+        "Workflow action",
+        "Step missing field",
     )
     return any(marker in text for marker in markers)
 
@@ -674,6 +752,13 @@ def _file_search_nudge_message() -> Dict[str, str]:
             "and call file_resolve again with structured arguments. "
             "Only ask the user if no plausible child directory remains."
         )
+    }
+
+
+def _assistant_repair_message(feedback: str) -> Dict[str, str]:
+    return {
+        "role": "user",
+        "content": "The previous workflow did not pass validation. Repair it and continue; do not ask the user. Validation feedback: %s" % feedback
     }
 
 

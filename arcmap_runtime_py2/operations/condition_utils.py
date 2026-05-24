@@ -5,6 +5,7 @@ import uuid
 
 import arcpy
 
+import condition_protocol
 from operations import common
 
 
@@ -14,19 +15,21 @@ except NameError:
     unicode = str
 
 
-TEXT_TYPES = set(["String", "Guid", "GlobalID"])
-NUMBER_TYPES = set(["SmallInteger", "Integer", "Single", "Double", "OID"])
+TEXT_TYPES = condition_protocol.TEXT_FIELD_TYPES
+NUMBER_TYPES = condition_protocol.NUMBER_FIELD_TYPES
 
 
 def compile_where(layer, condition):
     if not isinstance(condition, dict) or not condition:
         raise common.OperationError(u"where 条件必须是结构化对象。")
+    condition = condition_protocol.normalize_condition_tree(condition)
     return _compile_node(layer, condition)
 
 
 def condition_fields(condition):
     if not isinstance(condition, dict):
         return []
+    condition = condition_protocol.normalize_condition_tree(condition)
     op = _operator(condition)
     if op in ("and", "or"):
         fields = []
@@ -82,17 +85,17 @@ def _compile_node(layer, condition):
     field = _field(layer, condition.get("field"))
     field_sql = _field_sql(layer, field.name)
 
-    if op in ("eq", "="):
+    if op == "eq":
         return "%s = %s" % (field_sql, _literal(field, _value(condition)))
-    if op in ("ne", "!=", "<>"):
+    if op == "ne":
         return "%s <> %s" % (field_sql, _literal(field, _value(condition)))
-    if op in ("gt", ">"):
+    if op == "gt":
         return "%s > %s" % (field_sql, _literal(field, _value(condition)))
-    if op in ("gte", ">="):
+    if op == "gte":
         return "%s >= %s" % (field_sql, _literal(field, _value(condition)))
-    if op in ("lt", "<"):
+    if op == "lt":
         return "%s < %s" % (field_sql, _literal(field, _value(condition)))
-    if op in ("lte", "<="):
+    if op == "lte":
         return "%s <= %s" % (field_sql, _literal(field, _value(condition)))
     if op == "between":
         values = condition.get("values")
@@ -105,6 +108,8 @@ def _compile_node(layer, condition):
             raise common.OperationError(u"in 条件必须提供值列表。")
         return "%s IN (%s)" % (field_sql, ", ".join([_literal(field, value) for value in values]))
     if op == "like":
+        if getattr(field, "type", "") not in TEXT_TYPES:
+            raise common.OperationError(u"like 条件只能用于文本字段：%s" % field.name)
         return "%s LIKE %s" % (field_sql, _literal(field, _value(condition)))
     if op == "is_null":
         return "%s IS NULL" % field_sql
@@ -115,24 +120,7 @@ def _compile_node(layer, condition):
 
 
 def _operator(condition):
-    op = condition.get("op", condition.get("operator"))
-    if op is None:
-        raise common.OperationError(u"条件缺少 op。")
-    op = common._text(op).strip().lower()
-    aliases = {
-        u"等于": "eq",
-        u"不等于": "ne",
-        u"大于": "gt",
-        u"大于等于": "gte",
-        u"小于": "lt",
-        u"小于等于": "lte",
-        u"之间": "between",
-        u"包含于": "in",
-        u"模糊匹配": "like",
-        u"为空": "is_null",
-        u"非空": "is_not_null"
-    }
-    return aliases.get(op, op)
+    return condition_protocol.canonical_operator(condition, error_cls=common.OperationError, missing_message=u"条件缺少 op。")
 
 
 def _value(condition):
@@ -170,6 +158,8 @@ def _literal(field, value):
     if value is None:
         return "NULL"
     if field_type in NUMBER_TYPES:
+        if not condition_protocol.is_number_value(value):
+            raise common.OperationError(u"数值字段条件值不是数字：%s" % common._text(value))
         return common._text(value)
     text = common._text(value).replace("'", "''")
     if field_type == "Date":

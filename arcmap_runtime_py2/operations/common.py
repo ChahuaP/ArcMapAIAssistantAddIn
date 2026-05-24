@@ -15,6 +15,7 @@ except NameError:
 
 
 SAFE_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+SAFE_EXTENSION_RE = re.compile(r"^\.[A-Za-z0-9]{1,12}$")
 
 
 class OperationError(Exception):
@@ -136,13 +137,106 @@ def output_feature_class(context, output_name, output_workspace=None):
     return path
 
 
+def output_shapefile(context, output_name, output_folder=None):
+    folder = output_directory(context, output_folder)
+    name = safe_output_name(output_name)
+    path = os.path.join(folder, name + ".shp")
+    if arcpy.Exists(path) or os.path.exists(path):
+        raise OperationError("Output already exists: %s" % path)
+    return path
+
+
+def output_feature_dataset(context, output_name, output_workspace=None, output_folder=None, output_format=None):
+    fmt = _normalize_output_format(output_format)
+    if not fmt and output_folder:
+        fmt = "shp"
+    if fmt in ("", "gdb"):
+        return output_feature_class(context, output_name, output_workspace)
+    if fmt == "shp":
+        folder = output_folder or _folder_workspace(output_workspace)
+        return output_shapefile(context, output_name, folder)
+    raise OperationError(u"Unsupported feature output format: %s" % output_format)
+
+
+def output_dataset(context, output_name, output_policy, output_workspace=None, output_folder=None, output_format=None):
+    policy = output_policy if isinstance(output_policy, dict) else {}
+    output_type = _output_policy_type(policy)
+    if output_type == "feature_class":
+        fmt = output_format or (None if output_folder else policy.get("default_format"))
+        return output_feature_dataset(context, output_name, output_workspace, output_folder, fmt)
+    if output_type == "file":
+        return output_file(context, output_name, _policy_extension(policy, output_format), output_folder)
+    if output_type == "raster":
+        return output_file(context, output_name, _raster_extension(policy, output_format), output_folder)
+    raise OperationError(u"Unsupported output_policy.type: %s" % output_type)
+
+
 def output_file(context, output_name, extension, output_folder=None):
     folder = output_directory(context, output_folder)
     name = safe_output_name(output_name)
+    extension = _normalize_extension(extension)
     path = os.path.join(folder, name + extension)
     if os.path.exists(path):
         raise OperationError("Output already exists: %s" % path)
     return path
+
+
+def _folder_workspace(output_workspace):
+    if not output_workspace:
+        return None
+    workspace = _text(output_workspace)
+    if workspace.lower().endswith(u".gdb"):
+        raise OperationError(u"Shapefile output requires an output folder, not a geodatabase: %s" % workspace)
+    return workspace
+
+
+def _output_policy_type(policy):
+    value = policy.get("type")
+    if not value:
+        return "feature_class"
+    text = _text(value).strip().lower()
+    if text in ("vector", "feature", "featureclass"):
+        return "feature_class"
+    return text
+
+
+def _policy_extension(policy, output_format=None):
+    extension = policy.get("extension")
+    if extension:
+        return _normalize_extension(extension)
+    fmt = _normalize_output_format(output_format or policy.get("default_format"))
+    if fmt:
+        return _normalize_extension("." + fmt)
+    raise OperationError("File output_policy requires extension.")
+
+
+def _raster_extension(policy, output_format=None):
+    fmt = _normalize_output_format(output_format or policy.get("default_format") or "tif")
+    if fmt == "tiff":
+        fmt = "tif"
+    if fmt not in ("tif",):
+        raise OperationError(u"Unsupported raster output format: %s" % fmt)
+    return "." + fmt
+
+
+def _normalize_output_format(value):
+    if not value:
+        return ""
+    text = _text(value).strip().lower().lstrip(".")
+    if text == "shapefile":
+        return "shp"
+    if text in ("geodatabase", "file_gdb", "feature_class"):
+        return "gdb"
+    return text
+
+
+def _normalize_extension(extension):
+    text = _text(extension).strip()
+    if not text.startswith("."):
+        text = "." + text
+    if not SAFE_EXTENSION_RE.match(text):
+        raise OperationError(u"Invalid output extension: %s" % extension)
+    return text.lower()
 
 
 def add_output_layer(path):
@@ -160,6 +254,26 @@ def add_output_layer(path):
 def refresh():
     arcpy.RefreshTOC()
     arcpy.RefreshActiveView()
+
+
+class auto_add_outputs_disabled(object):
+    def __init__(self):
+        self._env = None
+        self._original = None
+        self._enabled = False
+
+    def __enter__(self):
+        self._env = getattr(arcpy, "env", None)
+        if self._env is not None and hasattr(self._env, "addOutputsToMap"):
+            self._original = self._env.addOutputsToMap
+            self._env.addOutputsToMap = False
+            self._enabled = True
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if self._enabled:
+            self._env.addOutputsToMap = self._original
+        return False
 
 
 def export_table_to_csv(layer, path, selected_only):

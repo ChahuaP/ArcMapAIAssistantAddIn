@@ -6,251 +6,947 @@
       "version": "1.0",
       "category": "analysis",
       "summary": "对输入图层做缓冲区分析。",
-      "keywords": ["buffer", "缓冲", "缓冲区", "距离"],
-      "model_card": "Use analysis.buffer to create a buffer feature class. Arguments: input_layer, distance, output_name, output_workspace optional when MXD is unsaved. output_workspace may be a folder or a .gdb path.",
+      "keywords": [
+        "buffer",
+        "缓冲",
+        "缓冲区",
+        "距离"
+      ],
+      "model_card": "Use analysis.buffer to create a buffer feature class. Arguments: input_layer, distance, output_name, output_workspace optional for GDB output, output_folder optional for shapefile output, output_format optional: gdb or shp.",
       "parameters_schema": {
         "type": "object",
-        "required": ["input_layer", "distance", "output_name"],
-        "properties": {"input_layer": {"type": "string"}, "distance": {"type": "string"}, "output_name": {"type": "string"}, "output_workspace": {"type": "string"}},
+        "required": [
+          "input_layer",
+          "distance",
+          "output_name"
+        ],
+        "properties": {
+          "input_layer": {
+            "type": "string"
+          },
+          "distance": {
+            "type": "string"
+          },
+          "output_name": {
+            "type": "string"
+          },
+          "output_workspace": {
+            "type": "string"
+          },
+          "output_folder": {
+            "type": "string"
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "gdb",
+              "shp"
+            ]
+          }
+        },
         "additionalProperties": false
       },
-      "context_requirements": {"requires_layers": true, "requires_output_location_when_unsaved": true},
+      "context_requirements": {
+        "requires_layers": true,
+        "requires_output_location_when_unsaved": true
+      },
       "side_effects": "writes_data",
-      "output_policy": {"writes_output": true, "workspace": "mxd_default_or_output_workspace", "overwrite": false},
+      "output_policy": {
+        "writes_output": true,
+        "type": "feature_class",
+        "formats": [
+          "gdb",
+          "shp"
+        ],
+        "default_format": "gdb",
+        "workspace": "mxd_default_or_output_workspace_or_output_folder",
+        "overwrite": false,
+        "add_to_map": true
+      },
       "executor": "operations.analysis_ops.buffer",
-      "examples": [{"user": "给 roads 做100米缓冲区", "arguments": {"input_layer": "roads", "distance": "100 Meters", "output_name": "roads_buffer_100m"}}]
+      "examples": [
+        {
+          "user": "给 roads 做100米缓冲区",
+          "arguments": {
+            "input_layer": "roads",
+            "distance": "100 Meters",
+            "output_name": "roads_buffer_100m"
+          }
+        }
+      ]
     },
     {
       "id": "analysis.clip",
       "version": "1.0",
       "category": "analysis",
       "summary": "用裁剪图层裁剪输入图层。",
-      "keywords": ["clip", "裁剪"],
-      "model_card": "Use analysis.clip to clip input features by clip features. Arguments: input_layer, clip_layer, output_name, output_workspace optional when MXD is unsaved. output_workspace may be a folder or a .gdb path.",
+      "keywords": [
+        "clip",
+        "裁剪"
+      ],
+      "model_card": "Use analysis.clip to clip input features by clip features. Arguments: input_layer, clip_layer, output_name, output_workspace optional for GDB output, output_folder optional for shapefile output, output_format optional: gdb or shp.",
       "parameters_schema": {
         "type": "object",
-        "required": ["input_layer", "clip_layer", "output_name"],
-        "properties": {"input_layer": {"type": "string"}, "clip_layer": {"type": "string"}, "output_name": {"type": "string"}, "output_workspace": {"type": "string"}},
+        "required": [
+          "input_layer",
+          "clip_layer",
+          "output_name"
+        ],
+        "properties": {
+          "input_layer": {
+            "type": "string"
+          },
+          "clip_layer": {
+            "type": "string"
+          },
+          "output_name": {
+            "type": "string"
+          },
+          "output_workspace": {
+            "type": "string"
+          },
+          "output_folder": {
+            "type": "string"
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "gdb",
+              "shp"
+            ]
+          }
+        },
         "additionalProperties": false
       },
-      "context_requirements": {"requires_layers": true, "requires_output_location_when_unsaved": true},
+      "context_requirements": {
+        "requires_layers": true,
+        "requires_output_location_when_unsaved": true
+      },
       "side_effects": "writes_data",
-      "output_policy": {"writes_output": true, "workspace": "mxd_default_or_output_workspace", "overwrite": false},
+      "output_policy": {
+        "writes_output": true,
+        "type": "feature_class",
+        "formats": [
+          "gdb",
+          "shp"
+        ],
+        "default_format": "gdb",
+        "workspace": "mxd_default_or_output_workspace_or_output_folder",
+        "overwrite": false,
+        "add_to_map": true
+      },
       "executor": "operations.analysis_ops.clip",
-      "examples": [{"user": "用 boundary 裁剪 roads", "arguments": {"input_layer": "roads", "clip_layer": "boundary", "output_name": "roads_clip"}}]
+      "examples": [
+        {
+          "user": "用 boundary 裁剪 roads",
+          "arguments": {
+            "input_layer": "roads",
+            "clip_layer": "boundary",
+            "output_name": "roads_clip"
+          }
+        }
+      ]
     },
     {
       "id": "analysis.intersect",
       "version": "1.0",
       "category": "analysis",
       "summary": "对多个图层做相交分析。",
-      "keywords": ["intersect", "相交分析", "叠加"],
-      "model_card": "Use analysis.intersect to intersect multiple input layers. Arguments: input_layers, output_name, output_workspace optional when MXD is unsaved. output_workspace may be a folder or a .gdb path.",
+      "keywords": [
+        "intersect",
+        "相交分析",
+        "叠加"
+      ],
+      "model_card": "Use analysis.intersect to intersect multiple input layers. Arguments: input_layers, output_name, output_workspace optional for GDB output, output_folder optional for shapefile output, output_format optional: gdb or shp.",
       "parameters_schema": {
         "type": "object",
-        "required": ["input_layers", "output_name"],
-        "properties": {"input_layers": {"type": "array", "items": {"type": "string"}, "minItems": 2}, "output_name": {"type": "string"}, "output_workspace": {"type": "string"}},
+        "required": [
+          "input_layers",
+          "output_name"
+        ],
+        "properties": {
+          "input_layers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 2
+          },
+          "output_name": {
+            "type": "string"
+          },
+          "output_workspace": {
+            "type": "string"
+          },
+          "output_folder": {
+            "type": "string"
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "gdb",
+              "shp"
+            ]
+          }
+        },
         "additionalProperties": false
       },
-      "context_requirements": {"requires_layers": true, "requires_output_location_when_unsaved": true},
+      "context_requirements": {
+        "requires_layers": true,
+        "requires_output_location_when_unsaved": true
+      },
       "side_effects": "writes_data",
-      "output_policy": {"writes_output": true, "workspace": "mxd_default_or_output_workspace", "overwrite": false},
+      "output_policy": {
+        "writes_output": true,
+        "type": "feature_class",
+        "formats": [
+          "gdb",
+          "shp"
+        ],
+        "default_format": "gdb",
+        "workspace": "mxd_default_or_output_workspace_or_output_folder",
+        "overwrite": false,
+        "add_to_map": true
+      },
       "executor": "operations.analysis_ops.intersect",
-      "examples": [{"user": "roads 和 boundary 做相交", "arguments": {"input_layers": ["roads", "boundary"], "output_name": "roads_boundary_intersect"}}]
+      "examples": [
+        {
+          "user": "roads 和 boundary 做相交",
+          "arguments": {
+            "input_layers": [
+              "roads",
+              "boundary"
+            ],
+            "output_name": "roads_boundary_intersect"
+          }
+        }
+      ]
     },
     {
       "id": "analysis.dissolve",
       "version": "1.0",
       "category": "analysis",
       "summary": "按字段融合要素。",
-      "keywords": ["dissolve", "融合", "按字段合并"],
-      "model_card": "Use analysis.dissolve to dissolve features. Arguments: input_layer, output_name, dissolve_fields optional, output_workspace optional when MXD is unsaved. output_workspace may be a folder or a .gdb path.",
+      "keywords": [
+        "dissolve",
+        "融合",
+        "按字段合并"
+      ],
+      "model_card": "Use analysis.dissolve to dissolve features. Arguments: input_layer, output_name, dissolve_fields optional, output_workspace optional for GDB output, output_folder optional for shapefile output, output_format optional: gdb or shp.",
       "parameters_schema": {
         "type": "object",
-        "required": ["input_layer", "output_name"],
-        "properties": {"input_layer": {"type": "string"}, "output_name": {"type": "string"}, "dissolve_fields": {"type": "array", "items": {"type": "string"}}, "output_workspace": {"type": "string"}},
+        "required": [
+          "input_layer",
+          "output_name"
+        ],
+        "properties": {
+          "input_layer": {
+            "type": "string"
+          },
+          "output_name": {
+            "type": "string"
+          },
+          "dissolve_fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "output_workspace": {
+            "type": "string"
+          },
+          "output_folder": {
+            "type": "string"
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "gdb",
+              "shp"
+            ]
+          }
+        },
         "additionalProperties": false
       },
-      "context_requirements": {"requires_layers": true, "requires_output_location_when_unsaved": true},
+      "context_requirements": {
+        "requires_layers": true,
+        "requires_output_location_when_unsaved": true
+      },
       "side_effects": "writes_data",
-      "output_policy": {"writes_output": true, "workspace": "mxd_default_or_output_workspace", "overwrite": false},
+      "output_policy": {
+        "writes_output": true,
+        "type": "feature_class",
+        "formats": [
+          "gdb",
+          "shp"
+        ],
+        "default_format": "gdb",
+        "workspace": "mxd_default_or_output_workspace_or_output_folder",
+        "overwrite": false,
+        "add_to_map": true
+      },
       "executor": "operations.analysis_ops.dissolve",
-      "examples": [{"user": "按 TYPE 融合 roads", "arguments": {"input_layer": "roads", "output_name": "roads_dissolve", "dissolve_fields": ["TYPE"]}}]
+      "examples": [
+        {
+          "user": "按 TYPE 融合 roads",
+          "arguments": {
+            "input_layer": "roads",
+            "output_name": "roads_dissolve",
+            "dissolve_fields": [
+              "TYPE"
+            ]
+          }
+        }
+      ]
     },
     {
       "id": "analysis.project",
       "version": "1.0",
       "category": "analysis",
       "summary": "投影转换图层。",
-      "keywords": ["project", "投影", "坐标转换"],
-      "model_card": "Use analysis.project to project a layer. Arguments: input_layer, output_name, spatial_reference, output_workspace optional when MXD is unsaved. output_workspace may be a folder or a .gdb path.",
+      "keywords": [
+        "project",
+        "投影",
+        "坐标转换"
+      ],
+      "model_card": "Use analysis.project to project a layer. Arguments: input_layer, output_name, spatial_reference, output_workspace optional for GDB output, output_folder optional for shapefile output, output_format optional: gdb or shp.",
       "parameters_schema": {
         "type": "object",
-        "required": ["input_layer", "output_name", "spatial_reference"],
-        "properties": {"input_layer": {"type": "string"}, "output_name": {"type": "string"}, "spatial_reference": {"type": "string"}, "output_workspace": {"type": "string"}},
+        "required": [
+          "input_layer",
+          "output_name",
+          "spatial_reference"
+        ],
+        "properties": {
+          "input_layer": {
+            "type": "string"
+          },
+          "output_name": {
+            "type": "string"
+          },
+          "spatial_reference": {
+            "type": "string"
+          },
+          "output_workspace": {
+            "type": "string"
+          },
+          "output_folder": {
+            "type": "string"
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "gdb",
+              "shp"
+            ]
+          }
+        },
         "additionalProperties": false
       },
-      "context_requirements": {"requires_layers": true, "requires_output_location_when_unsaved": true},
+      "context_requirements": {
+        "requires_layers": true,
+        "requires_output_location_when_unsaved": true
+      },
       "side_effects": "writes_data",
-      "output_policy": {"writes_output": true, "workspace": "mxd_default_or_output_workspace", "overwrite": false},
+      "output_policy": {
+        "writes_output": true,
+        "type": "feature_class",
+        "formats": [
+          "gdb",
+          "shp"
+        ],
+        "default_format": "gdb",
+        "workspace": "mxd_default_or_output_workspace_or_output_folder",
+        "overwrite": false,
+        "add_to_map": true
+      },
       "executor": "operations.analysis_ops.project",
-      "examples": [{"user": "把 roads 投影到 WGS 1984", "arguments": {"input_layer": "roads", "output_name": "roads_wgs84", "spatial_reference": "WGS 1984"}}]
+      "examples": [
+        {
+          "user": "把 roads 投影到 WGS 1984",
+          "arguments": {
+            "input_layer": "roads",
+            "output_name": "roads_wgs84",
+            "spatial_reference": "WGS 1984"
+          }
+        }
+      ]
     },
     {
       "id": "analysis.spatial_join",
       "version": "1.0",
       "category": "analysis",
       "summary": "执行空间连接。",
-      "keywords": ["spatial join", "空间连接"],
-      "model_card": "Use analysis.spatial_join for ArcPy SpatialJoin_analysis. Arguments: target_layer, join_layer, output_name, output_workspace optional when MXD is unsaved. output_workspace may be a folder or a .gdb path.",
+      "keywords": [
+        "spatial join",
+        "空间连接"
+      ],
+      "model_card": "Use analysis.spatial_join for ArcPy SpatialJoin_analysis. Arguments: target_layer, join_layer, output_name, output_workspace optional for GDB output, output_folder optional for shapefile output, output_format optional: gdb or shp.",
       "parameters_schema": {
         "type": "object",
-        "required": ["target_layer", "join_layer", "output_name"],
-        "properties": {"target_layer": {"type": "string"}, "join_layer": {"type": "string"}, "output_name": {"type": "string"}, "output_workspace": {"type": "string"}},
+        "required": [
+          "target_layer",
+          "join_layer",
+          "output_name"
+        ],
+        "properties": {
+          "target_layer": {
+            "type": "string"
+          },
+          "join_layer": {
+            "type": "string"
+          },
+          "output_name": {
+            "type": "string"
+          },
+          "output_workspace": {
+            "type": "string"
+          },
+          "output_folder": {
+            "type": "string"
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "gdb",
+              "shp"
+            ]
+          }
+        },
         "additionalProperties": false
       },
-      "context_requirements": {"requires_layers": true, "requires_output_location_when_unsaved": true},
+      "context_requirements": {
+        "requires_layers": true,
+        "requires_output_location_when_unsaved": true
+      },
       "side_effects": "writes_data",
-      "output_policy": {"writes_output": true, "workspace": "mxd_default_or_output_workspace", "overwrite": false},
+      "output_policy": {
+        "writes_output": true,
+        "type": "feature_class",
+        "formats": [
+          "gdb",
+          "shp"
+        ],
+        "default_format": "gdb",
+        "workspace": "mxd_default_or_output_workspace_or_output_folder",
+        "overwrite": false,
+        "add_to_map": true
+      },
       "executor": "operations.analysis_ops.spatial_join",
-      "examples": [{"user": "把 parcels 和 schools 做空间连接", "arguments": {"target_layer": "parcels", "join_layer": "schools", "output_name": "parcels_schools_join"}}]
+      "examples": [
+        {
+          "user": "把 parcels 和 schools 做空间连接",
+          "arguments": {
+            "target_layer": "parcels",
+            "join_layer": "schools",
+            "output_name": "parcels_schools_join"
+          }
+        }
+      ]
     },
     {
       "id": "analysis.erase",
       "version": "1.0",
       "category": "analysis",
       "summary": "用擦除图层从输入图层中去除重叠部分。",
-      "keywords": ["erase", "擦除", "去除重叠"],
-      "model_card": "Use analysis.erase to erase overlapped areas from an input layer. Arguments: input_layer, erase_layer, output_name, output_workspace optional when MXD is unsaved. output_workspace may be a folder or a .gdb path.",
+      "keywords": [
+        "erase",
+        "擦除",
+        "去除重叠"
+      ],
+      "model_card": "Use analysis.erase to erase overlapped areas from an input layer. Arguments: input_layer, erase_layer, output_name, output_workspace optional for GDB output, output_folder optional for shapefile output, output_format optional: gdb or shp.",
       "parameters_schema": {
         "type": "object",
-        "required": ["input_layer", "erase_layer", "output_name"],
-        "properties": {"input_layer": {"type": "string"}, "erase_layer": {"type": "string"}, "output_name": {"type": "string"}, "output_workspace": {"type": "string"}},
+        "required": [
+          "input_layer",
+          "erase_layer",
+          "output_name"
+        ],
+        "properties": {
+          "input_layer": {
+            "type": "string"
+          },
+          "erase_layer": {
+            "type": "string"
+          },
+          "output_name": {
+            "type": "string"
+          },
+          "output_workspace": {
+            "type": "string"
+          },
+          "output_folder": {
+            "type": "string"
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "gdb",
+              "shp"
+            ]
+          }
+        },
         "additionalProperties": false
       },
-      "context_requirements": {"requires_layers": true, "requires_output_location_when_unsaved": true},
+      "context_requirements": {
+        "requires_layers": true,
+        "requires_output_location_when_unsaved": true
+      },
       "side_effects": "writes_data",
-      "output_policy": {"writes_output": true, "workspace": "mxd_default_or_output_workspace", "overwrite": false},
+      "output_policy": {
+        "writes_output": true,
+        "type": "feature_class",
+        "formats": [
+          "gdb",
+          "shp"
+        ],
+        "default_format": "gdb",
+        "workspace": "mxd_default_or_output_workspace_or_output_folder",
+        "overwrite": false,
+        "add_to_map": true
+      },
       "executor": "operations.analysis_ops.erase",
-      "examples": [{"user": "用 boundary 擦除 roads", "arguments": {"input_layer": "roads", "erase_layer": "boundary", "output_name": "roads_erase"}}]
+      "examples": [
+        {
+          "user": "用 boundary 擦除 roads",
+          "arguments": {
+            "input_layer": "roads",
+            "erase_layer": "boundary",
+            "output_name": "roads_erase"
+          }
+        }
+      ]
     },
     {
       "id": "analysis.identity",
       "version": "1.0",
       "category": "analysis",
       "summary": "执行标识分析，把标识图层属性写入输入图层结果。",
-      "keywords": ["identity", "标识", "叠加属性"],
-      "model_card": "Use analysis.identity for identity overlay. Arguments: input_layer, identity_layer, output_name, output_workspace optional when MXD is unsaved. output_workspace may be a folder or a .gdb path.",
+      "keywords": [
+        "identity",
+        "标识",
+        "叠加属性"
+      ],
+      "model_card": "Use analysis.identity for identity overlay. Arguments: input_layer, identity_layer, output_name, output_workspace optional for GDB output, output_folder optional for shapefile output, output_format optional: gdb or shp.",
       "parameters_schema": {
         "type": "object",
-        "required": ["input_layer", "identity_layer", "output_name"],
-        "properties": {"input_layer": {"type": "string"}, "identity_layer": {"type": "string"}, "output_name": {"type": "string"}, "output_workspace": {"type": "string"}},
+        "required": [
+          "input_layer",
+          "identity_layer",
+          "output_name"
+        ],
+        "properties": {
+          "input_layer": {
+            "type": "string"
+          },
+          "identity_layer": {
+            "type": "string"
+          },
+          "output_name": {
+            "type": "string"
+          },
+          "output_workspace": {
+            "type": "string"
+          },
+          "output_folder": {
+            "type": "string"
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "gdb",
+              "shp"
+            ]
+          }
+        },
         "additionalProperties": false
       },
-      "context_requirements": {"requires_layers": true, "requires_output_location_when_unsaved": true},
+      "context_requirements": {
+        "requires_layers": true,
+        "requires_output_location_when_unsaved": true
+      },
       "side_effects": "writes_data",
-      "output_policy": {"writes_output": true, "workspace": "mxd_default_or_output_workspace", "overwrite": false},
+      "output_policy": {
+        "writes_output": true,
+        "type": "feature_class",
+        "formats": [
+          "gdb",
+          "shp"
+        ],
+        "default_format": "gdb",
+        "workspace": "mxd_default_or_output_workspace_or_output_folder",
+        "overwrite": false,
+        "add_to_map": true
+      },
       "executor": "operations.analysis_ops.identity",
-      "examples": [{"user": "用 zoning 对 parcels 做标识分析", "arguments": {"input_layer": "parcels", "identity_layer": "zoning", "output_name": "parcels_identity"}}]
+      "examples": [
+        {
+          "user": "用 zoning 对 parcels 做标识分析",
+          "arguments": {
+            "input_layer": "parcels",
+            "identity_layer": "zoning",
+            "output_name": "parcels_identity"
+          }
+        }
+      ]
     },
     {
       "id": "analysis.union",
       "version": "1.0",
       "category": "analysis",
       "summary": "对多个面图层做联合分析。",
-      "keywords": ["union", "联合", "叠加联合"],
-      "model_card": "Use analysis.union to union multiple polygon layers. Arguments: input_layers, output_name, output_workspace optional when MXD is unsaved. output_workspace may be a folder or a .gdb path.",
+      "keywords": [
+        "union",
+        "联合",
+        "叠加联合"
+      ],
+      "model_card": "Use analysis.union to union multiple polygon layers. Arguments: input_layers, output_name, output_workspace optional for GDB output, output_folder optional for shapefile output, output_format optional: gdb or shp.",
       "parameters_schema": {
         "type": "object",
-        "required": ["input_layers", "output_name"],
-        "properties": {"input_layers": {"type": "array", "items": {"type": "string"}, "minItems": 2}, "output_name": {"type": "string"}, "output_workspace": {"type": "string"}},
+        "required": [
+          "input_layers",
+          "output_name"
+        ],
+        "properties": {
+          "input_layers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 2
+          },
+          "output_name": {
+            "type": "string"
+          },
+          "output_workspace": {
+            "type": "string"
+          },
+          "output_folder": {
+            "type": "string"
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "gdb",
+              "shp"
+            ]
+          }
+        },
         "additionalProperties": false
       },
-      "context_requirements": {"requires_layers": true, "requires_output_location_when_unsaved": true},
+      "context_requirements": {
+        "requires_layers": true,
+        "requires_output_location_when_unsaved": true
+      },
       "side_effects": "writes_data",
-      "output_policy": {"writes_output": true, "workspace": "mxd_default_or_output_workspace", "overwrite": false},
+      "output_policy": {
+        "writes_output": true,
+        "type": "feature_class",
+        "formats": [
+          "gdb",
+          "shp"
+        ],
+        "default_format": "gdb",
+        "workspace": "mxd_default_or_output_workspace_or_output_folder",
+        "overwrite": false,
+        "add_to_map": true
+      },
       "executor": "operations.analysis_ops.union",
-      "examples": [{"user": "nanjing 和 zoning 做联合分析", "arguments": {"input_layers": ["nanjing", "zoning"], "output_name": "nanjing_zoning_union"}}]
+      "examples": [
+        {
+          "user": "nanjing 和 zoning 做联合分析",
+          "arguments": {
+            "input_layers": [
+              "nanjing",
+              "zoning"
+            ],
+            "output_name": "nanjing_zoning_union"
+          }
+        }
+      ]
     },
     {
       "id": "analysis.symmetrical_difference",
       "version": "1.0",
       "category": "analysis",
       "summary": "执行对称差异分析，保留两个图层不重叠的部分。",
-      "keywords": ["symmetrical difference", "symmetric difference", "对称差异", "差异"],
-      "model_card": "Use analysis.symmetrical_difference to keep non-overlapping areas of two layers. Arguments: input_layer, update_layer, output_name, output_workspace optional when MXD is unsaved. output_workspace may be a folder or a .gdb path.",
+      "keywords": [
+        "symmetrical difference",
+        "symmetric difference",
+        "对称差异",
+        "差异"
+      ],
+      "model_card": "Use analysis.symmetrical_difference to keep non-overlapping areas of two layers. Arguments: input_layer, update_layer, output_name, output_workspace optional for GDB output, output_folder optional for shapefile output, output_format optional: gdb or shp.",
       "parameters_schema": {
         "type": "object",
-        "required": ["input_layer", "update_layer", "output_name"],
-        "properties": {"input_layer": {"type": "string"}, "update_layer": {"type": "string"}, "output_name": {"type": "string"}, "output_workspace": {"type": "string"}},
+        "required": [
+          "input_layer",
+          "update_layer",
+          "output_name"
+        ],
+        "properties": {
+          "input_layer": {
+            "type": "string"
+          },
+          "update_layer": {
+            "type": "string"
+          },
+          "output_name": {
+            "type": "string"
+          },
+          "output_workspace": {
+            "type": "string"
+          },
+          "output_folder": {
+            "type": "string"
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "gdb",
+              "shp"
+            ]
+          }
+        },
         "additionalProperties": false
       },
-      "context_requirements": {"requires_layers": true, "requires_output_location_when_unsaved": true},
+      "context_requirements": {
+        "requires_layers": true,
+        "requires_output_location_when_unsaved": true
+      },
       "side_effects": "writes_data",
-      "output_policy": {"writes_output": true, "workspace": "mxd_default_or_output_workspace", "overwrite": false},
+      "output_policy": {
+        "writes_output": true,
+        "type": "feature_class",
+        "formats": [
+          "gdb",
+          "shp"
+        ],
+        "default_format": "gdb",
+        "workspace": "mxd_default_or_output_workspace_or_output_folder",
+        "overwrite": false,
+        "add_to_map": true
+      },
       "executor": "operations.analysis_ops.symmetrical_difference",
-      "examples": [{"user": "roads 和 boundary 做对称差异", "arguments": {"input_layer": "roads", "update_layer": "boundary", "output_name": "roads_boundary_symdiff"}}]
+      "examples": [
+        {
+          "user": "roads 和 boundary 做对称差异",
+          "arguments": {
+            "input_layer": "roads",
+            "update_layer": "boundary",
+            "output_name": "roads_boundary_symdiff"
+          }
+        }
+      ]
     },
     {
       "id": "analysis.update_overlay",
       "version": "1.0",
       "category": "analysis",
       "summary": "执行更新叠加分析。",
-      "keywords": ["update", "更新叠加", "叠加更新"],
-      "model_card": "Use analysis.update_overlay for ArcPy Update_analysis overlay. Arguments: input_layer, update_layer, output_name, output_workspace optional when MXD is unsaved. output_workspace may be a folder or a .gdb path.",
+      "keywords": [
+        "update",
+        "更新叠加",
+        "叠加更新"
+      ],
+      "model_card": "Use analysis.update_overlay for ArcPy Update_analysis overlay. Arguments: input_layer, update_layer, output_name, output_workspace optional for GDB output, output_folder optional for shapefile output, output_format optional: gdb or shp.",
       "parameters_schema": {
         "type": "object",
-        "required": ["input_layer", "update_layer", "output_name"],
-        "properties": {"input_layer": {"type": "string"}, "update_layer": {"type": "string"}, "output_name": {"type": "string"}, "output_workspace": {"type": "string"}},
+        "required": [
+          "input_layer",
+          "update_layer",
+          "output_name"
+        ],
+        "properties": {
+          "input_layer": {
+            "type": "string"
+          },
+          "update_layer": {
+            "type": "string"
+          },
+          "output_name": {
+            "type": "string"
+          },
+          "output_workspace": {
+            "type": "string"
+          },
+          "output_folder": {
+            "type": "string"
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "gdb",
+              "shp"
+            ]
+          }
+        },
         "additionalProperties": false
       },
-      "context_requirements": {"requires_layers": true, "requires_output_location_when_unsaved": true},
+      "context_requirements": {
+        "requires_layers": true,
+        "requires_output_location_when_unsaved": true
+      },
       "side_effects": "writes_data",
-      "output_policy": {"writes_output": true, "workspace": "mxd_default_or_output_workspace", "overwrite": false},
+      "output_policy": {
+        "writes_output": true,
+        "type": "feature_class",
+        "formats": [
+          "gdb",
+          "shp"
+        ],
+        "default_format": "gdb",
+        "workspace": "mxd_default_or_output_workspace_or_output_folder",
+        "overwrite": false,
+        "add_to_map": true
+      },
       "executor": "operations.analysis_ops.update_overlay",
-      "examples": [{"user": "用 new_boundary 更新 old_boundary", "arguments": {"input_layer": "old_boundary", "update_layer": "new_boundary", "output_name": "boundary_update"}}]
+      "examples": [
+        {
+          "user": "用 new_boundary 更新 old_boundary",
+          "arguments": {
+            "input_layer": "old_boundary",
+            "update_layer": "new_boundary",
+            "output_name": "boundary_update"
+          }
+        }
+      ]
     },
     {
       "id": "analysis.merge",
       "version": "1.0",
       "category": "analysis",
       "summary": "把多个图层合并成一个新图层。",
-      "keywords": ["merge", "合并", "合并图层"],
-      "model_card": "Use analysis.merge to merge multiple input layers into a new feature class. Arguments: input_layers, output_name, output_workspace optional when MXD is unsaved. output_workspace may be a folder or a .gdb path.",
+      "keywords": [
+        "merge",
+        "合并",
+        "合并图层"
+      ],
+      "model_card": "Use analysis.merge to merge multiple input layers into a new feature class. Arguments: input_layers, output_name, output_workspace optional for GDB output, output_folder optional for shapefile output, output_format optional: gdb or shp.",
       "parameters_schema": {
         "type": "object",
-        "required": ["input_layers", "output_name"],
-        "properties": {"input_layers": {"type": "array", "items": {"type": "string"}, "minItems": 2}, "output_name": {"type": "string"}, "output_workspace": {"type": "string"}},
+        "required": [
+          "input_layers",
+          "output_name"
+        ],
+        "properties": {
+          "input_layers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 2
+          },
+          "output_name": {
+            "type": "string"
+          },
+          "output_workspace": {
+            "type": "string"
+          },
+          "output_folder": {
+            "type": "string"
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "gdb",
+              "shp"
+            ]
+          }
+        },
         "additionalProperties": false
       },
-      "context_requirements": {"requires_layers": true, "requires_output_location_when_unsaved": true},
+      "context_requirements": {
+        "requires_layers": true,
+        "requires_output_location_when_unsaved": true
+      },
       "side_effects": "writes_data",
-      "output_policy": {"writes_output": true, "workspace": "mxd_default_or_output_workspace", "overwrite": false},
+      "output_policy": {
+        "writes_output": true,
+        "type": "feature_class",
+        "formats": [
+          "gdb",
+          "shp"
+        ],
+        "default_format": "gdb",
+        "workspace": "mxd_default_or_output_workspace_or_output_folder",
+        "overwrite": false,
+        "add_to_map": true
+      },
       "executor": "operations.analysis_ops.merge",
-      "examples": [{"user": "合并 roads1 和 roads2", "arguments": {"input_layers": ["roads1", "roads2"], "output_name": "roads_merge"}}]
+      "examples": [
+        {
+          "user": "合并 roads1 和 roads2",
+          "arguments": {
+            "input_layers": [
+              "roads1",
+              "roads2"
+            ],
+            "output_name": "roads_merge"
+          }
+        }
+      ]
     },
     {
       "id": "analysis.append",
       "version": "1.0",
       "category": "analysis",
       "summary": "把输入图层追加到目标图层，直接修改目标数据。",
-      "keywords": ["append", "追加", "追加到"],
+      "keywords": [
+        "append",
+        "追加",
+        "追加到"
+      ],
       "model_card": "Use analysis.append to append input layers into an existing target layer. This directly edits target data and requires confirmation. Arguments: input_layers, target_layer, schema_type optional.",
       "parameters_schema": {
         "type": "object",
-        "required": ["input_layers", "target_layer"],
+        "required": [
+          "input_layers",
+          "target_layer"
+        ],
         "properties": {
-          "input_layers": {"type": "array", "items": {"type": "string"}, "minItems": 1},
-          "target_layer": {"type": "string"},
-          "schema_type": {"type": "string", "enum": ["TEST", "NO_TEST"]}
+          "input_layers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1
+          },
+          "target_layer": {
+            "type": "string"
+          },
+          "schema_type": {
+            "type": "string",
+            "enum": [
+              "TEST",
+              "NO_TEST"
+            ]
+          }
         },
         "additionalProperties": false
       },
-      "context_requirements": {"requires_layers": true, "requires_confirmation": true},
+      "context_requirements": {
+        "requires_layers": true,
+        "requires_confirmation": true
+      },
       "side_effects": "edits_data",
-      "output_policy": {"writes_output": false, "edits_original": true},
+      "output_policy": {
+        "writes_output": false,
+        "edits_original": true
+      },
       "executor": "operations.analysis_ops.append",
-      "examples": [{"user": "把 roads_new 追加到 roads", "arguments": {"input_layers": ["roads_new"], "target_layer": "roads", "schema_type": "NO_TEST"}}]
+      "examples": [
+        {
+          "user": "把 roads_new 追加到 roads",
+          "arguments": {
+            "input_layers": [
+              "roads_new"
+            ],
+            "target_layer": "roads",
+            "schema_type": "NO_TEST"
+          }
+        }
+      ]
     }
   ]
 }

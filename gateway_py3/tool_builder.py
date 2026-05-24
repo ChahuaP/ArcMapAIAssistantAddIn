@@ -9,180 +9,32 @@ from pathlib import Path
 from typing import Any, Dict
 
 from .custom_tool_contract import CustomToolContractError, build_review_payload
+from .output_policy import (
+    OutputPolicyError,
+    canonical_output_policy,
+    managed_output_parameter_names,
+    managed_output_properties,
+    output_policy_type,
+    validate_output_policy,
+)
 from .paths import appdata_dir
+from .tool_builder_rules import (
+    ALLOWED_ARCPY_CALLS,
+    ALLOWED_BARE_CALLS,
+    CODING_RE,
+    DISALLOWED_ATTR_CALLS,
+    DISALLOWED_CALLS,
+    DISALLOWED_IMPORT_ROOTS,
+    EXECUTOR_ENCODING_HEADER,
+    PYTHON2_UNSUPPORTED_KEYWORDS,
+    PYTHON2_UNSUPPORTED_NAMES,
+    PYTHON2_UNSUPPORTED_NODE_NAMES,
+    RESERVED_ARCGIS_FIELD_NAMES,
+    RESERVED_CURSOR_WRITE_FIELDS,
+)
+
 PENDING_ROOT = appdata_dir() / "pending_tools"
 ENABLED_ROOT = appdata_dir() / "custom_tools" / "enabled"
-DISALLOWED_IMPORT_ROOTS = {
-    "asyncio",
-    "ctypes",
-    "dataclasses",
-    "ftplib",
-    "http",
-    "paramiko",
-    "pathlib",
-    "requests",
-    "shutil",
-    "socket",
-    "subprocess",
-    "urllib",
-    "urllib2",
-    "winreg",
-    "_winreg",
-}
-DISALLOWED_CALLS = {"__import__", "compile", "eval", "exec", "input", "open", "raw_input"}
-DISALLOWED_ATTR_CALLS = {
-    ("os", "fspath"),
-    ("os", "popen"),
-    ("os", "remove"),
-    ("os", "removedirs"),
-    ("os", "rename"),
-    ("os", "replace"),
-    ("os", "rmdir"),
-    ("os", "scandir"),
-    ("os", "startfile"),
-    ("os", "system"),
-    ("os", "unlink"),
-}
-EXECUTOR_ENCODING_HEADER = "# -*- coding: utf-8 -*-\n"
-CODING_RE = re.compile(r"coding[:=]\s*([-\w.]+)")
-PYTHON2_UNSUPPORTED_NODE_NAMES = {
-    "AnnAssign",
-    "AsyncFor",
-    "AsyncFunctionDef",
-    "AsyncWith",
-    "Await",
-    "FormattedValue",
-    "JoinedStr",
-    "Nonlocal",
-    "NamedExpr",
-}
-PYTHON2_UNSUPPORTED_NAMES = {
-    "BaseExceptionGroup",
-    "BlockingIOError",
-    "BrokenPipeError",
-    "ChildProcessError",
-    "ConnectionError",
-    "ExceptionGroup",
-    "FileExistsError",
-    "FileNotFoundError",
-    "InterruptedError",
-    "IsADirectoryError",
-    "ModuleNotFoundError",
-    "NotADirectoryError",
-    "PermissionError",
-    "ProcessLookupError",
-    "StopAsyncIteration",
-    "TimeoutError",
-}
-PYTHON2_UNSUPPORTED_KEYWORDS = {"exist_ok"}
-ALLOWED_BARE_CALLS = {
-    "Exception",
-    "RuntimeError",
-    "ValueError",
-    "TypeError",
-    "KeyError",
-    "IndexError",
-    "AttributeError",
-    "NotImplementedError",
-    "ArithmeticError",
-    "ZeroDivisionError",
-    "abs",
-    "all",
-    "any",
-    "bool",
-    "basestring",
-    "chr",
-    "dict",
-    "enumerate",
-    "filter",
-    "float",
-    "format",
-    "getattr",
-    "hasattr",
-    "int",
-    "isinstance",
-    "iter",
-    "len",
-    "list",
-    "long",
-    "map",
-    "max",
-    "min",
-    "next",
-    "ord",
-    "range",
-    "repr",
-    "reversed",
-    "round",
-    "set",
-    "setattr",
-    "slice",
-    "sorted",
-    "str",
-    "sum",
-    "tuple",
-    "unicode",
-    "unichr",
-    "xrange",
-    "zip",
-}
-ALLOWED_ARCPY_CALLS = {
-    ("arcpy", "AddFieldDelimiters"),
-    ("arcpy", "AddField_management"),
-    ("arcpy", "Append_management"),
-    ("arcpy", "Array"),
-    ("arcpy", "Buffer_analysis"),
-    ("arcpy", "Clip_analysis"),
-    ("arcpy", "CopyFeatures_management"),
-    ("arcpy", "CreateFeatureclass_management"),
-    ("arcpy", "CreateFileGDB_management"),
-    ("arcpy", "DeleteField_management"),
-    ("arcpy", "Delete_management"),
-    ("arcpy", "Describe"),
-    ("arcpy", "Dissolve_management"),
-    ("arcpy", "Erase_analysis"),
-    ("arcpy", "Exists"),
-    ("arcpy", "FeatureToPoint_management"),
-    ("arcpy", "GetCount_management"),
-    ("arcpy", "Geometry"),
-    ("arcpy", "Identity_analysis"),
-    ("arcpy", "Intersect_analysis"),
-    ("arcpy", "ListFields"),
-    ("arcpy", "MakeFeatureLayer_management"),
-    ("arcpy", "Merge_management"),
-    ("arcpy", "Multipoint"),
-    ("arcpy", "Point"),
-    ("arcpy", "PointGeometry"),
-    ("arcpy", "Polygon"),
-    ("arcpy", "Polyline"),
-    ("arcpy", "Project_management"),
-    ("arcpy", "SelectLayerByAttribute_management"),
-    ("arcpy", "SelectLayerByLocation_management"),
-    ("arcpy", "SpatialJoin_analysis"),
-    ("arcpy", "SpatialReference"),
-    ("arcpy", "SymDiff_analysis"),
-    ("arcpy", "Union_analysis"),
-    ("arcpy", "Update_analysis"),
-    ("arcpy", "da", "InsertCursor"),
-    ("arcpy", "da", "SearchCursor"),
-    ("arcpy", "da", "UpdateCursor"),
-    ("arcpy", "management", "AddField"),
-    ("arcpy", "management", "CopyFeatures"),
-    ("arcpy", "management", "CreateFeatureclass"),
-    ("arcpy", "management", "CreateFileGDB"),
-    ("arcpy", "management", "Delete"),
-    ("arcpy", "management", "GetCount"),
-    ("arcpy", "management", "MakeFeatureLayer"),
-}
-RESERVED_ARCGIS_FIELD_NAMES = {
-    "fid",
-    "objectid",
-    "oid",
-    "shape",
-    "shape_area",
-    "shape_length",
-}
-RESERVED_CURSOR_WRITE_FIELDS = RESERVED_ARCGIS_FIELD_NAMES | {"oid@"}
 
 
 class ToolBuilderError(Exception):
@@ -435,7 +287,8 @@ def canonicalize_operation_spec(spec: Dict[str, Any], source: Path | None = None
     except ToolBuilderError as exc:
         label = "：%s" % source if source else ""
         raise ToolBuilderError("operation_spec 参数定义不合法%s：%s" % (label, exc))
-    _ensure_managed_output_workspace_parameter(result)
+    result["output_policy"] = canonical_output_policy(result.get("output_policy"), str(result.get("side_effects") or ""))
+    _ensure_managed_output_parameters(result)
     if not isinstance(result.get("context_requirements"), dict):
         result["context_requirements"] = {}
     if not isinstance(result.get("output_policy"), dict):
@@ -444,7 +297,7 @@ def canonicalize_operation_spec(spec: Dict[str, Any], source: Path | None = None
     return result
 
 
-def _ensure_managed_output_workspace_parameter(spec: Dict[str, Any]) -> None:
+def _ensure_managed_output_parameters(spec: Dict[str, Any]) -> None:
     if spec.get("side_effects") != "writes_data":
         return
     schema = spec.get("parameters_schema")
@@ -453,10 +306,8 @@ def _ensure_managed_output_workspace_parameter(spec: Dict[str, Any]) -> None:
     properties = schema.setdefault("properties", {})
     if not isinstance(properties, dict):
         return
-    properties.setdefault("output_workspace", {
-        "type": "string",
-        "description": "Optional output folder or geodatabase. GeoPilot resolves output_path from this value."
-    })
+    for name, property_schema in managed_output_properties(spec.get("output_policy") or {}).items():
+        properties.setdefault(name, property_schema)
 
 
 def _canonical_parameters_schema(schema: Any) -> Dict[str, Any]:
@@ -547,6 +398,10 @@ def _validate_spec_shape(spec: Dict[str, Any]) -> None:
         raise ToolBuilderError("context_requirements 必须是对象。")
     if not isinstance(spec.get("output_policy"), dict):
         raise ToolBuilderError("output_policy 必须是对象。")
+    try:
+        validate_output_policy(spec.get("output_policy") or {}, side_effects)
+    except OutputPolicyError as exc:
+        raise ToolBuilderError(str(exc))
     if not isinstance(spec.get("examples"), list) or not spec.get("examples"):
         raise ToolBuilderError("operation_spec.examples 必须至少提供 1 个真实调用示例。")
 
@@ -580,6 +435,7 @@ def _validate_tool_files(source_dir: Path, tool_id: str) -> None:
 def _validate_executor_contract(spec: Dict[str, Any], code: str) -> None:
     tree = _validate_executor_code(code)
     _validate_reserved_field_usage(tree)
+    _validate_output_open_calls(tree, spec)
     if spec.get("side_effects") != "writes_data":
         return
     properties = (spec.get("parameters_schema") or {}).get("properties") or {}
@@ -590,7 +446,7 @@ def _validate_executor_contract(spec: Dict[str, Any], code: str) -> None:
         raise ToolBuilderError("writes_data 自定义工具必须把 output_name 声明为 required。")
     if not _executor_uses_argument_key(tree, "output_path"):
         raise ToolBuilderError("writes_data 自定义工具必须使用 arguments[\"output_path\"]，不要自己拼输出路径。")
-    for forbidden_key in ("output_workspace", "output_name"):
+    for forbidden_key in sorted(managed_output_parameter_names(spec.get("output_policy") or {}) - {"output_path"}):
         if _executor_uses_argument_key(tree, forbidden_key):
             raise ToolBuilderError("writes_data 自定义工具执行代码不能读取 arguments[\"%s\"]；请只使用 GeoPilot 生成的 arguments[\"output_path\"]。" % forbidden_key)
     _validate_create_featureclass_spatial_reference(tree)
@@ -618,6 +474,7 @@ def _validate_executor_code(code: str) -> ast.AST:
     except SyntaxError as exc:
         raise ToolBuilderError("executor_code 不是有效 Python 代码：%s" % exc)
     _validate_python2_subset(tree)
+    _validate_exception_handlers(tree)
     functions = {node.name: node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)}
     execute_func = functions.get("execute")
     if execute_func is None:
@@ -699,6 +556,39 @@ def _validate_create_featureclass_spatial_reference(tree: ast.AST) -> None:
                 "CreateFeatureclass_management 的 spatial_reference 必须来自 arcpy.Describe(输入图层).spatialReference；"
                 "不能传 context['spatial_reference']、spatialReference.name、factoryCode、普通字符串或图层属性。"
             )
+
+
+def _validate_output_open_calls(tree: ast.AST, spec: Dict[str, Any]) -> None:
+    open_calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call) and _is_open_call(node.func)]
+    if not open_calls:
+        return
+    if spec.get("side_effects") != "writes_data" or output_policy_type(spec.get("output_policy") or {}) not in ("file", "raster"):
+        raise ToolBuilderError("只有 file/raster 输出自定义工具可以调用 open，且只能写 arguments[\"output_path\"]。")
+    output_path_variables = _argument_key_variables(tree, "output_path")
+    for node in open_calls:
+        if _call_chain(node.func) != ("open",):
+            raise ToolBuilderError("文件输出只能调用 open(arguments[\"output_path\"], \"w\"/\"wb\")，不能使用其他 open 变体。")
+        if not node.args or not _is_output_path_reference(node.args[0], output_path_variables):
+            raise ToolBuilderError("open 的第一个参数必须是 arguments[\"output_path\"] 或直接由它赋值的变量。")
+        mode = _open_mode(node)
+        if mode not in ("w", "wb"):
+            raise ToolBuilderError("open 必须使用写入模式 \"w\" 或 \"wb\"，不能读取或追加其他文件。")
+
+
+def _is_open_call(func: ast.AST) -> bool:
+    chain = _call_chain(func)
+    return bool(chain) and chain[-1] == "open"
+
+
+def _open_mode(node: ast.Call) -> str:
+    if len(node.args) >= 2:
+        value = _literal_node_value(node.args[1])
+        return value or ""
+    for keyword in node.keywords:
+        if keyword.arg == "mode":
+            value = _literal_node_value(keyword.value)
+            return value or ""
+    return ""
 
 
 def _validate_reserved_field_usage(tree: ast.AST) -> None:
@@ -906,6 +796,24 @@ def _validate_python2_subset(tree: ast.AST) -> None:
             _validate_arguments_are_python2(node.args)
         if isinstance(node, ast.Raise) and getattr(node, "cause", None) is not None:
             raise ToolBuilderError("executor_code 不能使用 Python 3 的 raise ... from ... 语法。")
+
+
+def _validate_exception_handlers(tree: ast.AST) -> None:
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ExceptHandler):
+            continue
+        if not _is_broad_exception_handler(node):
+            continue
+        if not any(isinstance(child, ast.Raise) for child in ast.walk(node)):
+            raise ToolBuilderError("executor_code 不能用 broad except 吞掉错误；捕获 Exception/BaseException 后必须 raise 暴露真实失败原因。")
+
+
+def _is_broad_exception_handler(node: ast.ExceptHandler) -> bool:
+    if node.type is None:
+        return True
+    if isinstance(node.type, ast.Name):
+        return node.type.id in ("Exception", "BaseException")
+    return False
 
 
 def _validate_name_is_python2(name: str) -> None:

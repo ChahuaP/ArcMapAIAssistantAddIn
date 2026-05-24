@@ -15,7 +15,7 @@ except NameError:
 
 
 BASE_URL = "http://127.0.0.1:8765"
-EXPECTED_APP_VERSION = "0.13.5"
+EXPECTED_APP_VERSION = "0.13.12"
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 CREATE_NO_WINDOW = 0x08000000
 
@@ -39,18 +39,18 @@ def current_context():
 
 def ensure_running():
     payload = _health_payload(timeout=2)
-    if _is_compatible(payload):
+    if _is_expected_version(payload):
         return
     if payload:
         stop_gateway()
     start_gateway()
     deadline = time.time() + 15
     while time.time() < deadline:
-        if _is_compatible(_health_payload(timeout=2)):
+        if _is_expected_version(_health_payload(timeout=2)):
             return
         time.sleep(0.5)
     payload = _health_payload(timeout=2)
-    if payload and not _is_compatible(payload):
+    if payload and not _is_expected_version(payload):
         raise RuntimeError(u"本地网关版本不匹配：当前 %s，需要 %s。请重新安装最新版。" % (payload.get("app_version", u"未知"), EXPECTED_APP_VERSION))
     raise RuntimeError(u"本地网关启动失败。请双击 StartGateway.cmd 查看错误。")
 
@@ -59,8 +59,8 @@ def is_running(timeout=2):
     return _health_payload(timeout=timeout) is not None
 
 
-def is_compatible(timeout=2):
-    return _is_compatible(_health_payload(timeout=timeout))
+def is_expected_version(timeout=2):
+    return _is_expected_version(_health_payload(timeout=timeout))
 
 
 def stop_gateway():
@@ -163,7 +163,7 @@ def _health_payload(timeout):
         return None
 
 
-def _is_compatible(payload):
+def _is_expected_version(payload):
     return bool(payload and payload.get("app_version") == EXPECTED_APP_VERSION)
 
 

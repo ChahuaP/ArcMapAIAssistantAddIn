@@ -38,12 +38,8 @@ def _layer_for_path(path, mxd, df):
 
 
 def _make_raster_layer(path, layer_name):
-    add_outputs_to_map = arcpy.env.addOutputsToMap
-    arcpy.env.addOutputsToMap = False
-    try:
+    with common.auto_add_outputs_disabled():
         return arcpy.MakeRasterLayer_management(path, layer_name, "", "", RGB_BAND_INDEX)
-    finally:
-        arcpy.env.addOutputsToMap = add_outputs_to_map
 
 
 def _is_rgb_raster_path(path):

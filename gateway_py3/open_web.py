@@ -13,7 +13,7 @@ from gateway_py3.paths import REPO_ROOT, localappdata_dir
 
 
 BASE_URL = "http://127.0.0.1:8765"
-EXPECTED_APP_VERSION = "0.13.5"
+EXPECTED_APP_VERSION = "0.13.12"
 WEB_URL = BASE_URL
 CREATE_NO_WINDOW = 0x08000000
 
@@ -25,14 +25,14 @@ def main() -> None:
 
 def ensure_gateway() -> None:
     health = health_payload()
-    if is_compatible(health):
+    if is_expected_version(health):
         return
     if health:
         stop_gateway()
     start_gateway()
     deadline = time.time() + 15
     while time.time() < deadline:
-        if is_compatible(health_payload()):
+        if is_expected_version(health_payload()):
             return
         time.sleep(0.4)
     raise RuntimeError("ArcMap AI Assistant Gateway did not start.")
@@ -48,7 +48,7 @@ def health_payload() -> dict | None:
         return None
 
 
-def is_compatible(payload: dict | None) -> bool:
+def is_expected_version(payload: dict | None) -> bool:
     return bool(payload and payload.get("app_version") == EXPECTED_APP_VERSION)
 
 

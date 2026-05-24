@@ -1,3 +1,4 @@
+import json
 import os
 import pathlib
 import tempfile
@@ -22,7 +23,7 @@ class ProviderConfigTests(unittest.TestCase):
             else:
                 os.environ[name] = value
 
-    def test_legacy_deepseek_config_is_migrated_in_memory(self):
+    def test_old_top_level_deepseek_config_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             appdata = pathlib.Path(directory) / "Roaming"
             localappdata = pathlib.Path(directory) / "Local"
@@ -33,11 +34,8 @@ class ProviderConfigTests(unittest.TestCase):
             config_path = config_dir / "config.json"
             config_path.write_text('{"deepseek_api_key": "unit-test-key", "model": "deepseek-chat"}', encoding="utf-8-sig")
 
-            config = llm_providers.load_config()
-
-        self.assertEqual(config["providers"]["deepseek"]["api_key"], "unit-test-key")
-        self.assertEqual(config["semi_agent_provider"], "deepseek")
-        self.assertEqual(config["full_agent_provider"], "minimax")
+            with self.assertRaisesRegex(llm_providers.ProviderError, "旧字段"):
+                llm_providers.load_config()
 
     def test_public_config_reports_both_providers(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -66,7 +64,7 @@ class ProviderConfigTests(unittest.TestCase):
 
         self.assertEqual(config["providers"]["minimax"]["base_url"], "https://api.minimaxi.com/v1")
 
-    def test_legacy_minimax_endpoint_is_migrated_to_token_plan_endpoint(self):
+    def test_minimax_custom_endpoint_is_not_rewritten(self):
         with tempfile.TemporaryDirectory() as directory:
             appdata = pathlib.Path(directory) / "Roaming"
             localappdata = pathlib.Path(directory) / "Local"
@@ -75,13 +73,33 @@ class ProviderConfigTests(unittest.TestCase):
             path = appdata / "ArcMapAIAssistant" / "config.json"
             path.parent.mkdir(parents=True)
             path.write_text(
-                '{"providers":{"minimax":{"api_key":"unit-test-key","base_url":"https://api.minimax.io/v1"}}}',
+                '{"providers":{"minimax":{"api_key":"unit-test-key","base_url":"https://example.test/v1"}}}',
                 encoding="utf-8"
             )
 
             config = llm_providers.load_config()
 
-        self.assertEqual(config["providers"]["minimax"]["base_url"], "https://api.minimaxi.com/v1")
+        self.assertEqual(config["providers"]["minimax"]["base_url"], "https://example.test/v1")
+
+    def test_minimax_text_tool_call_is_normalized_by_provider_layer(self):
+        message = llm_providers._normalize_minimax_agent_message({
+            "role": "assistant",
+            "content": (
+                "<think><minimax:tool_call>\n"
+                "<invoke name=\"file_resolve\">\n"
+                "<parameter name=\"drive\">D</parameter>\n"
+                "<parameter name=\"directory_parts\">[\"Data\"]</parameter>\n"
+                "<parameter name=\"file_name\">nanjing.shp</parameter>\n"
+                "</invoke>\n"
+                "</minimax:tool_call></think>"
+            )
+        })
+
+        self.assertIsNone(message["content"])
+        tool_call = message["tool_calls"][0]
+        self.assertEqual(tool_call["function"]["name"], "file_resolve")
+        arguments = json.loads(tool_call["function"]["arguments"])
+        self.assertEqual(arguments["directory_parts"], ["Data"])
 
     def test_missing_key_message_names_provider_field(self):
         with tempfile.TemporaryDirectory() as directory:

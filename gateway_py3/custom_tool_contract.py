@@ -28,7 +28,8 @@ DIMENSIONLESS_SUFFIXES = (
 )
 REQUIRED_UNIT_ENUM_VALUES = ("map_units", "degrees", "meters")
 
-PLANNER_CUSTOM_TOOL_CONTRACT = """- Custom tools are for new reusable ArcPy algorithms, including capabilities not present in the ArcGIS operation catalog.
+PLANNER_CUSTOM_TOOL_CONTRACT = """- Custom tools are for new reusable ArcPy algorithms that cannot be expressed by chaining existing catalog operations.
+- Prefer a multi-step workflow of existing operations whenever the task is selection, filtering, splitting, exporting, converting, or other normal ArcGIS processing.
 - toolbuilder_create_draft is an agent tool, not an ArcGIS operation id. Never call catalog_get_operation_schema for toolbuilder.create_draft or toolbuilder_create_draft; call toolbuilder_create_draft directly.
 - Do not say the current ArcGIS version cannot create a custom tool when toolbuilder_create_draft is available. Create a disabled draft tool package instead.
 - If toolbuilder_create_draft returns ok=false, repair the operation_spec, executor_code, or tests from that exact error and call toolbuilder_create_draft again.
@@ -39,17 +40,22 @@ PLANNER_CUSTOM_TOOL_CONTRACT = """- Custom tools are for new reusable ArcPy algo
 - The custom tool draft must include operation_spec, executor_code, and review tests. Empty tests are invalid.
 - operation_spec describes the reusable operation: custom.* id, parameters_schema, context_requirements, side_effects, output_policy, and examples.
 - executor_code is real ArcMap ArcPy implementation code, not pseudo-code and not a workflow that chains GeoPilot operation ids.
-- executor_code must be one ArcMap Python 2.7-compatible module with def execute(context, arguments, step_outputs): ...
+- executor_code must be one ArcMap Python 2.7 module with def execute(context, arguments, step_outputs): ...
 - ArcMap uses Python 2.7. Do not use Python 3-only exception/classes or APIs such as FileNotFoundError, FileExistsError, PermissionError, ModuleNotFoundError, os.scandir, pathlib, dataclasses, keyword-only arguments, or os.makedirs(..., exist_ok=True).
 - Every helper function called by executor_code must be defined in the same executor module or imported from an allowed Python 2.7 standard module. Do not invent helper functions and assume GeoPilot or ArcPy provides them.
 - The runtime injects arcpy and resolves layer parameters before execute runs. Use arguments["input_layer"] or other layer parameters directly as ArcMap Layer objects.
-- For writes_data tools, declare required output_name and write the output dataset to arguments["output_path"]. Do not read arguments["output_workspace"] or arguments["output_name"] inside executor_code.
-- For writes_data tools, output_workspace is a GeoPilot-managed optional workflow argument. Include it in operation_spec or let GeoPilot add it; executor_code still must not read it.
-- For writes_data tools, do not add the output layer yourself; GeoPilot adds arguments["output_path"] to the map after execute returns.
+- Do not hide geometry or ArcPy failures with broad except/pass/continue. If a feature is invalid, count it and continue only for that specific expected condition; unexpected exceptions must raise so the tool can be revised.
+- For writes_data tools, declare required output_name and write the output only to arguments["output_path"]. Do not read managed output arguments such as output_workspace, output_folder, output_format, or output_name inside executor_code.
+- output_policy.type controls the generated output path: feature_class supports gdb and shp outputs, file writes ordinary files such as .obj/.json/.csv, and raster writes raster files such as .tif.
+- For feature_class outputs, GeoPilot may add output_workspace, output_folder, and output_format workflow arguments. Use output_format="shp" plus output_folder for shapefile output, or output_format="gdb" plus output_workspace for file geodatabase output.
+- For file outputs, operation_spec.output_policy must include extension such as ".obj"; executor_code may call open(arguments["output_path"], "w") or open(arguments["output_path"], "wb") and must not open any other path.
+- For raster outputs, write the raster to arguments["output_path"]; GeoPilot can generate a .tif path when output_policy.formats/default_format says tif.
+- For writes_data feature_class/raster tools, do not add the output layer yourself; GeoPilot adds arguments["output_path"] to the map after execute returns. File outputs are not added to ArcMap.
 - It is allowed to implement geometry algorithms with arcpy.Geometry, arcpy.Array, arcpy.Point, arcpy.Polygon, arcpy.da.SearchCursor, and arcpy.da.InsertCursor.
 - It is allowed to split arguments["output_path"] with os.path.dirname/basename when ArcPy requires workspace and dataset name separately.
 - ArcPy calls must be real ArcMap ArcPy APIs. Do not invent arcpy function names. Use known ArcMap calls such as CopyFeatures_management, CreateFeatureclass_management, AddField_management, FeatureToPoint_management, arcpy.da.SearchCursor, and arcpy.da.InsertCursor.
 - When using arcpy.CreateFeatureclass_management, split arguments["output_path"] into os.path.dirname(output_path) and os.path.basename(output_path), then pass spatial_reference from arcpy.Describe(input_layer).spatialReference. Do not pass the full output_path as workspace, do not manually create or append .gdb, and do not pass context["spatial_reference"], spatialReference.name, factoryCode, ordinary strings, or layer.spatialReference.
+- When iterating polygon vertices from SHAPE@ in ArcMap, geom.getPart(i) returns an Array of Point objects, with None separators for rings. Iterate points directly and handle None separators; do not assume part.getObject(j) is another ring with .count.
 - Never create or write ArcGIS system fields such as OBJECTID, FID, OID, Shape, Shape_Length, or Shape_Area. To preserve source feature ids, read "OID@" from the input cursor and write it to a custom LONG field such as SRC_OID.
 - Geometry algorithms that add or compare X/Y distances must define the unit contract explicitly. Do not describe a parameter as meters if the executor directly adds that value to coordinate X/Y values.
 - Radius, distance, width, height, length, offset, buffer, or tolerance parameters must either be dimensionless ratios such as radius_ratio, or they must have a matching unit parameter such as radius_unit / distance_unit with enum values map_units, degrees, meters. This is a hard contract, not a style preference.
@@ -61,6 +67,7 @@ PLANNER_CUSTOM_TOOL_CONTRACT = """- Custom tools are for new reusable ArcPy algo
 
 TOOLBUILDER_TOOL_DESCRIPTION = (
     "Create a disabled draft ArcMap ArcPy operation package for a missing reusable GIS capability. "
+    "Use this only when the task cannot be expressed by chaining existing operation catalog steps. "
     "This tool may implement new ArcPy algorithms that are not expressible by the built-in operation catalog. "
     "The draft must follow the GeoPilot custom tool development contract, include real ArcMap Python 2.7 executor_code, "
     "operation_spec, and non-empty review tests; it waits for human review before enablement."
@@ -159,7 +166,7 @@ TOOLBUILDER_TOOL_PARAMETERS: Dict[str, Any] = {
         "capability": {"type": "string"},
         "operation_spec": {
             **OPERATION_SPEC_SCHEMA,
-            "description": "Complete custom operation spec. Do not use legacy inputs/output fields; use parameters_schema."
+            "description": "Complete custom operation spec. Use parameters_schema as the only parameter definition source."
         },
         "executor_code": {
             "type": "string",
@@ -234,13 +241,15 @@ def build_review_payload(spec: Dict[str, Any], tests: Any) -> Dict[str, Any]:
         "contract_version": CONTRACT_VERSION,
         "runtime_contract": [
             "execute(context, arguments, step_outputs)",
-            "ArcMap Python 2.7 compatible",
+            "valid in ArcMap Python 2.7",
             "layer parameters are runtime-resolved ArcMap Layer objects",
-            "writes_data output dataset is arguments['output_path']",
-            "GeoPilot adds writes_data outputs to ArcGIS after execute returns",
-        "CreateFeatureclass splits arguments['output_path'] with os.path.dirname/basename",
-        "CreateFeatureclass spatial_reference comes from arcpy.Describe(input_layer).spatialReference",
-        "executor does not create or write ArcGIS system OID/Shape fields",
+            "writes_data output path is arguments['output_path']",
+            "output_policy.type selects feature_class, file, or raster path generation",
+            "GeoPilot adds feature_class/raster outputs to ArcGIS after execute returns",
+            "file outputs may only open arguments['output_path'] for w/wb writes",
+            "CreateFeatureclass splits arguments['output_path'] with os.path.dirname/basename",
+            "CreateFeatureclass spatial_reference comes from arcpy.Describe(input_layer).spatialReference",
+            "executor does not create or write ArcGIS system OID/Shape fields",
         ],
         "acceptance_checklist": _acceptance_checklist(spec),
         "test_count": len(normalized_tests),
@@ -283,6 +292,8 @@ def validate_review_tests(spec: Dict[str, Any], tests: Any) -> List[Dict[str, An
         for assertion in assertions:
             if not isinstance(assertion, str) or not assertion.strip():
                 raise CustomToolContractError("tests[%s].assertions 只能包含非空字符串。" % index)
+            if spec.get("side_effects") == "writes_data" and _weak_output_assertion(assertion):
+                raise CustomToolContractError("tests[%s].assertions 不能使用 >= 0 或 == 0 这类空成功断言；写数据工具必须验证非空输出或明确的正向计数。" % index)
             clean_assertions.append(assertion.strip())
         normalized.append({
             "name": name,
@@ -308,6 +319,15 @@ def _acceptance_checklist(spec: Dict[str, Any]) -> List[str]:
     if _dimension_unit_pairs(spec):
         checklist.append("distance-like parameters have explicit unit arguments and unit edge-case tests")
     return checklist
+
+
+def _weak_output_assertion(assertion: str) -> bool:
+    text = assertion.strip().lower().replace(" ", "")
+    if "> =0" in text:
+        return True
+    weak_tokens = (">=0", "==0", "=0")
+    count_words = ("count", "vertex", "vertices", "face", "feature", "row", "record", "byte", "size")
+    return any(word in text for word in count_words) and any(token in text for token in weak_tokens)
 
 
 def _validate_dimension_unit_contract(spec: Dict[str, Any]) -> None:

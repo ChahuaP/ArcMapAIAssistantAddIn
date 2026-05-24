@@ -6,9 +6,19 @@ import arcpy
 from operations import common
 
 
+def _output(context, arguments):
+    return common.output_feature_dataset(
+        context,
+        arguments["output_name"],
+        arguments.get("output_workspace"),
+        arguments.get("output_folder"),
+        arguments.get("output_format")
+    )
+
+
 def buffer(context, arguments, step_outputs):
     layer = common.find_layer(context, arguments["input_layer"], step_outputs)
-    output = common.output_feature_class(context, arguments["output_name"], arguments.get("output_workspace"))
+    output = _output(context, arguments)
     arcpy.Buffer_analysis(layer, output, arguments["distance"])
     common.add_output_layer(output)
     return {"output": output}
@@ -17,7 +27,7 @@ def buffer(context, arguments, step_outputs):
 def clip(context, arguments, step_outputs):
     input_layer = common.find_layer(context, arguments["input_layer"], step_outputs)
     clip_layer = common.find_layer(context, arguments["clip_layer"], step_outputs)
-    output = common.output_feature_class(context, arguments["output_name"], arguments.get("output_workspace"))
+    output = _output(context, arguments)
     arcpy.Clip_analysis(input_layer, clip_layer, output)
     common.add_output_layer(output)
     return {"output": output}
@@ -25,7 +35,7 @@ def clip(context, arguments, step_outputs):
 
 def intersect(context, arguments, step_outputs):
     layers = [common.find_layer(context, layer_value, step_outputs) for layer_value in arguments["input_layers"]]
-    output = common.output_feature_class(context, arguments["output_name"], arguments.get("output_workspace"))
+    output = _output(context, arguments)
     arcpy.Intersect_analysis(layers, output)
     common.add_output_layer(output)
     return {"output": output}
@@ -33,7 +43,7 @@ def intersect(context, arguments, step_outputs):
 
 def dissolve(context, arguments, step_outputs):
     layer = common.find_layer(context, arguments["input_layer"], step_outputs)
-    output = common.output_feature_class(context, arguments["output_name"], arguments.get("output_workspace"))
+    output = _output(context, arguments)
     fields = arguments.get("dissolve_fields") or []
     arcpy.Dissolve_management(layer, output, fields)
     common.add_output_layer(output)
@@ -42,7 +52,7 @@ def dissolve(context, arguments, step_outputs):
 
 def project(context, arguments, step_outputs):
     layer = common.find_layer(context, arguments["input_layer"], step_outputs)
-    output = common.output_feature_class(context, arguments["output_name"], arguments.get("output_workspace"))
+    output = _output(context, arguments)
     spatial_reference = arcpy.SpatialReference(arguments["spatial_reference"])
     arcpy.Project_management(layer, output, spatial_reference)
     common.add_output_layer(output)
@@ -52,7 +62,7 @@ def project(context, arguments, step_outputs):
 def spatial_join(context, arguments, step_outputs):
     target = common.find_layer(context, arguments["target_layer"], step_outputs)
     join = common.find_layer(context, arguments["join_layer"], step_outputs)
-    output = common.output_feature_class(context, arguments["output_name"], arguments.get("output_workspace"))
+    output = _output(context, arguments)
     arcpy.SpatialJoin_analysis(target, join, output)
     common.add_output_layer(output)
     return {"output": output}
@@ -61,7 +71,7 @@ def spatial_join(context, arguments, step_outputs):
 def erase(context, arguments, step_outputs):
     input_layer = common.find_layer(context, arguments["input_layer"], step_outputs)
     erase_layer = common.find_layer(context, arguments["erase_layer"], step_outputs)
-    output = common.output_feature_class(context, arguments["output_name"], arguments.get("output_workspace"))
+    output = _output(context, arguments)
     arcpy.Erase_analysis(input_layer, erase_layer, output)
     common.add_output_layer(output)
     return {"output": output}
@@ -70,7 +80,7 @@ def erase(context, arguments, step_outputs):
 def identity(context, arguments, step_outputs):
     input_layer = common.find_layer(context, arguments["input_layer"], step_outputs)
     identity_layer = common.find_layer(context, arguments["identity_layer"], step_outputs)
-    output = common.output_feature_class(context, arguments["output_name"], arguments.get("output_workspace"))
+    output = _output(context, arguments)
     arcpy.Identity_analysis(input_layer, identity_layer, output)
     common.add_output_layer(output)
     return {"output": output}
@@ -78,7 +88,7 @@ def identity(context, arguments, step_outputs):
 
 def union(context, arguments, step_outputs):
     layers = [common.find_layer(context, layer_value, step_outputs) for layer_value in arguments["input_layers"]]
-    output = common.output_feature_class(context, arguments["output_name"], arguments.get("output_workspace"))
+    output = _output(context, arguments)
     arcpy.Union_analysis(layers, output)
     common.add_output_layer(output)
     return {"output": output}
@@ -87,7 +97,7 @@ def union(context, arguments, step_outputs):
 def symmetrical_difference(context, arguments, step_outputs):
     input_layer = common.find_layer(context, arguments["input_layer"], step_outputs)
     update_layer = common.find_layer(context, arguments["update_layer"], step_outputs)
-    output = common.output_feature_class(context, arguments["output_name"], arguments.get("output_workspace"))
+    output = _output(context, arguments)
     arcpy.SymDiff_analysis(input_layer, update_layer, output)
     common.add_output_layer(output)
     return {"output": output}
@@ -96,7 +106,7 @@ def symmetrical_difference(context, arguments, step_outputs):
 def update_overlay(context, arguments, step_outputs):
     input_layer = common.find_layer(context, arguments["input_layer"], step_outputs)
     update_layer = common.find_layer(context, arguments["update_layer"], step_outputs)
-    output = common.output_feature_class(context, arguments["output_name"], arguments.get("output_workspace"))
+    output = _output(context, arguments)
     arcpy.Update_analysis(input_layer, update_layer, output)
     common.add_output_layer(output)
     return {"output": output}
@@ -104,7 +114,7 @@ def update_overlay(context, arguments, step_outputs):
 
 def merge(context, arguments, step_outputs):
     layers = [common.find_layer(context, layer_value, step_outputs) for layer_value in arguments["input_layers"]]
-    output = common.output_feature_class(context, arguments["output_name"], arguments.get("output_workspace"))
+    output = _output(context, arguments)
     arcpy.Merge_management(layers, output)
     common.add_output_layer(output)
     return {"output": output}

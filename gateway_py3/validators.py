@@ -6,6 +6,16 @@ from pathlib import Path
 import re
 from typing import Any, Dict, List
 
+from arcmap_runtime_py2.condition_protocol import (
+    CONDITION_OPERATOR_HELP,
+    LEAF_CONDITION_OPERATORS,
+    NUMBER_FIELD_TYPES,
+    TEXT_FIELD_TYPES,
+    VALUE_CONDITION_OPERATORS,
+    canonical_operator,
+    is_number_value,
+    normalize_condition_tree,
+)
 from arcmap_runtime_py2.context_fingerprint import context_hash
 
 from .catalog_loader import CatalogError, OperationCatalog
@@ -13,43 +23,6 @@ from .catalog_loader import CatalogError, OperationCatalog
 
 class ValidationError(Exception):
     pass
-
-
-CONDITION_OPERATOR_ALIASES = {
-    "等于": "eq",
-    "不等于": "ne",
-    "大于": "gt",
-    "大于等于": "gte",
-    "小于": "lt",
-    "小于等于": "lte",
-    "之间": "between",
-    "包含于": "in",
-    "模糊匹配": "like",
-    "为空": "is_null",
-    "非空": "is_not_null",
-}
-LEAF_CONDITION_OPERATORS = {
-    "eq",
-    "=",
-    "ne",
-    "!=",
-    "<>",
-    "gt",
-    ">",
-    "gte",
-    ">=",
-    "lt",
-    "<",
-    "lte",
-    "<=",
-    "between",
-    "in",
-    "like",
-    "is_null",
-    "is_not_null",
-}
-VALUE_CONDITION_OPERATORS = {"eq", "=", "ne", "!=", "<>", "gt", ">", "gte", ">=", "lt", "<", "lte", "<=", "like"}
-CONDITION_OPERATOR_HELP = "eq, ne, gt, gte, lt, lte, between, in, like, is_null, is_not_null, and, or, not"
 
 
 def validate_catalog(catalog: OperationCatalog) -> None:
@@ -77,6 +50,7 @@ def validate_catalog(catalog: OperationCatalog) -> None:
 def prepare_workflow(workflow: Dict[str, Any], catalog: OperationCatalog, context: Dict[str, Any]) -> Dict[str, Any]:
     prepared = copy.deepcopy(workflow)
     normalize_workflow(prepared)
+    normalize_workflow_arguments(prepared, catalog)
     apply_default_output_names(prepared, catalog)
     apply_project_output_location(prepared, catalog, context)
     apply_output_name_timestamp(prepared, catalog)
@@ -115,6 +89,21 @@ def normalize_workflow(workflow: Dict[str, Any]) -> None:
     for step in workflow.get("steps") or []:
         if isinstance(step, dict) and "id" in step:
             step["id"] = str(step["id"])
+
+
+def normalize_workflow_arguments(workflow: Dict[str, Any], catalog: OperationCatalog) -> None:
+    for step in workflow.get("steps") or []:
+        if not isinstance(step, dict):
+            continue
+        operation_id = step.get("operation")
+        if operation_id not in catalog.operations:
+            continue
+        arguments = step.get("arguments")
+        if not isinstance(arguments, dict):
+            continue
+        properties = (catalog.operations[operation_id].get("parameters_schema") or {}).get("properties") or {}
+        if "where" in properties and isinstance(arguments.get("where"), dict):
+            arguments["where"] = normalize_condition_tree(arguments["where"])
 
 
 def apply_default_output_names(workflow: Dict[str, Any], catalog: OperationCatalog) -> None:
@@ -185,6 +174,12 @@ def apply_project_output_location(workflow: Dict[str, Any], catalog: OperationCa
     project_output = context.get("project_output_workspace")
     if not isinstance(project_output, str) or not project_output.strip():
         return
+    project_output = project_output.strip()
+    if not Path(project_output).exists():
+        try:
+            Path(project_output).mkdir(parents=True, exist_ok=True)
+        except OSError:
+            return
     for step in workflow.get("steps") or []:
         operation_id = step.get("operation")
         if operation_id not in catalog.operations:
@@ -195,13 +190,47 @@ def apply_project_output_location(workflow: Dict[str, Any], catalog: OperationCa
         arguments = step.get("arguments")
         if not isinstance(arguments, dict):
             continue
+        properties = (operation.get("parameters_schema") or {}).get("properties") or {}
         if arguments.get("output_workspace") or arguments.get("output_folder"):
             continue
-        properties = (operation.get("parameters_schema") or {}).get("properties") or {}
-        if "output_workspace" in properties:
-            arguments["output_workspace"] = project_output.strip()
-        elif "output_folder" in properties:
-            arguments["output_folder"] = project_output.strip()
+        _set_project_output_location(arguments, properties, project_output)
+
+
+def _set_project_output_location(
+    arguments: Dict[str, Any],
+    properties: Dict[str, Any],
+    project_output: str,
+    preferred: str | None = None
+) -> None:
+    arguments.pop("output_workspace", None)
+    arguments.pop("output_folder", None)
+    if preferred == "output_folder" and "output_folder" in properties:
+        arguments["output_folder"] = project_output
+        return
+    if preferred == "output_workspace" and "output_workspace" in properties:
+        arguments["output_workspace"] = project_output
+        return
+    if "output_workspace" in properties:
+        arguments["output_workspace"] = project_output
+    elif "output_folder" in properties:
+        arguments["output_folder"] = project_output
+
+
+def _existing_directory(value: Any) -> bool:
+    if not isinstance(value, str) or not value.strip():
+        return False
+    path = Path(value.strip())
+    return path.exists() and path.is_dir()
+
+
+def _valid_output_workspace(value: Any) -> bool:
+    if not isinstance(value, str) or not value.strip():
+        return False
+    text = value.strip()
+    path = Path(text)
+    if text.lower().endswith(".gdb"):
+        return path.exists() or (path.parent.exists() and path.parent.is_dir())
+    return path.exists() and path.is_dir()
 
 
 def validate_workflow_semantics(workflow: Dict[str, Any], catalog: OperationCatalog, context: Dict[str, Any]) -> None:
@@ -218,6 +247,7 @@ def validate_workflow_semantics(workflow: Dict[str, Any], catalog: OperationCata
         _validate_layer_references(operation, arguments, context, available_layers, seen_step_ids)
         _validate_condition_arguments(operation, arguments)
         _validate_field_references(operation, arguments, context, available_layers)
+        _validate_condition_value_types(operation, arguments, available_layers)
         _validate_output_location(operation, arguments, context)
         _validate_output_name(arguments)
         _validate_layer_add_path(step, arguments)
@@ -229,7 +259,7 @@ def validate_workflow_semantics(workflow: Dict[str, Any], catalog: OperationCata
 def friendly_validation_message(error: Exception) -> str:
     message = str(error)
     if "Workflow action must be execute" in message:
-        return "任务类型不明确。请说明是要执行操作、普通回答、继续补充信息，还是这个能力当前不支持。"
+        return "workflow 必须带 action。如果已有 steps，请设置 action=execute；如果只是回答、追问或不支持，steps 必须为空。请修正后继续，不要向用户追问。"
     if "Step missing field: operation" in message:
         return "我还不能确定要执行哪一种 GIS 操作。请把任务再说具体一点，比如要缓冲、裁剪、选择、导出，还是添加图层。"
     if "Step missing field: arguments" in message:
@@ -241,7 +271,13 @@ def friendly_validation_message(error: Exception) -> str:
     if "missing required argument:" in message:
         return "这个操作还缺少必要参数“%s”。请补充后我再继续。" % message.rsplit(":", 1)[-1].strip()
     if "has unknown arguments:" in message:
+        if "folder_path" in message:
+            return "workflow operation 里不能使用 folder_path；folder_path 只属于 file_resolve。导出到文件夹时，请按 operation schema 使用 output_folder。请修正 workflow，不要向用户追问。"
         return message
+    if "属性条件缺少 op" in message:
+        return "属性条件 where 缺少 op。布尔条件必须写成 {\"op\":\"and\",\"conditions\":[...]} 或 {\"op\":\"or\",\"conditions\":[...]}，不能写 {\"and\":[...]}；叶子条件必须写 op，例如 {\"field\":\"NAME\",\"op\":\"like\",\"value\":\"%南京%\"}。请修正 workflow，不要向用户追问。"
+    if "输出文件夹不存在" in message or "输出工作空间不可用" in message:
+        return message + " 如果这是用户指定的位置，请先调用 output_folder_resolve 核实并向用户追问；如果用户没有指定输出位置，请移除输出位置参数，让系统使用项目输出目录或 MXD 默认输出目录。"
     if "Unknown operation" in message:
         return "当前版本还不支持这个操作。请换成已有能力，或告诉我你想完成的 GIS 处理目标。"
     if message:
@@ -457,10 +493,81 @@ def _validate_field_references(
             raise ValidationError("“%s”字段已经存在。请换一个新字段名。" % field_name)
 
 
+def _validate_condition_value_types(
+    operation: Dict[str, Any],
+    arguments: Dict[str, Any],
+    available_layers: List[Dict[str, Any]]
+) -> None:
+    requirements = operation.get("context_requirements") or {}
+    if not requirements.get("condition_fields") or not isinstance(arguments.get("where"), dict):
+        return
+    layer_value = _primary_layer_value(operation, arguments)
+    if not layer_value:
+        return
+    layers = _matching_layers_exact(layer_value, available_layers)
+    if len(layers) != 1 or layers[0].get("fields_unknown"):
+        return
+    field_types = {}
+    for field in layers[0].get("fields", []) or []:
+        name = field.get("name")
+        if name:
+            field_types[str(name).lower()] = str(field.get("type") or "")
+    if field_types:
+        _validate_condition_value_types_node(arguments["where"], field_types)
+
+
+def _validate_condition_value_types_node(condition: Dict[str, Any], field_types: Dict[str, str]) -> None:
+    op = _condition_operator(condition, strict=False)
+    if op in ("and", "or"):
+        for child in condition.get("conditions") or []:
+            if isinstance(child, dict):
+                _validate_condition_value_types_node(child, field_types)
+        return
+    if op == "not":
+        child = condition.get("condition")
+        if isinstance(child, dict):
+            _validate_condition_value_types_node(child, field_types)
+        return
+    field_name = condition.get("field")
+    if not field_name:
+        return
+    field_type = field_types.get(str(field_name).lower())
+    if not field_type:
+        return
+    if op == "like" and field_type not in TEXT_FIELD_TYPES:
+        raise ValidationError("like 条件只能用于文本字段，“%s”字段类型是 %s。" % (field_name, field_type))
+    if field_type in NUMBER_FIELD_TYPES:
+        _validate_numeric_condition_values(condition, op, field_name)
+
+
+def _validate_numeric_condition_values(condition: Dict[str, Any], op: str, field_name: Any) -> None:
+    if op in ("is_null", "is_not_null"):
+        return
+    values = []
+    if op in VALUE_CONDITION_OPERATORS:
+        values = [condition.get("value")]
+    elif op in ("between", "in"):
+        values = condition.get("values") or []
+    for value in values:
+        if not is_number_value(value):
+            raise ValidationError("数值字段“%s”的条件值必须是数字。" % field_name)
+
+
 def _validate_output_location(operation: Dict[str, Any], arguments: Dict[str, Any], context: Dict[str, Any]) -> None:
     if operation.get("side_effects") != "writes_data":
         return
-    if arguments.get("output_workspace") or arguments.get("output_folder"):
+    output_format = str(arguments.get("output_format") or "").strip().lower()
+    if arguments.get("output_folder") and arguments.get("output_workspace"):
+        raise ValidationError("输出位置不能同时使用 output_folder 和 output_workspace。请只保留一个。")
+    if output_format in ("shp", "shapefile") and arguments.get("output_workspace") and str(arguments["output_workspace"]).lower().endswith(".gdb"):
+        raise ValidationError("shp 输出必须使用 output_folder 指向已存在文件夹，不能输出到 GDB。")
+    if arguments.get("output_folder"):
+        if not _existing_directory(arguments["output_folder"]):
+            raise ValidationError("输出文件夹不存在：%s。请使用已存在的文件夹，或在项目模式下省略输出位置让系统使用项目 GeoPilot_Output。" % arguments["output_folder"])
+        return
+    if arguments.get("output_workspace"):
+        if not _valid_output_workspace(arguments["output_workspace"]):
+            raise ValidationError("输出工作空间不可用：%s。请使用已存在的文件夹/GDB，或在项目模式下省略输出位置让系统使用项目 GeoPilot_Output。" % arguments["output_workspace"])
         return
     workspace = (operation.get("output_policy") or {}).get("workspace", "")
     if context.get("is_saved") and workspace.startswith("mxd_default"):
@@ -612,13 +719,7 @@ def _field_name(value: Any) -> str:
 
 
 def _condition_operator(condition: Dict[str, Any], strict: bool = True) -> str:
-    op = condition.get("op", condition.get("operator"))
-    if op is None:
-        if strict:
-            raise ValidationError("属性条件缺少 op。")
-        return ""
-    text = str(op).strip().lower()
-    return CONDITION_OPERATOR_ALIASES.get(text, text)
+    return canonical_operator(condition, strict=strict, error_cls=ValidationError, missing_message="属性条件缺少 op。")
 
 
 def _available_layer_names(layers: List[Dict[str, Any]]) -> List[str]:

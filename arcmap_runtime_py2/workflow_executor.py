@@ -97,15 +97,45 @@ def _load_operations():
 def _canonicalize_operation(operation):
     result = dict(operation)
     result["parameters_schema"] = _canonicalize_parameters_schema(result.get("parameters_schema", {}))
-    _ensure_managed_output_workspace_parameter(result)
+    result["output_policy"] = _canonical_output_policy(result.get("output_policy"), result.get("side_effects"))
+    _ensure_managed_output_parameters(result)
     if not isinstance(result.get("context_requirements"), dict):
         result["context_requirements"] = {}
-    if not isinstance(result.get("output_policy"), dict):
-        result["output_policy"] = {}
     return result
 
 
-def _ensure_managed_output_workspace_parameter(operation):
+def _canonical_output_policy(policy, side_effects):
+    if not isinstance(policy, dict):
+        policy = {}
+    result = dict(policy)
+    if side_effects != "writes_data":
+        return result
+    output_type = _output_policy_type(result)
+    result["type"] = output_type
+    if output_type == "feature_class":
+        result.setdefault("formats", ["gdb", "shp"])
+        result.setdefault("default_format", "gdb")
+        result.setdefault("add_to_map", True)
+    elif output_type == "raster":
+        result.setdefault("formats", ["tif"])
+        result.setdefault("default_format", "tif")
+        result.setdefault("add_to_map", True)
+    elif output_type == "file":
+        result.setdefault("add_to_map", False)
+    return result
+
+
+def _output_policy_type(policy):
+    value = policy.get("type")
+    if not value:
+        return "feature_class"
+    text = str(value).strip().lower()
+    if text in ("vector", "feature", "featureclass"):
+        return "feature_class"
+    return text
+
+
+def _ensure_managed_output_parameters(operation):
     if operation.get("side_effects") != "writes_data":
         return
     schema = operation.get("parameters_schema")
@@ -114,10 +144,26 @@ def _ensure_managed_output_workspace_parameter(operation):
     properties = schema.setdefault("properties", {})
     if not isinstance(properties, dict):
         return
-    properties.setdefault("output_workspace", {
-        "type": "string",
-        "description": "Optional output folder or geodatabase. GeoPilot resolves output_path from this value."
-    })
+    output_type = _output_policy_type(operation.get("output_policy") or {})
+    if output_type == "feature_class":
+        properties.setdefault("output_workspace", {
+            "type": "string",
+            "description": "Optional output folder or geodatabase for GDB output. GeoPilot resolves output_path from this value."
+        })
+        properties.setdefault("output_folder", {
+            "type": "string",
+            "description": "Optional output folder for shapefile output. GeoPilot resolves output_path from this value."
+        })
+        properties.setdefault("output_format", {
+            "type": "string",
+            "enum": ["gdb", "shp"],
+            "description": "Output vector format."
+        })
+    elif output_type in ("file", "raster"):
+        properties.setdefault("output_folder", {
+            "type": "string",
+            "description": "Optional output folder. GeoPilot resolves output_path from this value."
+        })
 
 
 def _canonicalize_parameters_schema(schema):
@@ -224,10 +270,13 @@ def _prepare_runtime_arguments(operation, context, arguments, step_outputs):
             continue
         runtime_arguments[name] = _resolve_layer_argument(common, context, runtime_arguments[name], step_outputs)
     if _is_custom_writes_data(operation) and runtime_arguments.get("output_name") and not runtime_arguments.get("output_path"):
-        runtime_arguments["output_path"] = common.output_feature_class(
+        runtime_arguments["output_path"] = common.output_dataset(
             context,
             runtime_arguments["output_name"],
-            runtime_arguments.get("output_workspace")
+            operation.get("output_policy") or {},
+            runtime_arguments.get("output_workspace"),
+            runtime_arguments.get("output_folder"),
+            runtime_arguments.get("output_format")
         )
     return runtime_arguments
 
@@ -242,12 +291,51 @@ def _finalize_runtime_result(operation, context, arguments, result):
         return result
     common = _operations_common()
     result.setdefault("output", output_path)
-    result["layer"] = common.add_output_layer(output_path)
+    _validate_custom_output_artifact(operation.get("output_policy") or {}, output_path)
+    if _output_adds_to_map(operation.get("output_policy") or {}):
+        result["layer"] = common.add_output_layer(output_path)
     return result
 
 
 def _is_custom_writes_data(operation):
     return operation.get("side_effects") == "writes_data" and _is_custom_operation(operation)
+
+
+def _output_adds_to_map(policy):
+    if policy.get("add_to_map") is False:
+        return False
+    return _output_policy_type(policy) in ("feature_class", "raster")
+
+
+def _validate_custom_output_artifact(policy, output_path):
+    output_type = _output_policy_type(policy)
+    if output_type not in ("file", "raster"):
+        return
+    if not os.path.isfile(output_path):
+        raise WorkflowExecutionError(u"自定义工具没有生成输出文件：%s" % output_path)
+    if os.path.getsize(output_path) <= 0:
+        raise WorkflowExecutionError(u"自定义工具生成了空文件：%s" % output_path)
+    if _obj_output_policy(policy, output_path):
+        _validate_obj_file(output_path)
+
+
+def _obj_output_policy(policy, output_path):
+    extension = str(policy.get("extension") or "")
+    return extension.lower() == ".obj" or str(output_path).lower().endswith(".obj")
+
+
+def _validate_obj_file(output_path):
+    has_vertex = False
+    has_face = False
+    with open(output_path, "r") as handle:
+        for line in handle:
+            if line.startswith("v "):
+                has_vertex = True
+            elif line.startswith("f "):
+                has_face = True
+            if has_vertex and has_face:
+                return
+    raise WorkflowExecutionError(u"OBJ 输出没有有效顶点和面：%s" % output_path)
 
 
 def _is_custom_operation(operation):

@@ -4,6 +4,7 @@ import sys
 import tempfile
 import types
 import unittest
+import zipfile
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -32,8 +33,13 @@ class SplitByFieldTests(unittest.TestCase):
 
         fake_arcpy = types.SimpleNamespace()
         fake_arcpy.mapping = Mapping
-        fake_arcpy.ListFields = lambda layer: [FakeField("type", "String")]
-        fake_arcpy.Describe = lambda layer: types.SimpleNamespace(path=r"D:\Data")
+        fake_arcpy.env = types.SimpleNamespace(addOutputsToMap=True)
+        fake_arcpy.ListFields = lambda layer: [FakeField("type", "String"), FakeField("村名", "String")]
+        fake_arcpy.Describe = lambda layer: types.SimpleNamespace(
+            path=r"D:\Data",
+            spatialReference=types.SimpleNamespace(name="GCS_WGS_1984", factoryCode=4326)
+        )
+        fake_arcpy.SpatialReference = lambda code: types.SimpleNamespace(name="GCS_WGS_1984", factoryCode=code)
         fake_arcpy.AddFieldDelimiters = lambda workspace, field: "[%s]" % field
         fake_arcpy.Exists = lambda path: False
         fake_arcpy.MakeFeatureLayer_management = self._make_feature_layer
@@ -79,6 +85,7 @@ class SplitByFieldTests(unittest.TestCase):
         self.assertEqual(len(self.calls["copy"]), 3)
         self.assertEqual(self.calls["refresh_toc"], 1)
         self.assertEqual(self.calls["refresh_view"], 1)
+        self.assertTrue(sys.modules["arcpy"].env.addOutputsToMap)
 
     def test_shapefile_export_accepts_output_workspace_folder(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -96,10 +103,38 @@ class SplitByFieldTests(unittest.TestCase):
 
         self.assertTrue(result["outputs"][0].endswith(".shp"))
 
+    def test_kmz_export_uses_name_template_and_does_not_copy_shapefiles(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result = self.export_ops.split_by_field(
+                {"layers": [{"layer_ref": "layer:0", "name": "roads", "longName": "roads"}]},
+                {
+                    "layer": "roads",
+                    "field": "村名",
+                    "output_name": "community_kmz",
+                    "output_format": "kmz",
+                    "output_folder": directory,
+                    "name_template": "{value_base}永农"
+                },
+                {}
+            )
+
+            names = [pathlib.Path(item).name for item in result["outputs"]]
+            self.assertEqual(names, ["红光永农.kmz", "钱仓永农.kmz"])
+            self.assertEqual(self.calls["make"], [])
+            self.assertEqual(self.calls["copy"], [])
+            with zipfile.ZipFile(result["outputs"][0], "r") as archive:
+                kml_text = archive.read("doc.kml").decode("utf-8")
+
+        self.assertIn("<Polygon>", kml_text)
+        self.assertIn("红光社区", kml_text)
+        self.assertTrue(sys.modules["arcpy"].env.addOutputsToMap)
+
     def _make_feature_layer(self, source, temp_layer, where_clause):
+        self.assertFalse(sys.modules["arcpy"].env.addOutputsToMap)
         self.calls["make"].append((source, where_clause))
 
     def _copy_features(self, temp_layer, output):
+        self.assertFalse(sys.modules["arcpy"].env.addOutputsToMap)
         self.calls["copy"].append((temp_layer, output))
 
     def _delete(self, temp_layer):
@@ -110,8 +145,17 @@ class SplitByFieldTests(unittest.TestCase):
 
 
 class FakeSearchCursor(object):
-    def __init__(self, source, fields):
-        self.rows = iter([(None,), ("A",), ("B",), ("A",)])
+    def __init__(self, source, fields, where_clause=None, *args):
+        if fields == ["type"]:
+            rows = [(None,), ("A",), ("B",), ("A",)]
+        elif fields == ["村名"]:
+            rows = [("红光社区",), ("钱仓社区",), ("红光社区",)]
+        elif fields and fields[0] == "SHAPE@":
+            value = "钱仓社区" if where_clause and "钱仓社区" in where_clause else "红光社区"
+            rows = [(FakeGeometry(), "A", value)]
+        else:
+            rows = []
+        self.rows = iter(rows)
 
     def __enter__(self):
         return self
@@ -132,6 +176,10 @@ class FakeField(object):
     def __init__(self, name, field_type):
         self.name = name
         self.type = field_type
+
+
+class FakeGeometry(object):
+    JSON = '{"rings":[[[118.0,32.0],[118.1,32.0],[118.1,32.1],[118.0,32.0]]]}'
 
 
 class FakeLayer(object):

@@ -81,25 +81,33 @@ def split_by_field(context, arguments, step_outputs):
     output_base = _output_base(context, arguments, output_format)
     input_source = layer if bool(arguments.get("selected_only", False)) else (common._safe_data_source(layer) or layer)
     outputs = []
+    output_items = []
     used_names = set()
     for index, value in enumerate(values, 1):
-        name = _output_name_for_value(prefix, value, index, used_names)
+        name = _output_name_for_value(prefix, value, index, used_names, output_format, arguments.get("name_template"))
         output = _output_path(output_base, name, output_format)
         _ensure_output_available(output)
-        temp_layer = "arcmap_ai_split_%s" % uuid.uuid4().hex
-        try:
-            where_clause = _where_for_value(layer, field.name, value)
-            arcpy.MakeFeatureLayer_management(input_source, temp_layer, where_clause)
-            arcpy.CopyFeatures_management(temp_layer, output)
+        where_clause = _where_for_value(layer, field.name, value)
+        if output_format == "kmz":
+            feature_count = _write_feature_kmz(input_source, name, output, where_clause)
             outputs.append(output)
-        finally:
+            output_items.append({"value": common._text(value), "output": output, "feature_count": feature_count})
+        else:
+            temp_layer = "arcmap_ai_split_%s" % uuid.uuid4().hex
             try:
-                arcpy.Delete_management(temp_layer)
-            except Exception:
-                pass
+                with common.auto_add_outputs_disabled():
+                    arcpy.MakeFeatureLayer_management(input_source, temp_layer, where_clause)
+                    arcpy.CopyFeatures_management(temp_layer, output)
+                outputs.append(output)
+                output_items.append({"value": common._text(value), "output": output})
+            finally:
+                try:
+                    arcpy.Delete_management(temp_layer)
+                except Exception:
+                    pass
 
     common.refresh()
-    return {"outputs": outputs, "count": len(outputs), "output_format": output_format}
+    return {"outputs": outputs, "output_items": output_items, "count": len(outputs), "output_format": output_format}
 
 
 def _kml_output_scale(arguments):
@@ -109,11 +117,11 @@ def _kml_output_scale(arguments):
         mxd = common.current_mxd()
         df = common.active_data_frame(mxd)
         scale = int(round(float(getattr(df, "scale", 0))))
-        if scale > 0:
-            return scale
-    except Exception:
-        pass
-    return 1
+    except Exception as exc:
+        raise common.OperationError(u"KML 栅格导出无法读取当前地图比例尺，请提供 layer_output_scale：%s" % common._text(exc))
+    if scale <= 0:
+        raise common.OperationError(u"KML 栅格导出需要有效地图比例尺，请提供 layer_output_scale。")
+    return scale
 
 
 def _is_feature_layer(layer):
@@ -144,7 +152,7 @@ def _feature_count(layer):
     return int(value)
 
 
-def _write_feature_kmz(source, layer_name, output):
+def _write_feature_kmz(source, layer_name, output, where_clause=None):
     document_name = _xml_text(layer_name or "layer")
     spatial_reference = _require_spatial_reference(source)
     wgs84 = arcpy.SpatialReference(4326)
@@ -162,7 +170,10 @@ def _write_feature_kmz(source, layer_name, output):
     ]
     written_count = 0
     cursor_fields = ["SHAPE@"] + field_names
-    with arcpy.da.SearchCursor(source, cursor_fields) as cursor:
+    cursor_args = [source, cursor_fields]
+    if where_clause:
+        cursor_args.append(where_clause)
+    with arcpy.da.SearchCursor(*cursor_args) as cursor:
         for index, row in enumerate(cursor, 1):
             geometry = _project_geometry(row[0], spatial_reference, wgs84)
             if geometry is None:
@@ -428,17 +439,19 @@ def _output_format(arguments):
 def _output_base(context, arguments, output_format):
     if output_format == "gdb":
         return common.output_gdb(context, arguments.get("output_workspace") or arguments.get("output_folder"))
-    if output_format == "shp":
+    if output_format in ("shp", "kmz"):
         folder = arguments.get("output_folder") or arguments.get("output_workspace")
         if folder and common._text(folder).strip().lower().endswith(u".gdb"):
-            raise common.OperationError(u"导出 shp 时输出位置必须是普通文件夹，不能是 GDB。")
+            raise common.OperationError(u"导出 %s 时输出位置必须是普通文件夹，不能是 GDB。" % output_format)
         return common.output_directory(context, folder)
-    raise common.OperationError(u"output_format 只支持 shp 或 gdb。")
+    raise common.OperationError(u"output_format 只支持 shp、gdb 或 kmz。")
 
 
 def _output_path(output_base, output_name, output_format):
     if output_format == "gdb":
         return os.path.join(output_base, output_name)
+    if output_format == "kmz":
+        return os.path.join(output_base, output_name + ".kmz")
     return os.path.join(output_base, output_name + ".shp")
 
 
@@ -447,8 +460,15 @@ def _ensure_output_available(path):
         raise common.OperationError("Output already exists: %s" % path)
 
 
-def _output_name_for_value(prefix, value, index, used_names):
-    suffix = _safe_name_part(value, "group_%03d" % index)
+def _output_name_for_value(prefix, value, index, used_names, output_format, name_template=None):
+    if output_format == "kmz":
+        if name_template:
+            raw_name = _render_name_template(name_template, prefix, value, index)
+        else:
+            raw_name = u"%s_%s" % (common._text(prefix), _safe_file_name_part(value))
+        return _unique_file_name(raw_name, used_names)
+
+    suffix = _safe_name_part(value)
     base = _trim_name("%s_%s" % (prefix, suffix))
     name = base
     counter = 2
@@ -459,20 +479,99 @@ def _output_name_for_value(prefix, value, index, used_names):
     return common.safe_output_name(name)
 
 
-def _safe_name_part(value, fallback):
+def _render_name_template(template, prefix, value, index):
+    text = common._text(template)
+    replacements = {
+        u"{prefix}": common._text(prefix),
+        u"{value}": _value_text_for_name(value),
+        u"{value_base}": _value_base_for_name(value),
+        u"{index}": u"%03d" % index,
+        u"{index_number}": common._text(index)
+    }
+    for token, replacement in replacements.items():
+        text = text.replace(token, replacement)
+    return text
+
+
+def _unique_file_name(raw_name, used_names):
+    base = _safe_file_name(raw_name)
+    name = base
+    counter = 2
+    while name.lower() in used_names:
+        name = _safe_file_name(u"%s_%02d" % (base, counter))
+        counter += 1
+    used_names.add(name.lower())
+    return name
+
+
+def _safe_file_name_part(value):
+    if value is None:
+        return u"null"
+    raw_text = _value_text_for_name(value)
+    try:
+        return _safe_file_name(raw_text)
+    except common.OperationError:
+        raise common.OperationError(u"字段值无法生成输出文件名：%s" % raw_text)
+
+
+def _safe_file_name(value):
+    text = common._text(value).strip()
+    text = re.sub(u'[<>:"/\\\\|?\\x00-\\x1f]+', u"_", text)
+    text = re.sub(u"\\s+", u" ", text).strip(u" .")
+    if not text:
+        raise common.OperationError(u"输出文件名不能为空。")
+    upper = text.upper()
+    if upper in (u"CON", u"PRN", u"AUX", u"NUL") or re.match(u"^(COM|LPT)[1-9]$", upper):
+        text = u"_" + text
+    text = text[:120].rstrip(u" ._")
+    if not text:
+        raise common.OperationError(u"输出文件名不能为空。")
+    return text
+
+
+def _value_text_for_name(value):
+    if value is None:
+        return u"null"
+    return common._text(value).strip()
+
+
+def _value_base_for_name(value):
+    text = _value_text_for_name(value)
+    suffixes = (
+        u"社区村委会",
+        u"社区居委会",
+        u"村委会",
+        u"居委会",
+        u"居民委员会",
+        u"村民委员会",
+        u"社区",
+        u"行政村",
+        u"自然村",
+        u"村"
+    )
+    for suffix in suffixes:
+        if text.endswith(suffix) and len(text) > len(suffix):
+            return text[:-len(suffix)].strip()
+    return text
+
+
+def _safe_name_part(value):
     if value is None:
         return "null"
     text = common._text(value)
     text = re.sub(r"[^A-Za-z0-9_]+", "_", text).strip("_")
     if not text:
-        text = fallback
+        raise common.OperationError(u"字段值无法生成 ArcGIS 输出名称：%s" % common._text(value))
     if text[0].isdigit():
         text = "v_" + text
     return _trim_name(text)
 
 
 def _trim_name(value):
-    return value[:120].rstrip("_") or "group"
+    text = value[:120].rstrip("_")
+    if not text:
+        raise common.OperationError(u"输出名称不能为空。")
+    return text
 
 
 def _value_key(value):
