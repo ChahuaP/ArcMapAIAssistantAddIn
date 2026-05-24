@@ -336,7 +336,7 @@ class AgentToolRuntime:
         try:
             tool = create_draft_tool(self.store, arguments)
         except ToolBuilderError as exc:
-            return {"ok": False, "error": str(exc)}
+            return _toolbuilder_repairable_error(str(exc), "toolbuilder_create_draft")
         return {
             "ok": True,
             "status": "pending_review",
@@ -355,13 +355,27 @@ class AgentToolRuntime:
         try:
             tool = revise_draft_tool(self.store, arguments)
         except (KeyError, ToolBuilderError) as exc:
-            return {"ok": False, "error": str(exc)}
+            return _toolbuilder_repairable_error(str(exc), "toolbuilder_revise_draft")
         return {
             "ok": True,
             "status": "pending_review",
             "tool": tool,
             "message": "工具已在原工具上修订，重新进入待审核状态。"
         }
+
+
+def _toolbuilder_repairable_error(error: str, tool_name: str) -> Dict[str, Any]:
+    return {
+        "ok": False,
+        "status": "toolbuilder_validation_error",
+        "repairable": True,
+        "error": error,
+        "instruction": (
+            "%s 返回 ok=false，说明自定义工具草稿没有通过 GeoPilot 契约校验。"
+            "请根据 error 修正 operation_spec、executor_code 或 tests 后再次调用 %s，"
+            "不要把这个错误转成用户追问。"
+        ) % (tool_name, tool_name)
+    }
 
 
 def _tool(name: str, description: str, parameters: Dict[str, Any]) -> Dict[str, Any]:

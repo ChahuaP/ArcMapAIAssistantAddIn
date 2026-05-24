@@ -41,6 +41,8 @@ class AgenticPlannerTests(unittest.TestCase):
         self.assertIn('Never use file_resolve for output folders', SYSTEM_PROMPT)
         self.assertIn('you must decide output_name yourself from user_request', SYSTEM_PROMPT)
         self.assertIn('GeoPilot will not infer names from user text for you', SYSTEM_PROMPT)
+        self.assertIn('outputfolder', SYSTEM_PROMPT)
+        self.assertIn('already enabled capability', SYSTEM_PROMPT)
 
     def test_agentic_planner_uses_file_tool_then_proposes_intersect_workflow(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -449,6 +451,37 @@ class AgenticPlannerTests(unittest.TestCase):
         self.assertEqual(tool_results[0]["name"], "toolbuilder_create_draft")
         self.assertTrue(tool_results[0]["result"]["ok"])
         self.assertIn("toolbuilder_create_draft", json.dumps(client.calls[1]["messages"], ensure_ascii=False))
+
+    def test_toolbuilder_validation_error_forces_tool_repair_not_user_clarify(self):
+        bad_arguments = _star_tool_arguments()
+        bad_arguments["executor_code"] = bad_arguments["executor_code"].replace(
+            'output_path = arguments["output_path"]',
+            'output_path = arguments["output_path"]\n    output_folder = arguments["outputfolder"]'
+        )
+        client = FakeAgentClient([
+            _assistant_tool_call("call_1", "toolbuilder_create_draft", bad_arguments),
+            _assistant_tool_call("call_2", "workflow_propose", {
+                "action": "clarify",
+                "summary": 'writesdata 自定义工具执行代码不能读取 arguments["outputfolder"]；请只使用 GeoPilot 生成的 arguments["output_path"]。\n\n信息不够，当前不会执行任何操作。',
+                "steps": []
+            }),
+            _assistant_tool_call("call_3", "toolbuilder_create_draft", _star_tool_arguments()),
+            {"role": "assistant", "content": "已生成面转五角星面自定义工具草稿，审核启用后可以执行。"}
+        ])
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            store = WorkflowStore(root / "workflows.sqlite")
+            planner = AgenticPlanner(catalog=self.catalog, client=client, store=store)
+            with _isolated_tool_roots(root):
+                row = planner.plan("创建工具：把面图层转换成五角星面", _context())
+
+        self.assertEqual(row["workflow"]["action"], "answer")
+        tool_results = [item for item in row["agent_trace"] if item.get("type") == "tool"]
+        self.assertFalse(tool_results[0]["result"]["ok"])
+        self.assertTrue(tool_results[0]["result"]["repairable"])
+        self.assertEqual(tool_results[0]["result"]["status"], "toolbuilder_validation_error")
+        self.assertTrue(tool_results[1]["result"]["ok"])
+        self.assertNotIn("信息不够", row["workflow"]["summary"])
 
     def test_internal_feedback_after_toolbuilder_success_is_not_user_visible(self):
         client = FakeAgentClient([

@@ -446,7 +446,7 @@ def _validate_executor_contract(spec: Dict[str, Any], code: str) -> None:
         raise ToolBuilderError("writes_data 自定义工具必须把 output_name 声明为 required。")
     if not _executor_uses_argument_key(tree, "output_path"):
         raise ToolBuilderError("writes_data 自定义工具必须使用 arguments[\"output_path\"]，不要自己拼输出路径。")
-    for forbidden_key in sorted(managed_output_parameter_names(spec.get("output_policy") or {}) - {"output_path"}):
+    for forbidden_key in sorted(_executor_forbidden_output_argument_keys(tree, spec)):
         if _executor_uses_argument_key(tree, forbidden_key):
             raise ToolBuilderError("writes_data 自定义工具执行代码不能读取 arguments[\"%s\"]；请只使用 GeoPilot 生成的 arguments[\"output_path\"]。" % forbidden_key)
     _validate_create_featureclass_spatial_reference(tree)
@@ -729,6 +729,30 @@ def _is_output_path_reference(node: ast.AST, output_path_variables: set[str]) ->
         (isinstance(node, ast.Name) and node.id in output_path_variables)
         or _is_argument_key_expression(node, "output_path")
     )
+
+
+def _executor_forbidden_output_argument_keys(tree: ast.AST, spec: Dict[str, Any]) -> set[str]:
+    keys = managed_output_parameter_names(spec.get("output_policy") or {}) - {"output_path"}
+    for key in _executor_argument_keys(tree):
+        normalized = re.sub(r"[^a-z0-9]", "", key.lower())
+        if normalized.startswith("output") and normalized != "outputpath":
+            keys.add(key)
+    return keys
+
+
+def _executor_argument_keys(tree: ast.AST) -> set[str]:
+    keys: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name) and node.value.id == "arguments":
+            key = _literal_subscript_key(node)
+            if key:
+                keys.add(key)
+        elif isinstance(node, ast.Call) and _attribute_chain(node.func) == ("arguments", "get"):
+            if node.args:
+                key = _literal_node_value(node.args[0])
+                if key:
+                    keys.add(key)
+    return keys
 
 
 def _is_argument_key_expression(node: ast.AST, key: str) -> bool:

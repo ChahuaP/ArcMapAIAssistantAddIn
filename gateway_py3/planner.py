@@ -76,6 +76,7 @@ Hard rules:
 - If the current mode is full_agent, prefer the active project workdir for local data lookup and output planning.
 - In full_agent mode, generated data should use arcgis_context.project_output_workspace when the user does not provide an output location.
 - If existing operation chains cannot satisfy the user but the capability is feasible as a reusable ArcPy algorithm, call toolbuilder_create_draft to create a disabled draft tool package. Do not stop at unsupported just because no built-in operation exists.
+- If operation_index already contains an enabled custom.* operation that matches the user's goal, use that operation in workflow_propose. Do not create or revise a custom tool just to run an already enabled capability.
 - toolbuilder_create_draft is an agent tool, not an ArcGIS operation id. Never call catalog_get_operation_schema for toolbuilder.create_draft or toolbuilder_create_draft.
 - When the user reports a custom tool bug, bad parameter design, or wants a review change, find the matching entry in custom_tools, call toolbuilder_get_draft, then call toolbuilder_revise_draft with the same tool_id. Do not create a duplicate custom tool for revisions.
 - toolbuilder_get_draft and toolbuilder_revise_draft accept an internal UUID, a custom.* operation id such as custom.feature_to_star_polygon, or a custom_tool:<uuid>:execute executor reference. Never ask the user to provide existing custom tool executor code.
@@ -86,7 +87,7 @@ Hard rules:
 - Custom tool executor_code must not call getOutput. GeoPilot passes ArcMap Layer objects, not geoprocessing Result objects.
 - Custom tool executor_code receives already-resolved arguments from GeoPilot. For layer parameters, arguments["input_layer"] is the ArcMap layer object; do not search for layers by name.
 - Custom tool executor_code must not hide geometry or ArcPy failures with broad except/pass/continue. Unexpected errors must raise so the user can use "让 AI 修工具".
-- For writes_data custom tools, define required output_name in operation_spec and write only to arguments["output_path"]. Do not read managed output arguments such as output_workspace, output_folder, output_format, or output_name inside executor_code, and do not build output paths from arcpy.env.workspace or user arguments. Variable names like output_path_full do not count; the code must read arguments["output_path"] or arguments.get("output_path").
+- For writes_data custom tools, define required output_name in operation_spec and write only to arguments["output_path"]. Do not read managed output arguments such as output_workspace, output_folder, output_format, output_name, or misspelled output variants such as outputfolder inside executor_code, and do not build output paths from arcpy.env.workspace or user arguments. Variable names like output_path_full do not count; the code must read arguments["output_path"] or arguments.get("output_path").
 - Use output_policy.type deliberately: feature_class for ArcGIS vector outputs with gdb/shp formats, file for ordinary files such as .obj/.json/.csv with a declared extension, and raster for .tif raster outputs. File outputs may call open(arguments["output_path"], "w" or "wb") and must not open any other path.
 - For CreateFeatureclass_management, split arguments["output_path"] with os.path.dirname/basename and pass spatial_reference from arcpy.Describe(input_layer).spatialReference. Do not pass context["spatial_reference"], spatialReference.name, factoryCode, strings, or layer.spatialReference.
 - For SHAPE@ Polygon geometry in ArcMap, geom.getPart(i) returns an Array of Point objects. Iterate points directly and handle None ring separators; do not treat part.getObject(j) as a ring object with .count.
@@ -183,6 +184,13 @@ class AgenticPlanner:
                 content_workflow = _json_workflow_from_content(assistant_message.get("content"))
                 if content_workflow is None:
                     content_text = _assistant_content(assistant_message)
+                    tool_repair_feedback = _latest_unresolved_toolbuilder_repair_feedback(trace)
+                    if tool_repair_feedback:
+                        validation_feedback_count += 1
+                        if validation_feedback_count > _repair_limit_for_feedback(tool_repair_feedback):
+                            return self._store_unfinalized_feedback(command, context, tool_repair_feedback, trace, mode, project_id)
+                        messages.append(_assistant_repair_message(tool_repair_feedback))
+                        continue
                     if (
                         _file_result_can_continue(trace)
                         and _generic_clarification(content_text)
@@ -232,7 +240,8 @@ class AgenticPlanner:
                     result = {"ok": False, "error": friendly_validation_message(exc)}
                 write_event("agent.tool_result", {"name": name, "result": result})
                 trace.append({"type": "tool", "name": name, "arguments": arguments, "result": result})
-                pending_question = _question_from_tool_result(result) or pending_question
+                if not result.get("repairable"):
+                    pending_question = _question_from_tool_result(result) or pending_question
 
                 if name == "workflow_propose":
                     if result.get("ok"):
@@ -251,7 +260,8 @@ class AgenticPlanner:
 
                 messages.append(_tool_message(tool_call.get("id"), result))
 
-        return self._store_unfinalized_feedback(command, context, pending_question or "这个任务还不够明确，请补充要操作的数据、处理方式或输出位置。", trace, mode, project_id)
+        repair_feedback = _latest_unresolved_toolbuilder_repair_feedback(trace)
+        return self._store_unfinalized_feedback(command, context, pending_question or repair_feedback or "这个任务还不够明确，请补充要操作的数据、处理方式或输出位置。", trace, mode, project_id)
 
     def _messages(
         self,
@@ -294,7 +304,7 @@ class AgenticPlanner:
         generic_unsupported_feedback = _generic_unsupported_feedback(workflow, trace)
         if generic_unsupported_feedback:
             return None, generic_unsupported_feedback
-        validation_clarification_feedback = _validation_clarification_feedback(workflow)
+        validation_clarification_feedback = _validation_clarification_feedback(workflow, trace)
         if validation_clarification_feedback:
             return None, validation_clarification_feedback
         exploration_feedback = _attribute_exploration_feedback(workflow, trace)
@@ -547,9 +557,12 @@ def _generic_unsupported_feedback(workflow: Dict[str, Any], trace: List[Dict[str
     )
 
 
-def _validation_clarification_feedback(workflow: Dict[str, Any]) -> str:
+def _validation_clarification_feedback(workflow: Dict[str, Any], trace: List[Dict[str, Any]]) -> str:
     if workflow.get("action") not in ("clarify", "answer"):
         return ""
+    tool_repair_feedback = _latest_unresolved_toolbuilder_repair_feedback(trace)
+    if tool_repair_feedback:
+        return tool_repair_feedback
     summary = str(workflow.get("summary") or "")
     if not _looks_like_validation_feedback(summary):
         return ""
@@ -598,6 +611,8 @@ def _is_internal_planner_feedback(feedback: str) -> bool:
         "<minimax:tool_call>",
         "toolbuilder_create_draft 创建待审核自定义工具",
         "toolbuilder_revise_draft 修订同一个工具",
+        "自定义工具草稿没有通过 GeoPilot 契约校验",
+        "不要把这个错误转成用户追问",
     )
     return any(marker in text for marker in markers)
 
@@ -616,6 +631,9 @@ def _is_validation_repair_feedback(feedback: str) -> bool:
         "输出文件夹不存在",
         "输出工作空间不可用",
         "输出位置还不明确",
+        "自定义工具草稿没有通过 GeoPilot 契约校验",
+        "toolbuilder_create_draft 返回 ok=false",
+        "toolbuilder_revise_draft 返回 ok=false",
         "每个执行步骤都必须带 reason",
         "Step missing field",
         "Workflow action",
@@ -634,6 +652,29 @@ def _looks_like_validation_feedback(summary: str) -> bool:
         "Step missing field",
     )
     return any(marker in text for marker in markers)
+
+
+def _latest_unresolved_toolbuilder_repair_feedback(trace: List[Dict[str, Any]]) -> str:
+    for item in reversed(trace):
+        if item.get("type") != "tool":
+            continue
+        if item.get("name") not in ("toolbuilder_create_draft", "toolbuilder_revise_draft"):
+            continue
+        result = item.get("result") or {}
+        if result.get("ok"):
+            return ""
+        if result.get("repairable"):
+            instruction = result.get("instruction")
+            error = result.get("error")
+            if isinstance(instruction, str) and instruction.strip():
+                return instruction.strip()
+            if isinstance(error, str) and error.strip():
+                return (
+                    "自定义工具草稿没有通过 GeoPilot 契约校验。"
+                    "请根据错误修正 operation_spec、executor_code 或 tests 后再次调用 toolbuilder，"
+                    "不要把这个错误转成用户追问。错误：%s"
+                ) % error.strip()
+    return ""
 
 
 def _is_generic_unsupported_text(feedback: str) -> bool:
@@ -762,7 +803,7 @@ def _file_search_nudge_message() -> Dict[str, str]:
 def _assistant_repair_message(feedback: str) -> Dict[str, str]:
     return {
         "role": "user",
-        "content": "The previous workflow did not pass validation. Repair it and continue; do not ask the user. Validation feedback: %s" % feedback
+        "content": "The previous workflow or tool call did not pass validation. Repair it and continue; do not ask the user. Validation feedback: %s" % feedback
     }
 
 

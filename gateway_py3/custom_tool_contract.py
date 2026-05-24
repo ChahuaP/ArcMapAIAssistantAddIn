@@ -30,6 +30,7 @@ REQUIRED_UNIT_ENUM_VALUES = ("map_units", "degrees", "meters")
 
 PLANNER_CUSTOM_TOOL_CONTRACT = """- Custom tools are for new reusable ArcPy algorithms that cannot be expressed by chaining existing catalog operations.
 - Prefer a multi-step workflow of existing operations whenever the task is selection, filtering, splitting, exporting, converting, or other normal ArcGIS processing.
+- If an enabled custom.* operation already matches the user goal, generate a workflow using that operation; do not create or revise a custom tool just to run it.
 - toolbuilder_create_draft is an agent tool, not an ArcGIS operation id. Never call catalog_get_operation_schema for toolbuilder.create_draft or toolbuilder_create_draft; call toolbuilder_create_draft directly.
 - Do not say the current ArcGIS version cannot create a custom tool when toolbuilder_create_draft is available. Create a disabled draft tool package instead.
 - If toolbuilder_create_draft returns ok=false, repair the operation_spec, executor_code, or tests from that exact error and call toolbuilder_create_draft again.
@@ -45,7 +46,7 @@ PLANNER_CUSTOM_TOOL_CONTRACT = """- Custom tools are for new reusable ArcPy algo
 - Every helper function called by executor_code must be defined in the same executor module or imported from an allowed Python 2.7 standard module. Do not invent helper functions and assume GeoPilot or ArcPy provides them.
 - The runtime injects arcpy and resolves layer parameters before execute runs. Use arguments["input_layer"] or other layer parameters directly as ArcMap Layer objects.
 - Do not hide geometry or ArcPy failures with broad except/pass/continue. If a feature is invalid, count it and continue only for that specific expected condition; unexpected exceptions must raise so the tool can be revised.
-- For writes_data tools, declare required output_name and write the output only to arguments["output_path"]. Do not read managed output arguments such as output_workspace, output_folder, output_format, or output_name inside executor_code.
+- For writes_data tools, declare required output_name and write the output only to arguments["output_path"]. Do not read managed output arguments such as output_workspace, output_folder, output_format, output_name, or misspelled output variants such as outputfolder inside executor_code.
 - output_policy.type controls the generated output path: feature_class supports gdb and shp outputs, file writes ordinary files such as .obj/.json/.csv, and raster writes raster files such as .tif.
 - For feature_class outputs, GeoPilot may add output_workspace, output_folder, and output_format workflow arguments. Use output_format="shp" plus output_folder for shapefile output, or output_format="gdb" plus output_workspace for file geodatabase output.
 - For file outputs, operation_spec.output_policy must include extension such as ".obj"; executor_code may call open(arguments["output_path"], "w") or open(arguments["output_path"], "wb") and must not open any other path.

@@ -613,6 +613,26 @@ class ProjectAndToolTests(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertIn("output_workspace", result["error"])
 
+    def test_writes_data_executor_rejects_misspelled_output_argument(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            store = WorkflowStore(root / "workflows.sqlite")
+            runtime = AgentToolRuntime(self.catalog, store, _context())
+            spec = _custom_writes_data_spec()
+
+            with _isolated_tool_roots(root):
+                result = runtime.handle("toolbuilder_create_draft", {
+                    "name": "错误工具",
+                    "capability": "读取拼错的输出目录参数",
+                    "operation_spec": spec,
+                    "executor_code": "def execute(context, arguments, step_outputs):\n    output_path = arguments['output_path']\n    output_folder = arguments['outputfolder']\n    arcpy.CopyFeatures_management(arguments['input_layer'], output_path)\n    return {'output': output_path, 'folder': output_folder}\n",
+                    "tests": _review_tests()
+                })
+
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["repairable"])
+        self.assertIn("outputfolder", result["error"])
+
     def test_toolbuilder_rejects_distance_parameter_without_unit(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
