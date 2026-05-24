@@ -484,7 +484,6 @@ def _render_name_template(template, prefix, value, index):
     replacements = {
         u"{prefix}": common._text(prefix),
         u"{value}": _value_text_for_name(value),
-        u"{value_base}": _value_base_for_name(value),
         u"{index}": u"%03d" % index,
         u"{index_number}": common._text(index)
     }
@@ -533,26 +532,6 @@ def _value_text_for_name(value):
     if value is None:
         return u"null"
     return common._text(value).strip()
-
-
-def _value_base_for_name(value):
-    text = _value_text_for_name(value)
-    suffixes = (
-        u"社区村委会",
-        u"社区居委会",
-        u"村委会",
-        u"居委会",
-        u"居民委员会",
-        u"村民委员会",
-        u"社区",
-        u"行政村",
-        u"自然村",
-        u"村"
-    )
-    for suffix in suffixes:
-        if text.endswith(suffix) and len(text) > len(suffix):
-            return text[:-len(suffix)].strip()
-    return text
 
 
 def _safe_name_part(value):

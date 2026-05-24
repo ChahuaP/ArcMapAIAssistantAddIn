@@ -113,13 +113,13 @@ class SplitByFieldTests(unittest.TestCase):
                     "output_name": "community_kmz",
                     "output_format": "kmz",
                     "output_folder": directory,
-                    "name_template": "{value_base}永农"
+                    "name_template": "{value}永农"
                 },
                 {}
             )
 
             names = [pathlib.Path(item).name for item in result["outputs"]]
-            self.assertEqual(names, ["红光永农.kmz", "钱仓永农.kmz"])
+            self.assertEqual(names, ["红光社区永农.kmz", "钱仓社区永农.kmz"])
             self.assertEqual(self.calls["make"], [])
             self.assertEqual(self.calls["copy"], [])
             with zipfile.ZipFile(result["outputs"][0], "r") as archive:

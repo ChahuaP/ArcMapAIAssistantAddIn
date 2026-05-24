@@ -51,7 +51,6 @@ def prepare_workflow(workflow: Dict[str, Any], catalog: OperationCatalog, contex
     prepared = copy.deepcopy(workflow)
     normalize_workflow(prepared)
     normalize_workflow_arguments(prepared, catalog)
-    apply_default_output_names(prepared, catalog)
     apply_project_output_location(prepared, catalog, context)
     apply_output_name_timestamp(prepared, catalog)
     remove_generated_output_add_layers(prepared, catalog)
@@ -104,26 +103,6 @@ def normalize_workflow_arguments(workflow: Dict[str, Any], catalog: OperationCat
         properties = (catalog.operations[operation_id].get("parameters_schema") or {}).get("properties") or {}
         if "where" in properties and isinstance(arguments.get("where"), dict):
             arguments["where"] = normalize_condition_tree(arguments["where"])
-
-
-def apply_default_output_names(workflow: Dict[str, Any], catalog: OperationCatalog) -> None:
-    if workflow.get("action") != "execute":
-        return
-    for step in workflow.get("steps") or []:
-        operation_id = step.get("operation")
-        if operation_id not in catalog.operations:
-            continue
-        arguments = step.get("arguments")
-        if not isinstance(arguments, dict):
-            continue
-        schema = catalog.operations[operation_id].get("parameters_schema") or {}
-        if "output_name" not in schema.get("required", []):
-            continue
-        if arguments.get("output_name"):
-            continue
-        output_name = _default_output_name_for_step(operation_id, arguments)
-        if output_name:
-            arguments["output_name"] = output_name
 
 
 def apply_output_name_timestamp(workflow: Dict[str, Any], catalog: OperationCatalog) -> None:
@@ -269,7 +248,14 @@ def friendly_validation_message(error: Exception) -> str:
     if "Step missing field:" in message:
         return "这个任务信息还不完整。请把要操作的图层、参数和输出位置再说清楚一点。"
     if "missing required argument:" in message:
-        return "这个操作还缺少必要参数“%s”。请补充后我再继续。" % message.rsplit(":", 1)[-1].strip()
+        name = message.rsplit(":", 1)[-1].strip()
+        if name == "output_name":
+            return (
+                "写数据步骤缺少 output_name。请根据 user_request 自行判断用户是否指定了输出名；"
+                "如果指定了，就把用户的命名转换成合法 ASCII snake_case；如果没有指定，就由模型起一个清晰的英文名。"
+                "不要向用户追问，不要让系统默认按图层名生成。"
+            )
+        return "这个操作还缺少必要参数“%s”。请根据 user_request 和上下文补齐；确实无法判断时才向用户追问。" % name
     if "has unknown arguments:" in message:
         if "folder_path" in message:
             return "workflow operation 里不能使用 folder_path；folder_path 只属于 file_resolve。导出到文件夹时，请按 operation schema 使用 output_folder。请修正 workflow，不要向用户追问。"
@@ -731,25 +717,6 @@ def _available_layer_names(layers: List[Dict[str, Any]]) -> List[str]:
         if len(names) >= 10:
             break
     return names
-
-
-def _default_output_name_for_step(operation_id: str, arguments: Dict[str, Any]) -> str | None:
-    suffix = operation_id.split(".", 1)[1] if "." in operation_id else operation_id
-    if isinstance(arguments.get("input_layers"), list) and arguments["input_layers"]:
-        return _safe_output_name("_".join([str(item) for item in arguments["input_layers"]] + [suffix]))
-    for key in ("input_layer", "target_layer", "layer"):
-        if arguments.get(key):
-            return _safe_output_name("%s_%s" % (arguments[key], suffix))
-    return None
-
-
-def _safe_output_name(value: str) -> str:
-    text = re.sub(r"[^A-Za-z0-9_]+", "_", str(value)).strip("_")
-    if not text:
-        return "arcgis_ai_output"
-    if text[0].isdigit():
-        text = "out_" + text
-    return text[:120]
 
 
 def _has_timestamp_suffix(value: str) -> bool:

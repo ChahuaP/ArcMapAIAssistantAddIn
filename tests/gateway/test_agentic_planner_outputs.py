@@ -57,6 +57,20 @@ class AgenticPlannerOutputTests(unittest.TestCase):
         self.assertEqual(arguments["output_format"], "shp")
         self.assertEqual(arguments["output_folder"], directory)
 
+    def test_write_workflow_requires_model_chosen_output_name(self):
+        workflow = {
+            "action": "execute",
+            "summary": "将对 nanjing 生成缓冲区。",
+            "steps": [
+                _step("step_1", "analysis.buffer", {
+                    "input_layer": "nanjing",
+                    "distance": "10 Meters"
+                }, "缓冲")
+            ]
+        }
+        with self.assertRaisesRegex(ValidationError, "output_name"):
+            prepare_workflow(workflow, self.catalog, _context(is_saved=True))
+
     def test_full_agent_project_output_workspace_is_applied_to_writes(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
@@ -104,7 +118,7 @@ class AgenticPlannerOutputTests(unittest.TestCase):
                             "output_name": "community_kmz",
                             "output_format": "kmz",
                             "output_folder": str(output),
-                            "name_template": "{value_base}永农"
+                            "name_template": "{value}永农"
                         }, "按字段拆分导出 KMZ")
                     ]
                 })
@@ -134,7 +148,7 @@ class AgenticPlannerOutputTests(unittest.TestCase):
                             "output_name": "community_kmz",
                             "output_format": "kmz",
                             "output_folder": str(root / "missing" / "test"),
-                            "name_template": "{value_base}永农"
+                            "name_template": "{value}永农"
                         }, "按字段拆分导出 KMZ")
                     ]
                 }),
@@ -182,7 +196,7 @@ class AgenticPlannerOutputTests(unittest.TestCase):
                         "output_name": "community_kmz",
                         "output_format": "kmz",
                         "output_folder": directory,
-                        "name_template": "{value_base}永农"
+                        "name_template": "{value}永农"
                     }, "按 NAME 字段拆分导出 KMZ")
                 ]
             }
@@ -190,7 +204,7 @@ class AgenticPlannerOutputTests(unittest.TestCase):
 
         arguments = prepared["steps"][0]["arguments"]
         self.assertEqual(arguments["output_format"], "kmz")
-        self.assertEqual(arguments["name_template"], "{value_base}永农")
+        self.assertEqual(arguments["name_template"], "{value}永农")
         self.assertRegex(arguments["output_name"], r"^community_kmz_\d{8}_\d{6}$")
 
     def test_missing_output_folder_is_rejected_before_runtime_execution(self):

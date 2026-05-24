@@ -39,6 +39,8 @@ class AgenticPlannerTests(unittest.TestCase):
         self.assertIn('folder_path is only for the file_resolve tool', SYSTEM_PROMPT)
         self.assertIn('output_folder_resolve', SYSTEM_PROMPT)
         self.assertIn('Never use file_resolve for output folders', SYSTEM_PROMPT)
+        self.assertIn('you must decide output_name yourself from user_request', SYSTEM_PROMPT)
+        self.assertIn('GeoPilot will not infer names from user text for you', SYSTEM_PROMPT)
 
     def test_agentic_planner_uses_file_tool_then_proposes_intersect_workflow(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -58,6 +60,18 @@ class AgenticPlannerTests(unittest.TestCase):
                         _step("step_1", "layer.add_layer", {"path": str(p1)}, "添加 p1"),
                         _step("step_2", "layer.add_layer", {"path": str(p2)}, "添加 p2"),
                         _step("step_3", "analysis.intersect", {"input_layers": ["p1", "p2"]}, "对 p1 和 p2 相交")
+                    ]
+                }),
+                _assistant_tool_call("call_3", "workflow_propose", {
+                    "action": "execute",
+                    "summary": "将添加 p1、p2，并执行相交分析。",
+                    "steps": [
+                        _step("step_1", "layer.add_layer", {"path": str(p1)}, "添加 p1"),
+                        _step("step_2", "layer.add_layer", {"path": str(p2)}, "添加 p2"),
+                        _step("step_3", "analysis.intersect", {
+                            "input_layers": ["p1", "p2"],
+                            "output_name": "p1_p2_intersect"
+                        }, "对 p1 和 p2 相交")
                     ]
                 })
             ])
@@ -290,6 +304,16 @@ class AgenticPlannerTests(unittest.TestCase):
                     "summary": "将对 p1 和 p2 执行相交分析。",
                     "steps": [
                         _step("step_1", "analysis.intersect", {"input_layers": ["p1", "p2"]}, "对 p1 和 p2 相交")
+                    ]
+                }),
+                _assistant_tool_call("call_2", "workflow_propose", {
+                    "action": "execute",
+                    "summary": "将对 p1 和 p2 执行相交分析。",
+                    "steps": [
+                        _step("step_1", "analysis.intersect", {
+                            "input_layers": ["p1", "p2"],
+                            "output_name": "p1_p2_intersect"
+                        }, "对 p1 和 p2 相交")
                     ]
                 })
             ])

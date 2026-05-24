@@ -255,7 +255,7 @@
         "每类导出kml",
         "每类导出kmz"
       ],
-      "model_card": "Use export.split_by_field to export one output per unique value of a field. Arguments: layer, field, output_name as ASCII run id, output_format optional shp|gdb|kmz, output_folder for shp/kmz, output_workspace for gdb, name_template optional for kmz filenames, include_null optional, selected_only optional, max_outputs optional. If the user asks KML/KMZ per field value, set output_format=kmz; do not use shp/gdb. For kmz, name_template controls the final file name without extension. Placeholders: {value}=field value, {value_base}=field value with terminal community/village suffix removed, {prefix}=output_name, {index}=001. For a request like '命名为社区名+永农' with values such as '红光社区' and example '红光永农', use name_template='{value_base}永农'.",
+      "model_card": "Use export.split_by_field to export one output per unique value of a field. Arguments: layer, field, output_name as ASCII run id, output_format optional shp|gdb|kmz, output_folder for shp/kmz, output_workspace for gdb, name_template optional for kmz filenames, include_null optional, selected_only optional, max_outputs optional. If the user asks KML/KMZ per field value, set output_format=kmz; do not use shp/gdb. For kmz, name_template controls the final file name without extension. Placeholders: {value}=exact field value, {prefix}=output_name, {index}=001, {index_number}=1. The model decides the template from user_request; the runtime only renders the provided template.",
       "parameters_schema": {
         "type": "object",
         "required": [
@@ -336,14 +336,14 @@
           }
         },
         {
-          "user": "按社区分别导出 KML，命名为社区名+永农，例如红光永农",
+          "user": "按字段值分别导出 KML，文件名为字段值+永农",
           "arguments": {
             "layer": "layer:0",
             "field": "村名",
             "output_name": "community_kmz",
             "output_format": "kmz",
             "output_folder": "D:\\Data\\exports",
-            "name_template": "{value_base}永农"
+            "name_template": "{value}永农"
           }
         }
       ]

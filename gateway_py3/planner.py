@@ -54,6 +54,8 @@ Hard rules:
 - If the user names an output folder that does not resolve, ask one clear Chinese question or choose the active project output folder only when the user did not specify an output destination.
 - When the user provides a numeric size with a unit, map it to the operation schema exactly. For example, "外接圆半径0.001度" is a concrete radius, not a clarification request; if the schema has radius_unit, set it to degrees.
 - output_name must use ASCII letters, numbers, and underscores only, and must not start with a number.
+- For every writes_data step, you must decide output_name yourself from user_request. If the user specified a desired output/file name, convert that exact intent to legal ASCII snake_case and pass it as output_name. If the user did not specify a name, create a clear descriptive ASCII snake_case output_name. GeoPilot will not infer names from user text for you.
+- Before workflow_propose, self-check all writes_data steps: user-requested naming is preserved in output_name; unnamed outputs have model-chosen descriptive output_name; output_name is never omitted.
 - If the user asks for default GDB output, read arcgis_context.default_gdb or call arcgis_get_context, then pass that exact path as output_workspace.
 - You parse natural language into structured tool arguments. Tools do not parse natural language for you.
 - For local files, call file_resolve with structured arguments only: path, folder_path, drive, directory, directory_parts, file_name, extensions.
@@ -606,6 +608,8 @@ def _is_validation_repair_feedback(feedback: str) -> bool:
         "workflow 必须带 action",
         "不要把 workflow_validate",
         "属性条件 where 缺少 op",
+        "写数据步骤缺少 output_name",
+        "缺少必要参数",
         "叶子条件必须写 op",
         "叶子条件必须有 op",
         "workflow operation 里不能使用 folder_path",
