@@ -14,7 +14,7 @@ except NameError:
     unicode = str
 
 
-SAFE_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+INVALID_OUTPUT_NAME_RE = re.compile(u'[<>:"/\\\\|?*\\x00-\\x1f]')
 SAFE_EXTENSION_RE = re.compile(r"^\.[A-Za-z0-9]{1,12}$")
 
 
@@ -123,9 +123,16 @@ def output_directory(context, output_folder=None):
 
 
 def safe_output_name(name):
-    if not name or not SAFE_NAME_RE.match(name):
+    text = _text(name).strip() if name else u""
+    if (
+        not text
+        or text != _text(name)
+        or text in (u".", u"..")
+        or u"." in text
+        or INVALID_OUTPUT_NAME_RE.search(text)
+    ):
         raise OperationError("Invalid output_name: %s" % name)
-    return name
+    return text
 
 
 def output_feature_class(context, output_name, output_workspace=None):

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import copy
-from datetime import datetime
 from pathlib import Path
 import re
 from typing import Any, Dict, List
@@ -52,7 +51,6 @@ def prepare_workflow(workflow: Dict[str, Any], catalog: OperationCatalog, contex
     normalize_workflow(prepared)
     normalize_workflow_arguments(prepared, catalog)
     apply_project_output_location(prepared, catalog, context)
-    apply_output_name_timestamp(prepared, catalog)
     remove_generated_output_add_layers(prepared, catalog)
     validate_workflow(prepared, catalog)
     validate_workflow_semantics(prepared, catalog, context)
@@ -103,26 +101,6 @@ def normalize_workflow_arguments(workflow: Dict[str, Any], catalog: OperationCat
         properties = (catalog.operations[operation_id].get("parameters_schema") or {}).get("properties") or {}
         if "where" in properties and isinstance(arguments.get("where"), dict):
             arguments["where"] = normalize_condition_tree(arguments["where"])
-
-
-def apply_output_name_timestamp(workflow: Dict[str, Any], catalog: OperationCatalog) -> None:
-    if workflow.get("action") != "execute":
-        return
-    suffix = datetime.now().strftime("%Y%m%d_%H%M%S")
-    for step in workflow.get("steps") or []:
-        operation_id = step.get("operation")
-        if operation_id not in catalog.operations:
-            continue
-        operation = catalog.operations[operation_id]
-        if operation.get("side_effects") != "writes_data":
-            continue
-        arguments = step.get("arguments")
-        if not isinstance(arguments, dict):
-            continue
-        output_name = arguments.get("output_name")
-        if not output_name or _has_timestamp_suffix(str(output_name)):
-            continue
-        arguments["output_name"] = "%s_%s" % (output_name, suffix)
 
 
 def remove_generated_output_add_layers(workflow: Dict[str, Any], catalog: OperationCatalog) -> None:
@@ -252,7 +230,7 @@ def friendly_validation_message(error: Exception) -> str:
         if name == "output_name":
             return (
                 "写数据步骤缺少 output_name。请根据 user_request 自行判断用户是否指定了输出名；"
-                "如果指定了，就把用户的命名转换成合法 ASCII snake_case；如果没有指定，就由模型起一个清晰的英文名。"
+                "如果指定了，就按用户命名传 output_name；如果没有指定，就由模型起一个清晰名字。"
                 "不要向用户追问，不要让系统默认按图层名生成。"
             )
         return "这个操作还缺少必要参数“%s”。请根据 user_request 和上下文补齐；确实无法判断时才向用户追问。" % name
@@ -298,6 +276,13 @@ def _validate_arguments(step_id: str, operation_id: str, arguments: Dict[str, An
     if additional is False:
         extra = sorted(set(arguments) - set(properties))
         if extra:
+            if "output_path" in extra:
+                raise ValidationError(
+                    "%s 不要传 output_path。output_path 只由 GeoPilot 执行时根据 output_name 和输出位置生成；"
+                    "workflow 只允许传 operation schema 里声明的 output_name、output_folder 或 output_workspace，"
+                    "不要为了 output_path 修订自建工具。"
+                    % step_id
+                )
             allowed = sorted(properties)
             if operation_id.startswith("custom."):
                 raise ValidationError(
@@ -565,8 +550,14 @@ def _validate_output_name(arguments: Dict[str, Any]) -> None:
     output_name = arguments.get("output_name")
     if not output_name:
         return
-    if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", str(output_name)):
-        raise ValidationError("输出名称“%s”不能用于 ArcGIS。请使用英文、数字和下划线，并且不要用数字开头。" % output_name)
+    text = str(output_name)
+    if (
+        text != text.strip()
+        or text in (".", "..")
+        or "." in text
+        or re.search(r'[<>:"/\\|?*\x00-\x1f]', text)
+    ):
+        raise ValidationError("输出名称“%s”不能用于输出。请只传文件名主体，不要包含扩展名、路径或系统非法字符。" % output_name)
 
 
 def _validate_layer_add_path(step: Dict[str, Any], arguments: Dict[str, Any]) -> None:
@@ -717,10 +708,6 @@ def _available_layer_names(layers: List[Dict[str, Any]]) -> List[str]:
         if len(names) >= 10:
             break
     return names
-
-
-def _has_timestamp_suffix(value: str) -> bool:
-    return bool(re.search(r"(?:^|_)\d{8}(?:_\d{6})?$", value))
 
 
 def _register_generated_output_name(output_name: Any, generated_names: set[str]) -> None:

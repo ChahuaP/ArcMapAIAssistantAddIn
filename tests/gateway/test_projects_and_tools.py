@@ -363,6 +363,38 @@ class ProjectAndToolTests(unittest.TestCase):
         self.assertEqual(revised["tool"]["status"], "pending_review")
         self.assertFalse(enabled_exists_after_revision)
 
+    def test_toolbuilder_create_draft_does_not_overwrite_enabled_operation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            store = WorkflowStore(root / "workflows.sqlite")
+            runtime = AgentToolRuntime(self.catalog, store, _context())
+
+            with _isolated_tool_roots(root):
+                created = runtime.handle("toolbuilder_create_draft", {
+                    "name": "测试工具",
+                    "capability": "执行测试能力",
+                    "operation_spec": _custom_spec(),
+                    "executor_code": "def execute(context, arguments, step_outputs):\n    return {'ok': True}\n",
+                    "tests": _review_tests()
+                })
+                tool_id = created["tool"]["id"]
+                tool_builder.enable_tool(store, tool_id)
+
+                duplicate = runtime.handle("toolbuilder_create_draft", {
+                    "name": "测试工具",
+                    "capability": "错误覆盖启用工具",
+                    "operation_spec": _custom_spec(),
+                    "executor_code": "def execute(context, arguments, step_outputs):\n    return {'ok': True, 'duplicate': True}\n",
+                    "tests": _review_tests()
+                })
+                enabled_exists = (tool_builder.ENABLED_ROOT / tool_id).exists()
+                status = store.get_pending_tool(tool_id)["status"]
+
+        self.assertFalse(duplicate["ok"])
+        self.assertIn("直接生成 workflow", duplicate["error"])
+        self.assertTrue(enabled_exists)
+        self.assertEqual(status, "enabled")
+
     def test_catalog_schema_lookup_corrects_toolbuilder_namespace(self):
         with tempfile.TemporaryDirectory() as directory:
             store = WorkflowStore(pathlib.Path(directory) / "workflows.sqlite")
@@ -919,6 +951,49 @@ class ProjectAndToolTests(unittest.TestCase):
         self.assertEqual(operation["context_requirements"], {})
         self.assertEqual(operation["output_policy"], {})
 
+    def test_layer_parameter_marked_by_kind_is_loaded_as_string_reference(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            store = WorkflowStore(root / "workflows.sqlite")
+            runtime = AgentToolRuntime(self.catalog, store, _context())
+            spec = _custom_spec()
+            spec["parameters_schema"] = {
+                "type": "object",
+                "required": ["input_layer"],
+                "properties": {
+                    "input_layer": {"type": "object", "x-geopilot-kind": "layer"}
+                },
+                "additionalProperties": False
+            }
+
+            with _isolated_tool_roots(root):
+                result = runtime.handle("toolbuilder_create_draft", {
+                    "name": "测试工具",
+                    "capability": "执行测试能力",
+                    "operation_spec": spec,
+                    "executor_code": "def execute(context, arguments, step_outputs):\n    return {'ok': True}\n",
+                    "tests": _review_tests()
+                })
+                tool_builder.enable_tool(store, result["tool"]["id"])
+                catalog = OperationCatalog()
+
+        schema = catalog.get("custom.demo_tool")["parameters_schema"]
+        self.assertEqual(schema["properties"]["input_layer"]["type"], "string")
+        self.assertEqual(schema["properties"]["input_layer"]["x-geopilot-kind"], "layer")
+
+    def test_non_boolean_additional_properties_is_canonicalized_to_false(self):
+        spec = _custom_spec()
+        spec["parameters_schema"] = {
+            "type": "object",
+            "required": [],
+            "properties": {},
+            "additionalProperties": {}
+        }
+
+        canonical = tool_builder.canonicalize_operation_spec(spec)
+
+        self.assertIs(canonical["parameters_schema"]["additionalProperties"], False)
+
     def test_writes_data_tool_gets_managed_output_workspace_argument(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
@@ -939,6 +1014,26 @@ class ProjectAndToolTests(unittest.TestCase):
         schema = catalog.get("custom.demo_tool")["parameters_schema"]
         self.assertIn("output_workspace", schema["properties"])
         self.assertNotIn("output_workspace", schema["required"])
+
+    def test_writes_data_tool_must_not_declare_runtime_output_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            store = WorkflowStore(root / "workflows.sqlite")
+            runtime = AgentToolRuntime(self.catalog, store, _context())
+            spec = _custom_writes_data_spec()
+            spec["parameters_schema"]["properties"]["output_path"] = {"type": "string"}
+
+            with _isolated_tool_roots(root):
+                result = runtime.handle("toolbuilder_create_draft", {
+                    "name": "写数据工具",
+                    "capability": "写出数据",
+                    "operation_spec": spec,
+                    "executor_code": "def execute(context, arguments, step_outputs):\n    arcpy.CopyFeatures_management(arguments['input_layer'], arguments['output_path'])\n    return {'output': arguments['output_path']}\n",
+                    "tests": _review_tests()
+                })
+
+        self.assertFalse(result["ok"])
+        self.assertIn("不能在 parameters_schema 声明 output_path", result["error"])
 
     def test_polygon_to_star_custom_tool_contract_can_be_created_and_enabled(self):
         with tempfile.TemporaryDirectory() as directory:

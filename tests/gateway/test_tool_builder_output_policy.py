@@ -76,6 +76,33 @@ class ToolBuilderOutputPolicyTests(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertIn("open", result["error"])
 
+    def test_file_output_tool_rejects_python3_open_encoding_keyword(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            store = WorkflowStore(root / "workflows.sqlite")
+            runtime = AgentToolRuntime(self.catalog, store, _context())
+            spec = _custom_writes_data_spec()
+            spec["id"] = "custom.bad_py3_open"
+            spec["output_policy"] = {"type": "file", "extension": ".obj"}
+
+            with _isolated_tool_roots(root):
+                result = runtime.handle("toolbuilder_create_draft", {
+                    "name": "错误文件工具",
+                    "capability": "使用 Python3 open 参数",
+                    "operation_spec": spec,
+                    "executor_code": (
+                        "def execute(context, arguments, step_outputs):\n"
+                        "    handle = open(arguments['output_path'], 'w', encoding='utf-8')\n"
+                        "    handle.write('bad')\n"
+                        "    handle.close()\n"
+                        "    return {'output': arguments['output_path']}\n"
+                    ),
+                    "tests": _review_tests()
+                })
+
+        self.assertFalse(result["ok"])
+        self.assertIn("不要传 encoding", result["error"])
+
     def test_file_output_tool_rejects_broad_exception_swallowing(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)

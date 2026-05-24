@@ -255,7 +255,7 @@
         "每类导出kml",
         "每类导出kmz"
       ],
-      "model_card": "Use export.split_by_field to export one output per unique value of a field. Arguments: layer, field, output_name as ASCII run id, output_format optional shp|gdb|kmz, output_folder for shp/kmz, output_workspace for gdb, name_template optional for kmz filenames, include_null optional, selected_only optional, max_outputs optional. If the user asks KML/KMZ per field value, set output_format=kmz; do not use shp/gdb. For kmz, name_template controls the final file name without extension. Placeholders: {value}=exact field value, {prefix}=output_name, {index}=001, {index_number}=1. The model decides the template from user_request; the runtime only renders the provided template.",
+      "model_card": "Use export.split_by_field to export one output per unique value of a field. Arguments: layer, field, output_name as the user-visible base output name, output_format optional shp|gdb|kmz, output_folder for shp/kmz, output_workspace for gdb, name_template optional for kmz filenames, include_null optional, selected_only optional, max_outputs optional. output_name may be Chinese; do not translate or romanize user-provided names. If the user asks KML/KMZ per field value, set output_format=kmz; do not use shp/gdb. For kmz, name_template controls the final file name without extension. Placeholders: {value}=exact field value, {prefix}=output_name, {index}=001, {index_number}=1. The model decides the template from user_request; the runtime only renders the provided template.",
       "parameters_schema": {
         "type": "object",
         "required": [

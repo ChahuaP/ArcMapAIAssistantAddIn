@@ -147,6 +147,40 @@ class WorkflowExecutorConfirmationTests(unittest.TestCase):
         self.assertEqual(calls["add_output_layer"], 0)
         self.assertEqual(result["steps"][0]["result"]["output"], output_path)
 
+    def test_custom_open_encodes_unicode_writes_to_output_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            tool_dir = root / "tool_1"
+            tool_dir.mkdir()
+            output_path = str(root / "unicode.obj")
+            (tool_dir / "executor.py").write_text(
+                "# -*- coding: utf-8 -*-\n"
+                "def execute(context, arguments, step_outputs):\n"
+                "    handle = open(arguments['output_path'], 'wb')\n"
+                "    handle.write(u'坐标系\\n')\n"
+                "    handle.write('v 0 0 0\\n')\n"
+                "    handle.write('f 1 1 1\\n')\n"
+                "    handle.close()\n"
+                "    return {'output': arguments['output_path']}\n",
+                encoding="utf-8"
+            )
+            old_root = self.workflow_executor.CUSTOM_TOOLS_ROOT
+            self.workflow_executor.CUSTOM_TOOLS_ROOT = str(root)
+            sys.modules["arcpy"] = types.SimpleNamespace(marker="ok")
+            try:
+                result = self.workflow_executor._call_custom_executor(
+                    "custom_tool:tool_1:execute",
+                    {},
+                    {"output_path": output_path},
+                    {}
+                )
+                content = pathlib.Path(output_path).read_bytes()
+            finally:
+                self.workflow_executor.CUSTOM_TOOLS_ROOT = old_root
+
+        self.assertEqual(result["output"], output_path)
+        self.assertIn("坐标系".encode("utf-8"), content)
+
     def test_custom_obj_output_rejects_header_only_file(self):
         with tempfile.TemporaryDirectory() as directory:
             output_path = str(pathlib.Path(directory) / "empty.obj")

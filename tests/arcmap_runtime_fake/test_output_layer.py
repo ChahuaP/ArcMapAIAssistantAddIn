@@ -111,6 +111,34 @@ class OutputLayerTests(unittest.TestCase):
         self.assertTrue(output.endswith("building_model.obj"))
         self.assertIn(directory, output)
 
+    def test_output_dataset_file_policy_preserves_chinese_name(self):
+        fake_arcpy = types.SimpleNamespace()
+        fake_arcpy.Exists = lambda path: False
+        sys.modules["arcpy"] = fake_arcpy
+
+        spec = importlib.util.spec_from_file_location("common_output_file_policy_cn", COMMON_PATH)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = module.output_dataset({"mxd_path": ""}, "农房", {"type": "file", "extension": ".obj"}, output_folder=directory)
+
+        self.assertTrue(output.endswith("农房.obj"))
+        self.assertIn(directory, output)
+
+    def test_output_name_rejects_extension_body(self):
+        fake_arcpy = types.SimpleNamespace()
+        fake_arcpy.Exists = lambda path: False
+        sys.modules["arcpy"] = fake_arcpy
+
+        spec = importlib.util.spec_from_file_location("common_output_file_policy_bad_name", COMMON_PATH)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(module.OperationError, "Invalid output_name"):
+                module.output_dataset({"mxd_path": ""}, "农房.obj", {"type": "file", "extension": ".obj"}, output_folder=directory)
+
     def test_find_layer_can_use_layer_added_by_previous_step_name(self):
         added_layer = FakeLayer(r"D:\Data\p1.shp", "p1")
 

@@ -86,11 +86,11 @@ def managed_output_properties(policy: Dict[str, Any]) -> Dict[str, Dict[str, Any
     if output_type == "feature_class":
         properties["output_workspace"] = {
             "type": "string",
-            "description": "Optional output folder or geodatabase for GDB output. GeoPilot resolves output_path from this value."
+            "description": "Optional output folder or geodatabase for GDB output. GeoPilot creates runtime output_path from this value; workflow must not pass output_path."
         }
         properties["output_folder"] = {
             "type": "string",
-            "description": "Optional output folder for shapefile output. GeoPilot resolves output_path from this value."
+            "description": "Optional output folder for shapefile output. GeoPilot creates runtime output_path from this value; workflow must not pass output_path."
         }
         formats = output_formats(policy) or list(VECTOR_FORMATS)
         if len(formats) > 1:
@@ -102,12 +102,12 @@ def managed_output_properties(policy: Dict[str, Any]) -> Dict[str, Dict[str, Any
     elif output_type == "file":
         properties["output_folder"] = {
             "type": "string",
-            "description": "Optional output folder. GeoPilot resolves output_path from this value."
+            "description": "Optional output folder. GeoPilot creates runtime output_path from this value; workflow must not pass output_path."
         }
     elif output_type == "raster":
         properties["output_folder"] = {
             "type": "string",
-            "description": "Optional output folder for raster file output. GeoPilot resolves output_path from this value."
+            "description": "Optional output folder for raster file output. GeoPilot creates runtime output_path from this value; workflow must not pass output_path."
         }
         formats = output_formats(policy) or list(RASTER_FORMATS)
         if len(formats) > 1:

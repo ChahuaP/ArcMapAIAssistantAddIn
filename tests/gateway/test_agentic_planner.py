@@ -40,7 +40,10 @@ class AgenticPlannerTests(unittest.TestCase):
         self.assertIn('output_folder_resolve', SYSTEM_PROMPT)
         self.assertIn('Never use file_resolve for output folders', SYSTEM_PROMPT)
         self.assertIn('you must decide output_name yourself from user_request', SYSTEM_PROMPT)
+        self.assertIn('It may be Chinese', SYSTEM_PROMPT)
+        self.assertIn('Do not translate or romanize', SYSTEM_PROMPT)
         self.assertIn('GeoPilot will not infer names from user text for you', SYSTEM_PROMPT)
+        self.assertIn('never pass output_path', SYSTEM_PROMPT)
         self.assertIn('outputfolder', SYSTEM_PROMPT)
         self.assertIn('already enabled capability', SYSTEM_PROMPT)
 
@@ -86,7 +89,7 @@ class AgenticPlannerTests(unittest.TestCase):
             "layer.add_layer",
             "analysis.intersect"
         ])
-        self.assertRegex(workflow["steps"][2]["arguments"]["output_name"], r"^p1_p2_intersect_\d{8}_\d{6}$")
+        self.assertEqual(workflow["steps"][2]["arguments"]["output_name"], "p1_p2_intersect")
         tool_result_messages = [m for m in client.calls[1]["messages"] if m.get("role") == "tool"]
         self.assertIn("p1", tool_result_messages[0]["content"])
 
@@ -329,7 +332,7 @@ class AgenticPlannerTests(unittest.TestCase):
         self.assertIn("recent_conversation", first_user_message)
         self.assertIn("打开数据并相交", first_user_message)
         self.assertNotIn("全代理旧任务", first_user_message)
-        self.assertRegex(row["workflow"]["steps"][0]["arguments"]["output_name"], r"^p1_p2_intersect_\d{8}_\d{6}$")
+        self.assertEqual(row["workflow"]["steps"][0]["arguments"]["output_name"], "p1_p2_intersect")
 
     def test_bad_workflow_is_fed_back_once_then_repaired(self):
         client = FakeAgentClient([
@@ -785,7 +788,7 @@ class AgenticPlannerTests(unittest.TestCase):
         self.assertEqual(prepared["steps"][0]["arguments"]["layer"], "layer:nanjing")
         self.assertEqual(prepared["steps"][0]["arguments"]["where"]["field"], "NAME")
 
-    def test_chinese_output_name_is_rejected_before_runtime_execution(self):
+    def test_chinese_output_name_is_preserved_before_runtime_execution(self):
         workflow = {
             "action": "execute",
             "summary": "执行相交。",
@@ -796,11 +799,45 @@ class AgenticPlannerTests(unittest.TestCase):
                 }, "执行相交")
             ]
         }
-        with self.assertRaisesRegex(ValidationError, "输出名称"):
+        prepared = prepare_workflow(workflow, self.catalog, {
+            "is_saved": True,
+            "layers": [_layer("p1"), _layer("p2")]
+        })
+
+        self.assertEqual(prepared["steps"][0]["arguments"]["output_name"], "相交结果")
+
+    def test_output_name_rejects_extension_or_path(self):
+        workflow = {
+            "action": "execute",
+            "summary": "执行相交。",
+            "steps": [
+                _step("step_1", "analysis.intersect", {
+                    "input_layers": ["p1", "p2"],
+                    "output_name": "农房.obj"
+                }, "执行相交")
+            ]
+        }
+        with self.assertRaisesRegex(ValidationError, "不要包含扩展名"):
             prepare_workflow(workflow, self.catalog, {
                 "is_saved": True,
                 "layers": [_layer("p1"), _layer("p2")]
             })
+
+    def test_workflow_rejects_runtime_output_path_argument(self):
+        self.catalog.operations["custom.feature_to_point"] = _custom_writes_data_spec()
+        workflow = {
+            "action": "execute",
+            "summary": "将面转为中心点。",
+            "steps": [
+                _step("step_1", "custom.feature_to_point", {
+                    "input_layer": "nanjing",
+                    "output_name": "农房",
+                    "output_path": r"D:\Data\GeoPilot_Output\农房.obj"
+                }, "面转点")
+            ]
+        }
+        with self.assertRaisesRegex(ValidationError, "output_path 只由 GeoPilot"):
+            prepare_workflow(workflow, self.catalog, _context(is_saved=True))
 
     def test_generated_output_add_layer_step_is_removed(self):
         self.catalog.operations["custom.feature_to_point"] = _custom_writes_data_spec()
@@ -823,7 +860,7 @@ class AgenticPlannerTests(unittest.TestCase):
 
         self.assertEqual(len(prepared["steps"]), 1)
         self.assertEqual(prepared["steps"][0]["operation"], "custom.feature_to_point")
-        self.assertRegex(prepared["steps"][0]["arguments"]["output_name"], r"^taihucenterpoints_\d{8}_\d{6}$")
+        self.assertEqual(prepared["steps"][0]["arguments"]["output_name"], "taihucenterpoints")
 
     def test_layer_reference_is_exact_and_normalized_to_layer_ref(self):
         self.catalog.operations["custom.feature_to_point"] = _custom_writes_data_spec()

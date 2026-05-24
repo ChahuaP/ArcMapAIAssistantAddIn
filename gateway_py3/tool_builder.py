@@ -45,6 +45,12 @@ def create_draft_tool(store, arguments: Dict[str, Any]) -> Dict[str, Any]:
     package = _prepare_package(arguments)
     existing = _find_existing_tool_by_operation_id(store, package["spec"]["id"])
     if existing:
+        if existing.get("status") == "enabled":
+            raise ToolBuilderError(
+                "%s 已经是启用的 operation。只是执行时请直接生成 workflow 使用该 operation；"
+                "需要修复或修改时先 toolbuilder_get_draft，再 toolbuilder_revise_draft，不能用 toolbuilder_create_draft 覆盖已启用工具。"
+                % package["spec"]["id"]
+            )
         reason = "同一个 operation_id 已存在，按原工具修订。"
         return _write_revision(store, existing, package, reason)
 
@@ -326,7 +332,8 @@ def _canonical_parameters_schema(schema: Any) -> Dict[str, Any]:
             for name, value in properties.items()
         }
         result["required"] = required
-        result.setdefault("additionalProperties", False)
+        if result.get("additionalProperties") is not True:
+            result["additionalProperties"] = False
         return result
 
     properties = {}
@@ -354,7 +361,9 @@ def _canonical_parameter_property(value: Any, name: str) -> Dict[str, Any]:
         raise ToolBuilderError("参数“%s”定义必须是对象。" % name)
     prop = dict(value)
     parameter_type = prop.get("type")
-    if parameter_type == "layer":
+    if parameter_type == "layer" or prop.get("x-geopilot-kind") == "layer":
+        if parameter_type not in (None, "layer", "string", "object"):
+            raise ToolBuilderError("图层参数“%s”的 type 必须是 layer 或 string。" % name)
         prop["type"] = "string"
         prop["x-geopilot-kind"] = "layer"
         return prop
@@ -440,6 +449,8 @@ def _validate_executor_contract(spec: Dict[str, Any], code: str) -> None:
         return
     properties = (spec.get("parameters_schema") or {}).get("properties") or {}
     required = (spec.get("parameters_schema") or {}).get("required") or []
+    if "output_path" in properties:
+        raise ToolBuilderError("writes_data 自定义工具不能在 parameters_schema 声明 output_path；output_path 只由 GeoPilot 运行时注入。")
     if "output_name" not in properties:
         raise ToolBuilderError("writes_data 自定义工具必须声明 output_name 参数，由 GeoPilot 统一生成输出路径。")
     if "output_name" not in required:
@@ -568,6 +579,8 @@ def _validate_output_open_calls(tree: ast.AST, spec: Dict[str, Any]) -> None:
     for node in open_calls:
         if _call_chain(node.func) != ("open",):
             raise ToolBuilderError("文件输出只能调用 open(arguments[\"output_path\"], \"w\"/\"wb\")，不能使用其他 open 变体。")
+        if len(node.args) != 2 or node.keywords:
+            raise ToolBuilderError("open 只能写成 open(arguments[\"output_path\"], \"w\"/\"wb\")；不要传 encoding、buffering 等额外参数。")
         if not node.args or not _is_output_path_reference(node.args[0], output_path_variables):
             raise ToolBuilderError("open 的第一个参数必须是 arguments[\"output_path\"] 或直接由它赋值的变量。")
         mode = _open_mode(node)

@@ -5,6 +5,7 @@ import importlib
 import imp
 import json
 import os
+import sys
 
 import context_reader
 
@@ -23,6 +24,8 @@ try:
     unicode
 except NameError:
     unicode = str
+
+PY2 = sys.version_info[0] == 2
 
 
 CATALOG_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "operation_catalog"))
@@ -380,6 +383,7 @@ def _exception_text(exc):
 
 def _call_custom_executor(executor_path, context, arguments, step_outputs):
     module, function_name = _load_custom_module(executor_path)
+    module.open = _custom_tool_open_factory(arguments)
     function = getattr(module, function_name)
     return function(context, arguments, step_outputs)
 
@@ -413,3 +417,74 @@ def _load_custom_module(executor_path):
     import arcpy
     module.arcpy = arcpy
     return module, function_name
+
+
+def _custom_tool_open_factory(arguments):
+    output_path = arguments.get("output_path")
+
+    def custom_tool_open(path, mode="r"):
+        if not output_path:
+            raise WorkflowExecutionError(u"自定义工具没有可写 output_path。")
+        if not _same_path(path, output_path):
+            raise WorkflowExecutionError(u"自定义工具只能写 arguments[\"output_path\"]。")
+        if mode not in ("w", "wb"):
+            raise WorkflowExecutionError(u"自定义工具只能用 w/wb 模式写 output_path。")
+        return _Utf8WriteHandle(open(path, mode), mode)
+
+    return custom_tool_open
+
+
+class _Utf8WriteHandle(object):
+    def __init__(self, handle, mode):
+        self._handle = handle
+        self._binary = "b" in mode
+
+    def write(self, value):
+        return self._handle.write(self._write_value(value))
+
+    def writelines(self, values):
+        for value in values:
+            self.write(value)
+
+    def close(self):
+        return self._handle.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.close()
+        return False
+
+    def __getattr__(self, name):
+        return getattr(self._handle, name)
+
+    def _write_value(self, value):
+        if PY2:
+            if isinstance(value, unicode):
+                return value.encode("utf-8")
+            return value
+        if self._binary and isinstance(value, str):
+            return value.encode("utf-8")
+        return value
+
+
+def _same_path(left, right):
+    return _normalize_path(left) == _normalize_path(right)
+
+
+def _normalize_path(value):
+    text = _path_text(value)
+    return os.path.normcase(os.path.abspath(text))
+
+
+def _path_text(value):
+    if isinstance(value, unicode):
+        return value
+    if PY2 and isinstance(value, str):
+        encoding = sys.getfilesystemencoding() or "mbcs"
+        try:
+            return value.decode(encoding)
+        except Exception:
+            return value.decode("utf-8", "replace")
+    return str(value)

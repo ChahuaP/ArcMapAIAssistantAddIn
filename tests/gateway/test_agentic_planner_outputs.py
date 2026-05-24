@@ -164,7 +164,7 @@ class AgenticPlannerOutputTests(unittest.TestCase):
             self.assertEqual(row["workflow"]["action"], "clarify")
             self.assertIn("test 文件夹不存在", row["workflow"]["summary"])
 
-    def test_split_by_field_workflow_is_prepared_with_timestamp(self):
+    def test_split_by_field_workflow_preserves_model_output_name(self):
         with tempfile.TemporaryDirectory() as directory:
             workflow = {
                 "action": "execute",
@@ -182,7 +182,7 @@ class AgenticPlannerOutputTests(unittest.TestCase):
             prepared = prepare_workflow(workflow, self.catalog, _context(is_saved=True))
 
         output_name = prepared["steps"][0]["arguments"]["output_name"]
-        self.assertRegex(output_name, r"^nanjing_by_name_\d{8}_\d{6}$")
+        self.assertEqual(output_name, "nanjing_by_name")
 
     def test_split_by_field_kmz_allows_chinese_name_template(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -205,7 +205,7 @@ class AgenticPlannerOutputTests(unittest.TestCase):
         arguments = prepared["steps"][0]["arguments"]
         self.assertEqual(arguments["output_format"], "kmz")
         self.assertEqual(arguments["name_template"], "{value}永农")
-        self.assertRegex(arguments["output_name"], r"^community_kmz_\d{8}_\d{6}$")
+        self.assertEqual(arguments["output_name"], "community_kmz")
 
     def test_missing_output_folder_is_rejected_before_runtime_execution(self):
         with tempfile.TemporaryDirectory() as directory:
