@@ -29,7 +29,7 @@ config.xml
   ArcMap add-in metadata, target product, toolbar, and button declaration.
 
 Install/ArcMapAIAssistant_addin.py
-  Python implementation loaded by ArcMap. Keep this Python 2.7 compatible.
+  Python implementation loaded by ArcMap under the Python 2.7 runtime.
   It contains the native buttons and hot-loads the installed runtime.
 
 Images/

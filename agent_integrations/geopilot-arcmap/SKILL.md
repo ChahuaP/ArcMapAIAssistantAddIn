@@ -27,7 +27,7 @@ Use the local GeoPilot gateway and `ArcMapBridge.exe` as the ArcMap safety and e
 9. If the user confirmed this run, execute with `scripts/geopilot_cli.py arcmap-execute-workflow --confirmed --command "<user request>" --workflow workflow.json`.
 10. If the user enabled full auto, first run `scripts/geopilot_cli.py arcmap-permission --auto-execute`, then execute without asking again.
 
-Use `propose`, `approve-latest`, and `arcmap-execute-approved` only when you need to split queueing and execution for debugging.
+Use `propose`, `approve-latest`, and `arcmap-execute-approved` only when the user explicitly wants queue review before execution.
 
 ## Hard Rules
 

@@ -78,8 +78,8 @@ class AutoGatewayExtension(object):
         self.enabled = True
         try:
             load_runtime().ensure_gateway_silent()
-        except Exception:
-            pass
+        except Exception as exc:
+            show_message(u"GeoPilot 启动失败：%s" % exc)
 
 
 class OpenAssistantButton(object):

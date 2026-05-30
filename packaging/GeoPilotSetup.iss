@@ -3,7 +3,7 @@
 #endif
 
 #ifndef MySourceDir
-#define MySourceDir "..\release\ArcMapAIAssistant"
+#define MySourceDir "..\build\release_staging\ArcMapAIAssistant"
 #endif
 
 #ifndef MyOutputDir

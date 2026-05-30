@@ -9,3 +9,6 @@ CONTEXT.md
 build/
 dist/
 release/
+ArcMapBridgeExternal/bin/
+ArcMapBridgeExternal/obj/
+ArcMapAIAssistantAddIn/*.esriaddin

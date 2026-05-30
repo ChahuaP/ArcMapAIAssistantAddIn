@@ -276,7 +276,7 @@ def _plan_request(payload):
     elif context is None:
         stored_context = STATE.store.get_state("arcmap_context")
         if not stored_context:
-            raise ValueError("请先在 ArcGIS 工具栏点击“同步上下文”。")
+            raise ValueError("请先同步 ArcMap 上下文。外部 agent 使用 arcmap-list 和 arcmap-sync；Web 用户点击同步上下文。")
         context = stored_context["value"]
 
     project_id = payload.get("project_id") or ""
@@ -337,7 +337,7 @@ def _external_agent_context(payload):
         return context
     stored_context = STATE.store.get_state("arcmap_context")
     if not stored_context:
-        raise ValueError("请先在 ArcGIS 工具栏点击“同步上下文”。")
+        raise ValueError("请先让 agent 运行 arcmap-list 和 arcmap-sync 同步 ArcMap 上下文。")
     return stored_context["value"]
 
 
@@ -491,8 +491,8 @@ def _active_arcmap_bridge():
                 "hwnd": hwnd,
                 "summary": bridge.get("summary", {}),
             }
-        except Exception:
-            pass
+        except (KeyError, TypeError, ValueError, arcmap_bridge_client.ArcMapBridgeError):
+            STATE.store.delete_state("arcmap_active_bridge")
     return _scan_arcmap_bridge()
 
 
@@ -523,7 +523,7 @@ def _arcmap_bridges():
             continue
         try:
             health = arcmap_bridge_client.health(port=port)
-        except Exception:
+        except arcmap_bridge_client.ArcMapBridgeError:
             continue
         bridge_pid = int(health.get("pid") or candidate.get("pid") or 0)
         bridge_port = int(health.get("port") or port)
@@ -611,7 +611,7 @@ def _repair_custom_tool_workflow(workflow_id, payload):
     if context is None:
         stored_context = STATE.store.get_state("arcmap_context")
         if not stored_context:
-            raise ValueError("请先在 ArcGIS 工具栏点击“同步上下文”。")
+            raise ValueError("请先同步 ArcMap 上下文。外部 agent 使用 arcmap-list 和 arcmap-sync；Web 用户点击同步上下文。")
         context = stored_context["value"]
     if not isinstance(context, dict):
         raise ValueError("context must be an object.")

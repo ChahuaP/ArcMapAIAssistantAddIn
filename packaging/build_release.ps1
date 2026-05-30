@@ -1,15 +1,28 @@
-﻿param(
+param(
     [string]$ReleaseRoot = "",
     [switch]$BuildGateway,
     [switch]$BuildInstaller
 )
 
 $ErrorActionPreference = "Stop"
-$repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 if (-not $ReleaseRoot) {
-    $ReleaseRoot = Join-Path $repoRoot "release\ArcMapAIAssistant"
+    $ReleaseRoot = Join-Path $repoRoot "release"
 }
 $ReleaseRoot = [System.IO.Path]::GetFullPath($ReleaseRoot)
+$stageRoot = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "build\release_staging\ArcMapAIAssistant"))
+
+function Assert-UnderRepo {
+    param([string]$Path)
+    $full = [System.IO.Path]::GetFullPath($Path)
+    $root = [System.IO.Path]::GetFullPath($repoRoot)
+    if (-not $full.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "拒绝操作仓库外路径：$full"
+    }
+}
+
+Assert-UnderRepo $ReleaseRoot
+Assert-UnderRepo $stageRoot
 
 function Copy-TreeFiltered {
     param([string]$Source, [string]$Destination)
@@ -33,20 +46,42 @@ function Copy-TreeFiltered {
     }
 }
 
-function Copy-CmdFile {
-    param([string]$Source, [string]$Destination)
-    $encoding = New-Object System.Text.UTF8Encoding -ArgumentList $false
-    $text = [System.IO.File]::ReadAllText($Source, [System.Text.Encoding]::UTF8)
-    $text = $text -replace "`r?`n", "`r`n"
-    [System.IO.File]::WriteAllText($Destination, $text, $encoding)
+function Write-TextFile {
+    param([string]$Path, [string]$Text, [bool]$Bom)
+    $encoding = New-Object System.Text.UTF8Encoding -ArgumentList $Bom
+    $text = $Text -replace "`r?`n", "`r`n"
+    [System.IO.File]::WriteAllText($Path, $text, $encoding)
 }
 
 function Copy-PowerShellFile {
     param([string]$Source, [string]$Destination)
-    $encoding = New-Object System.Text.UTF8Encoding -ArgumentList $true
     $text = [System.IO.File]::ReadAllText($Source, [System.Text.Encoding]::UTF8)
-    $text = $text -replace "`r?`n", "`r`n"
-    [System.IO.File]::WriteAllText($Destination, $text, $encoding)
+    Write-TextFile $Destination $text $true
+}
+
+function Write-AppCommandFiles {
+    param([string]$AppRoot)
+    $openCommand = @'
+@echo off
+setlocal
+cd /d "%~dp0"
+start "" "http://127.0.0.1:8765"
+exit /b 0
+'@
+    $startCommand = @'
+@echo off
+setlocal
+cd /d "%~dp0"
+if not exist "%~dp0gateway\ArcMapAIAssistantGateway.exe" (
+  echo Missing gateway executable.
+  pause
+  exit /b 1
+)
+start "" "%~dp0gateway\ArcMapAIAssistantGateway.exe"
+exit /b 0
+'@
+    Write-TextFile (Join-Path $AppRoot "OpenAssistantWeb.cmd") $openCommand $false
+    Write-TextFile (Join-Path $AppRoot "StartGateway.cmd") $startCommand $false
 }
 
 function Get-AppVersion {
@@ -79,7 +114,7 @@ function Find-InnoCompiler {
             return $candidate
         }
     }
-    throw "未找到 Inno Setup 编译器 ISCC.exe。请安装 Inno Setup 6 后重试：https://jrsoftware.org/isinfo.php"
+    throw "未找到 Inno Setup 编译器 ISCC.exe。请安装 Inno Setup 6。"
 }
 
 function Build-ExternalArcMapBridge {
@@ -93,6 +128,28 @@ function Build-ExternalArcMapBridge {
         throw "缺少 ArcMapBridge.exe：$exe"
     }
     return $exe
+}
+
+function Build-ArcMapAddIn {
+    python (Join-Path $repoRoot "ArcMapAIAssistantAddIn\makeaddin.py") | Out-Host
+    $addin = Join-Path $repoRoot "ArcMapAIAssistantAddIn\ArcMapAIAssistantAddIn.esriaddin"
+    if (-not (Test-Path -LiteralPath $addin)) {
+        throw "缺少 ArcMap Add-in 包：$addin"
+    }
+    return $addin
+}
+
+function Clear-GeneratedBuildOutputs {
+    foreach ($path in @(
+        (Join-Path $repoRoot "ArcMapBridgeExternal\bin"),
+        (Join-Path $repoRoot "ArcMapBridgeExternal\obj"),
+        (Join-Path $repoRoot "ArcMapAIAssistantAddIn\ArcMapAIAssistantAddIn.esriaddin")
+    )) {
+        if (Test-Path -LiteralPath $path) {
+            Assert-UnderRepo $path
+            Remove-Item -LiteralPath $path -Recurse -Force
+        }
+    }
 }
 
 function Stop-BuildOutputGateway {
@@ -132,49 +189,56 @@ if ($BuildGateway) {
 $gatewayDist = Join-Path $repoRoot "dist\ArcMapAIAssistantGateway"
 $gatewayExe = Join-Path $gatewayDist "ArcMapAIAssistantGateway.exe"
 if (-not (Test-Path -LiteralPath $gatewayExe)) {
-    throw "缺少网关 EXE：$gatewayExe。请先运行：pyinstaller packaging\pyinstaller_gateway.spec --noconfirm --clean，或执行本脚本时加 -BuildGateway。"
+    throw "缺少网关 EXE：$gatewayExe。请执行 packaging\build_release.ps1 -BuildGateway -BuildInstaller。"
 }
 
-python (Join-Path $repoRoot "ArcMapAIAssistantAddIn\makeaddin.py") | Out-Host
+try {
+$addinPackage = Build-ArcMapAddIn
 $externalBridgeExe = Build-ExternalArcMapBridge
 
-if (Test-Path -LiteralPath $ReleaseRoot) {
-    Remove-Item -LiteralPath $ReleaseRoot -Recurse -Force
+if (Test-Path -LiteralPath $stageRoot) {
+    Assert-UnderRepo $stageRoot
+    Remove-Item -LiteralPath $stageRoot -Recurse -Force
 }
-New-Item -ItemType Directory -Path $ReleaseRoot -Force | Out-Null
-New-Item -ItemType Directory -Path (Join-Path $ReleaseRoot "app") -Force | Out-Null
-New-Item -ItemType Directory -Path (Join-Path $ReleaseRoot "app\bridge") -Force | Out-Null
-New-Item -ItemType Directory -Path (Join-Path $ReleaseRoot "ArcMapAIAssistantAddIn") -Force | Out-Null
-New-Item -ItemType Directory -Path (Join-Path $ReleaseRoot "packaging") -Force | Out-Null
+New-Item -ItemType Directory -Path $stageRoot -Force | Out-Null
+New-Item -ItemType Directory -Path (Join-Path $stageRoot "app") -Force | Out-Null
+New-Item -ItemType Directory -Path (Join-Path $stageRoot "app\bridge") -Force | Out-Null
+New-Item -ItemType Directory -Path (Join-Path $stageRoot "ArcMapAIAssistantAddIn") -Force | Out-Null
+New-Item -ItemType Directory -Path (Join-Path $stageRoot "packaging") -Force | Out-Null
 
 $appVersion = Get-AppVersion
-Set-Content -LiteralPath (Join-Path $ReleaseRoot "app\VERSION") -Value $appVersion -Encoding ASCII
-Copy-TreeFiltered (Join-Path $repoRoot "arcmap_runtime_py2") (Join-Path $ReleaseRoot "app\arcmap_runtime_py2")
-Copy-TreeFiltered (Join-Path $repoRoot "operation_catalog") (Join-Path $ReleaseRoot "app\operation_catalog")
-Copy-TreeFiltered (Join-Path $repoRoot "agent_integrations") (Join-Path $ReleaseRoot "agent_integrations")
-Copy-Item -LiteralPath $gatewayDist -Destination (Join-Path $ReleaseRoot "app\gateway") -Recurse -Force
-Copy-CmdFile (Join-Path $repoRoot "OpenAssistantWeb.cmd") (Join-Path $ReleaseRoot "app\OpenAssistantWeb.cmd")
-Copy-CmdFile (Join-Path $repoRoot "StartGateway.cmd") (Join-Path $ReleaseRoot "app\StartGateway.cmd")
-Copy-Item -LiteralPath (Join-Path $repoRoot "gateway_py3\web\help.html") -Destination (Join-Path $ReleaseRoot "app\help.html") -Force
-Copy-Item -LiteralPath (Join-Path $repoRoot "packaging\uninstall.ico") -Destination (Join-Path $ReleaseRoot "app\uninstall.ico") -Force
-Copy-Item -LiteralPath $externalBridgeExe -Destination (Join-Path $ReleaseRoot "app\bridge\ArcMapBridge.exe") -Force
-Copy-Item -LiteralPath (Join-Path $repoRoot "ArcMapAIAssistantAddIn\ArcMapAIAssistantAddIn.esriaddin") -Destination (Join-Path $ReleaseRoot "ArcMapAIAssistantAddIn\ArcMapAIAssistantAddIn.esriaddin") -Force
-Copy-PowerShellFile (Join-Path $repoRoot "packaging\install.ps1") (Join-Path $ReleaseRoot "packaging\install.ps1")
-Copy-PowerShellFile (Join-Path $repoRoot "packaging\uninstall.ps1") (Join-Path $ReleaseRoot "packaging\uninstall.ps1")
-Copy-CmdFile (Join-Path $repoRoot "InstallArcMapAIAssistant.cmd") (Join-Path $ReleaseRoot "InstallArcMapAIAssistant.cmd")
-Copy-CmdFile (Join-Path $repoRoot "UninstallArcMapAIAssistant.cmd") (Join-Path $ReleaseRoot "UninstallArcMapAIAssistant.cmd")
-Copy-Item -LiteralPath (Join-Path $repoRoot "packaging\USER_README.txt") -Destination (Join-Path $ReleaseRoot "README.txt") -Force
+Set-Content -LiteralPath (Join-Path $stageRoot "app\VERSION") -Value $appVersion -Encoding ASCII
+Copy-TreeFiltered (Join-Path $repoRoot "arcmap_runtime_py2") (Join-Path $stageRoot "app\arcmap_runtime_py2")
+Copy-TreeFiltered (Join-Path $repoRoot "operation_catalog") (Join-Path $stageRoot "app\operation_catalog")
+Copy-Item -LiteralPath $gatewayDist -Destination (Join-Path $stageRoot "app\gateway") -Recurse -Force
+Write-AppCommandFiles (Join-Path $stageRoot "app")
+Copy-Item -LiteralPath (Join-Path $repoRoot "gateway_py3\web\help.html") -Destination (Join-Path $stageRoot "app\help.html") -Force
+Copy-Item -LiteralPath (Join-Path $repoRoot "packaging\uninstall.ico") -Destination (Join-Path $stageRoot "app\uninstall.ico") -Force
+Copy-Item -LiteralPath $externalBridgeExe -Destination (Join-Path $stageRoot "app\bridge\ArcMapBridge.exe") -Force
+Copy-Item -LiteralPath $addinPackage -Destination (Join-Path $stageRoot "ArcMapAIAssistantAddIn\ArcMapAIAssistantAddIn.esriaddin") -Force
+Copy-PowerShellFile (Join-Path $repoRoot "packaging\install.ps1") (Join-Path $stageRoot "packaging\install.ps1")
+Copy-PowerShellFile (Join-Path $repoRoot "packaging\uninstall.ps1") (Join-Path $stageRoot "packaging\uninstall.ps1")
 
-Write-Host "发布包已生成：$ReleaseRoot"
-Write-Host "把整个目录压缩发给用户，用户双击 InstallArcMapAIAssistant.cmd 安装。"
+if (Test-Path -LiteralPath $ReleaseRoot) {
+    Assert-UnderRepo $ReleaseRoot
+    Get-ChildItem -LiteralPath $ReleaseRoot -Force | Remove-Item -Recurse -Force
+} else {
+    New-Item -ItemType Directory -Path $ReleaseRoot -Force | Out-Null
+}
+Copy-TreeFiltered (Join-Path $repoRoot "agent_integrations\geopilot-arcmap") (Join-Path $ReleaseRoot "geopilot-arcmap")
 
 if ($BuildInstaller) {
     $iscc = Find-InnoCompiler
     $setupScript = Join-Path $repoRoot "packaging\GeoPilotSetup.iss"
-    $installerOutput = Join-Path $repoRoot "release"
-    & $iscc $setupScript "/DMyAppVersion=$appVersion" "/DMySourceDir=$ReleaseRoot" "/DMyOutputDir=$installerOutput"
+    & $iscc $setupScript "/DMyAppVersion=$appVersion" "/DMySourceDir=$stageRoot" "/DMyOutputDir=$ReleaseRoot"
     if ($LASTEXITCODE -ne 0) {
         throw "Inno Setup 打包失败，退出码：$LASTEXITCODE"
     }
-    Write-Host "安装器已生成：$(Join-Path $installerOutput ("GeoPilotSetup-$appVersion.exe"))"
+    Write-Host "安装器已生成：$(Join-Path $ReleaseRoot ("GeoPilotSetup-$appVersion.exe"))"
 }
+} finally {
+    Clear-GeneratedBuildOutputs
+}
+
+Write-Host "release 已生成：$ReleaseRoot"
+Write-Host "交付内容：GeoPilotSetup-$appVersion.exe 和 geopilot-arcmap skill。"

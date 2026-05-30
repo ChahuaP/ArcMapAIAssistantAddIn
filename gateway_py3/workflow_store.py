@@ -331,6 +331,10 @@ class WorkflowStore:
             return None
         return {"key": row[0], "value": json.loads(row[1]), "updated_at": row[2]}
 
+    def delete_state(self, key: str) -> None:
+        with self._connection() as conn:
+            conn.execute("DELETE FROM app_state WHERE key = ?", (key,))
+
     def list_state(self, prefix: str = "") -> List[Dict[str, Any]]:
         with self._connection() as conn:
             if prefix:

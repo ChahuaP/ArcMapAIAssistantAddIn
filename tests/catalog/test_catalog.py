@@ -76,12 +76,24 @@ class CatalogTests(unittest.TestCase):
         self.assertNotIn(str(ROOT).replace("/", "\\"), addin_source)
         self.assertIn("install.json", addin_source)
 
+    def test_runtime_process_paths_come_from_installed_app(self):
+        bridge_client = (ROOT / "gateway_py3" / "arcmap_bridge_client.py").read_text(encoding="utf-8")
+        gateway_client = (ROOT / "arcmap_runtime_py2" / "gateway_client.py").read_text(encoding="utf-8")
+
+        self.assertIn('"install.json"', bridge_client)
+        self.assertIn('"bridge_exe"', bridge_client)
+        self.assertNotIn("GEOPILOT_ARCMAP_BRIDGE", bridge_client)
+        self.assertNotIn('"ArcMapBridgeExternal"', bridge_client)
+        self.assertIn('"gateway", "ArcMapAIAssistantGateway.exe"', gateway_client)
+        self.assertNotIn('"dist"', gateway_client)
+        self.assertNotIn('"python", "-m", "gateway_py3"', gateway_client)
+
     def test_release_and_install_package_operation_catalog(self):
         build_script = (PACKAGING_ROOT / "build_release.ps1").read_text(encoding="utf-8-sig")
         install_script = (PACKAGING_ROOT / "install.ps1").read_text(encoding="utf-8-sig")
         self.assertIn('"operation_catalog"', build_script)
         self.assertIn('"app\\operation_catalog"', build_script)
-        self.assertIn('"agent_integrations"', build_script)
+        self.assertIn('"agent_integrations\\geopilot-arcmap"', build_script)
         self.assertIn("Build-ExternalArcMapBridge", build_script)
         self.assertIn('"ArcMapBridgeExternal\\build.ps1"', build_script)
         self.assertIn('"app\\bridge\\ArcMapBridge.exe"', build_script)
@@ -95,23 +107,17 @@ class CatalogTests(unittest.TestCase):
         self.assertIn("app_version", install_script)
         self.assertIn("bridge_exe", install_script)
         self.assertIn("Test-InstallHealth", install_script)
+        self.assertIn("build\\release_staging\\ArcMapAIAssistant", build_script)
+        self.assertIn("GeoPilotSetup-$appVersion.exe 和 geopilot-arcmap skill", build_script)
 
-    def test_windows_installer_requests_admin_and_uses_inno_setup(self):
+    def test_windows_installer_uses_inno_setup(self):
         build_script = (PACKAGING_ROOT / "build_release.ps1").read_text(encoding="utf-8-sig")
-        installer_cmd = (ROOT / "BuildGeoPilotInstaller.cmd").read_text(encoding="utf-8")
-        install_cmd = (ROOT / "InstallArcMapAIAssistant.cmd").read_text(encoding="utf-8")
-        uninstall_cmd = (ROOT / "UninstallArcMapAIAssistant.cmd").read_text(encoding="utf-8")
         inno_script = (PACKAGING_ROOT / "GeoPilotSetup.iss").read_text(encoding="utf-8")
-        self.assertIn("-BuildInstaller", installer_cmd)
         self.assertIn("ISCC.exe", build_script)
         self.assertIn("Programs\\Inno Setup 6\\ISCC.exe", build_script)
         self.assertIn("Stop-BuildOutputGateway", build_script)
         self.assertIn("PyInstaller 打包失败", build_script)
         self.assertIn("Inno Setup 打包失败", build_script)
-        self.assertIn("Start-Process", install_cmd)
-        self.assertIn("-Verb RunAs", install_cmd)
-        self.assertIn("Start-Process", uninstall_cmd)
-        self.assertIn("-Verb RunAs", uninstall_cmd)
         self.assertIn("PrivilegesRequired=admin", inno_script)
         self.assertIn(r"DefaultDirName={autopf}\GeoPilot", inno_script)
         self.assertIn("RunOnceId", inno_script)

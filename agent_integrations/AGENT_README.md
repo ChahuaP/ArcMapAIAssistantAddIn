@@ -28,7 +28,7 @@ geopilot-arcmap/
 4. The agent should call `scripts/geopilot_cli.py` instead of GeoPilot `/plan`.
 5. The agent must call `arcmap-list` before any ArcMap sync or execution. This call starts `ArcMapBridge.exe` through the Gateway and discovers ArcMap targets.
 6. If multiple ArcMap instances are open, select one with `arcmap-select --hwnd <hwnd>`.
-7. The agent can call `arcmap-sync` and `arcmap-execute-workflow` directly. The Web console and toolbar buttons are optional debugging tools.
+7. The agent should call `arcmap-sync` and `arcmap-execute-workflow` directly for normal ArcMap operation.
 
 ## Important boundary
 

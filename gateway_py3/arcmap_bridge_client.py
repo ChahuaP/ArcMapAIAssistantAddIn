@@ -1,16 +1,15 @@
 from __future__ import annotations
 
 import json
-import os
 import socket
 import subprocess
-import sys
 import time
 from typing import Any, Dict
 from pathlib import Path
 from urllib import request
 from urllib.error import HTTPError, URLError
 
+from .paths import appdata_dir
 
 BASE_URL = "http://127.0.0.1:8766"
 
@@ -37,18 +36,16 @@ def execute_approved(allow_edits: bool = False, port: int | None = None, hwnd: i
     return _request("POST", "/execute-approved", payload, timeout=360, port=port)
 
 
-def ensure_running() -> bool:
+def ensure_running() -> None:
     for port in [8766] + list(range(8767, 8790)):
         if not _is_local_port_open(port):
             continue
         try:
             health(port=port)
-            return True
+            return
         except ArcMapBridgeError:
             continue
     exe = _bridge_exe_path()
-    if not exe:
-        return False
     subprocess.Popen(
         [str(exe)],
         cwd=str(exe.parent),
@@ -63,11 +60,11 @@ def ensure_running() -> bool:
                 continue
             try:
                 health(port=port)
-                return True
+                return
             except ArcMapBridgeError:
                 continue
         time.sleep(0.2)
-    return False
+    raise ArcMapBridgeError("ArcMapBridge.exe 启动后没有在 8766-8789 端口响应。")
 
 
 def _is_local_port_open(port: int) -> bool:
@@ -109,24 +106,29 @@ def _request(
 def _error_payload(exc: HTTPError) -> Dict[str, Any]:
     try:
         return json.loads(exc.read().decode("utf-8"))
-    except Exception:
+    except (UnicodeDecodeError, json.JSONDecodeError):
         return {"error": "HTTP %s" % exc.code}
 
 
 def _bridge_exe_path() -> Path | None:
-    env_path = os.environ.get("GEOPILOT_ARCMAP_BRIDGE")
-    candidates = []
-    if env_path:
-        candidates.append(Path(env_path))
-    here = Path(__file__).resolve()
-    repo_root = here.parent.parent
-    candidates.extend([
-        repo_root / "ArcMapBridgeExternal" / "bin" / "Release" / "ArcMapBridge.exe",
-        repo_root / "app" / "bridge" / "ArcMapBridge.exe",
-        Path(sys.executable).resolve().parent / "bridge" / "ArcMapBridge.exe",
-        Path(sys.executable).resolve().parent.parent / "bridge" / "ArcMapBridge.exe",
-    ])
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
-    return None
+    config = _install_config()
+    value = config.get("bridge_exe")
+    if not isinstance(value, str) or not value.strip():
+        raise ArcMapBridgeError("install.json 缺少 bridge_exe。请重新安装 GeoPilot。")
+    exe = Path(value)
+    if not exe.is_file():
+        raise ArcMapBridgeError("ArcMapBridge.exe 不存在：%s。请重新安装 GeoPilot。" % exe)
+    return exe
+
+
+def _install_config() -> Dict[str, Any]:
+    path = appdata_dir() / "install.json"
+    if not path.is_file():
+        raise ArcMapBridgeError("缺少安装配置：%s。请先安装 GeoPilot。" % path)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ArcMapBridgeError("install.json 无法读取：%s" % exc)
+    if not isinstance(data, dict):
+        raise ArcMapBridgeError("install.json 必须是 JSON 对象。")
+    return data

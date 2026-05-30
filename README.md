@@ -12,7 +12,7 @@ The project is built for ArcGIS Desktop / ArcMap, not ArcGIS Pro.
 - Executes approved ArcPy operations from a fixed operation catalog.
 - Supports common map, layer, selection, analysis, table, and export operations.
 - Provides a local Web console for conversation, task review, API key configuration, capabilities, and workflow queue.
-- Packages into a user-facing installer folder, so normal users do not need to install Python 3.
+- Packages into a single Windows setup executable, so normal users do not need to install Python 3.
 
 ## Safety Model
 
@@ -43,31 +43,19 @@ For developers:
 - ArcGIS Desktop Python 2.7 for the ArcMap Add-in runtime
 - PowerShell 7
 - PyInstaller for building the bundled gateway executable
-- Inno Setup 6 for building the optional `GeoPilotSetup.exe` installer
+- Inno Setup 6 for building `GeoPilotSetup.exe`
 
 ## Install From Release Package
 
 Do not install from the source tree directly.
 
-Download the release package from GitHub Releases. If the release includes the installer, run:
+Download the release package from GitHub Releases and run:
 
 ```text
 GeoPilotSetup-<version>.exe
 ```
 
 The installer opens like a normal Windows setup program and automatically requests administrator permission when installing to `C:\Program Files\GeoPilot`.
-
-If you use the folder package instead, unzip it and run:
-
-```text
-InstallArcMapAIAssistant.cmd
-```
-
-The command installer also requests administrator permission automatically. The default installation directory is:
-
-```text
-C:\Program Files\GeoPilot
-```
 
 After installation, open ArcMap and enable the toolbar if needed:
 
@@ -94,33 +82,20 @@ Example requests:
 - `把 nanjing 当前选中的要素导出到 D:\Data，输出名 nanjing_selected`
 - `把 nanjing 图层按 NAME 字段拆分导出为 shp，输出到 D:\Data`
 
-## Build A Release Package
+## Build A Release
 
 From the repository root:
 
 ```powershell
-.\BuildArcMapAIAssistantRelease.cmd
+pwsh.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\packaging\build_release.ps1 -BuildGateway -BuildInstaller
 ```
 
-To build the Windows setup executable, install Inno Setup 6 and run:
-
-```powershell
-.\BuildGeoPilotInstaller.cmd
-```
-
-Or run the packaging script directly:
-
-```powershell
-pwsh.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\packaging\build_release.ps1 -BuildGateway
-```
-
-The release package is generated at:
+The final release directory contains only:
 
 ```text
-release\ArcMapAIAssistant
+release\GeoPilotSetup-<version>.exe
+release\geopilot-arcmap\
 ```
-
-The setup executable is generated beside it as `release\GeoPilotSetup-<version>.exe`.
 
 ## Development
 
@@ -157,7 +132,7 @@ arcmap_runtime_py2/       ArcMap-side Python 2 runtime and ArcPy executor
 gateway_py3/              Local Python 3 gateway, Web console, agent planner
 operation_catalog/        Registered GIS operation specs and schemas
 packaging/                Installer, uninstaller, and PyInstaller build scripts
-tests/                    Gateway and fake ArcMap runtime tests
+tests/                    Release smoke tests
 ```
 
 ## Add Operations

@@ -8,46 +8,7 @@ $ErrorActionPreference = "Stop"
 
 function Get-PackageRoot {
     $scriptDir = Split-Path -Parent $PSCommandPath
-    if (Test-Path -LiteralPath (Join-Path $scriptDir "app")) {
-        return (Resolve-Path $scriptDir).Path
-    }
     return (Resolve-Path (Join-Path $scriptDir "..")).Path
-}
-
-function Select-InstallDir {
-    param([string]$Requested)
-    if ($Requested) {
-        return $Requested
-    }
-    $defaultDir = Join-Path $env:ProgramFiles "GeoPilot"
-    if ($Quiet) {
-        return $defaultDir
-    }
-
-    Write-Host ""
-    Write-Host "请选择安装位置："
-    Write-Host "1. $defaultDir"
-    if (Test-Path -LiteralPath "D:\") {
-        Write-Host "2. D:\ArcMapAIAssistant"
-        Write-Host "3. 自定义路径"
-    } else {
-        Write-Host "2. 自定义路径"
-    }
-    $choice = Read-Host "请输入序号，直接回车默认安装到 $defaultDir"
-    if (-not $choice) {
-        return $defaultDir
-    }
-    if ($choice -eq "1") {
-        return $defaultDir
-    }
-    if ((Test-Path -LiteralPath "D:\") -and $choice -eq "2") {
-        return "D:\ArcMapAIAssistant"
-    }
-    $custom = Read-Host "请输入完整安装路径"
-    if (-not $custom) {
-        throw "没有输入安装路径。"
-    }
-    return $custom
 }
 
 function Require-File {
@@ -122,10 +83,13 @@ Require-File $uninstallIcon "缺少卸载图标：$uninstallIcon"
 Require-File $versionFile "缺少版本文件：$versionFile"
 $appVersion = (Get-Content -Encoding UTF8 -LiteralPath $versionFile -Raw).Trim()
 
-$targetRoot = Select-InstallDir $InstallDir
+if (-not $InstallDir) {
+    throw "InstallDir is required. Please run GeoPilotSetup-$appVersion.exe."
+}
+$targetRoot = $InstallDir
 $targetRoot = [System.IO.Path]::GetFullPath($targetRoot)
 if ($targetRoot.StartsWith($env:ProgramFiles, [System.StringComparison]::OrdinalIgnoreCase) -and -not (Test-IsAdministrator)) {
-    throw "安装到 $env:ProgramFiles 需要管理员权限。请使用 InstallArcMapAIAssistant.cmd 或安装器启动，它会自动请求管理员权限。"
+    throw "安装到 $env:ProgramFiles 需要管理员权限。请使用 GeoPilotSetup-$appVersion.exe。"
 }
 
 Write-Host ""

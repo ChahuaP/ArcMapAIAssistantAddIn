@@ -108,21 +108,17 @@ def start_gateway():
     stdout = open(stdout_path, "ab")
     stderr = open(stderr_path, "ab")
 
-    last_error = None
-    for command in _gateway_commands():
-        try:
-            subprocess.Popen(
-                command,
-                cwd=REPO_ROOT,
-                stdout=stdout,
-                stderr=stderr,
-                creationflags=CREATE_NO_WINDOW
-            )
-            return
-        except Exception as exc:
-            last_error = exc
-
-    raise RuntimeError(u"无法启动本地网关：%s" % last_error)
+    command = _gateway_command()
+    try:
+        subprocess.Popen(
+            command,
+            cwd=REPO_ROOT,
+            stdout=stdout,
+            stderr=stderr,
+            creationflags=CREATE_NO_WINDOW
+        )
+    except Exception as exc:
+        raise RuntimeError(u"无法启动本地网关：%s" % exc)
 
 
 def plan(command, context):
@@ -145,19 +141,11 @@ def execution_result(workflow_id, status, result):
     return _post("/execution-result", {"workflow_id": workflow_id, "status": status, "result": result})
 
 
-def _gateway_commands():
-    exe_candidates = [
-        os.path.join(REPO_ROOT, "gateway", "ArcMapAIAssistantGateway.exe"),
-        os.path.join(REPO_ROOT, "ArcMapAIAssistantGateway.exe"),
-        os.path.join(REPO_ROOT, "dist", "ArcMapAIAssistantGateway", "ArcMapAIAssistantGateway.exe"),
-        os.path.join(REPO_ROOT, "dist", "ArcMapAIAssistantGateway.exe"),
-        os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "ArcMapAIAssistant", "ArcMapAIAssistantGateway.exe")
-    ]
-    for exe in exe_candidates:
-        if os.path.isfile(exe):
-            yield [exe]
-    yield ["py", "-3", "-m", "gateway_py3"]
-    yield ["python", "-m", "gateway_py3"]
+def _gateway_command():
+    exe = os.path.join(REPO_ROOT, "gateway", "ArcMapAIAssistantGateway.exe")
+    if not os.path.isfile(exe):
+        raise RuntimeError(u"缺少本地网关 EXE：%s。请重新安装 GeoPilot。" % exe)
+    return [exe]
 
 
 def _get(path, timeout=30):
