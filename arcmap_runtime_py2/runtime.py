@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import absolute_import
 
+import json
 import os
 import subprocess
 import time
@@ -20,9 +21,21 @@ reload(gateway_client)
 reload(workflow_executor)
 
 
+try:
+    unicode
+except NameError:
+    unicode = str
+
+
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 OPEN_WEB_CMD = os.path.join(REPO_ROOT, "OpenAssistantWeb.cmd")
 CREATE_NO_WINDOW = 0x08000000
+SILENT_COMMAND_FILE = os.path.join(
+    os.environ.get("LOCALAPPDATA", os.path.expanduser("~")),
+    "ArcMapAIAssistant",
+    "bridge_command.json"
+)
+_LAST_COMMAND_WAS_SILENT = False
 
 
 def show_message(text):
@@ -43,10 +56,29 @@ def start_gateway():
     show_message(u"本地网关已启动：%s 个能力。" % health.get("operation_count"))
 
 
+def ensure_gateway_silent():
+    try:
+        gateway_client.ensure_running()
+    except Exception as exc:
+        _log_event(u"gateway.ensure_failed", _exception_text(exc))
+
+
+def show_gateway_status():
+    gateway_client.ensure_running()
+    health = gateway_client.health()
+    show_message(u"本地网关已启动：版本 %s，%s 个能力。ArcMap Bridge 由网关自动启动。" % (
+        health.get("app_version"),
+        health.get("operation_count")
+    ))
+
+
 def sync_context():
+    global _LAST_COMMAND_WAS_SILENT
+    _LAST_COMMAND_WAS_SILENT = _consume_silent_command("sync")
     gateway_client.ensure_running()
     _sync_current_context()
-    show_message(u"已同步当前 ArcMap 上下文。")
+    if not _LAST_COMMAND_WAS_SILENT:
+        show_message(u"已同步当前 ArcMap 上下文。")
 
 
 def handle_command(command_text):
@@ -94,8 +126,10 @@ def open_assistant():
 
 
 def execute_pending():
+    global _LAST_COMMAND_WAS_SILENT
+    _LAST_COMMAND_WAS_SILENT = _consume_silent_command("execute")
     gateway_client.ensure_running()
-    _execute_pending()
+    _execute_pending(silent=_LAST_COMMAND_WAS_SILENT)
 
 
 def _save_key(api_key):
@@ -122,9 +156,11 @@ def _plan(command_text):
         show_message(workflow["workflow"]["summary"])
 
 
-def _execute_pending():
+def _execute_pending(silent=False):
     pending = gateway_client.pending()
     if not pending.get("workflow"):
+        if silent:
+            raise RuntimeError(u"没有已审批的工作流。")
         show_message(u"没有已审批的工作流。")
         return
 
@@ -145,21 +181,45 @@ def _execute_pending():
         gateway_client.execution_result(workflow_id, "failed", result)
         raise
 
-    try:
-        updated_context = _sync_current_context()
-        result["context_hash"] = updated_context.get("context_hash")
-    except Exception as exc:
-        result["context_sync_warning"] = _exception_text(exc)
-        _log_event(u"context_sync_after_success.failed", _exception_text(exc))
+    updated_context = _sync_current_context()
+    result["context_hash"] = updated_context.get("context_hash")
 
     gateway_client.execution_result(workflow_id, "succeeded", result)
-    show_message(u"工作流执行完成：%s" % result.get("summary", "succeeded"))
+    if not silent:
+        show_message(u"工作流执行完成：%s" % result.get("summary", "succeeded"))
 
 
 def _sync_current_context():
     context = context_reader.read_context()
     gateway_client.sync_context(context)
     return context
+
+
+def _consume_silent_command(action):
+    try:
+        if not os.path.isfile(SILENT_COMMAND_FILE):
+            return False
+        with open(SILENT_COMMAND_FILE, "rb") as handle:
+            raw = handle.read()
+        if not isinstance(raw, unicode):
+            raw = raw.decode("utf-8", "replace")
+        payload = json.loads(raw.lstrip(u"\ufeff"))
+        if payload.get("action") != action:
+            return False
+        if float(payload.get("expires_at") or 0) < time.time():
+            return False
+        try:
+            os.remove(SILENT_COMMAND_FILE)
+        except Exception:
+            pass
+        return True
+    except Exception as exc:
+        _log_event(u"bridge.silent_command_failed", _exception_text(exc))
+        return False
+
+
+def suppress_last_error_popup():
+    return bool(_LAST_COMMAND_WAS_SILENT)
 
 
 def _log_event(kind, detail=None):

@@ -82,6 +82,19 @@ function Find-InnoCompiler {
     throw "未找到 Inno Setup 编译器 ISCC.exe。请安装 Inno Setup 6 后重试：https://jrsoftware.org/isinfo.php"
 }
 
+function Build-ExternalArcMapBridge {
+    $buildScript = Join-Path $repoRoot "ArcMapBridgeExternal\build.ps1"
+    & $buildScript | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        throw "ArcMapBridge.exe 编译失败，退出码：$LASTEXITCODE"
+    }
+    $exe = Join-Path $repoRoot "ArcMapBridgeExternal\bin\Release\ArcMapBridge.exe"
+    if (-not (Test-Path -LiteralPath $exe)) {
+        throw "缺少 ArcMapBridge.exe：$exe"
+    }
+    return $exe
+}
+
 function Stop-BuildOutputGateway {
     param([string]$GatewayExePath)
     $target = [System.IO.Path]::GetFullPath($GatewayExePath)
@@ -123,12 +136,14 @@ if (-not (Test-Path -LiteralPath $gatewayExe)) {
 }
 
 python (Join-Path $repoRoot "ArcMapAIAssistantAddIn\makeaddin.py") | Out-Host
+$externalBridgeExe = Build-ExternalArcMapBridge
 
 if (Test-Path -LiteralPath $ReleaseRoot) {
     Remove-Item -LiteralPath $ReleaseRoot -Recurse -Force
 }
 New-Item -ItemType Directory -Path $ReleaseRoot -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $ReleaseRoot "app") -Force | Out-Null
+New-Item -ItemType Directory -Path (Join-Path $ReleaseRoot "app\bridge") -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $ReleaseRoot "ArcMapAIAssistantAddIn") -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $ReleaseRoot "packaging") -Force | Out-Null
 
@@ -136,11 +151,13 @@ $appVersion = Get-AppVersion
 Set-Content -LiteralPath (Join-Path $ReleaseRoot "app\VERSION") -Value $appVersion -Encoding ASCII
 Copy-TreeFiltered (Join-Path $repoRoot "arcmap_runtime_py2") (Join-Path $ReleaseRoot "app\arcmap_runtime_py2")
 Copy-TreeFiltered (Join-Path $repoRoot "operation_catalog") (Join-Path $ReleaseRoot "app\operation_catalog")
+Copy-TreeFiltered (Join-Path $repoRoot "agent_integrations") (Join-Path $ReleaseRoot "agent_integrations")
 Copy-Item -LiteralPath $gatewayDist -Destination (Join-Path $ReleaseRoot "app\gateway") -Recurse -Force
 Copy-CmdFile (Join-Path $repoRoot "OpenAssistantWeb.cmd") (Join-Path $ReleaseRoot "app\OpenAssistantWeb.cmd")
 Copy-CmdFile (Join-Path $repoRoot "StartGateway.cmd") (Join-Path $ReleaseRoot "app\StartGateway.cmd")
 Copy-Item -LiteralPath (Join-Path $repoRoot "gateway_py3\web\help.html") -Destination (Join-Path $ReleaseRoot "app\help.html") -Force
 Copy-Item -LiteralPath (Join-Path $repoRoot "packaging\uninstall.ico") -Destination (Join-Path $ReleaseRoot "app\uninstall.ico") -Force
+Copy-Item -LiteralPath $externalBridgeExe -Destination (Join-Path $ReleaseRoot "app\bridge\ArcMapBridge.exe") -Force
 Copy-Item -LiteralPath (Join-Path $repoRoot "ArcMapAIAssistantAddIn\ArcMapAIAssistantAddIn.esriaddin") -Destination (Join-Path $ReleaseRoot "ArcMapAIAssistantAddIn\ArcMapAIAssistantAddIn.esriaddin") -Force
 Copy-PowerShellFile (Join-Path $repoRoot "packaging\install.ps1") (Join-Path $ReleaseRoot "packaging\install.ps1")
 Copy-PowerShellFile (Join-Path $repoRoot "packaging\uninstall.ps1") (Join-Path $ReleaseRoot "packaging\uninstall.ps1")

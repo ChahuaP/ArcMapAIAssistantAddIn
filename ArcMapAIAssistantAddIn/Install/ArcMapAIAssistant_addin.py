@@ -20,14 +20,10 @@ except NameError:
 
 
 def installed_runtime_path():
-    override = os.environ.get("ARCMAP_AI_RUNTIME_PATH")
-    if override:
-        return override
     install_dir = installed_app_dir()
-    if install_dir:
-        return os.path.join(install_dir, "arcmap_runtime_py2")
-    root = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
-    return os.path.join(root, "ArcMapAIAssistant", "app", "arcmap_runtime_py2")
+    if not install_dir:
+        raise RuntimeError("GeoPilot install config is missing install_dir.")
+    return os.path.join(install_dir, "arcmap_runtime_py2")
 
 
 def installed_app_dir():
@@ -44,10 +40,12 @@ def installed_app_dir():
             raw = raw.decode("utf-8", "replace")
         raw = raw.lstrip(u"\ufeff")
         payload = json.loads(raw)
-    except Exception:
-        return ""
+    except Exception as exc:
+        raise RuntimeError("Invalid GeoPilot install config: %s" % exc)
     install_dir = payload.get("install_dir", "")
-    return install_dir if isinstance(install_dir, basestring) else ""
+    if not isinstance(install_dir, basestring) or not install_dir:
+        raise RuntimeError("GeoPilot install config is missing install_dir.")
+    return install_dir
 
 
 def show_message(text):
@@ -71,6 +69,17 @@ def load_runtime():
 
 def run_command(command_text):
     return load_runtime().handle_command(command_text)
+
+
+class AutoGatewayExtension(object):
+    """Implementation for ArcMapAIAssistant_addin.autoGatewayExtension (Extension)."""
+
+    def __init__(self):
+        self.enabled = True
+        try:
+            load_runtime().ensure_gateway_silent()
+        except Exception:
+            pass
 
 
 class OpenAssistantButton(object):
@@ -109,10 +118,13 @@ class SyncContextButton(object):
         self.checked = False
 
     def onClick(self):
+        runtime = None
         try:
-            load_runtime().sync_context()
+            runtime = load_runtime()
+            runtime.sync_context()
         except Exception as exc:
-            show_message(u"执行失败：%s" % exc)
+            if not runtime or not getattr(runtime, "suppress_last_error_popup", lambda: False)():
+                show_message(u"执行失败：%s" % exc)
 
 
 class ExecuteWorkflowButton(object):
@@ -123,7 +135,10 @@ class ExecuteWorkflowButton(object):
         self.checked = False
 
     def onClick(self):
+        runtime = None
         try:
-            load_runtime().execute_pending()
+            runtime = load_runtime()
+            runtime.execute_pending()
         except Exception as exc:
-            show_message(u"执行失败：%s" % exc)
+            if not runtime or not getattr(runtime, "suppress_last_error_popup", lambda: False)():
+                show_message(u"执行失败：%s" % exc)

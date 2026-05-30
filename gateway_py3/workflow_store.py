@@ -331,6 +331,19 @@ class WorkflowStore:
             return None
         return {"key": row[0], "value": json.loads(row[1]), "updated_at": row[2]}
 
+    def list_state(self, prefix: str = "") -> List[Dict[str, Any]]:
+        with self._connection() as conn:
+            if prefix:
+                rows = conn.execute(
+                    "SELECT key, value_json, updated_at FROM app_state WHERE key LIKE ? ORDER BY updated_at DESC",
+                    (prefix + "%",)
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT key, value_json, updated_at FROM app_state ORDER BY updated_at DESC"
+                ).fetchall()
+        return [{"key": row[0], "value": json.loads(row[1]), "updated_at": row[2]} for row in rows]
+
     def _set_status(self, workflow_id: str, status: str) -> Dict[str, Any]:
         with self._connection() as conn:
             conn.execute("UPDATE workflows SET status = ?, updated_at = ? WHERE id = ?", (status, time.time(), workflow_id))

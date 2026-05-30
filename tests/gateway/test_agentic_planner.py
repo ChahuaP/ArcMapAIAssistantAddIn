@@ -311,7 +311,7 @@ class AgenticPlannerTests(unittest.TestCase):
         tool_names = [item["name"] for item in row["agent_trace"] if item.get("type") == "tool"]
         self.assertEqual(tool_names, ["file_resolve", "file_resolve"])
 
-    def test_recent_conversation_is_sent_to_model_for_short_followup(self):
+    def test_semi_agent_does_not_send_recent_conversation(self):
         with tempfile.TemporaryDirectory() as directory:
             store = WorkflowStore(pathlib.Path(directory) / "workflows.sqlite")
             store.create_draft("打开数据并相交", "hash", {"action": "clarify", "summary": "请确认要对哪些图层相交。", "steps": []}, [])
@@ -340,12 +340,55 @@ class AgenticPlannerTests(unittest.TestCase):
                 "is_saved": True,
                 "layers": [_layer("p1"), _layer("p2")]
             })
+            rows = store.list_recent(mode="semi_agent")
 
-        first_user_message = client.calls[0]["messages"][1]["content"]
-        self.assertIn("recent_conversation", first_user_message)
-        self.assertIn("打开数据并相交", first_user_message)
-        self.assertNotIn("全代理旧任务", first_user_message)
+        first_user_payload = json.loads(client.calls[0]["messages"][1]["content"])
+        self.assertEqual(first_user_payload["recent_conversation"], [])
+        self.assertEqual([item["command"] for item in rows], ["p1、p2"])
         self.assertEqual(row["workflow"]["steps"][0]["arguments"]["output_name"], "p1_p2_intersect")
+
+    def test_semi_agent_ignores_project_id_and_project_memory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            store = WorkflowStore(root / "workflows.sqlite")
+            project = store.create_project("项目", str(root))
+            store.add_project_memory(project["id"], "导出命名规范是社区名+日期", kind="naming_convention")
+            client = FakeAgentClient([
+                _assistant_tool_call("call_1", "workflow_propose", {
+                    "action": "answer",
+                    "summary": "半代理不会读取项目记忆。",
+                    "steps": []
+                })
+            ])
+            planner = AgenticPlanner(catalog=self.catalog, client=client, store=store)
+            row = planner.plan("我的命名是什么", _context(), mode="semi_agent", project_id=project["id"])
+
+        first_user_payload = json.loads(client.calls[0]["messages"][1]["content"])
+        tool_names = [item["function"]["name"] for item in client.calls[0]["tools"]]
+        self.assertIsNone(first_user_payload["project"])
+        self.assertEqual(first_user_payload["recent_conversation"], [])
+        self.assertNotIn("project_remember", tool_names)
+        self.assertEqual(row["project_id"], "")
+
+    def test_full_agent_still_sends_project_recent_conversation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            store = WorkflowStore(root / "workflows.sqlite")
+            project = store.create_project("项目", str(root))
+            store.create_draft("项目上一步", "hash", {"action": "answer", "summary": "全代理项目历史。", "steps": []}, [], mode="full_agent", project_id=project["id"])
+            store.create_draft("半代理旧任务", "hash", {"action": "answer", "summary": "不应进入全代理上下文。", "steps": []}, [])
+            client = FakeAgentClient([
+                _assistant_tool_call("call_1", "workflow_propose", {
+                    "action": "execute",
+                    "summary": "刷新地图。",
+                    "steps": [_step("step_1", "view.refresh_view", {}, "刷新地图")]
+                })
+            ])
+            planner = AgenticPlanner(catalog=self.catalog, client=client, store=store)
+            planner.plan("继续", _context(), mode="full_agent", project_id=project["id"])
+
+        first_user_payload = json.loads(client.calls[0]["messages"][1]["content"])
+        self.assertEqual(first_user_payload["recent_conversation"][0]["command"], "项目上一步")
 
     def test_bad_workflow_is_fed_back_once_then_repaired(self):
         client = FakeAgentClient([

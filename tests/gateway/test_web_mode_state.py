@@ -117,6 +117,24 @@ class WebModeStateTests(unittest.TestCase):
         self.assertIn('self.send_header("Access-Control-Allow-Origin", "*")', app)
         self.assertIn('self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")', app)
 
+    def test_web_uses_arcmap_bridge_for_sync_and_execution(self):
+        html = (ROOT / "gateway_py3" / "web" / "index.html").read_text(encoding="utf-8")
+
+        self.assertIn("async function loadArcMapBridges()", html)
+        self.assertIn("api('/arcmap/bridges')", html)
+        self.assertIn("async function syncArcMap()", html)
+        self.assertIn("api('/arcmap/sync'", html)
+        self.assertIn("api('/arcmap/execute-approved'", html)
+        self.assertIn("发送并执行", html)
+
+    def test_skill_mentions_multi_arcmap_selection(self):
+        skill = (ROOT / "agent_integrations" / "geopilot-arcmap" / "SKILL.md").read_text(encoding="utf-8")
+
+        self.assertIn("arcmap-list", skill)
+        self.assertIn("arcmap-select", skill)
+        self.assertIn("--hwnd", skill)
+        self.assertIn("multiple ArcMap instances", skill)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,4 @@
+interface:
+  display_name: "GeoPilot ArcMap"
+  short_description: "Operate ArcMap through local GeoPilot."
+  default_prompt: "Use GeoPilot ArcMap to sync ArcMap, validate a workflow locally, and execute it through the ArcMap bridge."

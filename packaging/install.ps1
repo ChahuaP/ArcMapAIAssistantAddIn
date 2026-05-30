@@ -78,6 +78,7 @@ function Test-InstallHealth {
         (Join-Path $TargetRoot "arcmap_runtime_py2\runtime.py"),
         (Join-Path $TargetRoot "operation_catalog\catalog.json"),
         (Join-Path $TargetRoot "gateway\ArcMapAIAssistantGateway.exe"),
+        (Join-Path $TargetRoot "bridge\ArcMapBridge.exe"),
         (Join-Path $TargetRoot "OpenAssistantWeb.cmd"),
         (Join-Path $TargetRoot "StartGateway.cmd"),
         (Join-Path $TargetRoot "help.html"),
@@ -100,6 +101,7 @@ $packageRoot = Get-PackageRoot
 $appSource = Join-Path $packageRoot "app"
 $addin = Join-Path $packageRoot "ArcMapAIAssistantAddIn\ArcMapAIAssistantAddIn.esriaddin"
 $gatewayExe = Join-Path $appSource "gateway\ArcMapAIAssistantGateway.exe"
+$bridgeExe = Join-Path $appSource "bridge\ArcMapBridge.exe"
 $runtimeSource = Join-Path $appSource "arcmap_runtime_py2"
 $catalogSource = Join-Path $appSource "operation_catalog"
 $openCmd = Join-Path $appSource "OpenAssistantWeb.cmd"
@@ -110,6 +112,7 @@ $versionFile = Join-Path $appSource "VERSION"
 
 Require-File $addin "缺少 ArcMap 插件包：$addin"
 Require-File $gatewayExe "缺少 Python3 网关 EXE：$gatewayExe。请先用 packaging\build_release.ps1 生成发布包。"
+Require-File $bridgeExe "缺少 ArcMapBridge.exe：$bridgeExe"
 Require-File (Join-Path $runtimeSource "runtime.py") "缺少 ArcMap runtime：$runtimeSource"
 Require-File (Join-Path $catalogSource "catalog.json") "缺少操作目录：$catalogSource"
 Require-File $openCmd "缺少打开控制台脚本：$openCmd"
@@ -132,6 +135,7 @@ New-Item -ItemType Directory -Path $targetRoot -Force | Out-Null
 Copy-CleanDirectory $runtimeSource (Join-Path $targetRoot "arcmap_runtime_py2")
 Copy-CleanDirectory $catalogSource (Join-Path $targetRoot "operation_catalog")
 Copy-CleanDirectory (Join-Path $appSource "gateway") (Join-Path $targetRoot "gateway")
+Copy-CleanDirectory (Join-Path $appSource "bridge") (Join-Path $targetRoot "bridge")
 Copy-Item -LiteralPath $openCmd -Destination (Join-Path $targetRoot "OpenAssistantWeb.cmd") -Force
 Copy-Item -LiteralPath $startCmd -Destination (Join-Path $targetRoot "StartGateway.cmd") -Force
 Copy-Item -LiteralPath $helpHtml -Destination (Join-Path $targetRoot "help.html") -Force
@@ -146,6 +150,7 @@ $installConfig = @{
     install_dir = $targetRoot
     app_version = $appVersion
     addin_dir = $addinTargetDir
+    bridge_exe = (Join-Path $targetRoot "bridge\ArcMapBridge.exe")
     desktop_version = $DesktopVersion
     installed_at = (Get-Date).ToString("s")
 }
@@ -159,5 +164,6 @@ Write-Host ""
 Write-Host "安装完成。"
 Write-Host "安装自检：通过。"
 Write-Host "ArcMap 插件目录：$addinTargetDir"
+Write-Host "ArcMapBridge：$(Join-Path $targetRoot "bridge\ArcMapBridge.exe")"
 Write-Host "程序目录：$targetRoot"
 Write-Host "配置文件：$(Join-Path $configDir "install.json")"

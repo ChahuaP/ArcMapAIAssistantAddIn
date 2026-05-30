@@ -9,6 +9,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 CATALOG_ROOT = ROOT / "operation_catalog"
 RUNTIME_ROOT = ROOT / "arcmap_runtime_py2"
 ADDIN_ROOT = ROOT / "ArcMapAIAssistantAddIn"
+EXTERNAL_BRIDGE_ROOT = ROOT / "ArcMapBridgeExternal"
 PACKAGING_ROOT = ROOT / "packaging"
 
 
@@ -49,11 +50,25 @@ class CatalogTests(unittest.TestCase):
                 functions = {node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)}
                 self.assertIn(function_name, functions, operation["executor"])
 
-    def test_addin_does_not_register_auto_sync_extension(self):
+    def test_python_addin_registers_auto_gateway_extension(self):
         tree = ET.parse(str(ADDIN_ROOT / "config.xml"))
         namespace = {"addin": "http://schemas.esri.com/Desktop/AddIns"}
         extension = tree.find(".//addin:Extensions/addin:Extension", namespace)
-        self.assertIsNone(extension)
+        self.assertIsNotNone(extension)
+        self.assertEqual(extension.attrib.get("class"), "AutoGatewayExtension")
+        self.assertEqual(extension.attrib.get("autoLoad"), "true")
+
+    def test_external_arcmap_bridge_uses_rot_and_python_addin_commands(self):
+        source = (EXTERNAL_BRIDGE_ROOT / "Program.cs").read_text(encoding="utf-8")
+        project = (EXTERNAL_BRIDGE_ROOT / "ArcMapBridgeExternal.csproj").read_text(encoding="utf-8")
+        build_script = (EXTERNAL_BRIDGE_ROOT / "build.ps1").read_text(encoding="utf-8-sig")
+        self.assertIn("AppROTClass", source)
+        self.assertIn("TcpListener", source)
+        self.assertIn('"syncContextButton"', source)
+        self.assertIn('"executeWorkflowButton"', source)
+        self.assertIn("<AssemblyName>ArcMapBridge</AssemblyName>", project)
+        self.assertIn("<PlatformTarget>x86</PlatformTarget>", project)
+        self.assertIn("ArcMapBridge.exe", build_script)
 
     def test_addin_runtime_path_comes_from_install_config(self):
         addin_source = (ADDIN_ROOT / "Install" / "ArcMapAIAssistant_addin.py").read_text(encoding="utf-8")
@@ -66,6 +81,10 @@ class CatalogTests(unittest.TestCase):
         install_script = (PACKAGING_ROOT / "install.ps1").read_text(encoding="utf-8-sig")
         self.assertIn('"operation_catalog"', build_script)
         self.assertIn('"app\\operation_catalog"', build_script)
+        self.assertIn('"agent_integrations"', build_script)
+        self.assertIn("Build-ExternalArcMapBridge", build_script)
+        self.assertIn('"ArcMapBridgeExternal\\build.ps1"', build_script)
+        self.assertIn('"app\\bridge\\ArcMapBridge.exe"', build_script)
         self.assertIn('"app\\VERSION"', build_script)
         self.assertIn('"app\\help.html"', build_script)
         self.assertIn('"app\\uninstall.ico"', build_script)
@@ -74,6 +93,7 @@ class CatalogTests(unittest.TestCase):
         self.assertIn('"catalog.json"', install_script)
         self.assertIn('"VERSION"', install_script)
         self.assertIn("app_version", install_script)
+        self.assertIn("bridge_exe", install_script)
         self.assertIn("Test-InstallHealth", install_script)
 
     def test_windows_installer_requests_admin_and_uses_inno_setup(self):

@@ -19,9 +19,6 @@ The add-in reads %APPDATA%\ArcMapAIAssistant\install.json and loads:
 
 <install_dir>\arcmap_runtime_py2\runtime.py
 
-For local development only, ARCMAP_AI_RUNTIME_PATH can override the runtime
-path.
-
 Edit runtime files, then press Enter again in ArcMap. No ArcMap restart or
 add-in reinstall is needed for runtime-only changes. Reinstall only when
 config.xml or the add-in shell changes.

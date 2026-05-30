@@ -44,7 +44,7 @@ class AgentToolRuntime:
         self.project = project
 
     def tools(self) -> List[Dict[str, Any]]:
-        return [
+        tools = [
             _tool(
                 "catalog_list_operations",
                 "List all registered ArcGIS operation ids with short user-facing summaries.",
@@ -73,38 +73,6 @@ class AgentToolRuntime:
                     "required": ["layer"],
                     "properties": {
                         "layer": {"type": "string", "description": "Exact layer_ref or layer name from arcgis_context.layers, for example layer:0 or roads."}
-                    },
-                    "additionalProperties": False
-                }
-            ),
-            _tool(
-                "project_get_context",
-                "Get the active GeoPilot project workdir and saved project memories. Use only in full_agent mode.",
-                {"type": "object", "properties": {}, "additionalProperties": False}
-            ),
-            _tool(
-                "project_list_files",
-                "List GIS files under the active project workdir from structured path arguments. This does not parse natural language.",
-                {
-                    "type": "object",
-                    "properties": {
-                        "relative_path": {"type": "string", "description": "Folder under project workdir, for example data\\roads."},
-                        "file_name": {"type": "string", "description": "Exact file name to find, for example roads.shp."},
-                        "extensions": {"type": "array", "items": {"type": "string"}, "description": "Allowed extensions, for example ['shp']."},
-                        "max_depth": {"type": "integer", "description": "Search depth under relative_path. Defaults to 2, maximum 5."}
-                    },
-                    "additionalProperties": False
-                }
-            ),
-            _tool(
-                "project_remember",
-                "Save a concise project memory for future full_agent planning.",
-                {
-                    "type": "object",
-                    "required": ["content"],
-                    "properties": {
-                        "content": {"type": "string"},
-                        "kind": {"type": "string"}
                     },
                     "additionalProperties": False
                 }
@@ -182,6 +150,42 @@ class AgentToolRuntime:
                 TOOLBUILDER_REVISE_TOOL_PARAMETERS
             )
         ]
+        if self.project:
+            tools[3:3] = [
+                _tool(
+                    "project_get_context",
+                    "Get the active GeoPilot project workdir and saved project memories.",
+                    {"type": "object", "properties": {}, "additionalProperties": False}
+                ),
+                _tool(
+                    "project_list_files",
+                    "List GIS files under the active project workdir from structured path arguments. This does not parse natural language.",
+                    {
+                        "type": "object",
+                        "properties": {
+                            "relative_path": {"type": "string", "description": "Folder under project workdir, for example data\\roads."},
+                            "file_name": {"type": "string", "description": "Exact file name to find, for example roads.shp."},
+                            "extensions": {"type": "array", "items": {"type": "string"}, "description": "Allowed extensions, for example ['shp']."},
+                            "max_depth": {"type": "integer", "description": "Search depth under relative_path. Defaults to 2, maximum 5."}
+                        },
+                        "additionalProperties": False
+                    }
+                ),
+                _tool(
+                    "project_remember",
+                    "Save a concise project memory for future full_agent planning.",
+                    {
+                        "type": "object",
+                        "required": ["content"],
+                        "properties": {
+                            "content": {"type": "string"},
+                            "kind": {"type": "string"}
+                        },
+                        "additionalProperties": False
+                    }
+                )
+            ]
+        return tools
 
     def operation_index(self) -> List[Dict[str, str]]:
         return [

@@ -1584,11 +1584,12 @@
         <div class="top-controls">
           <div class="status-line" aria-live="polite">
             <div class="status-tile warn" id="gatewayState"><span>网关</span><strong>检查中</strong></div>
-            <div class="status-tile warn" id="arcgisState"><span>地图上下文</span><strong>未同步</strong></div>
+            <div class="status-tile warn" id="arcgisState"><span>ArcMap</span><strong>未连接</strong></div>
             <div class="status-tile warn" id="restartState"><span>当前模式</span><strong>检查中</strong></div>
           </div>
           <div class="quick-actions" aria-label="常用信息">
             <button class="ghost small" onclick="openCapabilities()">能力范围</button>
+            <button class="ghost small" onclick="syncArcMap()">自动同步</button>
             <button class="ghost small" onclick="openModal('contextModal')">地图快照</button>
             <button class="ghost small" onclick="openPendingTools()">工具管理</button>
             <button class="ghost small" onclick="openDiagnostics()">系统诊断</button>
@@ -1796,7 +1797,7 @@
   </div>
 
   <script>
-    const EXPECTED_GATEWAY_VERSION = '0.13.20';
+    const EXPECTED_GATEWAY_VERSION = '0.14.0';
     const API_ORIGIN = window.location.protocol === 'file:' ? 'http://127.0.0.1:8765' : '';
     const POLL_INTERVAL_MS = 2500;
     const HEALTH_INTERVAL_MS = 10000;
@@ -1808,6 +1809,7 @@
     let modeInitialized = false;
     let activeProject = null;
     let latestArcgisContext = null;
+    let arcmapBridges = [];
     let cachedWorkflows = [];
     let selectedWorkflowId = '';
     let transientUserMessage = '';
@@ -2202,17 +2204,17 @@
       const item = data.context;
       if (!item || !item.value) {
         latestArcgisContext = null;
-        setTile('arcgisState', 'warn', '未同步');
+        setTile('arcgisState', arcmapBridges.length ? 'warn' : 'bad', arcmapBridges.length ? `${arcmapBridges.length} 个 ArcMap` : '未连接');
         document.getElementById('layerCount').textContent = '0';
         document.getElementById('mxdState').textContent = '未知';
         document.getElementById('srState').textContent = '未知';
-        document.getElementById('layerTable').innerHTML = '<tr><td colspan="3">请在 ArcGIS 工具栏点击“同步上下文”。</td></tr>';
+        document.getElementById('layerTable').innerHTML = '<tr><td colspan="3">请点击“自动同步”，或确认 ArcMap 已加载 GeoPilot Add-in。</td></tr>';
         return;
       }
       const ctx = item.value;
       latestArcgisContext = ctx;
       const layers = ctx.layers || [];
-      setTile('arcgisState', 'ok', `最近同步，${layers.length} 个图层`);
+      setTile('arcgisState', 'ok', `已同步，${layers.length} 个图层`);
       document.getElementById('layerCount').textContent = layers.length;
       document.getElementById('mxdState').textContent = ctx.is_saved ? '已保存' : '未保存';
       document.getElementById('srState').textContent = (ctx.spatial_reference && ctx.spatial_reference.name) || '未知';
@@ -2227,6 +2229,34 @@
         row.innerHTML = `<td>${escapeHtml(layer.name || '')}</td><td>${escapeHtml(layer.geometry_type || '')}</td><td>${layer.selected_count || 0}</td>`;
         table.appendChild(row);
       });
+    }
+
+    async function loadArcMapBridges() {
+      try {
+        const data = await api('/arcmap/bridges');
+        arcmapBridges = data.bridges || [];
+        if (!latestArcgisContext) {
+          setTile('arcgisState', arcmapBridges.length ? 'warn' : 'bad', arcmapBridges.length ? `${arcmapBridges.length} 个 ArcMap` : '未连接');
+        }
+      } catch (err) {
+        arcmapBridges = [];
+        if (!latestArcgisContext) setTile('arcgisState', 'bad', '未连接');
+      }
+    }
+
+    async function syncArcMap() {
+      try {
+        await loadArcMapBridges();
+        if (arcmapBridges.length > 1) {
+          setStatus('检测到多个 ArcMap。请在 agent 中用 arcmap-list 查看并 arcmap-select 选择目标。');
+          return;
+        }
+        await api('/arcmap/sync', {method: 'POST', body: '{}'});
+        setStatus('已自动同步 ArcMap 上下文。');
+        await loadContext();
+      } catch (err) {
+        setStatus(err.message);
+      }
     }
 
     async function loadProjects() {
@@ -2449,7 +2479,7 @@
         const data = await api('/plan', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({command, mode: currentMode, project_id: activeProject ? activeProject.id : ''})
+          body: JSON.stringify({command, mode: currentMode, project_id: currentMode === 'full_agent' && activeProject ? activeProject.id : ''})
         });
         transientUserMessage = '';
         transientAssistantMessage = '';
@@ -2467,8 +2497,9 @@
 
     async function approve(id) {
       await api(`/workflows/${id}/approve`, {method: 'POST', body: '{}'});
+      await api('/arcmap/execute-approved', {method: 'POST', body: JSON.stringify({confirmed: true, allow_edits: true})});
       selectedWorkflowId = id;
-      setStatus('已发送到 ArcGIS，等待你在 ArcGIS 工具栏点击“执行任务”。');
+      setStatus('已发送到 ArcMap 并自动执行。');
       await refreshWorkflows();
     }
 
@@ -2596,8 +2627,8 @@
       let text = wf.summary;
       if (action === 'execute') {
         text += item.status === 'draft'
-          ? '\n\n已生成任务。确认后会发送到 ArcGIS，之后还需要在 ArcGIS 工具栏点击“执行任务”。'
-          : '\n\n已发送到 ArcGIS，等待你在 ArcGIS 工具栏点击“执行任务”。';
+          ? '\n\n已生成任务。确认后会发送到当前 ArcMap 并自动执行。'
+          : '\n\n任务已发送到 ArcMap。';
       } else if (action === 'clarify') {
         text += '\n\n信息不够，当前不会执行任何操作。';
       } else if (action === 'unsupported') {
@@ -2881,7 +2912,7 @@
         <p class="task-title">${escapeHtml(workflowTitle(item.workflow))}</p>
         <div class="task-meta">${escapeHtml(shortCommand(item.command))}</div>
         ${action === 'answer' ? '<div class="task-note">这是一条普通回复，不需要发送到 ArcGIS。</div>' : ''}
-        ${item.status === 'approved_for_arcmap' ? '<div class="task-note">已发送到 ArcGIS。请回到 ArcGIS 工具栏点击“执行任务”。</div>' : ''}
+        ${item.status === 'approved_for_arcmap' ? '<div class="task-note">已发送到 ArcMap，等待自动执行。</div>' : ''}
         ${failedMessage(item)}
         ${repairingWorkflowIds.has(item.id) ? '<div class="task-note">AI 正在读取失败信息并修订原工具...</div>' : ''}
         ${writesData(item.workflow) ? '<div class="task-note warn">这个任务会写出新数据。若当前 MXD 未保存，需要在对话中说明输出文件夹或 GDB。</div>' : ''}
@@ -2891,7 +2922,7 @@
       if (item.status === 'draft' && action === 'execute') {
         const approveButton = document.createElement('button');
         approveButton.className = 'success small';
-        approveButton.textContent = '发送到 ArcGIS';
+        approveButton.textContent = '发送并执行';
         approveButton.onclick = () => approve(item.id);
         actions.appendChild(approveButton);
       }
@@ -2980,7 +3011,7 @@
       if (action === 'unsupported') return '暂不支持。';
       if (action === 'answer') return '已回答。';
       if (item.status === 'draft') return '任务已生成，等待确认。';
-      if (item.status === 'approved_for_arcmap') return '已发送到 ArcGIS，等待工具栏执行。';
+      if (item.status === 'approved_for_arcmap') return '已发送到 ArcMap，等待自动执行。';
       return statusLabel(item, action);
     }
 
@@ -2989,7 +3020,7 @@
       if (action === 'clarify') return '需要回答';
       if (action === 'unsupported') return '暂不支持';
       if (item.status === 'draft') return '待确认';
-      if (item.status === 'approved_for_arcmap') return '待执行';
+      if (item.status === 'approved_for_arcmap') return '待自动执行';
       if (item.status === 'claimed_by_arcmap' || item.status === 'executing') return '执行中';
       if (item.status === 'succeeded') return '已完成';
       if (item.status === 'failed') return '失败';
@@ -3193,6 +3224,7 @@
       try {
         await loadConfig();
         await openHealth({silent: true});
+        await loadArcMapBridges();
         await loadProjects();
         await loadContext();
         await refreshWorkflows();
@@ -3211,6 +3243,7 @@
         if (Date.now() - lastHealthCheck > HEALTH_INTERVAL_MS) {
           await loadConfig();
           await openHealth({silent: true});
+          await loadArcMapBridges();
         }
         await loadProjects();
         await loadContext();

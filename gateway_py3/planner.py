@@ -9,7 +9,7 @@ from .agent_tools import AgentToolError, AgentToolRuntime
 from .catalog_loader import OperationCatalog
 from .custom_tool_contract import PLANNER_CUSTOM_TOOL_CONTRACT
 from .file_resolver import FileResolver
-from .llm_providers import FULL_AGENT_MODE, ChatProvider, create_provider
+from .llm_providers import FULL_AGENT_MODE, SEMI_AGENT_MODE, ChatProvider, create_provider
 from .logs import write_event
 from .output_folder_resolver import OutputFolderResolver
 from .validators import ValidationError, context_hash, friendly_validation_message, prepare_workflow
@@ -129,7 +129,10 @@ class AgenticPlanner:
         mode: str = "semi_agent",
         project_id: str | None = None
     ) -> Dict[str, Any]:
-        project = self.store.get_project(project_id) if project_id else None
+        if mode == SEMI_AGENT_MODE:
+            self.store.clear_workflows(mode=SEMI_AGENT_MODE)
+            project_id = ""
+        project = self.store.get_project(project_id) if mode == FULL_AGENT_MODE and project_id else None
         if mode == FULL_AGENT_MODE and not project:
             raise PlannerError("全代理模式需要先选择一个项目工作目录。")
         if project:
@@ -273,6 +276,9 @@ class AgenticPlanner:
         mode: str,
         project: Dict[str, Any] | None
     ) -> List[Dict[str, Any]]:
+        recent_conversation = []
+        if mode == FULL_AGENT_MODE:
+            recent_conversation = _recent_conversation(self.store, project.get("id") if project else None, mode, 18)
         payload = {
             "user_request": command,
             "mode": mode,
@@ -280,7 +286,7 @@ class AgenticPlanner:
             "project": _project_summary(project, self.store) if project else None,
             "operation_index": operation_index,
             "custom_tools": _custom_tool_status(self.store),
-            "recent_conversation": _recent_conversation(self.store, project.get("id") if project else None, mode, 18 if mode == FULL_AGENT_MODE else 6)
+            "recent_conversation": recent_conversation
         }
         return [
             {"role": "system", "content": SYSTEM_PROMPT},

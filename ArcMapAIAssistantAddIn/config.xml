@@ -3,7 +3,7 @@
   <Name>ArcMap AI Assistant</Name>
   <AddInID>{7f42eea1-1f17-4cf4-9d4f-c0c8d28c0a23}</AddInID>
   <Description>ArcMap AI Assistant toolbar.</Description>
-  <Version>1.4</Version>
+  <Version>1.5</Version>
   <Image />
   <Author>Codex</Author>
   <Company />
@@ -22,7 +22,7 @@
                 tip="显示 Web 控制台">
           <Help heading="ArcMap AI Assistant" />
         </Button>
-        <Button caption="启动AI后台"
+        <Button caption="启动网关"
                 category="ArcMap AI Assistant"
                 class="StartGatewayButton"
                 id="ArcMapAIAssistant_addin.startGatewayButton"
@@ -47,7 +47,11 @@
           <Help heading="ArcMap AI Assistant" />
         </Button>
       </Commands>
-      <Extensions />
+      <Extensions>
+        <Extension autoLoad="true"
+                   class="AutoGatewayExtension"
+                   id="ArcMapAIAssistant_addin.autoGatewayExtension" />
+      </Extensions>
       <Toolbars>
         <Toolbar caption="ArcMap AI Assistant"
                  category="ArcMap AI Assistant"

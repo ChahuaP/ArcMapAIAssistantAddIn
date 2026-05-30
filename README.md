@@ -77,7 +77,7 @@ Customize > Toolbars > ArcMap AI Assistant
 
 ## Basic Use
 
-1. Click `启动AI后台` in the ArcMap toolbar.
+1. Click `启动网关` in the ArcMap toolbar.
 2. Click `显示控制台` to open the local Web console.
 3. Configure the model API key in the Web console.
 4. Click `同步上下文` in ArcMap.

@@ -13,7 +13,7 @@ from gateway_py3.paths import REPO_ROOT, localappdata_dir
 
 
 BASE_URL = "http://127.0.0.1:8765"
-EXPECTED_APP_VERSION = "0.13.20"
+EXPECTED_APP_VERSION = "0.14.0"
 WEB_URL = BASE_URL
 CREATE_NO_WINDOW = 0x08000000
 
