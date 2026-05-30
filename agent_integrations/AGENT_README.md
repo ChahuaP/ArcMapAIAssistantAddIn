@@ -23,11 +23,12 @@ geopilot-arcmap/
 
 ## How to use after installing
 
-1. Open ArcMap with the GeoPilot Python Add-in enabled. The local Gateway starts `ArcMapBridge.exe` when an agent asks for ArcMap targets.
+1. Open ArcMap with the GeoPilot Python Add-in enabled.
 3. Ask the agent to use `geopilot-arcmap`.
 4. The agent should call `scripts/geopilot_cli.py` instead of GeoPilot `/plan`.
-5. The agent should call `arcmap-list`; if multiple ArcMap instances are open, select one with `arcmap-select --hwnd <hwnd>`.
-6. The agent can call `arcmap-sync` and `arcmap-execute-workflow` directly. The Web console and toolbar buttons are optional debugging tools.
+5. The agent must call `arcmap-list` before any ArcMap sync or execution. This call starts `ArcMapBridge.exe` through the Gateway and discovers ArcMap targets.
+6. If multiple ArcMap instances are open, select one with `arcmap-select --hwnd <hwnd>`.
+7. The agent can call `arcmap-sync` and `arcmap-execute-workflow` directly. The Web console and toolbar buttons are optional debugging tools.
 
 ## Important boundary
 
