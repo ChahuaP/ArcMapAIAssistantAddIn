@@ -50,6 +50,23 @@ class CatalogTests(unittest.TestCase):
                 functions = {node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)}
                 self.assertIn(function_name, functions, operation["executor"])
 
+    def test_functional_operation_packs_are_registered(self):
+        catalog = _load_json(CATALOG_ROOT / "catalog.json")
+        self.assertIn("packs/edit_geometry.json", catalog["packs"])
+        self.assertIn("packs/data_management.json", catalog["packs"])
+        self.assertIn("packs/layout.json", catalog["packs"])
+        operations = {}
+        for pack_path in catalog["packs"]:
+            pack = _load_json(CATALOG_ROOT / pack_path)
+            for operation in pack["operations"]:
+                operations[operation["id"]] = operation
+
+        self.assertEqual(operations["edit.create_star_polygon"]["output_policy"]["geometry_type"], "Polygon")
+        self.assertEqual(operations["data.repair_geometry"]["side_effects"], "edits_data")
+        self.assertEqual(operations["layout.export_pdf"]["output_policy"]["type"], "file")
+        star_properties = operations["edit.create_star_polygon"]["parameters_schema"]["properties"]
+        self.assertEqual(star_properties["outer_radius_unit"]["enum"], ["map_units", "meters", "degrees"])
+
     def test_python_addin_registers_auto_gateway_extension(self):
         tree = ET.parse(str(ADDIN_ROOT / "config.xml"))
         namespace = {"addin": "http://schemas.esri.com/Desktop/AddIns"}
@@ -66,6 +83,8 @@ class CatalogTests(unittest.TestCase):
         self.assertIn("TcpListener", source)
         self.assertIn('"syncContextButton"', source)
         self.assertIn('"executeWorkflowButton"', source)
+        self.assertIn("allow_edits", source)
+        self.assertIn("ExtractBool", source)
         self.assertIn("<AssemblyName>ArcMapBridge</AssemblyName>", project)
         self.assertIn("<PlatformTarget>x86</PlatformTarget>", project)
         self.assertIn("ArcMapBridge.exe", build_script)
@@ -79,6 +98,7 @@ class CatalogTests(unittest.TestCase):
     def test_runtime_process_paths_come_from_installed_app(self):
         bridge_client = (ROOT / "gateway_py3" / "arcmap_bridge_client.py").read_text(encoding="utf-8")
         gateway_client = (ROOT / "arcmap_runtime_py2" / "gateway_client.py").read_text(encoding="utf-8")
+        runtime = (ROOT / "arcmap_runtime_py2" / "runtime.py").read_text(encoding="utf-8")
 
         self.assertIn('"install.json"', bridge_client)
         self.assertIn('"bridge_exe"', bridge_client)
@@ -87,6 +107,8 @@ class CatalogTests(unittest.TestCase):
         self.assertIn('"gateway", "ArcMapAIAssistantGateway.exe"', gateway_client)
         self.assertNotIn('"dist"', gateway_client)
         self.assertNotIn('"python", "-m", "gateway_py3"', gateway_client)
+        self.assertIn('_LAST_SILENT_COMMAND.get("allow_edits")', runtime)
+        self.assertIn("if _LAST_COMMAND_WAS_SILENT:", runtime)
 
     def test_release_and_install_package_operation_catalog(self):
         build_script = (PACKAGING_ROOT / "build_release.ps1").read_text(encoding="utf-8-sig")

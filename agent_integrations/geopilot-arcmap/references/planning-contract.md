@@ -5,12 +5,15 @@ GeoPilot is the execution bridge for ArcMap. The external agent is the planner.
 ## Core planning rules
 
 - Use local facts before drafting: current ArcMap context, capability catalog, layer fields, sampled values when available, and explicit user paths.
-- Prefer composing existing atomic operations. Common chains are add layer, inspect fields, select by attribute or location, export selected features, split by field, export KML/KMZ, clear selection, zoom, and refresh.
+- Prefer composing existing atomic operations. Common chains are add layer, inspect fields, select by attribute or location, export selected features, split by field, export KML/KMZ, create simple geometry, copy/repair/manage data, update existing layout text, export layout, clear selection, zoom, and refresh.
 - Do not create a custom tool when an existing operation or operation chain can express the task.
 - Use custom tools only for reusable GIS algorithms or processing primitives that cannot be expressed by the catalog.
 - If an enabled `custom.*` operation already matches the goal, use it directly. Do not create a duplicate draft.
 - If a pending or rejected custom tool matches the goal, tell the user it must be reviewed/enabled or revised before execution.
 - If a custom tool has a bug or bad parameter design, revise the same tool. Do not create a second tool with the same purpose.
+- For direct geometry creation, use `edit.*` operations before creating a custom tool. A request such as “创建一个五角星 feature” should map to `edit.create_star_polygon` when the user supplies or can confirm center/radius/coordinate system.
+- For layout work, use `layout.list_elements` before `layout.set_text` unless the text element name is already known. GeoPilot can update existing layout elements and export the layout; it does not invent a new legend/scale bar/north arrow unless a registered operation says so.
+- For data management operations marked `edits_data`, require the user's explicit `allow_edits` authorization because the original dataset is modified.
 
 ## Local file and output handling
 
@@ -21,6 +24,13 @@ GeoPilot is the execution bridge for ArcMap. The external agent is the planner.
 - If the user did not provide an output location, let GeoPilot use the MXD default output location or project output location.
 - Use `output_folder` only when the operation schema declares it. Use `output_workspace` only when the schema declares it.
 - `output_name` is only the base name: no folder, no extension, no dot, and no Windows-illegal characters.
+
+## Geometry unit rules
+
+- Geometry creation parameters that use `radius`, `distance`, or other coordinate offsets must include the matching `*_unit` parameter.
+- Use `degrees` only when creating raw geometry in a geographic coordinate system.
+- Use `meters` only when the target spatial reference is projected and ArcMap can convert meters to map units.
+- Use `map_units` when the user is deliberately working in the current data frame's coordinate units.
 
 ## Layer, field, and attribute intent
 

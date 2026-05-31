@@ -394,11 +394,7 @@ def _tool(name: str, description: str, parameters: Dict[str, Any]) -> Dict[str, 
 
 
 def _custom_tool_catalog_status(store: WorkflowStore, operation_id: str) -> Dict[str, Any] | None:
-    try:
-        tools = store.list_pending_tools()
-    except Exception:
-        return None
-    for tool in tools:
+    for tool in store.list_pending_tools():
         spec = (tool.get("payload") or {}).get("operation_spec") or {}
         if spec.get("id") != operation_id:
             continue

@@ -5,6 +5,9 @@
     "packs/selection.json",
     "packs/analysis.json",
     "packs/table.json",
-    "packs/export.json"
+    "packs/export.json",
+    "packs/edit_geometry.json",
+    "packs/data_management.json",
+    "packs/layout.json"
   ]
 }

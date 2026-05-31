@@ -19,6 +19,8 @@ def main() -> int:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     subparsers.add_parser("health")
+    subparsers.add_parser("doctor")
+    subparsers.add_parser("agent-diagnostics")
     subparsers.add_parser("context")
     subparsers.add_parser("capabilities")
     subparsers.add_parser("workflows")
@@ -68,6 +70,10 @@ def main() -> int:
     try:
         if args.command == "health":
             return _print(_get(args.base_url, "/health"))
+        if args.command == "doctor":
+            return _print(_get(args.base_url, "/agent/diagnostics"))
+        if args.command == "agent-diagnostics":
+            return _print(_get(args.base_url, "/agent/diagnostics"))
         if args.command == "context":
             return _print(_get(args.base_url, "/context"))
         if args.command == "capabilities":

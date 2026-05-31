@@ -1,0 +1,266 @@
+from __future__ import annotations
+
+import socket
+import time
+
+from gateway_py3 import arcmap_bridge_client
+from gateway_py3.routes import external_agent
+from gateway_py3.validators import context_hash
+
+
+def sync_context(state, port_checker=None):
+    bridge = active_bridge(state, port_checker=port_checker)
+    before = state.store.get_state("arcmap_context")
+    before_value = before.get("value") if before else None
+    result = arcmap_bridge_client.sync_context_target(port=bridge["port"], hwnd=bridge.get("hwnd"))
+    context = result.get("context") if isinstance(result.get("context"), dict) else {}
+    deadline = time.time() + 10
+    while not context and time.time() < deadline:
+        stored = state.store.get_state("arcmap_context")
+        if stored and isinstance(stored.get("value"), dict) and stored.get("value") is not before_value:
+            context = stored["value"]
+            break
+        time.sleep(0.2)
+    if not context:
+        stored = state.store.get_state("arcmap_context")
+        context = stored.get("value") if stored and isinstance(stored.get("value"), dict) else {}
+    if not context:
+        raise arcmap_bridge_client.ArcMapBridgeError("ArcMap Bridge 同步后没有返回有效 context。")
+    return {
+        "ok": True,
+        "bridge": bridge,
+        "context_hash": context_hash(context),
+        "context": context
+    }
+
+
+def health(state, port_checker=None):
+    bridge = active_bridge(state, port_checker=port_checker)
+    result = arcmap_bridge_client.health(port=bridge["port"])
+    result["registered_bridge"] = bridge
+    return result
+
+
+def register(state, payload):
+    pid = int(payload.get("pid") or 0)
+    port = int(payload.get("port") or 0)
+    if pid <= 0 or port <= 0:
+        raise ValueError("pid and port are required.")
+    bridge = {
+        "pid": pid,
+        "port": port,
+        "summary": payload.get("summary") if isinstance(payload.get("summary"), dict) else {},
+    }
+    state.store.set_state("arcmap_bridge:%s" % pid, bridge)
+    return {"ok": True, "bridge": bridge}
+
+
+def set_active(state, payload, port_checker=None):
+    port = int(payload.get("port") or 0)
+    pid = int(payload.get("pid") or 0)
+    hwnd = int(payload.get("hwnd") or 0)
+    if port <= 0 and pid <= 0 and hwnd <= 0:
+        raise ValueError("pid, port or hwnd is required.")
+    matches = []
+    for bridge in bridges(state, port_checker=port_checker):
+        if hwnd > 0 and bridge.get("hwnd") == hwnd:
+            matches.append(bridge)
+        elif port > 0 and bridge.get("port") == port and (hwnd <= 0 or bridge.get("hwnd") == hwnd):
+            matches.append(bridge)
+        elif pid > 0 and bridge.get("pid") == pid and (hwnd <= 0 or bridge.get("hwnd") == hwnd):
+            matches.append(bridge)
+    if not matches:
+        raise ValueError("没有找到匹配的 ArcMap Bridge。")
+    if len(matches) > 1:
+        raise ValueError("匹配到多个 ArcMap，请用 hwnd 精确选择。")
+    state.store.set_state("arcmap_active_bridge", matches[0])
+    return {"ok": True, "bridge": matches[0]}
+
+
+def set_permission(state, payload):
+    permission = {
+        "auto_execute": bool(payload.get("auto_execute")),
+        "allow_edits": bool(payload.get("allow_edits")),
+    }
+    state.store.set_state("arcmap_permission", permission)
+    return {"ok": True, "permission": permission}
+
+
+def execute_approved(state, payload, port_checker=None):
+    row = state.store.pending()
+    if not row:
+        raise ValueError("没有已审批的工作流。")
+    allow_edits = execution_permission(state, payload, row)
+    bridge = active_bridge(state, port_checker=port_checker)
+    result = arcmap_bridge_client.execute_approved(allow_edits=allow_edits, port=bridge["port"], hwnd=bridge.get("hwnd"))
+    result["bridge"] = bridge
+    return result
+
+
+def execute_workflow(state, payload, port_checker=None):
+    proposed = external_agent.propose_workflow(state, payload)
+    row = proposed["workflow"]
+    state.store.approve(row["id"])
+    allow_edits = execution_permission(state, payload, row)
+    bridge = active_bridge(state, port_checker=port_checker)
+    result = arcmap_bridge_client.execute_approved(allow_edits=allow_edits, port=bridge["port"], hwnd=bridge.get("hwnd"))
+    result["bridge"] = bridge
+    return {
+        "ok": True,
+        "workflow": state.store.get(row["id"]),
+        "execution": result
+    }
+
+
+def execution_permission(state, payload, row):
+    permission = stored_permission(state)
+    user_confirmed = bool(payload.get("confirmed"))
+    auto_execute = bool(permission.get("auto_execute"))
+    if not user_confirmed and not auto_execute:
+        raise ValueError("执行前需要用户在 Codex 对话中确认，或先设置 arcmap permission auto_execute=true。")
+
+    workflow = row.get("workflow") or {}
+    has_edits = workflow_has_side_effect(state, workflow, "edits_data")
+    allow_edits = bool(payload.get("allow_edits")) or bool(permission.get("allow_edits"))
+    if has_edits and not allow_edits:
+        raise ValueError("该 workflow 会直接修改原始数据。需要用户明确设置 allow_edits=true。")
+    return allow_edits
+
+
+def stored_permission(state):
+    stored = state.store.get_state("arcmap_permission")
+    if not stored:
+        return {}
+    value = stored.get("value")
+    return value if isinstance(value, dict) else {}
+
+
+def workflow_has_side_effect(state, workflow, side_effect):
+    for step in workflow.get("steps") or []:
+        operation_id = step.get("operation")
+        if operation_id in state.catalog.operations and state.catalog.operations[operation_id].get("side_effects") == side_effect:
+            return True
+    return False
+
+
+def active_bridge(state, port_checker=None):
+    stored = state.store.get_state("arcmap_active_bridge")
+    if stored and isinstance(stored.get("value"), dict):
+        bridge = stored["value"]
+        try:
+            hwnd = int(bridge.get("hwnd") or 0)
+            if hwnd <= 0:
+                return scan_bridge(state, port_checker=port_checker)
+            health_result = arcmap_bridge_client.health(port=int(bridge["port"]))
+            refreshed = target_bridge_from_health(health_result, bridge, hwnd)
+            if refreshed:
+                state.store.set_state("arcmap_active_bridge", refreshed)
+                return refreshed
+            state.store.delete_state("arcmap_active_bridge")
+        except (KeyError, TypeError, ValueError, arcmap_bridge_client.ArcMapBridgeError):
+            state.store.delete_state("arcmap_active_bridge")
+    return scan_bridge(state, port_checker=port_checker)
+
+
+def target_bridge_from_health(health_result, stored_bridge, hwnd):
+    summary = health_result.get("summary") if isinstance(health_result.get("summary"), dict) else {}
+    targets = summary.get("targets")
+    if not isinstance(targets, list):
+        return None
+    for target in targets:
+        if not isinstance(target, dict):
+            continue
+        if int(target.get("hwnd") or 0) != hwnd:
+            continue
+        return {
+            "pid": int(health_result.get("pid") or stored_bridge.get("pid") or 0),
+            "port": int(health_result.get("port") or stored_bridge["port"]),
+            "hwnd": hwnd,
+            "summary": {
+                "bridge": summary.get("bridge", "external"),
+                "title": target.get("title") or "",
+                "name": target.get("name") or "",
+            },
+        }
+    return None
+
+
+def bridges(state, port_checker=None):
+    check_port = port_checker or is_local_port_open
+    arcmap_bridge_client.ensure_running()
+    candidates = []
+    seen_ports = set()
+    for item in state.store.list_state("arcmap_bridge:"):
+        value = item.get("value")
+        if not isinstance(value, dict):
+            continue
+        port = int(value.get("port") or 0)
+        if port <= 0 or port in seen_ports:
+            continue
+        seen_ports.add(port)
+        candidates.append(value)
+    for port in [8766] + list(range(8767, 8790)):
+        if port not in seen_ports:
+            candidates.append({"pid": 0, "port": port})
+            seen_ports.add(port)
+
+    live = []
+    for candidate in candidates:
+        port = int(candidate.get("port") or 0)
+        if port <= 0:
+            continue
+        if not check_port(port):
+            continue
+        try:
+            health_result = arcmap_bridge_client.health(port=port)
+        except arcmap_bridge_client.ArcMapBridgeError:
+            continue
+        bridge_pid = int(health_result.get("pid") or candidate.get("pid") or 0)
+        bridge_port = int(health_result.get("port") or port)
+        summary = health_result.get("summary") if isinstance(health_result.get("summary"), dict) else candidate.get("summary", {})
+        targets = summary.get("targets") if isinstance(summary, dict) else None
+        if isinstance(targets, list) and targets:
+            for target in targets:
+                if not isinstance(target, dict):
+                    continue
+                hwnd = int(target.get("hwnd") or 0)
+                bridge = {
+                    "pid": bridge_pid,
+                    "port": bridge_port,
+                    "hwnd": hwnd,
+                    "summary": {
+                        "bridge": summary.get("bridge", "external"),
+                        "title": target.get("title") or "",
+                        "name": target.get("name") or "",
+                    },
+                }
+                state.store.set_state("arcmap_bridge:%s:%s" % (bridge_pid, hwnd), bridge)
+                live.append(bridge)
+        else:
+            bridge = {
+                "pid": bridge_pid,
+                "port": bridge_port,
+                "summary": summary,
+            }
+            state.store.set_state("arcmap_bridge:%s" % bridge["pid"], bridge)
+            live.append(bridge)
+    return live
+
+
+def is_local_port_open(port):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(0.05)
+    try:
+        return sock.connect_ex(("127.0.0.1", int(port))) == 0
+    finally:
+        sock.close()
+
+
+def scan_bridge(state, port_checker=None):
+    live_bridges = bridges(state, port_checker=port_checker)
+    if len(live_bridges) == 1:
+        state.store.set_state("arcmap_active_bridge", live_bridges[0])
+        return live_bridges[0]
+    if len(live_bridges) > 1:
+        raise arcmap_bridge_client.ArcMapBridgeError("检测到多个 ArcMap，请先选择目标窗口。")
+    raise arcmap_bridge_client.ArcMapBridgeError("ArcMap Bridge 未连接。")

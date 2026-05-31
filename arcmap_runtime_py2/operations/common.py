@@ -14,6 +14,7 @@ except NameError:
     unicode = str
 
 
+ARCPY_EXECUTE_ERROR = getattr(arcpy, "ExecuteError", RuntimeError)
 INVALID_OUTPUT_NAME_RE = re.compile(u'[<>:"/\\\\|?*\\x00-\\x1f]')
 SAFE_EXTENSION_RE = re.compile(r"^\.[A-Za-z0-9]{1,12}$")
 
@@ -389,7 +390,7 @@ def _safe_data_source(layer):
     try:
         if layer.supports("DATASOURCE"):
             return layer.dataSource
-    except Exception:
+    except (ARCPY_EXECUTE_ERROR, RuntimeError, AttributeError, TypeError):
         pass
     return None
 

@@ -103,7 +103,7 @@ def split_by_field(context, arguments, step_outputs):
             finally:
                 try:
                     arcpy.Delete_management(temp_layer)
-                except Exception:
+                except (common.ARCPY_EXECUTE_ERROR, RuntimeError):
                     pass
 
     common.refresh()
@@ -117,7 +117,7 @@ def _kml_output_scale(arguments):
         mxd = common.current_mxd()
         df = common.active_data_frame(mxd)
         scale = int(round(float(getattr(df, "scale", 0))))
-    except Exception as exc:
+    except (common.ARCPY_EXECUTE_ERROR, RuntimeError, AttributeError, TypeError, ValueError) as exc:
         raise common.OperationError(u"KML 栅格导出无法读取当前地图比例尺，请提供 layer_output_scale：%s" % common._text(exc))
     if scale <= 0:
         raise common.OperationError(u"KML 栅格导出需要有效地图比例尺，请提供 layer_output_scale。")

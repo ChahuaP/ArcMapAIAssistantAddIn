@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 from gateway_py3 import app
 from gateway_py3.catalog_loader import OperationCatalog
+from gateway_py3.routes import handle_get
 from gateway_py3.workflow_store import WorkflowStore
 
 try:
@@ -138,6 +139,56 @@ class ExternalAgentApiTests(unittest.TestCase):
         self.assertIn("parameters_schema", public)
         self.assertIn("output_policy", public)
         self.assertEqual(public["parameters_schema"]["properties"]["output_format"]["enum"], ["gdb", "shp"])
+
+    def test_agent_diagnostics_reports_external_agent_readiness(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = WorkflowStore(pathlib.Path(directory) / "workflows.sqlite")
+            store.set_state("arcmap_context", _context(is_saved=True))
+            store.set_state("arcmap_permission", {"auto_execute": True, "allow_edits": False})
+            app.STATE = SimpleNamespace(
+                catalog=OperationCatalog(),
+                store=store,
+                planner=_PlannerThatMustNotRun()
+            )
+
+            result = handle_get(app.STATE, "/agent/diagnostics", app.APP_VERSION)
+
+        self.assertEqual(result["app_version"], app.APP_VERSION)
+        self.assertIn("edit_geometry", result["categories"])
+        self.assertTrue(result["context"]["synced"])
+        self.assertIn("arcmap-sync", result["first_run_steps"])
+
+    def test_validate_accepts_geometry_creation_workflow(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = WorkflowStore(pathlib.Path(directory) / "workflows.sqlite")
+            app.STATE = SimpleNamespace(
+                catalog=OperationCatalog(),
+                store=store,
+                planner=_PlannerThatMustNotRun()
+            )
+            workflow = {
+                "action": "execute",
+                "summary": "创建五角星面要素。",
+                "steps": [
+                    _step("step_1", "edit.create_star_polygon", {
+                        "center_x": 118.78,
+                        "center_y": 32.04,
+                        "outer_radius": 0.01,
+                        "outer_radius_unit": "degrees",
+                        "point_count": 5,
+                        "wkid": 4326,
+                        "output_name": "star_feature"
+                    }, "按中心点和半径创建五角星面。")
+                ]
+            }
+
+            result = app._external_agent_validate({
+                "context": _context(is_saved=True),
+                "workflow": workflow
+            })
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["workflow"]["steps"][0]["operation"], "edit.create_star_polygon")
 
     def test_arcmap_execute_workflow_requires_confirmation(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -301,6 +352,26 @@ class ExternalAgentApiTests(unittest.TestCase):
         ports = sorted(bridge["port"] for bridge in bridges)
         self.assertEqual(ports, [8771, 8772])
 
+    def test_active_bridge_replaces_stale_arcmap_window_handle(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = WorkflowStore(pathlib.Path(directory) / "workflows.sqlite")
+            store.set_state("arcmap_active_bridge", {
+                "pid": 1,
+                "port": 8766,
+                "hwnd": 18155486,
+                "summary": {"title": "old"}
+            })
+            app.STATE = SimpleNamespace(
+                catalog=OperationCatalog(),
+                store=store,
+                planner=_PlannerThatMustNotRun()
+            )
+            with _TargetBridgePatch(8766, 1, [{"hwnd": 222, "title": "current.mxd", "name": "ArcMap"}]):
+                bridge = app._active_arcmap_bridge()
+
+        self.assertEqual(bridge["hwnd"], 222)
+        self.assertEqual(bridge["summary"]["title"], "current.mxd")
+
 
 class _PlannerThatMustNotRun:
     def plan(self, *args, **kwargs):
@@ -397,6 +468,42 @@ class _MultiBridgePatch:
                 "pid": self.ports[port],
                 "port": port,
                 "summary": {"mxd_path": "%s.mxd" % self.ports[port]}
+            }
+
+        app.arcmap_bridge_client.health = fake_health
+        app.arcmap_bridge_client.ensure_running = lambda: True
+        app._is_local_port_open = lambda port: True
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        app.arcmap_bridge_client.health = self.old_health
+        app.arcmap_bridge_client.ensure_running = self.old_ensure_running
+        app._is_local_port_open = self.old_is_local_port_open
+
+
+class _TargetBridgePatch:
+    def __init__(self, port, pid, targets):
+        self.port = port
+        self.pid = pid
+        self.targets = targets
+
+    def __enter__(self):
+        self.old_health = app.arcmap_bridge_client.health
+        self.old_ensure_running = app.arcmap_bridge_client.ensure_running
+        self.old_is_local_port_open = app._is_local_port_open
+
+        def fake_health(port=None):
+            if port != self.port:
+                raise app.arcmap_bridge_client.ArcMapBridgeError("missing")
+            return {
+                "ok": True,
+                "pid": self.pid,
+                "port": self.port,
+                "summary": {
+                    "bridge": "external",
+                    "arcmap_count": len(self.targets),
+                    "targets": self.targets
+                }
             }
 
         app.arcmap_bridge_client.health = fake_health

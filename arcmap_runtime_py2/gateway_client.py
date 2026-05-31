@@ -15,7 +15,7 @@ except NameError:
 
 
 BASE_URL = "http://127.0.0.1:8765"
-EXPECTED_APP_VERSION = "0.14.0"
+EXPECTED_APP_VERSION = "0.16.2"
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 CREATE_NO_WINDOW = 0x08000000
 PLAN_TIMEOUT_SECONDS = 360
@@ -82,7 +82,7 @@ def stop_gateway():
         )
         if not isinstance(output, unicode):
             output = output.decode("mbcs", "replace")
-    except Exception:
+    except (subprocess.CalledProcessError, OSError):
         return False
     for line in output.splitlines():
         parts = line.split()
@@ -117,7 +117,7 @@ def start_gateway():
             stderr=stderr,
             creationflags=CREATE_NO_WINDOW
         )
-    except Exception as exc:
+    except OSError as exc:
         raise RuntimeError(u"无法启动本地网关：%s" % exc)
 
 
@@ -156,7 +156,7 @@ def _get(path, timeout=30):
 def _health_payload(timeout):
     try:
         return _get("/health", timeout=timeout)
-    except Exception:
+    except (RuntimeError, ValueError, urllib2.URLError):
         return None
 
 
@@ -187,6 +187,6 @@ def _http_error_message(exc):
         payload = json.loads(body.decode("utf-8"))
         if payload.get("error"):
             return payload["error"]
-    except Exception:
+    except (ValueError, UnicodeDecodeError, UnicodeEncodeError, AttributeError, TypeError):
         pass
     return "HTTP %s: %s" % (exc.code, getattr(exc, "reason", "request failed"))

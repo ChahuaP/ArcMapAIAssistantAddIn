@@ -1,0 +1,278 @@
+{
+  "pack": "edit_geometry",
+  "operations": [
+    {
+      "id": "edit.create_point_features",
+      "version": "1.0",
+      "category": "edit_geometry",
+      "summary": "根据坐标创建点要素图层。",
+      "keywords": ["create point", "创建点", "坐标点", "点要素"],
+      "model_card": "Use edit.create_point_features to create a new point feature class from explicit coordinates. Arguments: points array of {x,y,name optional}, output_name, spatial_reference_layer optional, wkid optional, output_workspace/output_folder/output_format optional. If spatial_reference_layer and wkid are omitted, ArcMap uses the active data frame spatial reference and fails when it is unknown.",
+      "parameters_schema": {
+        "type": "object",
+        "required": ["points", "output_name"],
+        "properties": {
+          "points": {
+            "type": "array",
+            "items": {"type": "object"},
+            "minItems": 1
+          },
+          "output_name": {"type": "string"},
+          "spatial_reference_layer": {"type": "string", "x-geopilot-kind": "layer"},
+          "wkid": {"type": "integer"},
+          "output_workspace": {"type": "string"},
+          "output_folder": {"type": "string"},
+          "output_format": {"type": "string", "enum": ["gdb", "shp"]}
+        },
+        "additionalProperties": false
+      },
+      "context_requirements": {
+        "requires_layers": false,
+        "requires_output_location_when_unsaved": true
+      },
+      "side_effects": "writes_data",
+      "output_policy": {
+        "writes_output": true,
+        "type": "feature_class",
+        "geometry_type": "Point",
+        "formats": ["gdb", "shp"],
+        "default_format": "gdb",
+        "workspace": "mxd_default_or_output_workspace_or_output_folder",
+        "overwrite": false,
+        "add_to_map": true
+      },
+      "executor": "operations.edit_geometry_ops.create_point_features",
+      "examples": [
+        {
+          "user": "在 118.78,32.04 创建一个点",
+          "arguments": {
+            "points": [{"x": 118.78, "y": 32.04, "name": "point_1"}],
+            "wkid": 4326,
+            "output_name": "point_1"
+          }
+        }
+      ]
+    },
+    {
+      "id": "edit.create_polyline_feature",
+      "version": "1.0",
+      "category": "edit_geometry",
+      "summary": "根据坐标序列创建线要素图层。",
+      "keywords": ["create line", "创建线", "折线", "线要素"],
+      "model_card": "Use edit.create_polyline_feature to create a new polyline feature class from ordered coordinates. Arguments: coordinates array of {x,y}, output_name, name optional, spatial_reference_layer optional, wkid optional, output location optional.",
+      "parameters_schema": {
+        "type": "object",
+        "required": ["coordinates", "output_name"],
+        "properties": {
+          "coordinates": {
+            "type": "array",
+            "items": {"type": "object"},
+            "minItems": 2
+          },
+          "output_name": {"type": "string"},
+          "name": {"type": "string"},
+          "spatial_reference_layer": {"type": "string", "x-geopilot-kind": "layer"},
+          "wkid": {"type": "integer"},
+          "output_workspace": {"type": "string"},
+          "output_folder": {"type": "string"},
+          "output_format": {"type": "string", "enum": ["gdb", "shp"]}
+        },
+        "additionalProperties": false
+      },
+      "context_requirements": {
+        "requires_layers": false,
+        "requires_output_location_when_unsaved": true
+      },
+      "side_effects": "writes_data",
+      "output_policy": {
+        "writes_output": true,
+        "type": "feature_class",
+        "geometry_type": "Polyline",
+        "formats": ["gdb", "shp"],
+        "default_format": "gdb",
+        "workspace": "mxd_default_or_output_workspace_or_output_folder",
+        "overwrite": false,
+        "add_to_map": true
+      },
+      "executor": "operations.edit_geometry_ops.create_polyline_feature",
+      "examples": [
+        {
+          "user": "用这些坐标创建一条线",
+          "arguments": {
+            "coordinates": [{"x": 0, "y": 0}, {"x": 10, "y": 10}],
+            "output_name": "line_from_points"
+          }
+        }
+      ]
+    },
+    {
+      "id": "edit.create_polygon_feature",
+      "version": "1.0",
+      "category": "edit_geometry",
+      "summary": "根据坐标环创建面要素图层。",
+      "keywords": ["create polygon", "创建面", "多边形", "面要素"],
+      "model_card": "Use edit.create_polygon_feature to create a new polygon feature class from a ring of coordinates. Arguments: coordinates array of {x,y}, output_name, name optional, spatial_reference_layer optional, wkid optional, output location optional. The runtime closes the ring if the last point is not equal to the first point.",
+      "parameters_schema": {
+        "type": "object",
+        "required": ["coordinates", "output_name"],
+        "properties": {
+          "coordinates": {
+            "type": "array",
+            "items": {"type": "object"},
+            "minItems": 3
+          },
+          "output_name": {"type": "string"},
+          "name": {"type": "string"},
+          "spatial_reference_layer": {"type": "string", "x-geopilot-kind": "layer"},
+          "wkid": {"type": "integer"},
+          "output_workspace": {"type": "string"},
+          "output_folder": {"type": "string"},
+          "output_format": {"type": "string", "enum": ["gdb", "shp"]}
+        },
+        "additionalProperties": false
+      },
+      "context_requirements": {
+        "requires_layers": false,
+        "requires_output_location_when_unsaved": true
+      },
+      "side_effects": "writes_data",
+      "output_policy": {
+        "writes_output": true,
+        "type": "feature_class",
+        "geometry_type": "Polygon",
+        "formats": ["gdb", "shp"],
+        "default_format": "gdb",
+        "workspace": "mxd_default_or_output_workspace_or_output_folder",
+        "overwrite": false,
+        "add_to_map": true
+      },
+      "executor": "operations.edit_geometry_ops.create_polygon_feature",
+      "examples": [
+        {
+          "user": "用四个角点创建一个面",
+          "arguments": {
+            "coordinates": [{"x": 0, "y": 0}, {"x": 10, "y": 0}, {"x": 10, "y": 10}, {"x": 0, "y": 10}],
+            "output_name": "polygon_from_ring"
+          }
+        }
+      ]
+    },
+    {
+      "id": "edit.create_regular_polygon",
+      "version": "1.0",
+      "category": "edit_geometry",
+      "summary": "按中心点、半径和边数创建正多边形。",
+      "keywords": ["regular polygon", "正多边形", "五边形", "六边形"],
+      "model_card": "Use edit.create_regular_polygon to create a regular polygon feature class. Arguments: center_x, center_y, radius, radius_unit, sides, output_name, start_angle_degrees optional default -90, spatial_reference_layer optional, wkid optional. radius_unit must be map_units, meters, or degrees. Use degrees only in a geographic coordinate system; use meters only in a projected coordinate system.",
+      "parameters_schema": {
+        "type": "object",
+        "required": ["center_x", "center_y", "radius", "radius_unit", "sides", "output_name"],
+        "properties": {
+          "center_x": {"type": "number"},
+          "center_y": {"type": "number"},
+          "radius": {"type": "number"},
+          "radius_unit": {"type": "string", "enum": ["map_units", "meters", "degrees"]},
+          "sides": {"type": "integer"},
+          "start_angle_degrees": {"type": "number"},
+          "name": {"type": "string"},
+          "output_name": {"type": "string"},
+          "spatial_reference_layer": {"type": "string", "x-geopilot-kind": "layer"},
+          "wkid": {"type": "integer"},
+          "output_workspace": {"type": "string"},
+          "output_folder": {"type": "string"},
+          "output_format": {"type": "string", "enum": ["gdb", "shp"]}
+        },
+        "additionalProperties": false
+      },
+      "context_requirements": {
+        "requires_layers": false,
+        "requires_output_location_when_unsaved": true
+      },
+      "side_effects": "writes_data",
+      "output_policy": {
+        "writes_output": true,
+        "type": "feature_class",
+        "geometry_type": "Polygon",
+        "formats": ["gdb", "shp"],
+        "default_format": "gdb",
+        "workspace": "mxd_default_or_output_workspace_or_output_folder",
+        "overwrite": false,
+        "add_to_map": true
+      },
+      "executor": "operations.edit_geometry_ops.create_regular_polygon",
+      "examples": [
+        {
+          "user": "在当前地图中心附近创建一个半径 100 米的正五边形",
+          "arguments": {
+            "center_x": 500000,
+            "center_y": 3500000,
+            "radius": 100,
+            "radius_unit": "meters",
+            "sides": 5,
+            "output_name": "regular_pentagon"
+          }
+        }
+      ]
+    },
+    {
+      "id": "edit.create_star_polygon",
+      "version": "1.0",
+      "category": "edit_geometry",
+      "summary": "按中心点和半径创建星形面要素。",
+      "keywords": ["star polygon", "五角星", "星形", "创建五角星"],
+      "model_card": "Use edit.create_star_polygon when the user asks to create a star feature, including 五角星. Arguments: center_x, center_y, outer_radius, outer_radius_unit, output_name, point_count optional default 5, inner_radius optional, inner_radius_unit optional, start_angle_degrees optional default -90, spatial_reference_layer optional, wkid optional. Units follow the same rule as regular polygon: degrees only for geographic coordinate systems, meters only for projected coordinate systems, map_units uses raw map units.",
+      "parameters_schema": {
+        "type": "object",
+        "required": ["center_x", "center_y", "outer_radius", "outer_radius_unit", "output_name"],
+        "properties": {
+          "center_x": {"type": "number"},
+          "center_y": {"type": "number"},
+          "outer_radius": {"type": "number"},
+          "outer_radius_unit": {"type": "string", "enum": ["map_units", "meters", "degrees"]},
+          "inner_radius": {"type": "number"},
+          "inner_radius_unit": {"type": "string", "enum": ["map_units", "meters", "degrees"]},
+          "point_count": {"type": "integer"},
+          "start_angle_degrees": {"type": "number"},
+          "name": {"type": "string"},
+          "output_name": {"type": "string"},
+          "spatial_reference_layer": {"type": "string", "x-geopilot-kind": "layer"},
+          "wkid": {"type": "integer"},
+          "output_workspace": {"type": "string"},
+          "output_folder": {"type": "string"},
+          "output_format": {"type": "string", "enum": ["gdb", "shp"]}
+        },
+        "additionalProperties": false
+      },
+      "context_requirements": {
+        "requires_layers": false,
+        "requires_output_location_when_unsaved": true
+      },
+      "side_effects": "writes_data",
+      "output_policy": {
+        "writes_output": true,
+        "type": "feature_class",
+        "geometry_type": "Polygon",
+        "formats": ["gdb", "shp"],
+        "default_format": "gdb",
+        "workspace": "mxd_default_or_output_workspace_or_output_folder",
+        "overwrite": false,
+        "add_to_map": true
+      },
+      "executor": "operations.edit_geometry_ops.create_star_polygon",
+      "examples": [
+        {
+          "user": "创建一个五角星 feature",
+          "arguments": {
+            "center_x": 118.78,
+            "center_y": 32.04,
+            "outer_radius": 0.01,
+            "outer_radius_unit": "degrees",
+            "point_count": 5,
+            "wkid": 4326,
+            "output_name": "star_feature"
+          }
+        }
+      ]
+    }
+  ]
+}

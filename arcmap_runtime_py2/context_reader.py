@@ -18,6 +18,7 @@ MAX_VALUE_PROFILE_FIELDS = 30
 MAX_VALUE_PROFILE_ROWS = 250
 MAX_FIELD_VALUE_SAMPLES = 20
 MAX_VALUE_TEXT_LENGTH = 120
+ARCPY_EXECUTE_ERROR = getattr(arcpy, "ExecuteError", RuntimeError)
 
 
 def read_context():
@@ -107,15 +108,15 @@ def _layer_info(layer, index):
             fid_set = getattr(desc, "FIDSet", "") or ""
             info["selected_count"] = len([item for item in fid_set.split(";") if item])
             info["selection_hash"] = context_fingerprint.selection_hash(fid_set)
-        except Exception:
-            pass
+        except (ARCPY_EXECUTE_ERROR, RuntimeError, AttributeError, TypeError) as exc:
+            _layer_warning(info, u"describe_failed: %s" % _sample_text(exc))
         try:
             fields = arcpy.ListFields(layer)
             for field in fields:
                 info["fields"].append({"name": field.name, "type": field.type})
             _attach_field_value_samples(layer, info, fields)
-        except Exception:
-            pass
+        except (ARCPY_EXECUTE_ERROR, RuntimeError, AttributeError, TypeError) as exc:
+            _layer_warning(info, u"field_read_failed: %s" % _sample_text(exc))
     return info
 
 
@@ -129,7 +130,8 @@ def _attach_field_value_samples(layer, layer_info, fields):
     seen = dict((field.name, set()) for field in profiled_fields)
     try:
         cursor = arcpy.da.SearchCursor(layer, field_names)
-    except Exception:
+    except (ARCPY_EXECUTE_ERROR, RuntimeError, AttributeError, TypeError) as exc:
+        _layer_warning(layer_info, u"value_sample_failed: %s" % _sample_text(exc))
         return
     try:
         row_count = 0
@@ -149,10 +151,7 @@ def _attach_field_value_samples(layer, layer_info, fields):
             if row_count >= MAX_VALUE_PROFILE_ROWS or _all_sample_lists_full(samples):
                 break
     finally:
-        try:
-            del cursor
-        except Exception:
-            pass
+        del cursor
     for field_info in layer_info.get("fields", []):
         values = samples.get(field_info.get("name"))
         if values:
@@ -171,10 +170,13 @@ def _all_sample_lists_full(samples):
 def _sample_text(value):
     try:
         text = value if isinstance(value, unicode) else unicode(value)
-    except Exception:
-        try:
-            text = value.decode("utf-8", "ignore")
-        except Exception:
+    except (UnicodeDecodeError, UnicodeEncodeError, TypeError, ValueError):
+        if hasattr(value, "decode"):
+            try:
+                text = value.decode("utf-8", "ignore")
+            except (UnicodeDecodeError, UnicodeEncodeError, TypeError, AttributeError):
+                text = u""
+        else:
             text = u""
     text = text.strip()
     if len(text) > MAX_VALUE_TEXT_LENGTH:
@@ -186,6 +188,11 @@ def _safe_support(layer, support_name, attr_name):
     try:
         if layer.supports(support_name):
             return getattr(layer, attr_name)
-    except Exception:
-        pass
+    except (RuntimeError, AttributeError, TypeError):
+        return None
     return None
+
+
+def _layer_warning(info, message):
+    warnings = info.setdefault("warnings", [])
+    warnings.append(message)

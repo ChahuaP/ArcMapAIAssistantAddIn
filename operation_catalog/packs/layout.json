@@ -1,0 +1,168 @@
+{
+  "pack": "layout",
+  "operations": [
+    {
+      "id": "layout.list_elements",
+      "version": "1.0",
+      "category": "layout",
+      "summary": "列出当前 MXD 版面元素。",
+      "keywords": ["layout elements", "版面元素", "标题", "图例", "比例尺", "指北针"],
+      "model_card": "Use layout.list_elements to inspect existing layout elements before editing title text or exporting a map. Arguments: element_type optional ALL, TEXT_ELEMENT, LEGEND_ELEMENT, MAPSURROUND_ELEMENT, PICTURE_ELEMENT, or DATAFRAME_ELEMENT.",
+      "parameters_schema": {
+        "type": "object",
+        "properties": {
+          "element_type": {
+            "type": "string",
+            "enum": ["ALL", "TEXT_ELEMENT", "LEGEND_ELEMENT", "MAPSURROUND_ELEMENT", "PICTURE_ELEMENT", "DATAFRAME_ELEMENT"]
+          }
+        },
+        "additionalProperties": false
+      },
+      "context_requirements": {"requires_layers": false},
+      "side_effects": "read_only",
+      "output_policy": {"writes_output": false},
+      "executor": "operations.layout_ops.list_elements",
+      "examples": [
+        {
+          "user": "当前版面有哪些标题和图例元素",
+          "arguments": {"element_type": "ALL"}
+        }
+      ]
+    },
+    {
+      "id": "layout.set_text",
+      "version": "1.0",
+      "category": "layout",
+      "summary": "修改现有文本版面元素的文字。",
+      "keywords": ["layout text", "修改标题", "设置标题", "版面文字"],
+      "model_card": "Use layout.set_text to change an existing TEXT_ELEMENT. First call layout.list_elements if the element name is unknown. Arguments: element_name, text, match optional EXACT or WILDCARD. This cannot create new text elements; it only updates one existing element.",
+      "parameters_schema": {
+        "type": "object",
+        "required": ["element_name", "text"],
+        "properties": {
+          "element_name": {"type": "string"},
+          "text": {"type": "string"},
+          "match": {"type": "string", "enum": ["EXACT", "WILDCARD"]}
+        },
+        "additionalProperties": false
+      },
+      "context_requirements": {"requires_layers": false},
+      "side_effects": "changes_map",
+      "output_policy": {"writes_output": false},
+      "executor": "operations.layout_ops.set_text",
+      "examples": [
+        {
+          "user": "把版面标题改成南京用地现状图",
+          "arguments": {
+            "element_name": "Title",
+            "text": "南京用地现状图"
+          }
+        }
+      ]
+    },
+    {
+      "id": "layout.set_active_view",
+      "version": "1.0",
+      "category": "layout",
+      "summary": "切换 ArcMap 当前视图为版面视图或数据视图。",
+      "keywords": ["page layout", "data view", "切换版面", "切换视图"],
+      "model_card": "Use layout.set_active_view to switch ArcMap between PAGE_LAYOUT and DATA_VIEW. Arguments: view_mode PAGE_LAYOUT or DATA_VIEW.",
+      "parameters_schema": {
+        "type": "object",
+        "required": ["view_mode"],
+        "properties": {
+          "view_mode": {"type": "string", "enum": ["PAGE_LAYOUT", "DATA_VIEW"]}
+        },
+        "additionalProperties": false
+      },
+      "context_requirements": {"requires_layers": false},
+      "side_effects": "changes_map",
+      "output_policy": {"writes_output": false},
+      "executor": "operations.layout_ops.set_active_view",
+      "examples": [
+        {
+          "user": "切换到版面视图",
+          "arguments": {"view_mode": "PAGE_LAYOUT"}
+        }
+      ]
+    },
+    {
+      "id": "layout.export_pdf",
+      "version": "1.0",
+      "category": "layout",
+      "summary": "导出当前版面为 PDF。",
+      "keywords": ["layout pdf", "版面导出PDF", "出图PDF"],
+      "model_card": "Use layout.export_pdf to export the current map layout to a PDF file. Arguments: output_name, resolution optional, image_quality optional BEST/NORMAL/FASTER/FASTEST, output_folder optional when MXD is unsaved.",
+      "parameters_schema": {
+        "type": "object",
+        "required": ["output_name"],
+        "properties": {
+          "output_name": {"type": "string"},
+          "resolution": {"type": "integer"},
+          "image_quality": {"type": "string", "enum": ["BEST", "NORMAL", "FASTER", "FASTEST"]},
+          "output_folder": {"type": "string"}
+        },
+        "additionalProperties": false
+      },
+      "context_requirements": {"requires_output_location_when_unsaved": true},
+      "side_effects": "writes_data",
+      "output_policy": {
+        "writes_output": true,
+        "type": "file",
+        "extension": ".pdf",
+        "workspace": "mxd_default_or_output_folder",
+        "overwrite": false,
+        "add_to_map": false
+      },
+      "executor": "operations.layout_ops.export_pdf",
+      "examples": [
+        {
+          "user": "把当前版面导出成 PDF",
+          "arguments": {
+            "output_name": "layout_map",
+            "resolution": 300
+          }
+        }
+      ]
+    },
+    {
+      "id": "layout.export_png",
+      "version": "1.0",
+      "category": "layout",
+      "summary": "导出当前版面为 PNG 图片。",
+      "keywords": ["layout png", "版面导出PNG", "出图PNG"],
+      "model_card": "Use layout.export_png to export the current map layout to a PNG file. Arguments: output_name, resolution optional, world_file optional, output_folder optional when MXD is unsaved.",
+      "parameters_schema": {
+        "type": "object",
+        "required": ["output_name"],
+        "properties": {
+          "output_name": {"type": "string"},
+          "resolution": {"type": "integer"},
+          "world_file": {"type": "boolean"},
+          "output_folder": {"type": "string"}
+        },
+        "additionalProperties": false
+      },
+      "context_requirements": {"requires_output_location_when_unsaved": true},
+      "side_effects": "writes_data",
+      "output_policy": {
+        "writes_output": true,
+        "type": "file",
+        "extension": ".png",
+        "workspace": "mxd_default_or_output_folder",
+        "overwrite": false,
+        "add_to_map": false
+      },
+      "executor": "operations.layout_ops.export_png",
+      "examples": [
+        {
+          "user": "把当前版面导出成 PNG",
+          "arguments": {
+            "output_name": "layout_map_png",
+            "resolution": 300
+          }
+        }
+      ]
+    }
+  ]
+}

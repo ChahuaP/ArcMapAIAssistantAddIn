@@ -252,11 +252,8 @@ def _call_executor(executor_path, context, arguments, step_outputs):
     if module_name.startswith("operations."):
         common = importlib.import_module("operations.common")
         reload(common)
-        try:
-            condition_utils = importlib.import_module("operations.condition_utils")
-            reload(condition_utils)
-        except Exception:
-            pass
+        condition_utils = importlib.import_module("operations.condition_utils")
+        reload(condition_utils)
     module = importlib.import_module(module_name)
     module = reload(module)
     function = getattr(module, function_name)
@@ -374,10 +371,10 @@ def _operations_common():
 def _exception_text(exc):
     try:
         return unicode(exc)
-    except Exception:
+    except (UnicodeDecodeError, UnicodeEncodeError, TypeError, ValueError):
         try:
             return str(exc).decode("utf-8", "replace")
-        except Exception:
+        except (UnicodeDecodeError, UnicodeEncodeError, TypeError, AttributeError):
             return u"<unprintable exception>"
 
 
@@ -485,6 +482,6 @@ def _path_text(value):
         encoding = sys.getfilesystemencoding() or "mbcs"
         try:
             return value.decode(encoding)
-        except Exception:
+        except UnicodeDecodeError:
             return value.decode("utf-8", "replace")
     return str(value)

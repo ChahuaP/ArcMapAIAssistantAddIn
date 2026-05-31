@@ -1,0 +1,182 @@
+{
+  "pack": "data_management",
+  "operations": [
+    {
+      "id": "data.copy_features",
+      "version": "1.0",
+      "category": "data_management",
+      "summary": "复制图层要素为新的要素类或 Shapefile。",
+      "keywords": ["copy features", "复制要素", "另存为", "导出要素"],
+      "model_card": "Use data.copy_features to copy a feature layer into a new output dataset. Arguments: input_layer, output_name, output_workspace optional for GDB output, output_folder optional for shapefile output, output_format optional: gdb or shp.",
+      "parameters_schema": {
+        "type": "object",
+        "required": ["input_layer", "output_name"],
+        "properties": {
+          "input_layer": {"type": "string", "x-geopilot-kind": "layer"},
+          "output_name": {"type": "string"},
+          "output_workspace": {"type": "string"},
+          "output_folder": {"type": "string"},
+          "output_format": {"type": "string", "enum": ["gdb", "shp"]}
+        },
+        "additionalProperties": false
+      },
+      "context_requirements": {
+        "requires_layers": true,
+        "requires_output_location_when_unsaved": true
+      },
+      "side_effects": "writes_data",
+      "output_policy": {
+        "writes_output": true,
+        "type": "feature_class",
+        "formats": ["gdb", "shp"],
+        "default_format": "gdb",
+        "workspace": "mxd_default_or_output_workspace_or_output_folder",
+        "overwrite": false,
+        "add_to_map": true
+      },
+      "executor": "operations.data_management_ops.copy_features",
+      "examples": [
+        {
+          "user": "把 roads 复制成一个新的 shp",
+          "arguments": {
+            "input_layer": "roads",
+            "output_name": "roads_copy",
+            "output_format": "shp"
+          }
+        }
+      ]
+    },
+    {
+      "id": "data.multipart_to_singlepart",
+      "version": "1.0",
+      "category": "data_management",
+      "summary": "将多部件要素拆为单部件要素。",
+      "keywords": ["multipart", "singlepart", "多部件", "单部件", "拆分部件"],
+      "model_card": "Use data.multipart_to_singlepart to split multipart features into singlepart features. Arguments: input_layer, output_name, output location optional.",
+      "parameters_schema": {
+        "type": "object",
+        "required": ["input_layer", "output_name"],
+        "properties": {
+          "input_layer": {"type": "string", "x-geopilot-kind": "layer"},
+          "output_name": {"type": "string"},
+          "output_workspace": {"type": "string"},
+          "output_folder": {"type": "string"},
+          "output_format": {"type": "string", "enum": ["gdb", "shp"]}
+        },
+        "additionalProperties": false
+      },
+      "context_requirements": {
+        "requires_layers": true,
+        "requires_output_location_when_unsaved": true
+      },
+      "side_effects": "writes_data",
+      "output_policy": {
+        "writes_output": true,
+        "type": "feature_class",
+        "formats": ["gdb", "shp"],
+        "default_format": "gdb",
+        "workspace": "mxd_default_or_output_workspace_or_output_folder",
+        "overwrite": false,
+        "add_to_map": true
+      },
+      "executor": "operations.data_management_ops.multipart_to_singlepart",
+      "examples": [
+        {
+          "user": "把 parcels 多部件拆成单部件",
+          "arguments": {
+            "input_layer": "parcels",
+            "output_name": "parcels_singlepart"
+          }
+        }
+      ]
+    },
+    {
+      "id": "data.repair_geometry",
+      "version": "1.0",
+      "category": "data_management",
+      "summary": "修复输入图层的几何错误，会直接修改源数据。",
+      "keywords": ["repair geometry", "修复几何", "几何错误"],
+      "model_card": "Use data.repair_geometry only when the user explicitly wants to repair geometry in the source dataset. This edits original data and requires allow_edits. Arguments: layer, delete_null optional DELETE_NULL or KEEP_NULL.",
+      "parameters_schema": {
+        "type": "object",
+        "required": ["layer"],
+        "properties": {
+          "layer": {"type": "string", "x-geopilot-kind": "layer"},
+          "delete_null": {"type": "string", "enum": ["DELETE_NULL", "KEEP_NULL"]}
+        },
+        "additionalProperties": false
+      },
+      "context_requirements": {"requires_layers": true},
+      "side_effects": "edits_data",
+      "output_policy": {"writes_output": false},
+      "executor": "operations.data_management_ops.repair_geometry",
+      "examples": [
+        {
+          "user": "修复 parcels 的几何错误",
+          "arguments": {
+            "layer": "parcels",
+            "delete_null": "DELETE_NULL"
+          }
+        }
+      ]
+    },
+    {
+      "id": "data.define_projection",
+      "version": "1.0",
+      "category": "data_management",
+      "summary": "为图层数据定义坐标系，会直接修改数据集元数据。",
+      "keywords": ["define projection", "定义投影", "定义坐标系"],
+      "model_card": "Use data.define_projection when the dataset has the correct coordinates but missing/wrong projection metadata. This edits dataset metadata and requires allow_edits. Arguments: layer, wkid.",
+      "parameters_schema": {
+        "type": "object",
+        "required": ["layer", "wkid"],
+        "properties": {
+          "layer": {"type": "string", "x-geopilot-kind": "layer"},
+          "wkid": {"type": "integer"}
+        },
+        "additionalProperties": false
+      },
+      "context_requirements": {"requires_layers": true},
+      "side_effects": "edits_data",
+      "output_policy": {"writes_output": false},
+      "executor": "operations.data_management_ops.define_projection",
+      "examples": [
+        {
+          "user": "给 roads 定义 WGS84 坐标系",
+          "arguments": {
+            "layer": "roads",
+            "wkid": 4326
+          }
+        }
+      ]
+    },
+    {
+      "id": "data.add_xy",
+      "version": "1.0",
+      "category": "data_management",
+      "summary": "给点图层属性表添加 POINT_X 和 POINT_Y 字段，会直接修改源数据。",
+      "keywords": ["add xy", "添加xy", "坐标字段", "POINT_X"],
+      "model_card": "Use data.add_xy for point layers when the user wants POINT_X and POINT_Y fields added to the source data. This edits original data and requires allow_edits. Arguments: layer.",
+      "parameters_schema": {
+        "type": "object",
+        "required": ["layer"],
+        "properties": {
+          "layer": {"type": "string", "x-geopilot-kind": "layer"}
+        },
+        "additionalProperties": false
+      },
+      "context_requirements": {"requires_layers": true},
+      "side_effects": "edits_data",
+      "output_policy": {"writes_output": false},
+      "executor": "operations.data_management_ops.add_xy",
+      "examples": [
+        {
+          "user": "给 points 添加 XY 坐标字段",
+          "arguments": {
+            "layer": "points"
+          }
+        }
+      ]
+    }
+  ]
+}

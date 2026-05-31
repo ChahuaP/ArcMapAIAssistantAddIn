@@ -9,38 +9,22 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .paths import data_dir
+from .workflow_store_projects import (
+    PROJECT_MEMORY_COMPACT_LIMIT,
+    PROJECT_MEMORY_KEEP_RECENT,
+    PROJECT_OUTPUT_DIR_NAME,
+    compact_memory_text,
+    insert_project_event,
+)
+from .workflow_store_schema import (
+    init_database,
+    pending_tool_row_to_dict,
+    project_row_to_dict,
+    workflow_row_to_dict,
+)
 
 
 DB_PATH = data_dir() / "workflows.sqlite"
-WORKFLOW_COLUMNS = {
-    "id",
-    "status",
-    "mode",
-    "project_id",
-    "command",
-    "context_hash",
-    "workflow_json",
-    "agent_trace_json",
-    "created_at",
-    "updated_at",
-    "result_json"
-}
-WORKFLOW_COLUMN_DEFINITIONS = {
-    "status": "TEXT NOT NULL DEFAULT 'draft'",
-    "mode": "TEXT NOT NULL DEFAULT 'semi_agent'",
-    "project_id": "TEXT NOT NULL DEFAULT ''",
-    "command": "TEXT NOT NULL DEFAULT ''",
-    "context_hash": "TEXT NOT NULL DEFAULT ''",
-    "workflow_json": "TEXT NOT NULL DEFAULT '{}'",
-    "agent_trace_json": "TEXT NOT NULL DEFAULT '[]'",
-    "created_at": "REAL NOT NULL DEFAULT 0",
-    "updated_at": "REAL NOT NULL DEFAULT 0",
-    "result_json": "TEXT"
-}
-PROJECT_OUTPUT_DIR_NAME = "GeoPilot_Output"
-PROJECT_MEMORY_COMPACT_LIMIT = 80
-PROJECT_MEMORY_KEEP_RECENT = 30
-PROJECT_MEMORY_SUMMARY_MAX_CHARS = 6000
 
 
 class WorkflowStore:
@@ -62,84 +46,7 @@ class WorkflowStore:
 
     def _init(self) -> None:
         with self._connection() as conn:
-            _migrate_workflows_schema(conn)
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS workflows (
-                    id TEXT PRIMARY KEY,
-                    status TEXT NOT NULL,
-                    mode TEXT NOT NULL,
-                    project_id TEXT NOT NULL,
-                    command TEXT NOT NULL,
-                    context_hash TEXT NOT NULL,
-                    workflow_json TEXT NOT NULL,
-                    agent_trace_json TEXT NOT NULL,
-                    created_at REAL NOT NULL,
-                    updated_at REAL NOT NULL,
-                    result_json TEXT
-                )
-                """
-            )
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_workflows_project_updated ON workflows(project_id, updated_at)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_workflows_mode_updated ON workflows(mode, updated_at)")
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS projects (
-                    id TEXT PRIMARY KEY,
-                    name TEXT NOT NULL,
-                    workdir TEXT NOT NULL,
-                    created_at REAL NOT NULL,
-                    updated_at REAL NOT NULL
-                )
-                """
-            )
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS project_memories (
-                    id TEXT PRIMARY KEY,
-                    project_id TEXT NOT NULL,
-                    kind TEXT NOT NULL,
-                    content TEXT NOT NULL,
-                    created_at REAL NOT NULL
-                )
-                """
-            )
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS project_events (
-                    id TEXT PRIMARY KEY,
-                    project_id TEXT NOT NULL,
-                    event_type TEXT NOT NULL,
-                    payload_json TEXT NOT NULL,
-                    created_at REAL NOT NULL
-                )
-                """
-            )
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_project_memories_project_created ON project_memories(project_id, created_at)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_project_events_project_created ON project_events(project_id, created_at)")
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS pending_tools (
-                    id TEXT PRIMARY KEY,
-                    status TEXT NOT NULL,
-                    name TEXT NOT NULL,
-                    capability TEXT NOT NULL,
-                    payload_json TEXT NOT NULL,
-                    files_json TEXT NOT NULL,
-                    created_at REAL NOT NULL,
-                    updated_at REAL NOT NULL
-                )
-                """
-            )
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS app_state (
-                    key TEXT PRIMARY KEY,
-                    value_json TEXT NOT NULL,
-                    updated_at REAL NOT NULL
-                )
-                """
-            )
+            init_database(conn)
 
     def create_draft(
         self,
@@ -173,7 +80,7 @@ class WorkflowStore:
                 )
             )
             if project_id:
-                _insert_project_event(conn, project_id, "workflow_created", {
+                insert_project_event(conn, project_id, "workflow_created", {
                     "workflow_id": workflow_id,
                     "command": command,
                     "summary": workflow.get("summary", ""),
@@ -189,7 +96,7 @@ class WorkflowStore:
             ).fetchone()
         if row is None:
             raise KeyError(workflow_id)
-        return _row_to_dict(row)
+        return workflow_row_to_dict(row)
 
     def list_recent(self, limit: int = 50, project_id: str | None = None, mode: str | None = None) -> List[Dict[str, Any]]:
         with self._connection() as conn:
@@ -232,7 +139,7 @@ class WorkflowStore:
                     """,
                     (limit,)
                 ).fetchall()
-        return [_row_to_dict(row) for row in rows]
+        return [workflow_row_to_dict(row) for row in rows]
 
     def clear_workflows(self, project_id: str | None = None, mode: str | None = None) -> Dict[str, Any]:
         with self._connection() as conn:
@@ -283,7 +190,7 @@ class WorkflowStore:
                 LIMIT 1
                 """
             ).fetchone()
-        return _row_to_dict(row) if row else None
+        return workflow_row_to_dict(row) if row else None
 
     def claim(self, workflow_id: str) -> Dict[str, Any]:
         return self._set_status(workflow_id, "claimed_by_arcmap")
@@ -366,7 +273,7 @@ class WorkflowStore:
                 "INSERT INTO projects (id, name, workdir, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
                 (project_id, name.strip() or path.name, str(path), now, now)
             )
-            _insert_project_event(conn, project_id, "project_created", {
+            insert_project_event(conn, project_id, "project_created", {
                 "name": name.strip() or path.name,
                 "workdir": str(path),
                 "output_workspace": str(output_dir)
@@ -379,7 +286,7 @@ class WorkflowStore:
             rows = conn.execute(
                 "SELECT id, name, workdir, created_at, updated_at FROM projects ORDER BY created_at DESC"
             ).fetchall()
-        return [_project_row_to_dict(row) for row in rows]
+        return [project_row_to_dict(row) for row in rows]
 
     def get_project(self, project_id: str | None) -> Optional[Dict[str, Any]]:
         if not project_id:
@@ -389,7 +296,7 @@ class WorkflowStore:
                 "SELECT id, name, workdir, created_at, updated_at FROM projects WHERE id = ?",
                 (project_id,)
             ).fetchone()
-        return _project_row_to_dict(row) if row else None
+        return project_row_to_dict(row) if row else None
 
     def set_active_project(self, project_id: str) -> Dict[str, Any]:
         project = self.get_project(project_id)
@@ -440,7 +347,7 @@ class WorkflowStore:
         event_id = str(uuid.uuid4())
         now = time.time()
         with self._connection() as conn:
-            _insert_project_event(conn, project_id, event_type, payload, now, event_id)
+            insert_project_event(conn, project_id, event_type, payload, now, event_id)
         return {"id": event_id, "project_id": project_id, "event_type": event_type, "payload": payload, "created_at": now}
 
     def list_project_events(self, project_id: str, limit: int = 80) -> List[Dict[str, Any]]:
@@ -497,7 +404,7 @@ class WorkflowStore:
             keep_recent = max(1, min(keep_recent, max_items - 1))
             older = memories[:-keep_recent]
             recent = memories[-keep_recent:]
-            summary = _compact_memory_text(older)
+            summary = compact_memory_text(older)
             delete_ids = [item["id"] for item in older]
             placeholders = ",".join("?" for _ in delete_ids)
             conn.execute("DELETE FROM project_memories WHERE id IN (%s)" % placeholders, delete_ids)
@@ -507,7 +414,7 @@ class WorkflowStore:
                 "INSERT INTO project_memories (id, project_id, kind, content, created_at) VALUES (?, ?, ?, ?, ?)",
                 (summary_id, project_id, "summary", summary, min(recent[0]["created_at"], now) - 0.001)
             )
-            _insert_project_event(conn, project_id, "memory_compacted", {
+            insert_project_event(conn, project_id, "memory_compacted", {
                 "compacted_count": len(older),
                 "kept_recent_count": len(recent),
                 "summary_id": summary_id
@@ -546,7 +453,7 @@ class WorkflowStore:
                 ORDER BY updated_at DESC
                 """
             ).fetchall()
-        return [_pending_tool_row_to_dict(row) for row in rows]
+        return [pending_tool_row_to_dict(row) for row in rows]
 
     def get_pending_tool(self, tool_id: str) -> Dict[str, Any]:
         with self._connection() as conn:
@@ -559,7 +466,7 @@ class WorkflowStore:
             ).fetchone()
         if row is None:
             raise KeyError(tool_id)
-        return _pending_tool_row_to_dict(row)
+        return pending_tool_row_to_dict(row)
 
     def set_pending_tool_status(self, tool_id: str, status: str) -> Dict[str, Any]:
         if status not in ("pending_review", "enabled", "rejected"):
@@ -606,81 +513,3 @@ class WorkflowStore:
         if cursor.rowcount == 0:
             raise KeyError(tool_id)
         return {"ok": True, "id": tool_id}
-
-
-def _migrate_workflows_schema(conn) -> None:
-    table = conn.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'workflows'").fetchone()
-    if table is None:
-        return
-    columns = {row[1] for row in conn.execute("PRAGMA table_info(workflows)").fetchall()}
-    critical_missing = {"id"} - columns
-    if critical_missing:
-        raise RuntimeError("workflows 表结构损坏，缺少字段：%s" % "、".join(sorted(critical_missing)))
-    for column in sorted(WORKFLOW_COLUMNS - columns):
-        definition = WORKFLOW_COLUMN_DEFINITIONS.get(column)
-        if not definition:
-            raise RuntimeError("workflows 表无法迁移，缺少字段：%s" % column)
-        conn.execute("ALTER TABLE workflows ADD COLUMN %s %s" % (column, definition))
-
-
-def _row_to_dict(row) -> Dict[str, Any]:
-    return {
-        "id": row[0],
-        "status": row[1],
-        "mode": row[2],
-        "project_id": row[3],
-        "command": row[4],
-        "context_hash": row[5],
-        "workflow": json.loads(row[6]),
-        "agent_trace": json.loads(row[7]),
-        "created_at": row[8],
-        "updated_at": row[9],
-        "result": json.loads(row[10]) if row[10] else None
-    }
-
-
-def _project_row_to_dict(row) -> Dict[str, Any]:
-    return {
-        "id": row[0],
-        "name": row[1],
-        "workdir": row[2],
-        "created_at": row[3],
-        "updated_at": row[4],
-    }
-
-
-def _pending_tool_row_to_dict(row) -> Dict[str, Any]:
-    return {
-        "id": row[0],
-        "status": row[1],
-        "name": row[2],
-        "capability": row[3],
-        "payload": json.loads(row[4]),
-        "files": json.loads(row[5]),
-        "created_at": row[6],
-        "updated_at": row[7],
-    }
-
-
-def _insert_project_event(conn, project_id: str, event_type: str, payload: Dict[str, Any], now: float, event_id: str | None = None) -> None:
-    conn.execute(
-        "INSERT INTO project_events (id, project_id, event_type, payload_json, created_at) VALUES (?, ?, ?, ?, ?)",
-        (event_id or str(uuid.uuid4()), project_id, event_type, json.dumps(payload, ensure_ascii=False, sort_keys=True), now)
-    )
-
-
-def _compact_memory_text(memories: List[Dict[str, Any]]) -> str:
-    lines = ["项目长期记忆摘要："]
-    for item in memories:
-        content = str(item.get("content") or "").strip()
-        if not content:
-            continue
-        kind = str(item.get("kind") or "note")
-        if kind == "summary":
-            lines.append(content)
-        else:
-            lines.append("- [%s] %s" % (kind, content))
-    text = "\n".join(lines)
-    if len(text) <= PROJECT_MEMORY_SUMMARY_MAX_CHARS:
-        return text
-    return text[:PROJECT_MEMORY_SUMMARY_MAX_CHARS].rstrip() + "\n- 早期记忆过长，已截断。"

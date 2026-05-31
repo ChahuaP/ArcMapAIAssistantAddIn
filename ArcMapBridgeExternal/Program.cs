@@ -228,20 +228,21 @@ namespace GeoPilot.ArcMapBridgeExternal
             private string ExecuteRequest(BridgeRequest request)
             {
                 int hwnd = ExtractInt(request.Body, "hwnd");
+                bool allowEdits = ExtractBool(request.Body, "allow_edits");
                 if (request.Action == "sync")
                 {
-                    ExecuteArcMapCommand(hwnd, SyncCommandId, "sync");
+                    ExecuteArcMapCommand(hwnd, SyncCommandId, "sync", false);
                     return "{\"ok\":true}";
                 }
                 if (request.Action == "execute")
                 {
-                    ExecuteArcMapCommand(hwnd, ExecuteCommandId, "execute");
+                    ExecuteArcMapCommand(hwnd, ExecuteCommandId, "execute", allowEdits);
                     return "{\"ok\":true,\"result\":{\"ok\":true,\"summary\":\"ArcMap command executed.\"}}";
                 }
                 return ErrorJson("Unknown request.");
             }
 
-            private void ExecuteArcMapCommand(int hwnd, string commandId, string silentAction)
+            private void ExecuteArcMapCommand(int hwnd, string commandId, string silentAction, bool allowEdits)
             {
                 IApplication app = ResolveArcMap(hwnd);
                 IDocument document = app.Document;
@@ -251,7 +252,7 @@ namespace GeoPilot.ArcMapBridgeExternal
                 {
                     throw new InvalidOperationException("ArcMap command not found: " + commandId);
                 }
-                WriteSilentCommand(silentAction);
+                WriteSilentCommand(silentAction, allowEdits);
                 item.Execute();
             }
 
@@ -503,7 +504,7 @@ namespace GeoPilot.ArcMapBridgeExternal
             stream.Write(data, 0, data.Length);
         }
 
-        private static void WriteSilentCommand(string action)
+        private static void WriteSilentCommand(string action, bool allowEdits)
         {
             try
             {
@@ -515,7 +516,8 @@ namespace GeoPilot.ArcMapBridgeExternal
                 }
                 double expiresAt = (DateTime.UtcNow - new DateTime(1970, 1, 1)).TotalSeconds + 60;
                 string json = "{\"action\":\"" + JsonEscape(action) + "\",\"expires_at\":" +
-                    expiresAt.ToString(System.Globalization.CultureInfo.InvariantCulture) + "}";
+                    expiresAt.ToString(System.Globalization.CultureInfo.InvariantCulture) +
+                    ",\"allow_edits\":" + (allowEdits ? "true" : "false") + "}";
                 File.WriteAllText(Path.Combine(dir, SilentCommandFileName), json, Encoding.UTF8);
             }
             catch (Exception ex)
@@ -592,6 +594,43 @@ namespace GeoPilot.ArcMapBridgeExternal
             }
             int value;
             return int.TryParse(json.Substring(start, pos - start), out value) ? value : 0;
+        }
+
+        private static bool ExtractBool(string json, string key)
+        {
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                return false;
+            }
+            string marker = "\"" + key + "\"";
+            int pos = json.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (pos < 0)
+            {
+                return false;
+            }
+            pos = json.IndexOf(':', pos);
+            if (pos < 0)
+            {
+                return false;
+            }
+            pos++;
+            while (pos < json.Length && char.IsWhiteSpace(json[pos]))
+            {
+                pos++;
+            }
+            if (pos >= json.Length)
+            {
+                return false;
+            }
+            if (string.Compare(json, pos, "true", 0, 4, true, System.Globalization.CultureInfo.InvariantCulture) == 0)
+            {
+                return true;
+            }
+            if (json[pos] == '1')
+            {
+                return true;
+            }
+            return false;
         }
 
         private static string SafeString(Func<string> getter)

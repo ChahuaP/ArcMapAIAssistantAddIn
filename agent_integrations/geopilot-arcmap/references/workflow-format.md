@@ -67,3 +67,16 @@ Allowed operators: `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `between`, `in`, `like`
 - Use `output_folder` for folder or shapefile/KMZ/file output only when the operation schema includes it.
 - Use `output_format` only when the schema declares it.
 - Do not include file extensions in `output_name`.
+
+## Full-auto execution
+
+- To enable full auto after explicit user authorization, run `arcmap-permission --auto-execute`.
+- Add `--allow-edits` only when the user explicitly authorizes direct source-data edits.
+- Full auto does not remove validation. Always validate the workflow before execution.
+- In full auto, ArcMap Bridge execution is noninteractive. When `allow_edits` is true, direct edit confirmations are handled by the saved permission instead of an ArcMap popup.
+
+## Common operation families
+
+- `edit.*`: create point, line, polygon, regular polygon, or star polygon outputs from explicit coordinates. These write new datasets and do not directly edit source data.
+- `data.*`: copy features and geometry/data-management tools. Operations with `side_effects=edits_data` require edit authorization.
+- `layout.*`: inspect existing layout elements, update existing text elements, switch views, and export layout files.

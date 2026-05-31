@@ -5,9 +5,32 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
+def _web_source():
+    web_root = ROOT / "gateway_py3" / "web"
+    return "\n".join([
+        (web_root / "index.html").read_text(encoding="utf-8"),
+        (web_root / "app.js").read_text(encoding="utf-8"),
+        (web_root / "app_render.js").read_text(encoding="utf-8"),
+        (web_root / "app_mentions.js").read_text(encoding="utf-8"),
+        (web_root / "styles.css").read_text(encoding="utf-8"),
+        (web_root / "components.css").read_text(encoding="utf-8"),
+    ])
+
+
+def _server_source():
+    gateway = ROOT / "gateway_py3"
+    return "\n".join([
+        (gateway / "app.py").read_text(encoding="utf-8"),
+        (gateway / "llm_providers.py").read_text(encoding="utf-8"),
+        (gateway / "routes" / "__init__.py").read_text(encoding="utf-8"),
+        (gateway / "routes" / "common.py").read_text(encoding="utf-8"),
+        (gateway / "routes" / "planner.py").read_text(encoding="utf-8"),
+    ])
+
+
 class WebModeStateTests(unittest.TestCase):
     def test_polling_config_does_not_overwrite_selected_mode(self):
-        html = (ROOT / "gateway_py3" / "web" / "index.html").read_text(encoding="utf-8")
+        html = _web_source()
 
         self.assertIn("const MODE_STORAGE_KEY = 'geopilot.currentMode';", html)
         self.assertIn("let modeInitialized = false;", html)
@@ -15,14 +38,14 @@ class WebModeStateTests(unittest.TestCase):
         self.assertIn("storeMode(mode);", html)
 
     def test_full_agent_chat_renders_project_conversation_stream(self):
-        html = (ROOT / "gateway_py3" / "web" / "index.html").read_text(encoding="utf-8")
+        html = _web_source()
 
         self.assertIn("if (currentMode === 'full_agent') {", html)
         self.assertIn("visibleWorkflows(workflows).slice().reverse()", html)
         self.assertIn("appendAssistantForWorkflow(item, false, false);", html)
 
     def test_assistant_markdown_and_thinking_have_dedicated_rendering(self):
-        html = (ROOT / "gateway_py3" / "web" / "index.html").read_text(encoding="utf-8")
+        html = _web_source()
 
         self.assertIn("function renderAssistantMarkdown(text)", html)
         self.assertIn("function splitThinking(text)", html)
@@ -30,13 +53,13 @@ class WebModeStateTests(unittest.TestCase):
         self.assertIn("class=\"think-panel\"", html)
 
     def test_answer_workflows_are_displayed_without_arcgis_execution_prompt(self):
-        html = (ROOT / "gateway_py3" / "web" / "index.html").read_text(encoding="utf-8")
+        html = _web_source()
 
         self.assertIn("action === 'answer'", html)
         self.assertIn("这是一条普通回复，不需要发送到 ArcGIS。", html)
 
     def test_task_panel_renders_all_visible_tasks(self):
-        html = (ROOT / "gateway_py3" / "web" / "index.html").read_text(encoding="utf-8")
+        html = _web_source()
 
         self.assertIn("const items = visibleWorkflows(workflows);", html)
         self.assertIn("items.forEach(item => list.appendChild(taskCard(item)));", html)
@@ -46,19 +69,19 @@ class WebModeStateTests(unittest.TestCase):
         self.assertNotIn("查看对话", html)
 
     def test_project_form_is_not_closed_by_config_polling_in_full_mode(self):
-        html = (ROOT / "gateway_py3" / "web" / "index.html").read_text(encoding="utf-8")
+        html = _web_source()
 
         self.assertIn("if (!fullMode) document.getElementById('sidebarProjectForm').hidden = true;", html)
 
     def test_pending_user_message_survives_workflow_polling(self):
-        html = (ROOT / "gateway_py3" / "web" / "index.html").read_text(encoding="utf-8")
+        html = _web_source()
 
         self.assertIn("let transientUserMessage = '';", html)
         self.assertIn("function appendTransientConversation", html)
         self.assertIn("if (transientUserMessage && currentMode !== 'full_agent' && !selectedWorkflowId) return;", html)
 
     def test_long_model_wait_has_visible_progress_state(self):
-        html = (ROOT / "gateway_py3" / "web" / "index.html").read_text(encoding="utf-8")
+        html = _web_source()
 
         self.assertIn("let modelWait = null;", html)
         self.assertIn("function startModelWait(label)", html)
@@ -68,14 +91,14 @@ class WebModeStateTests(unittest.TestCase):
         self.assertIn("模型正在处理上下文和工具选择。", html)
 
     def test_custom_tools_can_be_deleted_from_ui(self):
-        html = (ROOT / "gateway_py3" / "web" / "index.html").read_text(encoding="utf-8")
+        html = _web_source()
 
         self.assertIn("async function deleteTool(id)", html)
         self.assertIn("api(`/tools/${id}/delete`", html)
         self.assertIn("自建工具已删除。", html)
 
     def test_projects_can_be_deleted_from_ui(self):
-        html = (ROOT / "gateway_py3" / "web" / "index.html").read_text(encoding="utf-8")
+        html = _web_source()
 
         self.assertIn("async function deleteProject(id, name)", html)
         self.assertIn("api(`/projects/${encodeURIComponent(id)}/delete`", html)
@@ -83,14 +106,14 @@ class WebModeStateTests(unittest.TestCase):
         self.assertIn("项目已删除。", html)
 
     def test_clear_project_conversation_refreshes_context_state(self):
-        html = (ROOT / "gateway_py3" / "web" / "index.html").read_text(encoding="utf-8")
+        html = _web_source()
 
         self.assertIn("已清空项目对话和上下文。", html)
         self.assertIn("if (currentMode === 'full_agent') await loadProjects();", html)
 
     def test_failed_custom_tool_workflow_can_request_ai_revision(self):
-        html = (ROOT / "gateway_py3" / "web" / "index.html").read_text(encoding="utf-8")
-        app = (ROOT / "gateway_py3" / "app.py").read_text(encoding="utf-8")
+        html = _web_source()
+        server = _server_source()
 
         self.assertIn("function usesCustomTool(workflow)", html)
         self.assertIn("让 AI 修工具", html)
@@ -99,12 +122,12 @@ class WebModeStateTests(unittest.TestCase):
         self.assertIn("修复中...", html)
         self.assertIn("async function repairCustomTool(id)", html)
         self.assertIn("api(`/workflows/${id}/repair-custom-tool`", html)
-        self.assertIn("repair-custom-tool", app)
-        self.assertIn("toolbuilder_get_draft", app)
-        self.assertIn("toolbuilder_revise_draft", app)
+        self.assertIn("repair-custom-tool", server)
+        self.assertIn("toolbuilder_get_draft", server)
+        self.assertIn("toolbuilder_revise_draft", server)
 
     def test_file_loaded_page_calls_local_gateway_api(self):
-        html = (ROOT / "gateway_py3" / "web" / "index.html").read_text(encoding="utf-8")
+        html = _web_source()
 
         self.assertIn("const API_ORIGIN = window.location.protocol === 'file:' ? 'http://127.0.0.1:8765' : '';", html)
         self.assertIn("response = await fetch(apiUrl(path), options || {});", html)
@@ -118,14 +141,25 @@ class WebModeStateTests(unittest.TestCase):
         self.assertIn('self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")', app)
 
     def test_web_uses_arcmap_bridge_for_sync_and_execution(self):
-        html = (ROOT / "gateway_py3" / "web" / "index.html").read_text(encoding="utf-8")
+        html = _web_source()
 
         self.assertIn("async function loadArcMapBridges()", html)
         self.assertIn("api('/arcmap/bridges')", html)
-        self.assertIn("async function syncArcMap()", html)
-        self.assertIn("api('/arcmap/sync'", html)
         self.assertIn("api('/arcmap/execute-approved'", html)
         self.assertIn("发送并执行", html)
+        self.assertNotIn("自动同步", html)
+        self.assertNotIn("function syncArcMap", html)
+
+    def test_model_config_is_provider_driven(self):
+        html = _web_source()
+        server = _server_source()
+
+        self.assertIn("模型配置", html)
+        self.assertNotIn("模型已配置", html)
+        self.assertIn("provider_options", server)
+        self.assertIn("function renderModelConfig(config)", html)
+        self.assertIn("function collectProviderConfig()", html)
+        self.assertIn('id="providerKeyFields"', html)
 
     def test_skill_mentions_multi_arcmap_selection(self):
         skill = (ROOT / "agent_integrations" / "geopilot-arcmap" / "SKILL.md").read_text(encoding="utf-8")

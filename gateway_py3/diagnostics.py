@@ -41,6 +41,43 @@ def collect_diagnostics(app_version: str, operation_count: int, network_check: b
     }
 
 
+def collect_agent_diagnostics(app_version: str, operation_count: int, state: Any) -> Dict[str, Any]:
+    context_record = state.store.get_state("arcmap_context")
+    context = context_record.get("value") if isinstance(context_record, dict) else None
+    permission_record = state.store.get_state("arcmap_permission")
+    permission = permission_record.get("value") if isinstance(permission_record, dict) else {}
+    active_bridge_record = state.store.get_state("arcmap_active_bridge")
+    active_bridge = active_bridge_record.get("value") if isinstance(active_bridge_record, dict) else {}
+    categories = _catalog_categories(state)
+    checks = [
+        _check_gateway(app_version, operation_count),
+        _item("agent_planner", "外部 Agent 规划", "ok", "Codex/Claude/WorkBuddy 直接生成 workflow；GeoPilot 不调用 /plan。"),
+        _check_agent_capabilities(operation_count, categories),
+        _check_agent_context(context),
+        _check_agent_bridge(active_bridge),
+        _check_agent_permission(permission),
+    ]
+    return {
+        "ok": all(item["status"] == "ok" for item in checks),
+        "app_version": app_version,
+        "operation_count": operation_count,
+        "categories": categories,
+        "context": _agent_context_summary(context),
+        "active_bridge": active_bridge if isinstance(active_bridge, dict) else {},
+        "permission": permission if isinstance(permission, dict) else {},
+        "checks": checks,
+        "first_run_steps": [
+            "health",
+            "arcmap-list",
+            "arcmap-select when multiple ArcMap windows are listed",
+            "arcmap-sync",
+            "capabilities",
+            "validate",
+            "arcmap-execute-workflow"
+        ]
+    }
+
+
 def _read_install_config() -> Dict[str, Any]:
     path = _install_config_path()
     if not path.exists():
@@ -49,7 +86,7 @@ def _read_install_config() -> Dict[str, Any]:
         with path.open("r", encoding="utf-8-sig") as handle:
             data = json.load(handle)
         return data if isinstance(data, dict) else {}
-    except Exception as exc:
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
         return {"error": str(exc)}
 
 
@@ -84,6 +121,62 @@ def _check_gateway_catalog() -> Dict[str, Any]:
     if path.exists():
         return _item("gateway_catalog", "网关操作目录", "ok", "网关可读取操作目录。", path)
     return _item("gateway_catalog", "网关操作目录", "bad", "网关缺少 operation_catalog。", path)
+
+
+def _catalog_categories(state: Any) -> Dict[str, int]:
+    categories: Dict[str, int] = {}
+    for operation in state.catalog.all_operations():
+        category = str(operation.get("category") or "unknown")
+        categories[category] = categories.get(category, 0) + 1
+    return categories
+
+
+def _check_agent_capabilities(operation_count: int, categories: Dict[str, int]) -> Dict[str, Any]:
+    if operation_count <= 0:
+        return _item("agent_capabilities", "Agent 能力目录", "bad", "没有可用 operation。")
+    detail = "已加载 %s 个 operation，分类：%s。" % (
+        operation_count,
+        "、".join("%s=%s" % (key, categories[key]) for key in sorted(categories))
+    )
+    return _item("agent_capabilities", "Agent 能力目录", "ok", detail)
+
+
+def _check_agent_context(context: Any) -> Dict[str, Any]:
+    if isinstance(context, dict) and context:
+        layer_count = len(context.get("layers") or [])
+        return _item("agent_context", "ArcMap 上下文", "ok", "已同步，上下文含 %s 个图层。" % layer_count)
+    return _item("agent_context", "ArcMap 上下文", "warn", "还没有同步上下文；先运行 arcmap-list，再运行 arcmap-sync。")
+
+
+def _check_agent_bridge(active_bridge: Any) -> Dict[str, Any]:
+    if isinstance(active_bridge, dict) and active_bridge.get("port"):
+        title = ((active_bridge.get("summary") or {}).get("title") or "").strip()
+        detail = "已选择 ArcMap Bridge，port=%s。" % active_bridge.get("port")
+        if title:
+            detail = detail[:-1] + "，窗口=%s。" % title
+        return _item("agent_bridge", "ArcMap 目标", "ok", detail)
+    return _item("agent_bridge", "ArcMap 目标", "warn", "还没有选择 ArcMap 目标；运行 arcmap-list，多个窗口时再运行 arcmap-select。")
+
+
+def _check_agent_permission(permission: Any) -> Dict[str, Any]:
+    if not isinstance(permission, dict):
+        permission = {}
+    if permission.get("auto_execute") and permission.get("allow_edits"):
+        return _item("agent_permission", "自动执行权限", "ok", "已允许全自动执行，且允许直接数据编辑。")
+    if permission.get("auto_execute"):
+        return _item("agent_permission", "自动执行权限", "ok", "已允许全自动执行；直接编辑数据仍会被拦截，除非 allow_edits=true。")
+    return _item("agent_permission", "自动执行权限", "warn", "未开启全自动执行；执行前需要用户确认，或运行 arcmap-permission --auto-execute。")
+
+
+def _agent_context_summary(context: Any) -> Dict[str, Any]:
+    if not isinstance(context, dict) or not context:
+        return {"synced": False, "layer_count": 0}
+    return {
+        "synced": True,
+        "layer_count": len(context.get("layers") or []),
+        "mxd_path": context.get("mxd_path") or "",
+        "is_saved": bool(context.get("is_saved")),
+    }
 
 
 def _check_install_config(install: Dict[str, Any]) -> Dict[str, Any]:
@@ -166,7 +259,7 @@ def _check_one_provider_network(provider_id: str, provider: Dict[str, Any]) -> L
     try:
         addresses = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
         checks.append(_item("%s_dns" % provider_id, "%s DNS" % label, "ok", "域名可解析：%s。" % host))
-    except Exception as exc:
+    except (OSError, socket.gaierror) as exc:
         checks.append(_item("%s_dns" % provider_id, "%s DNS" % label, "bad", "域名解析失败：%s。" % exc))
         checks.append(_item("%s_tcp" % provider_id, "%s 连接" % label, "bad", "DNS 失败，未尝试连接。"))
         return checks
@@ -175,7 +268,7 @@ def _check_one_provider_network(provider_id: str, provider: Dict[str, Any]) -> L
         with socket.create_connection(address, timeout=3):
             pass
         checks.append(_item("%s_tcp" % provider_id, "%s 连接" % label, "ok", "可以连接 %s:%s。" % (host, port)))
-    except Exception as exc:
+    except OSError as exc:
         checks.append(_item("%s_tcp" % provider_id, "%s 连接" % label, "bad", "连接失败：%s。" % exc))
     return checks
 
@@ -190,7 +283,7 @@ def _read_text(path: Path) -> Dict[str, str]:
         return {"value": "", "error": ""}
     try:
         return {"value": path.read_text(encoding="utf-8-sig").strip(), "error": ""}
-    except Exception as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         return {"value": "", "error": str(exc)}
 
 

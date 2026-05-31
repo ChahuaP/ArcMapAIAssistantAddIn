@@ -28,8 +28,10 @@ class GeoPilotCliTests(unittest.TestCase):
 
         self.assertIn("arcmap-list", text)
         self.assertIn("arcmap-select", text)
+        self.assertIn("doctor", text)
         self.assertIn("/arcmap/bridges", text)
         self.assertIn("/arcmap/active", text)
+        self.assertIn("/agent/diagnostics", text)
 
 
 def _load_cli():

@@ -13,7 +13,7 @@ from gateway_py3.paths import REPO_ROOT, localappdata_dir
 
 
 BASE_URL = "http://127.0.0.1:8765"
-EXPECTED_APP_VERSION = "0.14.0"
+EXPECTED_APP_VERSION = "0.16.2"
 WEB_URL = BASE_URL
 CREATE_NO_WINDOW = 0x08000000
 
@@ -60,7 +60,7 @@ def stop_gateway() -> None:
             ["netstat", "-ano", "-p", "tcp"],
             creationflags=CREATE_NO_WINDOW
         ).decode("mbcs", "replace")
-    except Exception:
+    except (subprocess.CalledProcessError, OSError):
         return
     for line in output.splitlines():
         parts = line.split()

@@ -17,6 +17,7 @@ except NameError:
 
 TEXT_TYPES = condition_protocol.TEXT_FIELD_TYPES
 NUMBER_TYPES = condition_protocol.NUMBER_FIELD_TYPES
+ARCPY_EXECUTE_ERROR = getattr(arcpy, "ExecuteError", RuntimeError)
 
 
 def compile_where(layer, condition):
@@ -52,7 +53,7 @@ def count_where(layer, condition):
     finally:
         try:
             arcpy.Delete_management(temp_name)
-        except Exception:
+        except (ARCPY_EXECUTE_ERROR, RuntimeError):
             pass
 
 
@@ -149,7 +150,7 @@ def _field_sql(layer, field_name):
         desc = arcpy.Describe(layer)
         workspace = getattr(desc, "path", "")
         return arcpy.AddFieldDelimiters(workspace, field_name)
-    except Exception:
+    except (ARCPY_EXECUTE_ERROR, RuntimeError, AttributeError, TypeError):
         return '"%s"' % field_name
 
 

@@ -36,6 +36,7 @@ SILENT_COMMAND_FILE = os.path.join(
     "bridge_command.json"
 )
 _LAST_COMMAND_WAS_SILENT = False
+_LAST_SILENT_COMMAND = {}
 
 
 def show_message(text):
@@ -59,7 +60,7 @@ def start_gateway():
 def ensure_gateway_silent():
     try:
         gateway_client.ensure_running()
-    except Exception as exc:
+    except (RuntimeError, OSError) as exc:
         _log_event(u"gateway.ensure_failed", _exception_text(exc))
 
 
@@ -73,8 +74,9 @@ def show_gateway_status():
 
 
 def sync_context():
-    global _LAST_COMMAND_WAS_SILENT
-    _LAST_COMMAND_WAS_SILENT = _consume_silent_command("sync")
+    global _LAST_COMMAND_WAS_SILENT, _LAST_SILENT_COMMAND
+    _LAST_SILENT_COMMAND = _consume_silent_command("sync")
+    _LAST_COMMAND_WAS_SILENT = bool(_LAST_SILENT_COMMAND)
     gateway_client.ensure_running()
     _sync_current_context()
     if not _LAST_COMMAND_WAS_SILENT:
@@ -126,8 +128,9 @@ def open_assistant():
 
 
 def execute_pending():
-    global _LAST_COMMAND_WAS_SILENT
-    _LAST_COMMAND_WAS_SILENT = _consume_silent_command("execute")
+    global _LAST_COMMAND_WAS_SILENT, _LAST_SILENT_COMMAND
+    _LAST_SILENT_COMMAND = _consume_silent_command("execute")
+    _LAST_COMMAND_WAS_SILENT = bool(_LAST_SILENT_COMMAND)
     gateway_client.ensure_running()
     _execute_pending(silent=_LAST_COMMAND_WAS_SILENT)
 
@@ -198,24 +201,24 @@ def _sync_current_context():
 def _consume_silent_command(action):
     try:
         if not os.path.isfile(SILENT_COMMAND_FILE):
-            return False
+            return {}
         with open(SILENT_COMMAND_FILE, "rb") as handle:
             raw = handle.read()
         if not isinstance(raw, unicode):
             raw = raw.decode("utf-8", "replace")
         payload = json.loads(raw.lstrip(u"\ufeff"))
         if payload.get("action") != action:
-            return False
+            return {}
         if float(payload.get("expires_at") or 0) < time.time():
-            return False
+            return {}
         try:
             os.remove(SILENT_COMMAND_FILE)
-        except Exception:
+        except OSError:
             pass
-        return True
-    except Exception as exc:
+        return payload if isinstance(payload, dict) else {}
+    except (IOError, OSError, ValueError, TypeError) as exc:
         _log_event(u"bridge.silent_command_failed", _exception_text(exc))
-        return False
+        return {}
 
 
 def suppress_last_error_popup():
@@ -231,7 +234,7 @@ def _log_event(kind, detail=None):
         message = u"%s\t%s\t%s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), kind, _unicode_text(detail or ""))
         with open(path, "ab") as handle:
             handle.write(message.encode("utf-8", "replace"))
-    except Exception:
+    except (IOError, OSError):
         pass
 
 
@@ -245,7 +248,7 @@ def _exception_text(exc):
 def _traceback_text():
     try:
         return _unicode_text(traceback.format_exc())
-    except Exception:
+    except (UnicodeDecodeError, UnicodeEncodeError, TypeError, ValueError):
         return u""
 
 
@@ -261,14 +264,16 @@ def _unicode_text(value):
         return value.decode("utf-8", "replace")
     try:
         return unicode(value)
-    except Exception:
+    except (UnicodeDecodeError, UnicodeEncodeError, TypeError, ValueError):
         try:
             return str(value).decode("utf-8", "replace")
-        except Exception:
+        except (UnicodeDecodeError, UnicodeEncodeError, TypeError, AttributeError):
             return u"<unprintable>"
 
 
 def _confirm_direct_edit(message):
+    if _LAST_COMMAND_WAS_SILENT:
+        return bool(_LAST_SILENT_COMMAND.get("allow_edits"))
     text = _unicode_text(message) + u"\n\n这会直接修改原始数据，且不承诺可撤销。是否继续？"
     result = pythonaddins.MessageBox(text, "ArcMap AI Assistant", 4)
     if isinstance(result, bool):

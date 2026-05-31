@@ -74,5 +74,5 @@ def _normalize_path(value):
 def _selection_sort_key(value):
     try:
         return (0, int(value))
-    except Exception:
+    except (TypeError, ValueError):
         return (1, value)

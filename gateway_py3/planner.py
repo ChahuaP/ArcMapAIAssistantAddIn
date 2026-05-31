@@ -448,11 +448,7 @@ def _project_output_workspace(project: Dict[str, Any]) -> Path:
 
 def _custom_tool_status(store: WorkflowStore) -> List[Dict[str, str]]:
     tools = []
-    try:
-        rows = store.list_pending_tools()
-    except Exception:
-        return tools
-    for row in rows:
+    for row in store.list_pending_tools():
         payload = row.get("payload") or {}
         spec = payload.get("operation_spec") or {}
         revision = payload.get("revision") or {}
@@ -469,11 +465,7 @@ def _custom_tool_status(store: WorkflowStore) -> List[Dict[str, str]]:
 
 def _recent_conversation(store: WorkflowStore, project_id: str | None = None, mode: str | None = None, limit: int = 6) -> List[Dict[str, Any]]:
     history = []
-    try:
-        rows = store.list_recent(limit=limit, project_id=project_id, mode=mode)
-    except Exception:
-        return history
-    for row in reversed(rows):
+    for row in reversed(store.list_recent(limit=limit, project_id=project_id, mode=mode)):
         workflow = row.get("workflow") or {}
         history.append({
             "command": row.get("command"),

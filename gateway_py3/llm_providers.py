@@ -94,6 +94,26 @@ ENV_KEY_ALIASES = {
     MINIMAX_PROVIDER: ("MINIMAX_API_KEY",),
     ZHIPU_PROVIDER: ("ZHIPU_API_KEY", "BIGMODEL_API_KEY"),
 }
+PROVIDER_OPTIONS = (
+    {
+        "id": DEEPSEEK_PROVIDER,
+        "label": "DeepSeek",
+        "env_key": ENV_KEYS[DEEPSEEK_PROVIDER],
+        "key_placeholder": "DeepSeek API Key",
+    },
+    {
+        "id": MINIMAX_PROVIDER,
+        "label": "MiniMax",
+        "env_key": ENV_KEYS[MINIMAX_PROVIDER],
+        "key_placeholder": "MiniMax Token Plan Key",
+    },
+    {
+        "id": ZHIPU_PROVIDER,
+        "label": "智谱",
+        "env_key": ENV_KEYS[ZHIPU_PROVIDER],
+        "key_placeholder": "智谱开放平台 Key",
+    },
+)
 
 
 class ProviderError(Exception):
@@ -163,7 +183,7 @@ class ChatProvider:
             raise ProviderError(provider_http_error(self.provider_id, exc.code, detail))
         except (TimeoutError, socket.timeout):
             raise ProviderError("%s 响应超时：已等待 %s 秒。请重试，或切换到更快的模型。" % (provider_label(self.provider_id), self.timeout))
-        except Exception as exc:
+        except (OSError, ValueError, urllib.error.URLError) as exc:
             raise ProviderError(str(exc))
 
 
@@ -262,6 +282,7 @@ def public_config(config: Dict[str, Any] | None = None) -> Dict[str, Any]:
         "full_agent_provider": config["full_agent_provider"],
         "full_agent_model": config["full_agent_model"],
         "providers": providers,
+        "provider_options": [dict(item) for item in PROVIDER_OPTIONS],
         "model_options": [dict(item) for item in MODEL_OPTIONS],
         "config_path": str(status["active_path"]),
         "config_file_exists": bool(status["active_path"].exists()),
@@ -349,7 +370,7 @@ def missing_api_key_message(provider_id: str) -> str:
     if active_path.exists():
         try:
             config = load_config()
-        except Exception as exc:
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
             return "%s API Key 配置文件读取失败：%s。请在网页右上角重新保存 Key。" % (label, exc)
         settings = (config.get("providers") or {}).get(provider_id) or {}
         if settings:
