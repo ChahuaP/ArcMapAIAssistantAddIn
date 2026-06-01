@@ -244,10 +244,13 @@
       }
       if (payload.mode && payload.mode !== currentMode) return;
       if (payload.project_id && currentMode === 'full_agent' && activeProject && payload.project_id !== activeProject.id) return;
+      if (payload.request_id && activePlanRequestId && payload.request_id !== activePlanRequestId) return;
       setState({agentProgress: payload});
       if (modelWait) {
         modelWait.label = payload.label || modelWait.label;
         modelWait.stage = payload.stage || modelWait.stage;
+        const stageIndex = modelWaitStageIndex();
+        modelWait.completedStageIndex = Math.max(modelWait.completedStageIndex || -1, stageIndex);
         updateModelWait();
       } else if (payload.label) {
         setStatus(payload.label);

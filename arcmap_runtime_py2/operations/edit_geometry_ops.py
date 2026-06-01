@@ -9,6 +9,15 @@ import arcpy
 from operations import common
 
 
+def create_empty_feature_layer(context, arguments, step_outputs):
+    spatial_reference = _spatial_reference(context, arguments, step_outputs)
+    geometry_type = _feature_class_geometry_type(arguments["geometry_type"])
+    output = _create_feature_class(context, arguments, geometry_type, spatial_reference)
+    _add_name_field(output)
+    common.add_output_layer(output)
+    return {"output": output, "feature_count": 0, "geometry_type": _geometry_type_label(geometry_type)}
+
+
 def create_point_features(context, arguments, step_outputs):
     spatial_reference = _spatial_reference(context, arguments, step_outputs)
     output = _create_feature_class(context, arguments, "POINT", spatial_reference)
@@ -58,6 +67,12 @@ def append_polyline_features(context, arguments, step_outputs):
 def create_polygon_feature(context, arguments, step_outputs):
     spatial_reference = _spatial_reference(context, arguments, step_outputs)
     rows = _polygon_rows(arguments, spatial_reference)
+    return _create_polygon_output(context, arguments, spatial_reference, rows)
+
+
+def create_rectangle_polygon(context, arguments, step_outputs):
+    spatial_reference = _spatial_reference(context, arguments, step_outputs)
+    rows = _rectangle_polygon_rows(arguments, spatial_reference)
     return _create_polygon_output(context, arguments, spatial_reference, rows)
 
 
@@ -180,6 +195,34 @@ def _create_feature_class(context, arguments, geometry_type, spatial_reference):
     return output
 
 
+def _feature_class_geometry_type(value):
+    text = common._text(value).strip().lower()
+    mapping = {
+        "point": "POINT",
+        "multipoint": "MULTIPOINT",
+        "polyline": "POLYLINE",
+        "line": "POLYLINE",
+        "polygon": "POLYGON",
+        "面": "POLYGON",
+        "线": "POLYLINE",
+        "点": "POINT",
+    }
+    if text not in mapping:
+        raise common.OperationError(u"geometry_type 必须是 point、polyline 或 polygon。")
+    return mapping[text]
+
+
+def _geometry_type_label(value):
+    text = common._text(value).upper()
+    if text == "POINT":
+        return "Point"
+    if text == "POLYLINE":
+        return "Polyline"
+    if text == "POLYGON":
+        return "Polygon"
+    return text
+
+
 def _add_name_field(output):
     if not _name_field(output):
         arcpy.AddField_management(output, "NAME", "TEXT", "", "", 255)
@@ -286,6 +329,25 @@ def _polygon_rows(arguments, spatial_reference):
         raise common.OperationError(u"请提供 coordinates，或提供 features 数组。")
     points = _closed_ring(_points(arguments["coordinates"], min_count=3))
     return [(_polygon_geometry(points, spatial_reference), arguments.get("name") or arguments.get("output_name") or "polygon_1")]
+
+
+def _rectangle_polygon_rows(arguments, spatial_reference):
+    left = float(arguments["left"])
+    top = float(arguments["top"])
+    right = float(arguments["right"])
+    bottom = float(arguments["bottom"])
+    if left >= right:
+        raise common.OperationError(u"矩形 left 必须小于 right。")
+    if bottom >= top:
+        raise common.OperationError(u"矩形 bottom 必须小于 top。")
+    points = _closed_ring([
+        (left, top),
+        (right, top),
+        (right, bottom),
+        (left, bottom)
+    ])
+    name = arguments.get("name") or arguments.get("output_name") or "rectangle_1"
+    return [(_polygon_geometry(points, spatial_reference), name)]
 
 
 def _regular_polygon_rows(arguments, spatial_reference):

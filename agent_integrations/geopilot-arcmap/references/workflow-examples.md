@@ -129,6 +129,51 @@ Use these as patterns only after checking `/api/capabilities`. Keep operation id
 }
 ```
 
+## Create Empty WGS84 Polygon Layer
+
+```json
+{
+  "action": "execute",
+  "summary": "创建一个空的 WGS84 面图层。",
+  "steps": [
+    {
+      "id": "step_1",
+      "operation": "edit.create_empty_feature_layer",
+      "arguments": {
+        "geometry_type": "polygon",
+        "wkid": 4326,
+        "output_name": "polygon_layer"
+      },
+      "reason": "用户要求创建空面图层，没有要求创建具体 feature。"
+    }
+  ]
+}
+```
+
+## Create Rectangle From Corners
+
+```json
+{
+  "action": "execute",
+  "summary": "根据左上角和右下角创建 WGS84 矩形面。",
+  "steps": [
+    {
+      "id": "step_1",
+      "operation": "edit.create_rectangle_polygon",
+      "arguments": {
+        "left": 120,
+        "top": 30,
+        "right": 125,
+        "bottom": 20,
+        "wkid": 4326,
+        "output_name": "rectangle_120_30_125_20"
+      },
+      "reason": "用户给出左上角和右下角，直接创建一个矩形 polygon feature。"
+    }
+  ]
+}
+```
+
 ## Create Multiple Stars In One New Layer
 
 ```json

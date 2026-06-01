@@ -47,6 +47,7 @@ def validate_catalog(catalog: OperationCatalog) -> None:
 
 
 def prepare_workflow(workflow: Dict[str, Any], catalog: OperationCatalog, context: Dict[str, Any]) -> Dict[str, Any]:
+    validate_workflow_shape(workflow)
     prepared = copy.deepcopy(workflow)
     normalize_workflow(prepared)
     normalize_workflow_arguments(prepared, catalog)
@@ -55,6 +56,21 @@ def prepare_workflow(workflow: Dict[str, Any], catalog: OperationCatalog, contex
     validate_workflow(prepared, catalog)
     validate_workflow_semantics(prepared, catalog, context)
     return prepared
+
+
+def validate_workflow_shape(workflow: Dict[str, Any]) -> None:
+    if not isinstance(workflow, dict):
+        raise ValidationError("Workflow must be an object.")
+    steps = workflow.get("steps")
+    if steps is not None and not isinstance(steps, list):
+        raise ValidationError("Workflow steps must be an array.")
+    for index, step in enumerate(steps or []):
+        if not isinstance(step, dict):
+            raise ValidationError("Workflow step %s must be an object." % (index + 1))
+        arguments = step.get("arguments")
+        if arguments is not None and not isinstance(arguments, dict):
+            step_id = step.get("id") or "step_%s" % (index + 1)
+            raise ValidationError("%s arguments must be an object." % step_id)
 
 
 def validate_workflow(workflow: Dict[str, Any], catalog: OperationCatalog) -> None:
@@ -215,6 +231,12 @@ def validate_workflow_semantics(workflow: Dict[str, Any], catalog: OperationCata
 
 def friendly_validation_message(error: Exception) -> str:
     message = str(error)
+    if "Workflow steps must be an array" in message:
+        return "workflow.steps 必须是数组，例如 \"steps\": [{...}]，不能写成 {\"item\": {...}}。请修正 workflow_json 后继续，不要向用户追问。"
+    if "Workflow step " in message and " must be an object" in message:
+        return "workflow.steps 里的每个步骤都必须是对象。请修正 workflow_json 后继续，不要向用户追问。"
+    if " arguments must be an object" in message:
+        return "workflow step 的 arguments 必须是对象。请修正 workflow_json 后继续，不要向用户追问。"
     if "Workflow action must be execute" in message:
         return "workflow 必须带 action。如果已有 steps，请设置 action=execute；如果只是回答、追问或不支持，steps 必须为空。请修正后继续，不要向用户追问。"
     if "Step missing field: operation" in message:
@@ -234,6 +256,14 @@ def friendly_validation_message(error: Exception) -> str:
                 "不要向用户追问，不要让系统默认按图层名生成。"
             )
         return "这个操作还缺少必要参数“%s”。请根据 user_request 和上下文补齐；确实无法判断时才向用户追问。" % name
+    if " must be array." in message:
+        return message + " 数组参数必须写成 JSON 数组，例如 [{\"x\":120,\"y\":30}]，不能写成 {\"item\":[...]}。请修正 workflow_json 后继续，不要向用户追问。"
+    if " must be integer." in message:
+        return message + " 整数参数必须写成 JSON 数字，例如 4326，不能写成字符串 \"4326\"。请修正 workflow_json 后继续，不要向用户追问。"
+    if " must be number." in message:
+        return message + " 数值参数必须写成 JSON 数字，不能写成字符串。请修正 workflow_json 后继续，不要向用户追问。"
+    if " must be object." in message:
+        return message + " 对象参数必须写成 JSON 对象。请修正 workflow_json 后继续，不要向用户追问。"
     if "has unknown arguments:" in message:
         if "folder_path" in message:
             return "workflow operation 里不能使用 folder_path；folder_path 只属于 file_resolve。导出到文件夹时，请按 operation schema 使用 output_folder。请修正 workflow，不要向用户追问。"

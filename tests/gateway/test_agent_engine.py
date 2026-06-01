@@ -56,6 +56,22 @@ class AgentEngineTests(unittest.TestCase):
         self.assertEqual(result["workflow"]["steps"][0]["operation"], "view.refresh_view")
         self.assertEqual(result["agent_trace"][0]["type"], "assistant")
         self.assertIn("agent.progress", [event["type"] for event in events])
+        self.assertIn("generate_workflow", [event["payload"]["stage"] for event in events if event["type"] == "agent.progress"])
+
+    def test_workflow_proposal_uses_json_string_contract(self):
+        workflow = {
+            "action": "execute",
+            "summary": "刷新地图。",
+            "steps": [
+                {"id": "step_1", "operation": "view.refresh_view", "arguments": {}, "reason": "刷新当前地图。"}
+            ],
+        }
+
+        result = workflow_from_proposal_arguments({
+            "workflow_json": json.dumps(workflow, ensure_ascii=False)
+        })
+
+        self.assertEqual(result["steps"][0]["operation"], "view.refresh_view")
 
 
 class _Runtime:

@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Tuple
 
 from .agent_engine import AgentRunner, AgentSession, AgentToolExecutor
 from .agent_engine.tools import tool_call_parts, workflow_from_proposal_arguments
-from .agent_tools import AgentToolRuntime
+from .agent_tools import AgentToolError, AgentToolRuntime
 from .catalog_loader import OperationCatalog
 from .custom_tool_contract import PLANNER_CUSTOM_TOOL_CONTRACT
 from .file_resolver import FileResolver
@@ -40,6 +40,7 @@ Hard rules:
 - Field mentions may appear as #字段名 from the UI. Treat # as a selection marker only. Workflow arguments must use the real field name without #.
 - Never invent ArcPy tools. Workflow steps may only use registered operation ids from the catalog.
 - Never execute anything. You only propose a workflow; the user and ArcGIS runtime execute later.
+- workflow_validate and workflow_propose must receive workflow_json: a valid JSON string containing the complete workflow object. Do not pass a nested workflow object or separate action/summary/steps arguments to these tools.
 - The final proposal must be submitted with workflow_propose, or as a JSON object with action, summary, and steps.
 - action must be exactly execute, clarify, unsupported, or answer.
 - answer is for normal conversation that does not need ArcGIS execution, such as explaining previous project activity.
@@ -73,6 +74,8 @@ Hard rules:
 - For existing ArcGIS layers, pass the chosen layer_ref, such as layer:0, in layer arguments. Do not pass a similar layer name when layer names are close.
 - If a later step uses a dataset produced by an earlier step, reference it as from_step:step_id when the layer name is not enough.
 - Writes_data operations add their generated output layer to ArcGIS automatically. Do not add layer.add_layer for outputs created by earlier workflow steps.
+- Intent mapping for layer creation is strict: “创建面图层，WGS84” means create an empty polygon layer with edit.create_empty_feature_layer; “创建一个正方形/矩形/五角星/点/线” means create concrete feature geometry; “加载 shp/kml/tif” means layer.add_layer; “复制某图层” means data.copy_features.
+- For rectangles/squares described by upper-left and lower-right corners, use edit.create_rectangle_polygon with numeric left/top/right/bottom. Do not hand-build coordinates arrays unless the rectangle operation is unavailable.
 - Do not mention JSON, schema, tool calls, operation ids, catalog internals, or validation internals to the user.
 - Do not overwrite existing data.
 - If the current mode is full_agent, prefer the active project workdir for local data lookup and output planning.
@@ -129,7 +132,8 @@ class AgenticPlanner:
         command: str,
         context: Dict[str, Any],
         mode: str = "semi_agent",
-        project_id: str | None = None
+        project_id: str | None = None,
+        request_id: str | None = None
     ) -> Dict[str, Any]:
         if mode == SEMI_AGENT_MODE:
             self.store.clear_workflows(mode=SEMI_AGENT_MODE)
@@ -150,6 +154,7 @@ class AgenticPlanner:
             project=project,
             context_hash=context_hash(context),
             operation_count=len(self.catalog.operations),
+            request_id=request_id or "",
         )
         messages = self._messages(command, context, tool_executor.operation_index(), mode, project)
         strategy = _PlannerStrategy(self, command, context, mode, project_id)
@@ -185,7 +190,10 @@ class AgenticPlanner:
         for tool_call in message.get("tool_calls") or []:
             name, arguments = tool_call_parts(tool_call)
             if name == "workflow_propose":
-                return workflow_from_proposal_arguments(arguments)
+                try:
+                    return workflow_from_proposal_arguments(arguments)
+                except AgentToolError:
+                    return None
         return None
 
     def _try_finalize(
@@ -454,6 +462,7 @@ def _validation_clarification_feedback(workflow: Dict[str, Any], trace: List[Dic
     return (
         "不要把 workflow_validate 的校验错误原样返回给用户。请根据上一条校验错误修正 workflow 后继续提交。"
         "属性 where 必须使用标准结构：{\"op\":\"and\",\"conditions\":[...]}，叶子条件必须有 op；"
+        "数组参数必须写成 JSON 数组，整数和数值必须写成 JSON number；"
         "导出目录参数按 operation schema 使用 output_folder，不要写 folder_path。不要向用户追问。"
     )
 
@@ -464,6 +473,8 @@ def _repair_limit_for_feedback(feedback: str) -> int:
 
 def _public_unfinalized_feedback(feedback: str, trace: List[Dict[str, Any]]) -> Tuple[str, bool]:
     text = str(feedback or "").strip()
+    if _is_workflow_structure_feedback(text):
+        return "这个任务可以执行，但模型连续生成了无效的任务结构，系统没有发送到 ArcMap。请重新发送一次任务。", True
     if not _needs_public_rewrite(text):
         return text, False
     tool = _latest_successful_toolbuilder_tool(trace)
@@ -498,6 +509,26 @@ def _is_internal_planner_feedback(feedback: str) -> bool:
         "toolbuilder_revise_draft 修订同一个工具",
         "自定义工具草稿没有通过 GeoPilot 契约校验",
         "不要把这个错误转成用户追问",
+        "workflow_json",
+        "workflow.steps 必须是数组",
+        "不能写成 {\"item\"",
+        "请修正 workflow_json",
+    )
+    return any(marker in text for marker in markers)
+
+
+def _is_workflow_structure_feedback(feedback: str) -> bool:
+    text = str(feedback or "")
+    markers = (
+        "workflow_json",
+        "workflow.steps 必须是数组",
+        "Workflow steps must be an array",
+        "must be array",
+        "must be integer",
+        "must be number",
+        "must be object",
+        "必须写成 JSON",
+        "不能写成 {\"item\"",
     )
     return any(marker in text for marker in markers)
 
@@ -505,9 +536,15 @@ def _is_internal_planner_feedback(feedback: str) -> bool:
 def _is_validation_repair_feedback(feedback: str) -> bool:
     text = str(feedback or "")
     markers = (
+        "workflow_json",
         "workflow 必须带 action",
+        "workflow.steps 必须是数组",
         "不要把 workflow_validate",
         "属性条件 where 缺少 op",
+        "must be array",
+        "must be integer",
+        "must be number",
+        "must be object",
         "写数据步骤缺少 output_name",
         "缺少必要参数",
         "叶子条件必须写 op",
@@ -532,6 +569,12 @@ def _looks_like_validation_feedback(summary: str) -> bool:
         "属性条件缺少 op",
         "where 缺少 op",
         "has unknown arguments",
+        "must be array",
+        "must be integer",
+        "must be number",
+        "must be object",
+        "workflow.steps 必须是数组",
+        "workflow_json",
         "missing required argument",
         "Workflow action",
         "Step missing field",

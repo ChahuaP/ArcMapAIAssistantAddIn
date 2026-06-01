@@ -1,4 +1,4 @@
-    const EXPECTED_GATEWAY_VERSION = '0.20.0';
+    const EXPECTED_GATEWAY_VERSION = '0.20.1';
     const API_ORIGIN = window.location.protocol === 'file:' ? 'http://127.0.0.1:8765' : '';
     const MODE_STORAGE_KEY = 'geopilot.currentMode';
     let eventSource = null;
@@ -17,6 +17,7 @@
     let transientAssistantMessage = '';
     let modelWait = null;
     let modelWaitTimer = null;
+    let activePlanRequestId = '';
     let repairingWorkflowIds = new Set();
     let providerOptions = [];
     let modelOptions = [];
@@ -215,7 +216,7 @@
 
     function startModelWait(label) {
       stopModelWait();
-      modelWait = {label, startedAt: Date.now()};
+      modelWait = {label, startedAt: Date.now(), stage: '', completedStageIndex: -1};
       updateModelWait();
       modelWaitTimer = window.setInterval(updateModelWait, 1000);
       const button = document.getElementById('sendButton');
@@ -228,6 +229,7 @@
         modelWaitTimer = null;
       }
       modelWait = null;
+      activePlanRequestId = '';
       const button = document.getElementById('sendButton');
       if (button) button.disabled = false;
     }
@@ -254,11 +256,11 @@
     }
 
     function modelWaitStageIndex() {
-      const order = ['sync_arcmap', 'read_capabilities', 'analyze', 'read_fields', 'model', 'generate_workflow', 'validate', 'execute_arcmap', 'complete'];
+      const order = ['sync_arcmap', 'read_capabilities', 'analyze', 'read_fields', 'generate_workflow', 'validate', 'execute_arcmap', 'complete', 'failed'];
       const stage = (modelWait && modelWait.stage) || (appState.agentProgress && appState.agentProgress.stage) || '';
       const index = order.indexOf(stage);
       if (index >= 0) return Math.min(7, index);
-      return Math.min(7, Math.floor(modelWaitElapsed() / 12));
+      return modelWait && modelWait.completedStageIndex >= 0 ? modelWait.completedStageIndex : Math.min(7, Math.floor(modelWaitElapsed() / 12));
     }
 
     function renderModelWait() {
@@ -282,7 +284,7 @@
           </div>
           <div class="model-wait-bar" aria-hidden="true"><span></span></div>
           <div class="model-wait-steps">
-            ${stages.map((stage, index) => `<span class="${index === active ? 'active' : ''}">${stage}</span>`).join('')}
+            ${stages.map((stage, index) => `<span class="${index === active ? 'active' : index < active ? 'done' : ''}">${stage}</span>`).join('')}
           </div>
           <div class="model-wait-note">${notes[active]}</div>
         </div>
@@ -858,7 +860,9 @@
       input.value = '';
       transientUserMessage = command;
       transientAssistantMessage = '';
+      const requestId = `plan-${Date.now()}-${Math.random().toString(16).slice(2)}`;
       startModelWait('模型正在思考');
+      activePlanRequestId = requestId;
       if (currentMode === 'full_agent') {
         renderConversation(cachedWorkflows);
       } else {
@@ -870,7 +874,7 @@
         const data = await api('/plan', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({command, mode: currentMode, project_id: currentMode === 'full_agent' && activeProject ? activeProject.id : ''})
+          body: JSON.stringify({command, mode: currentMode, project_id: currentMode === 'full_agent' && activeProject ? activeProject.id : '', request_id: requestId})
         });
         transientUserMessage = '';
         transientAssistantMessage = '';

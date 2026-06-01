@@ -43,6 +43,8 @@ Use `propose`, `approve-latest`, and `arcmap-execute-approved` only when the use
 - Direct data edits remain protected by ArcMap-side confirmation.
 - Full auto requires explicit user authorization. For direct source-data edits, require explicit `allow_edits`.
 - Geometry creation follows user intent: create one new output layer when the user asks for a new shp/layer, append to `target_layer` only when the user explicitly asks to add features into an existing layer, and create separate layers only when the user asks for separate outputs.
+- Intent mapping is strict: “创建面图层，WGS84” means `edit.create_empty_feature_layer`; “创建一个正方形/矩形/五角星/点/线” means a concrete `edit.create_*` feature operation; “加载 shp/kml/tif” means `layer.add_layer`; “复制某图层” means `data.copy_features`.
+- For upper-left/lower-right rectangle or square requests, use `edit.create_rectangle_polygon` with numeric `left/top/right/bottom`.
 - Do not plan “create many shapefiles then merge” for ordinary multi-feature creation. Use `features` arrays in `edit.create_*` when one output layer should contain multiple features.
 - ArcGIS feature classes cannot mix point, line, and polygon geometry in one layer. If the requested features mix geometry types and the user asked for one shp, ask a clarification instead of forcing a merge.
 - When multiple ArcMap instances are open, do not guess. Use `arcmap-list` and select the intended instance by `hwnd` before syncing or executing.

@@ -64,6 +64,8 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(operations["edit.create_star_polygon"]["output_policy"]["geometry_type"], "Polygon")
         self.assertEqual(operations["edit.append_star_polygons"]["side_effects"], "edits_data")
         self.assertEqual(operations["edit.append_star_polygons"]["output_policy"]["geometry_type"], "Polygon")
+        self.assertEqual(operations["edit.create_empty_feature_layer"]["output_policy"]["geometry_type"], "UserSelected")
+        self.assertEqual(operations["edit.create_rectangle_polygon"]["output_policy"]["geometry_type"], "Polygon")
         self.assertEqual(operations["data.repair_geometry"]["side_effects"], "edits_data")
         self.assertEqual(operations["layout.export_pdf"]["output_policy"]["type"], "file")
         star_properties = operations["edit.create_star_polygon"]["parameters_schema"]["properties"]

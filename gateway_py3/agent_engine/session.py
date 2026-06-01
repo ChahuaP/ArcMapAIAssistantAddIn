@@ -13,5 +13,6 @@ class AgentSession:
     project: Dict[str, Any] | None
     context_hash: str
     operation_count: int
+    request_id: str = ""
     permissions: Dict[str, Any] = field(default_factory=dict)
     history: List[Dict[str, Any]] = field(default_factory=list)

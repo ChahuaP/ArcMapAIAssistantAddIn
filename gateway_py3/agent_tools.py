@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import Any, Dict, List
@@ -111,26 +112,24 @@ class AgentToolRuntime:
             ),
             _tool(
                 "workflow_validate",
-                "Validate a proposed workflow locally before final proposal. Every execute step must include id, operation, arguments, and reason. Returns normalized workflow or a Chinese correction question.",
+                "Validate a proposed workflow locally before final proposal. Pass workflow_json as a valid JSON string, not a nested object. Every execute step must include id, operation, arguments, and reason. Returns normalized workflow or a Chinese correction question.",
                 {
                     "type": "object",
-                    "required": ["workflow"],
+                    "required": ["workflow_json"],
                     "properties": {
-                        "workflow": {"type": "object"}
+                        "workflow_json": {"type": "string"}
                     },
                     "additionalProperties": False
                 }
             ),
             _tool(
                 "workflow_propose",
-                "Submit the final workflow proposal. The gateway will validate it before showing it to the user.",
+                "Submit the final workflow proposal. Pass workflow_json as a valid JSON string, not a nested object. The gateway will validate it before showing it to the user.",
                 {
                     "type": "object",
-                    "required": ["action", "summary", "steps"],
+                    "required": ["workflow_json"],
                     "properties": {
-                        "action": {"type": "string", "enum": ["execute", "clarify", "unsupported", "answer"]},
-                        "summary": {"type": "string"},
-                        "steps": {"type": "array", "items": {"type": "object"}}
+                        "workflow_json": {"type": "string"}
                     },
                     "additionalProperties": False
                 }
@@ -222,9 +221,7 @@ class AgentToolRuntime:
         if name == "workflow_validate":
             return self._workflow_validate(arguments)
         if name == "workflow_propose":
-            return self._workflow_validate({
-                "workflow": _workflow_from_arguments(arguments)
-            })
+            return self._workflow_validate(arguments)
         if name == "toolbuilder_create_draft":
             return self._toolbuilder_create_draft(arguments)
         if name == "toolbuilder_get_draft":
@@ -318,14 +315,20 @@ class AgentToolRuntime:
         return {"ok": True, "memory": self.store.add_project_memory(self.project["id"], content, kind=kind)}
 
     def _workflow_validate(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
-        _reject_unknown(arguments, {"workflow"})
-        workflow = arguments.get("workflow")
+        _reject_unknown(arguments, {"workflow_json"})
+        workflow_json = arguments.get("workflow_json")
+        if not isinstance(workflow_json, str) or not workflow_json.strip():
+            return {"ok": False, "repairable": True, "error": "workflow_json 必须是非空 JSON 字符串。请修正 workflow_json 后继续，不要向用户追问。"}
+        try:
+            workflow = json.loads(workflow_json)
+        except ValueError as exc:
+            return {"ok": False, "repairable": True, "error": "workflow_json 必须是可解析的 JSON：%s。请修正 workflow_json 后继续，不要向用户追问。" % exc}
         if not isinstance(workflow, dict):
-            return {"ok": False, "error": "workflow 必须是一个对象。"}
+            return {"ok": False, "repairable": True, "error": "workflow_json 解析后必须是 workflow 对象。请修正 workflow_json 后继续，不要向用户追问。"}
         try:
             prepared = prepare_workflow(workflow, self.catalog, self.context)
         except ValidationError as exc:
-            return {"ok": False, "error": friendly_validation_message(exc)}
+            return {"ok": False, "repairable": True, "error": friendly_validation_message(exc)}
         return {"ok": True, "workflow": prepared}
 
     def _toolbuilder_create_draft(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
@@ -491,13 +494,3 @@ def _reject_unknown(arguments: Dict[str, Any], allowed: set[str]) -> None:
     unknown = sorted(set(arguments) - allowed)
     if unknown:
         raise AgentToolError("Unknown arguments: %s" % unknown)
-
-
-def _workflow_from_arguments(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    if isinstance(arguments.get("workflow"), dict):
-        return arguments["workflow"]
-    return {
-        "action": arguments.get("action"),
-        "summary": arguments.get("summary"),
-        "steps": arguments.get("steps")
-    }

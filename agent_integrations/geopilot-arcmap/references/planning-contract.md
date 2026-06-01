@@ -12,6 +12,9 @@ GeoPilot is the execution bridge for ArcMap. The external agent is the planner.
 - If a pending or rejected custom tool matches the goal, tell the user it must be reviewed/enabled or revised before execution.
 - If a custom tool has a bug or bad parameter design, revise the same tool. Do not create a second tool with the same purpose.
 - For direct geometry creation, use `edit.*` operations before creating a custom tool. A request such as “创建一个五角星 feature” should map to `edit.create_star_polygon` when the user supplies or can confirm center/radius/coordinate system.
+- Interpret “创建面图层，WGS84” as an empty polygon layer request and use `edit.create_empty_feature_layer` with `geometry_type=polygon` and `wkid=4326`; interpret “创建一个正方形/矩形/五角星/点/线” as a concrete feature creation request.
+- For rectangles or squares described by upper-left and lower-right corners, use `edit.create_rectangle_polygon` with numeric `left/top/right/bottom`; do not hand-build coordinate arrays unless that operation is unavailable.
+- Interpret “加载 shp/kml/tif” as `layer.add_layer`, and “复制某图层” as `data.copy_features`.
 - Geometry creation must follow user intent:
   - If the user asks for one new shp/layer containing many features, use the `features` array on the matching `edit.create_*` operation and write one output dataset.
   - If the user explicitly asks to add features into an existing layer, use the matching `edit.append_*` operation with `target_layer`; this is `edits_data` and requires edit authorization.

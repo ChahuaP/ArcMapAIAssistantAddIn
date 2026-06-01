@@ -2,6 +2,54 @@
   "pack": "edit_geometry",
   "operations": [
     {
+      "id": "edit.create_empty_feature_layer",
+      "version": "1.0",
+      "category": "edit_geometry",
+      "summary": "创建空的点、线或面要素图层。",
+      "keywords": ["create empty layer", "创建空图层", "创建面图层", "创建点图层", "创建线图层", "空要素类"],
+      "model_card": "Use edit.create_empty_feature_layer when the user asks to create a new empty point, polyline, or polygon layer/feature class, such as 创建面图层 WGS84, and does not provide feature coordinates. This creates a schema-empty feature class and adds it to ArcMap. Do not use this when the user asks to create a concrete point/line/polygon feature; use edit.create_point_features, edit.create_polyline_feature, edit.create_polygon_feature, edit.create_rectangle_polygon, edit.create_regular_polygon, or edit.create_star_polygon instead.",
+      "parameters_schema": {
+        "type": "object",
+        "required": ["geometry_type", "output_name"],
+        "properties": {
+          "geometry_type": {"type": "string", "enum": ["point", "polyline", "polygon"]},
+          "output_name": {"type": "string"},
+          "spatial_reference_layer": {"type": "string", "x-geopilot-kind": "layer"},
+          "wkid": {"type": "integer"},
+          "output_workspace": {"type": "string"},
+          "output_folder": {"type": "string"},
+          "output_format": {"type": "string", "enum": ["gdb", "shp"]}
+        },
+        "additionalProperties": false
+      },
+      "context_requirements": {
+        "requires_layers": false,
+        "requires_output_location_when_unsaved": true
+      },
+      "side_effects": "writes_data",
+      "output_policy": {
+        "writes_output": true,
+        "type": "feature_class",
+        "geometry_type": "UserSelected",
+        "formats": ["gdb", "shp"],
+        "default_format": "gdb",
+        "workspace": "mxd_default_or_output_workspace_or_output_folder",
+        "overwrite": false,
+        "add_to_map": true
+      },
+      "executor": "operations.edit_geometry_ops.create_empty_feature_layer",
+      "examples": [
+        {
+          "user": "创建一个 WGS84 面图层",
+          "arguments": {
+            "geometry_type": "polygon",
+            "wkid": 4326,
+            "output_name": "polygon_layer"
+          }
+        }
+      ]
+    },
+    {
       "id": "edit.create_point_features",
       "version": "1.0",
       "category": "edit_geometry",
@@ -317,6 +365,61 @@
             "target_layer": "parcels",
             "coordinates": [{"x": 0, "y": 0}, {"x": 10, "y": 0}, {"x": 10, "y": 10}, {"x": 0, "y": 10}],
             "name": "new_parcel"
+          }
+        }
+      ]
+    },
+    {
+      "id": "edit.create_rectangle_polygon",
+      "version": "1.0",
+      "category": "edit_geometry",
+      "summary": "根据左上角和右下角创建新的矩形面要素图层。",
+      "keywords": ["rectangle polygon", "矩形", "正方形", "左上角", "右下角", "创建矩形"],
+      "model_card": "Use edit.create_rectangle_polygon when the user gives a rectangle or square by left/top/right/bottom, upper-left and lower-right, or two opposite corners. Arguments are numeric left, top, right, bottom, output_name, and optional wkid/spatial_reference_layer/output location. For WGS84 longitude/latitude rectangles, left/right are longitudes and top/bottom are latitudes; set wkid=4326 when the user says WGS84.",
+      "parameters_schema": {
+        "type": "object",
+        "required": ["left", "top", "right", "bottom", "output_name"],
+        "properties": {
+          "left": {"type": "number"},
+          "top": {"type": "number"},
+          "right": {"type": "number"},
+          "bottom": {"type": "number"},
+          "output_name": {"type": "string"},
+          "name": {"type": "string"},
+          "spatial_reference_layer": {"type": "string", "x-geopilot-kind": "layer"},
+          "wkid": {"type": "integer"},
+          "output_workspace": {"type": "string"},
+          "output_folder": {"type": "string"},
+          "output_format": {"type": "string", "enum": ["gdb", "shp"]}
+        },
+        "additionalProperties": false
+      },
+      "context_requirements": {
+        "requires_layers": false,
+        "requires_output_location_when_unsaved": true
+      },
+      "side_effects": "writes_data",
+      "output_policy": {
+        "writes_output": true,
+        "type": "feature_class",
+        "geometry_type": "Polygon",
+        "formats": ["gdb", "shp"],
+        "default_format": "gdb",
+        "workspace": "mxd_default_or_output_workspace_or_output_folder",
+        "overwrite": false,
+        "add_to_map": true
+      },
+      "executor": "operations.edit_geometry_ops.create_rectangle_polygon",
+      "examples": [
+        {
+          "user": "创建一个正方形，左上角 120 30，右下角 125 20，WGS84",
+          "arguments": {
+            "left": 120,
+            "top": 30,
+            "right": 125,
+            "bottom": 20,
+            "wkid": 4326,
+            "output_name": "rectangle_120_30_125_20"
           }
         }
       ]

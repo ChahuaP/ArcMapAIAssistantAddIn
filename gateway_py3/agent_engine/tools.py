@@ -36,10 +36,13 @@ def tool_call_parts(tool_call: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
 
 
 def workflow_from_proposal_arguments(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    if isinstance(arguments.get("workflow"), dict):
-        return arguments["workflow"]
-    return {
-        "action": arguments.get("action"),
-        "summary": arguments.get("summary"),
-        "steps": arguments.get("steps"),
-    }
+    workflow_json = arguments.get("workflow_json")
+    if not isinstance(workflow_json, str) or not workflow_json.strip():
+        raise AgentToolError("workflow_propose must pass workflow_json as a non-empty JSON string.")
+    try:
+        workflow = json.loads(workflow_json)
+    except ValueError as exc:
+        raise AgentToolError("workflow_json must be valid JSON: %s" % exc)
+    if not isinstance(workflow, dict):
+        raise AgentToolError("workflow_json must decode to a workflow object.")
+    return workflow

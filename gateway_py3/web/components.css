@@ -134,6 +134,11 @@
       color: var(--primary-strong);
       font-weight: 760;
     }
+    .model-wait-steps span.done {
+      background: rgba(37, 145, 83, .12);
+      color: #126b34;
+      font-weight: 700;
+    }
     body.mode-full .model-wait-head strong {
       color: #fff7df;
     }
@@ -154,6 +159,10 @@
     body.mode-full .model-wait-steps span.active {
       background: rgba(240, 207, 114, .2);
       color: #fff0b8;
+    }
+    body.mode-full .model-wait-steps span.done {
+      background: rgba(155, 226, 176, .14);
+      color: #9be2b0;
     }
     .markdown-body {
       display: grid;

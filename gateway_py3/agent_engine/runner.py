@@ -38,7 +38,7 @@ class AgentRunner:
         pending_question = ""
         file_search_nudges = 0
         for _ in range(MAX_TOOL_ROUNDS):
-            publish_agent_progress(self.state, session, "model", "生成 workflow")
+            publish_agent_progress(self.state, session, "generate_workflow", "生成 workflow")
             response = self.client.chat_agent(messages, tools)
             assistant_message = response["message"]
             usage = response.get("usage", {})

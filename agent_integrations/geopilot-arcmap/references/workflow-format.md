@@ -77,6 +77,8 @@ Allowed operators: `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `between`, `in`, `like`
 
 ## Common operation families
 
+- `edit.create_empty_feature_layer`: create an empty point, polyline, or polygon layer/feature class when the user asks for a new empty layer.
+- `edit.create_rectangle_polygon`: create a rectangle/square polygon from `left/top/right/bottom`, especially when the user gives upper-left and lower-right corners.
 - `edit.create_*`: create point, line, polygon, regular polygon, or star polygon outputs from explicit coordinates. Use `features` arrays when one new output layer should contain multiple features.
 - `edit.append_*`: append new features into an existing target layer only when the user explicitly asks to write into that layer. These are direct data edits and require `allow_edits` in full auto.
 - `data.*`: copy features and geometry/data-management tools. Operations with `side_effects=edits_data` require edit authorization.

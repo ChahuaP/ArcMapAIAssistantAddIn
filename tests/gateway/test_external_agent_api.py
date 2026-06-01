@@ -190,6 +190,65 @@ class ExternalAgentApiTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["workflow"]["steps"][0]["operation"], "edit.create_star_polygon")
 
+    def test_validate_accepts_empty_feature_layer_workflow(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = WorkflowStore(pathlib.Path(directory) / "workflows.sqlite")
+            app.STATE = SimpleNamespace(
+                catalog=OperationCatalog(),
+                store=store,
+                planner=_PlannerThatMustNotRun()
+            )
+            workflow = {
+                "action": "execute",
+                "summary": "创建 WGS84 空面图层。",
+                "steps": [
+                    _step("step_1", "edit.create_empty_feature_layer", {
+                        "geometry_type": "polygon",
+                        "wkid": 4326,
+                        "output_name": "polygon_layer"
+                    }, "用户要求创建一个空的 WGS84 面图层。")
+                ]
+            }
+
+            result = app._external_agent_validate({
+                "context": _context(is_saved=True),
+                "workflow": workflow
+            })
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["workflow"]["steps"][0]["operation"], "edit.create_empty_feature_layer")
+
+    def test_validate_accepts_rectangle_polygon_workflow(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = WorkflowStore(pathlib.Path(directory) / "workflows.sqlite")
+            app.STATE = SimpleNamespace(
+                catalog=OperationCatalog(),
+                store=store,
+                planner=_PlannerThatMustNotRun()
+            )
+            workflow = {
+                "action": "execute",
+                "summary": "根据两角点创建 WGS84 矩形面。",
+                "steps": [
+                    _step("step_1", "edit.create_rectangle_polygon", {
+                        "left": 120,
+                        "top": 30,
+                        "right": 125,
+                        "bottom": 20,
+                        "wkid": 4326,
+                        "output_name": "rectangle_120_30_125_20"
+                    }, "用户给出左上角和右下角。")
+                ]
+            }
+
+            result = app._external_agent_validate({
+                "context": _context(is_saved=True),
+                "workflow": workflow
+            })
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["workflow"]["steps"][0]["arguments"]["wkid"], 4326)
+
     def test_validate_accepts_batch_geometry_creation_workflow(self):
         with tempfile.TemporaryDirectory() as directory:
             store = WorkflowStore(pathlib.Path(directory) / "workflows.sqlite")
@@ -469,12 +528,13 @@ class _DraftPlanner:
         self.store = store
         self.calls = []
 
-    def plan(self, command, context, mode="semi_agent", project_id=None):
+    def plan(self, command, context, mode="semi_agent", project_id=None, request_id=None):
         self.calls.append({
             "command": command,
             "context": context,
             "mode": mode,
-            "project_id": project_id
+            "project_id": project_id,
+            "request_id": request_id
         })
         return self.store.create_draft(
             command,
