@@ -77,6 +77,7 @@ Allowed operators: `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `between`, `in`, `like`
 
 ## Common operation families
 
-- `edit.*`: create point, line, polygon, regular polygon, or star polygon outputs from explicit coordinates. These write new datasets and do not directly edit source data.
+- `edit.create_*`: create point, line, polygon, regular polygon, or star polygon outputs from explicit coordinates. Use `features` arrays when one new output layer should contain multiple features.
+- `edit.append_*`: append new features into an existing target layer only when the user explicitly asks to write into that layer. These are direct data edits and require `allow_edits` in full auto.
 - `data.*`: copy features and geometry/data-management tools. Operations with `side_effects=edits_data` require edit authorization.
 - `layout.*`: inspect existing layout elements, update existing text elements, switch views, and export layout files.

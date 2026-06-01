@@ -5,9 +5,9 @@
       "id": "edit.create_point_features",
       "version": "1.0",
       "category": "edit_geometry",
-      "summary": "根据坐标创建点要素图层。",
+      "summary": "根据坐标创建新的点要素图层，可一次写入多个点。",
       "keywords": ["create point", "创建点", "坐标点", "点要素"],
-      "model_card": "Use edit.create_point_features to create a new point feature class from explicit coordinates. Arguments: points array of {x,y,name optional}, output_name, spatial_reference_layer optional, wkid optional, output_workspace/output_folder/output_format optional. If spatial_reference_layer and wkid are omitted, ArcMap uses the active data frame spatial reference and fails when it is unknown.",
+      "model_card": "Use edit.create_point_features to create one new point feature class from explicit coordinates. Put all requested point features in the points array; do not create one shapefile per point unless the user explicitly asks for separate layers. Arguments: points array of {x,y,name optional}, output_name, spatial_reference_layer optional, wkid optional, output_workspace/output_folder/output_format optional. If spatial_reference_layer and wkid are omitted, ArcMap uses the active data frame spatial reference and fails when it is unknown.",
       "parameters_schema": {
         "type": "object",
         "required": ["points", "output_name"],
@@ -54,20 +54,65 @@
       ]
     },
     {
+      "id": "edit.append_point_features",
+      "version": "1.0",
+      "category": "edit_geometry",
+      "summary": "向已有点图层追加点要素。",
+      "keywords": ["append point", "添加点", "追加点", "已有图层"],
+      "model_card": "Use edit.append_point_features only when the user wants to add point features into an existing point layer, such as 往某图层里继续创建点. This directly edits the target dataset and requires edit authorization. Arguments: target_layer, points array of {x,y,name optional}. Do not use this for creating a new output layer.",
+      "parameters_schema": {
+        "type": "object",
+        "required": ["target_layer", "points"],
+        "properties": {
+          "target_layer": {"type": "string", "x-geopilot-kind": "layer"},
+          "points": {
+            "type": "array",
+            "items": {"type": "object"},
+            "minItems": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "context_requirements": {
+        "requires_layers": true
+      },
+      "side_effects": "edits_data",
+      "output_policy": {
+        "writes_output": false,
+        "edits_target_layer": true,
+        "geometry_type": "Point"
+      },
+      "executor": "operations.edit_geometry_ops.append_point_features",
+      "examples": [
+        {
+          "user": "往 points 图层里添加两个点",
+          "arguments": {
+            "target_layer": "points",
+            "points": [{"x": 118.78, "y": 32.04, "name": "A"}, {"x": 118.79, "y": 32.05, "name": "B"}]
+          }
+        }
+      ]
+    },
+    {
       "id": "edit.create_polyline_feature",
       "version": "1.0",
       "category": "edit_geometry",
-      "summary": "根据坐标序列创建线要素图层。",
+      "summary": "根据坐标序列创建新的线要素图层，可一次写入多条线。",
       "keywords": ["create line", "创建线", "折线", "线要素"],
-      "model_card": "Use edit.create_polyline_feature to create a new polyline feature class from ordered coordinates. Arguments: coordinates array of {x,y}, output_name, name optional, spatial_reference_layer optional, wkid optional, output location optional.",
+      "model_card": "Use edit.create_polyline_feature to create one new polyline feature class. For one line, pass coordinates and optional name. For multiple lines in the same output layer, pass features array items with coordinates and optional name. Do not create one shapefile per line unless the user explicitly asks for separate layers. Arguments: coordinates or features, output_name, spatial_reference_layer optional, wkid optional, output location optional.",
       "parameters_schema": {
         "type": "object",
-        "required": ["coordinates", "output_name"],
+        "required": ["output_name"],
         "properties": {
           "coordinates": {
             "type": "array",
             "items": {"type": "object"},
             "minItems": 2
+          },
+          "features": {
+            "type": "array",
+            "items": {"type": "object"},
+            "minItems": 1
           },
           "output_name": {"type": "string"},
           "name": {"type": "string"},
@@ -102,6 +147,63 @@
             "coordinates": [{"x": 0, "y": 0}, {"x": 10, "y": 10}],
             "output_name": "line_from_points"
           }
+        },
+        {
+          "user": "把两条道路线创建到同一个 shp",
+          "arguments": {
+            "features": [
+              {"name": "road_1", "coordinates": [{"x": 0, "y": 0}, {"x": 10, "y": 10}]},
+              {"name": "road_2", "coordinates": [{"x": 0, "y": 1}, {"x": 10, "y": 11}]}
+            ],
+            "output_name": "roads"
+          }
+        }
+      ]
+    },
+    {
+      "id": "edit.append_polyline_features",
+      "version": "1.0",
+      "category": "edit_geometry",
+      "summary": "向已有线图层追加线要素。",
+      "keywords": ["append line", "添加线", "追加线", "已有图层"],
+      "model_card": "Use edit.append_polyline_features only when the user wants to add polyline features into an existing line layer. This directly edits the target dataset and requires edit authorization. For one line, pass coordinates and optional name. For multiple lines, pass features array items with coordinates and optional name.",
+      "parameters_schema": {
+        "type": "object",
+        "required": ["target_layer"],
+        "properties": {
+          "target_layer": {"type": "string", "x-geopilot-kind": "layer"},
+          "coordinates": {
+            "type": "array",
+            "items": {"type": "object"},
+            "minItems": 2
+          },
+          "features": {
+            "type": "array",
+            "items": {"type": "object"},
+            "minItems": 1
+          },
+          "name": {"type": "string"}
+        },
+        "additionalProperties": false
+      },
+      "context_requirements": {
+        "requires_layers": true
+      },
+      "side_effects": "edits_data",
+      "output_policy": {
+        "writes_output": false,
+        "edits_target_layer": true,
+        "geometry_type": "Polyline"
+      },
+      "executor": "operations.edit_geometry_ops.append_polyline_features",
+      "examples": [
+        {
+          "user": "往 roads 图层里继续添加一条线",
+          "arguments": {
+            "target_layer": "roads",
+            "coordinates": [{"x": 0, "y": 0}, {"x": 10, "y": 10}],
+            "name": "new_road"
+          }
         }
       ]
     },
@@ -109,17 +211,22 @@
       "id": "edit.create_polygon_feature",
       "version": "1.0",
       "category": "edit_geometry",
-      "summary": "根据坐标环创建面要素图层。",
+      "summary": "根据坐标环创建新的面要素图层，可一次写入多个面。",
       "keywords": ["create polygon", "创建面", "多边形", "面要素"],
-      "model_card": "Use edit.create_polygon_feature to create a new polygon feature class from a ring of coordinates. Arguments: coordinates array of {x,y}, output_name, name optional, spatial_reference_layer optional, wkid optional, output location optional. The runtime closes the ring if the last point is not equal to the first point.",
+      "model_card": "Use edit.create_polygon_feature to create one new polygon feature class. For one polygon, pass coordinates and optional name. For multiple polygons in the same output layer, pass features array items with coordinates and optional name. Do not create one shapefile per polygon unless the user explicitly asks for separate layers. The runtime closes each ring if the last point is not equal to the first point.",
       "parameters_schema": {
         "type": "object",
-        "required": ["coordinates", "output_name"],
+        "required": ["output_name"],
         "properties": {
           "coordinates": {
             "type": "array",
             "items": {"type": "object"},
             "minItems": 3
+          },
+          "features": {
+            "type": "array",
+            "items": {"type": "object"},
+            "minItems": 1
           },
           "output_name": {"type": "string"},
           "name": {"type": "string"},
@@ -154,6 +261,63 @@
             "coordinates": [{"x": 0, "y": 0}, {"x": 10, "y": 0}, {"x": 10, "y": 10}, {"x": 0, "y": 10}],
             "output_name": "polygon_from_ring"
           }
+        },
+        {
+          "user": "把两个地块创建到同一个图层",
+          "arguments": {
+            "features": [
+              {"name": "parcel_1", "coordinates": [{"x": 0, "y": 0}, {"x": 10, "y": 0}, {"x": 10, "y": 10}, {"x": 0, "y": 10}]},
+              {"name": "parcel_2", "coordinates": [{"x": 20, "y": 0}, {"x": 30, "y": 0}, {"x": 30, "y": 10}, {"x": 20, "y": 10}]}
+            ],
+            "output_name": "parcels"
+          }
+        }
+      ]
+    },
+    {
+      "id": "edit.append_polygon_features",
+      "version": "1.0",
+      "category": "edit_geometry",
+      "summary": "向已有面图层追加面要素。",
+      "keywords": ["append polygon", "添加面", "追加面", "已有图层"],
+      "model_card": "Use edit.append_polygon_features only when the user wants to add polygon features into an existing polygon layer. This directly edits the target dataset and requires edit authorization. For one polygon, pass coordinates and optional name. For multiple polygons, pass features array items with coordinates and optional name.",
+      "parameters_schema": {
+        "type": "object",
+        "required": ["target_layer"],
+        "properties": {
+          "target_layer": {"type": "string", "x-geopilot-kind": "layer"},
+          "coordinates": {
+            "type": "array",
+            "items": {"type": "object"},
+            "minItems": 3
+          },
+          "features": {
+            "type": "array",
+            "items": {"type": "object"},
+            "minItems": 1
+          },
+          "name": {"type": "string"}
+        },
+        "additionalProperties": false
+      },
+      "context_requirements": {
+        "requires_layers": true
+      },
+      "side_effects": "edits_data",
+      "output_policy": {
+        "writes_output": false,
+        "edits_target_layer": true,
+        "geometry_type": "Polygon"
+      },
+      "executor": "operations.edit_geometry_ops.append_polygon_features",
+      "examples": [
+        {
+          "user": "往 parcels 图层里继续添加一个面",
+          "arguments": {
+            "target_layer": "parcels",
+            "coordinates": [{"x": 0, "y": 0}, {"x": 10, "y": 0}, {"x": 10, "y": 10}, {"x": 0, "y": 10}],
+            "name": "new_parcel"
+          }
         }
       ]
     },
@@ -161,12 +325,12 @@
       "id": "edit.create_regular_polygon",
       "version": "1.0",
       "category": "edit_geometry",
-      "summary": "按中心点、半径和边数创建正多边形。",
+      "summary": "按中心点、半径和边数创建新的正多边形图层，可一次写入多个面。",
       "keywords": ["regular polygon", "正多边形", "五边形", "六边形"],
-      "model_card": "Use edit.create_regular_polygon to create a regular polygon feature class. Arguments: center_x, center_y, radius, radius_unit, sides, output_name, start_angle_degrees optional default -90, spatial_reference_layer optional, wkid optional. radius_unit must be map_units, meters, or degrees. Use degrees only in a geographic coordinate system; use meters only in a projected coordinate system.",
+      "model_card": "Use edit.create_regular_polygon to create one new polygon feature class containing regular polygon features. For one polygon, pass center_x, center_y, radius, radius_unit, sides, and output_name. For multiple regular polygons in the same output layer, pass features array items with center_x, center_y, radius, radius_unit, sides, optional name; shared values such as radius_unit or sides may stay at top level. Do not create one shapefile per polygon unless the user explicitly asks for separate layers. radius_unit must be map_units, meters, or degrees.",
       "parameters_schema": {
         "type": "object",
-        "required": ["center_x", "center_y", "radius", "radius_unit", "sides", "output_name"],
+        "required": ["output_name"],
         "properties": {
           "center_x": {"type": "number"},
           "center_y": {"type": "number"},
@@ -174,6 +338,11 @@
           "radius_unit": {"type": "string", "enum": ["map_units", "meters", "degrees"]},
           "sides": {"type": "integer"},
           "start_angle_degrees": {"type": "number"},
+          "features": {
+            "type": "array",
+            "items": {"type": "object"},
+            "minItems": 1
+          },
           "name": {"type": "string"},
           "output_name": {"type": "string"},
           "spatial_reference_layer": {"type": "string", "x-geopilot-kind": "layer"},
@@ -211,6 +380,72 @@
             "sides": 5,
             "output_name": "regular_pentagon"
           }
+        },
+        {
+          "user": "创建三个正五边形到同一个图层",
+          "arguments": {
+            "features": [
+              {"center_x": 500000, "center_y": 3500000, "name": "pentagon_1"},
+              {"center_x": 501000, "center_y": 3500000, "name": "pentagon_2"},
+              {"center_x": 502000, "center_y": 3500000, "name": "pentagon_3"}
+            ],
+            "radius": 100,
+            "radius_unit": "meters",
+            "sides": 5,
+            "output_name": "pentagons"
+          }
+        }
+      ]
+    },
+    {
+      "id": "edit.append_regular_polygons",
+      "version": "1.0",
+      "category": "edit_geometry",
+      "summary": "向已有面图层追加正多边形要素。",
+      "keywords": ["append regular polygon", "追加正多边形", "已有图层"],
+      "model_card": "Use edit.append_regular_polygons only when the user wants to add regular polygon features into an existing polygon layer. This directly edits the target dataset and requires edit authorization. For one polygon, pass center_x, center_y, radius, radius_unit, sides, optional name. For multiple polygons, pass features array items; shared radius_unit, radius, sides, or start_angle_degrees may stay at top level.",
+      "parameters_schema": {
+        "type": "object",
+        "required": ["target_layer"],
+        "properties": {
+          "target_layer": {"type": "string", "x-geopilot-kind": "layer"},
+          "center_x": {"type": "number"},
+          "center_y": {"type": "number"},
+          "radius": {"type": "number"},
+          "radius_unit": {"type": "string", "enum": ["map_units", "meters", "degrees"]},
+          "sides": {"type": "integer"},
+          "start_angle_degrees": {"type": "number"},
+          "features": {
+            "type": "array",
+            "items": {"type": "object"},
+            "minItems": 1
+          },
+          "name": {"type": "string"}
+        },
+        "additionalProperties": false
+      },
+      "context_requirements": {
+        "requires_layers": true
+      },
+      "side_effects": "edits_data",
+      "output_policy": {
+        "writes_output": false,
+        "edits_target_layer": true,
+        "geometry_type": "Polygon"
+      },
+      "executor": "operations.edit_geometry_ops.append_regular_polygons",
+      "examples": [
+        {
+          "user": "往 parcels 图层里添加一个正五边形",
+          "arguments": {
+            "target_layer": "parcels",
+            "center_x": 500000,
+            "center_y": 3500000,
+            "radius": 100,
+            "radius_unit": "meters",
+            "sides": 5,
+            "name": "new_pentagon"
+          }
         }
       ]
     },
@@ -218,12 +453,12 @@
       "id": "edit.create_star_polygon",
       "version": "1.0",
       "category": "edit_geometry",
-      "summary": "按中心点和半径创建星形面要素。",
+      "summary": "按中心点和半径创建新的星形面图层，可一次写入多个星形要素。",
       "keywords": ["star polygon", "五角星", "星形", "创建五角星"],
-      "model_card": "Use edit.create_star_polygon when the user asks to create a star feature, including 五角星. Arguments: center_x, center_y, outer_radius, outer_radius_unit, output_name, point_count optional default 5, inner_radius optional, inner_radius_unit optional, start_angle_degrees optional default -90, spatial_reference_layer optional, wkid optional. Units follow the same rule as regular polygon: degrees only for geographic coordinate systems, meters only for projected coordinate systems, map_units uses raw map units.",
+      "model_card": "Use edit.create_star_polygon when the user asks to create star polygon features, including 五角星. For one star, pass center_x, center_y, outer_radius, outer_radius_unit, output_name, optional point_count. For multiple stars in the same output layer, pass features array items with center_x, center_y, optional name; shared outer_radius, outer_radius_unit, inner_radius, inner_radius_unit, point_count, or start_angle_degrees may stay at top level. Do not create one shapefile per star unless the user explicitly asks for separate layers.",
       "parameters_schema": {
         "type": "object",
-        "required": ["center_x", "center_y", "outer_radius", "outer_radius_unit", "output_name"],
+        "required": ["output_name"],
         "properties": {
           "center_x": {"type": "number"},
           "center_y": {"type": "number"},
@@ -233,6 +468,11 @@
           "inner_radius_unit": {"type": "string", "enum": ["map_units", "meters", "degrees"]},
           "point_count": {"type": "integer"},
           "start_angle_degrees": {"type": "number"},
+          "features": {
+            "type": "array",
+            "items": {"type": "object"},
+            "minItems": 1
+          },
           "name": {"type": "string"},
           "output_name": {"type": "string"},
           "spatial_reference_layer": {"type": "string", "x-geopilot-kind": "layer"},
@@ -270,6 +510,75 @@
             "point_count": 5,
             "wkid": 4326,
             "output_name": "star_feature"
+          }
+        },
+        {
+          "user": "创建多个五角星到同一个 shp",
+          "arguments": {
+            "features": [
+              {"center_x": 118.78, "center_y": 32.04, "name": "star_1"},
+              {"center_x": 118.79, "center_y": 32.05, "name": "star_2"}
+            ],
+            "outer_radius": 0.01,
+            "outer_radius_unit": "degrees",
+            "point_count": 5,
+            "wkid": 4326,
+            "output_name": "stars"
+          }
+        }
+      ]
+    },
+    {
+      "id": "edit.append_star_polygons",
+      "version": "1.0",
+      "category": "edit_geometry",
+      "summary": "向已有面图层追加星形面要素。",
+      "keywords": ["append star polygon", "追加五角星", "添加五角星", "已有图层"],
+      "model_card": "Use edit.append_star_polygons only when the user wants to add star polygon features into an existing polygon layer. This directly edits the target dataset and requires edit authorization. For one star, pass center_x, center_y, outer_radius, outer_radius_unit, optional point_count and name. For multiple stars, pass features array items; shared radius/unit/point_count may stay at top level.",
+      "parameters_schema": {
+        "type": "object",
+        "required": ["target_layer"],
+        "properties": {
+          "target_layer": {"type": "string", "x-geopilot-kind": "layer"},
+          "center_x": {"type": "number"},
+          "center_y": {"type": "number"},
+          "outer_radius": {"type": "number"},
+          "outer_radius_unit": {"type": "string", "enum": ["map_units", "meters", "degrees"]},
+          "inner_radius": {"type": "number"},
+          "inner_radius_unit": {"type": "string", "enum": ["map_units", "meters", "degrees"]},
+          "point_count": {"type": "integer"},
+          "start_angle_degrees": {"type": "number"},
+          "features": {
+            "type": "array",
+            "items": {"type": "object"},
+            "minItems": 1
+          },
+          "name": {"type": "string"}
+        },
+        "additionalProperties": false
+      },
+      "context_requirements": {
+        "requires_layers": true
+      },
+      "side_effects": "edits_data",
+      "output_policy": {
+        "writes_output": false,
+        "edits_target_layer": true,
+        "geometry_type": "Polygon"
+      },
+      "executor": "operations.edit_geometry_ops.append_star_polygons",
+      "examples": [
+        {
+          "user": "往 stars 图层里继续添加两个五角星",
+          "arguments": {
+            "target_layer": "stars",
+            "features": [
+              {"center_x": 118.78, "center_y": 32.04, "name": "star_1"},
+              {"center_x": 118.79, "center_y": 32.05, "name": "star_2"}
+            ],
+            "outer_radius": 0.01,
+            "outer_radius_unit": "degrees",
+            "point_count": 5
           }
         }
       ]

@@ -1,4 +1,4 @@
-    const EXPECTED_GATEWAY_VERSION = '0.16.2';
+    const EXPECTED_GATEWAY_VERSION = '0.17.1';
     const API_ORIGIN = window.location.protocol === 'file:' ? 'http://127.0.0.1:8765' : '';
     const POLL_INTERVAL_MS = 2500;
     const HEALTH_INTERVAL_MS = 10000;

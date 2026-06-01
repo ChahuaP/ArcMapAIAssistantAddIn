@@ -16,11 +16,13 @@ from .paths import config_path, localappdata_dir
 DEEPSEEK_PROVIDER = "deepseek"
 MINIMAX_PROVIDER = "minimax"
 ZHIPU_PROVIDER = "zhipu"
-SUPPORTED_PROVIDERS = (DEEPSEEK_PROVIDER, MINIMAX_PROVIDER, ZHIPU_PROVIDER)
+QWEN_PROVIDER = "qwen"
+SUPPORTED_PROVIDERS = (DEEPSEEK_PROVIDER, MINIMAX_PROVIDER, ZHIPU_PROVIDER, QWEN_PROVIDER)
 SEMI_AGENT_MODE = "semi_agent"
 FULL_AGENT_MODE = "full_agent"
 MINIMAX_TOKEN_PLAN_BASE_URL = "https://api.minimaxi.com/v1"
 ZHIPU_BASE_URL = "https://open.bigmodel.cn/api/paas/v4"
+QWEN_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 MODEL_REQUEST_TIMEOUT_SECONDS = 300
 MINIMAX_TEXT_TOOL_CALL_RE = re.compile(r"<minimax:tool_call>(.*?)</minimax:tool_call>", re.IGNORECASE | re.DOTALL)
 MINIMAX_TEXT_INVOKE_RE = re.compile(r"<invoke\s+name=\"([^\"]+)\">(.*?)</invoke>", re.IGNORECASE | re.DOTALL)
@@ -49,6 +51,12 @@ MODEL_OPTIONS = (
         "provider": MINIMAX_PROVIDER,
         "model": "MiniMax-M2.7",
         "label": "MiniMax M2.7",
+        "thinking": False,
+    },
+    {
+        "provider": QWEN_PROVIDER,
+        "model": "qwen3.6-flash-2026-04-16",
+        "label": "千问 Qwen3.6 Flash",
         "thinking": False,
     },
 )
@@ -81,6 +89,10 @@ DEFAULT_CONFIG = {
             "model": "glm-5.1",
             "base_url": ZHIPU_BASE_URL,
         },
+        QWEN_PROVIDER: {
+            "model": "qwen3.6-flash-2026-04-16",
+            "base_url": QWEN_BASE_URL,
+        },
     },
 }
 
@@ -88,11 +100,13 @@ ENV_KEYS = {
     DEEPSEEK_PROVIDER: "DEEPSEEK_API_KEY",
     MINIMAX_PROVIDER: "MINIMAX_API_KEY",
     ZHIPU_PROVIDER: "ZHIPU_API_KEY",
+    QWEN_PROVIDER: "DASHSCOPE_API_KEY",
 }
 ENV_KEY_ALIASES = {
     DEEPSEEK_PROVIDER: ("DEEPSEEK_API_KEY",),
     MINIMAX_PROVIDER: ("MINIMAX_API_KEY",),
     ZHIPU_PROVIDER: ("ZHIPU_API_KEY", "BIGMODEL_API_KEY"),
+    QWEN_PROVIDER: ("DASHSCOPE_API_KEY", "QWEN_API_KEY", "BAILIAN_API_KEY"),
 }
 PROVIDER_OPTIONS = (
     {
@@ -112,6 +126,12 @@ PROVIDER_OPTIONS = (
         "label": "智谱",
         "env_key": ENV_KEYS[ZHIPU_PROVIDER],
         "key_placeholder": "智谱开放平台 Key",
+    },
+    {
+        "id": QWEN_PROVIDER,
+        "label": "千问",
+        "env_key": ENV_KEYS[QWEN_PROVIDER],
+        "key_placeholder": "阿里云百炼 API Key",
     },
 )
 
@@ -224,6 +244,10 @@ class ZhipuProvider(ChatProvider):
         return body
 
 
+class QwenProvider(ChatProvider):
+    provider_id = QWEN_PROVIDER
+
+
 def create_provider(mode: str | None = None, provider_id: str | None = None) -> ChatProvider:
     selected = provider_id or provider_for_mode(mode or public_config()["default_mode"])
     model = None if provider_id else model_for_mode(mode or public_config()["default_mode"])
@@ -233,6 +257,8 @@ def create_provider(mode: str | None = None, provider_id: str | None = None) -> 
         return MiniMaxProvider(model=model)
     if selected == ZHIPU_PROVIDER:
         return ZhipuProvider(model=model)
+    if selected == QWEN_PROVIDER:
+        return QwenProvider(model=model)
     raise ProviderError("未知模型供应商：%s。" % selected)
 
 
@@ -290,6 +316,7 @@ def public_config(config: Dict[str, Any] | None = None) -> Dict[str, Any]:
         "has_deepseek_api_key": providers[DEEPSEEK_PROVIDER]["has_api_key"],
         "has_minimax_api_key": providers[MINIMAX_PROVIDER]["has_api_key"],
         "has_zhipu_api_key": providers[ZHIPU_PROVIDER]["has_api_key"],
+        "has_qwen_api_key": providers[QWEN_PROVIDER]["has_api_key"],
     }
 
 
@@ -443,6 +470,7 @@ def provider_label(provider_id: str) -> str:
         DEEPSEEK_PROVIDER: "DeepSeek",
         MINIMAX_PROVIDER: "MiniMax",
         ZHIPU_PROVIDER: "智谱",
+        QWEN_PROVIDER: "千问",
     }.get(provider_id, provider_id)
 
 
@@ -457,6 +485,8 @@ def provider_http_error(provider_id: str, status_code: int, detail: str) -> str:
             return "DeepSeek API Key 无效。请在右上角“API Key”里重新保存 DeepSeek API Key。原始信息：%s" % readable
         if provider_id == ZHIPU_PROVIDER:
             return "智谱 API Key 无效。请在右上角“API Key”里重新保存智谱 API Key。原始信息：%s" % readable
+        if provider_id == QWEN_PROVIDER:
+            return "千问 API Key 无效。请在右上角“API Key”里重新保存阿里云百炼 API Key，并确认接口地址为 https://dashscope.aliyuncs.com/compatible-mode/v1。原始信息：%s" % readable
     return "%s HTTP %s：%s" % (label, status_code, readable)
 
 

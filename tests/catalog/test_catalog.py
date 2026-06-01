@@ -62,9 +62,13 @@ class CatalogTests(unittest.TestCase):
                 operations[operation["id"]] = operation
 
         self.assertEqual(operations["edit.create_star_polygon"]["output_policy"]["geometry_type"], "Polygon")
+        self.assertEqual(operations["edit.append_star_polygons"]["side_effects"], "edits_data")
+        self.assertEqual(operations["edit.append_star_polygons"]["output_policy"]["geometry_type"], "Polygon")
         self.assertEqual(operations["data.repair_geometry"]["side_effects"], "edits_data")
         self.assertEqual(operations["layout.export_pdf"]["output_policy"]["type"], "file")
         star_properties = operations["edit.create_star_polygon"]["parameters_schema"]["properties"]
+        self.assertIn("features", star_properties)
+        self.assertEqual(operations["edit.create_star_polygon"]["parameters_schema"]["required"], ["output_name"])
         self.assertEqual(star_properties["outer_radius_unit"]["enum"], ["map_units", "meters", "degrees"])
 
     def test_python_addin_registers_auto_gateway_extension(self):

@@ -13,36 +13,87 @@ def create_point_features(context, arguments, step_outputs):
     spatial_reference = _spatial_reference(context, arguments, step_outputs)
     output = _create_feature_class(context, arguments, "POINT", spatial_reference)
     _add_name_field(output)
-    rows = []
-    for index, item in enumerate(arguments["points"], 1):
-        x, y = _point_xy(item)
-        name = _feature_name(item, "point_%s" % index)
-        geometry = arcpy.PointGeometry(arcpy.Point(x, y), spatial_reference)
-        rows.append((geometry, name))
-    _insert_rows(output, rows)
+    rows = _point_rows(arguments["points"], spatial_reference)
+    names_written = _insert_rows(output, rows)
     common.add_output_layer(output)
-    return {"output": output, "feature_count": len(rows), "geometry_type": "Point"}
+    return {"output": output, "feature_count": len(rows), "geometry_type": "Point", "names_written": names_written}
+
+
+def append_point_features(context, arguments, step_outputs):
+    target, spatial_reference = _target_layer(context, arguments, step_outputs, "Point")
+    rows = _point_rows(arguments["points"], spatial_reference)
+    names_written = _insert_rows(target, rows)
+    common.refresh()
+    return {
+        "target_layer": _layer_name(target),
+        "feature_count": len(rows),
+        "geometry_type": "Point",
+        "names_written": names_written
+    }
 
 
 def create_polyline_feature(context, arguments, step_outputs):
     spatial_reference = _spatial_reference(context, arguments, step_outputs)
-    points = _points(arguments["coordinates"], min_count=2)
     output = _create_feature_class(context, arguments, "POLYLINE", spatial_reference)
     _add_name_field(output)
-    geometry = arcpy.Polyline(arcpy.Array([arcpy.Point(x, y) for x, y in points]), spatial_reference)
-    _insert_rows(output, [(geometry, arguments.get("name") or arguments["output_name"])])
+    rows = _polyline_rows(arguments, spatial_reference)
+    names_written = _insert_rows(output, rows)
     common.add_output_layer(output)
-    return {"output": output, "feature_count": 1, "geometry_type": "Polyline"}
+    return {"output": output, "feature_count": len(rows), "geometry_type": "Polyline", "names_written": names_written}
+
+
+def append_polyline_features(context, arguments, step_outputs):
+    target, spatial_reference = _target_layer(context, arguments, step_outputs, "Polyline")
+    rows = _polyline_rows(arguments, spatial_reference)
+    names_written = _insert_rows(target, rows)
+    common.refresh()
+    return {
+        "target_layer": _layer_name(target),
+        "feature_count": len(rows),
+        "geometry_type": "Polyline",
+        "names_written": names_written
+    }
 
 
 def create_polygon_feature(context, arguments, step_outputs):
     spatial_reference = _spatial_reference(context, arguments, step_outputs)
-    points = _closed_ring(_points(arguments["coordinates"], min_count=3))
-    return _create_polygon_output(context, arguments, spatial_reference, points)
+    rows = _polygon_rows(arguments, spatial_reference)
+    return _create_polygon_output(context, arguments, spatial_reference, rows)
+
+
+def append_polygon_features(context, arguments, step_outputs):
+    target, spatial_reference = _target_layer(context, arguments, step_outputs, "Polygon")
+    rows = _polygon_rows(arguments, spatial_reference)
+    names_written = _insert_rows(target, rows)
+    common.refresh()
+    return {
+        "target_layer": _layer_name(target),
+        "feature_count": len(rows),
+        "geometry_type": "Polygon",
+        "names_written": names_written
+    }
 
 
 def create_regular_polygon(context, arguments, step_outputs):
     spatial_reference = _spatial_reference(context, arguments, step_outputs)
+    rows = _regular_polygon_rows(arguments, spatial_reference)
+    return _create_polygon_output(context, arguments, spatial_reference, rows)
+
+
+def append_regular_polygons(context, arguments, step_outputs):
+    target, spatial_reference = _target_layer(context, arguments, step_outputs, "Polygon")
+    rows = _regular_polygon_rows(arguments, spatial_reference)
+    names_written = _insert_rows(target, rows)
+    common.refresh()
+    return {
+        "target_layer": _layer_name(target),
+        "feature_count": len(rows),
+        "geometry_type": "Polygon",
+        "names_written": names_written
+    }
+
+
+def _regular_polygon_geometry(arguments, spatial_reference):
     sides = int(arguments["sides"])
     if sides < 3:
         raise common.OperationError(u"正多边形 sides 必须大于等于 3。")
@@ -57,11 +108,29 @@ def create_regular_polygon(context, arguments, step_outputs):
         start_angle,
         360.0 / sides
     )
-    return _create_polygon_output(context, arguments, spatial_reference, _closed_ring(points))
+    return _polygon_geometry(_closed_ring(points), spatial_reference)
 
 
 def create_star_polygon(context, arguments, step_outputs):
     spatial_reference = _spatial_reference(context, arguments, step_outputs)
+    rows = _star_polygon_rows(arguments, spatial_reference)
+    return _create_polygon_output(context, arguments, spatial_reference, rows)
+
+
+def append_star_polygons(context, arguments, step_outputs):
+    target, spatial_reference = _target_layer(context, arguments, step_outputs, "Polygon")
+    rows = _star_polygon_rows(arguments, spatial_reference)
+    names_written = _insert_rows(target, rows)
+    common.refresh()
+    return {
+        "target_layer": _layer_name(target),
+        "feature_count": len(rows),
+        "geometry_type": "Polygon",
+        "names_written": names_written
+    }
+
+
+def _star_polygon_geometry(arguments, spatial_reference):
     point_count = int(arguments.get("point_count", 5))
     if point_count < 3:
         raise common.OperationError(u"星形 point_count 必须大于等于 3。")
@@ -86,16 +155,15 @@ def create_star_polygon(context, arguments, step_outputs):
         float(arguments.get("start_angle_degrees", -90.0)),
         180.0 / point_count
     )
-    return _create_polygon_output(context, arguments, spatial_reference, _closed_ring(points))
+    return _polygon_geometry(_closed_ring(points), spatial_reference)
 
 
-def _create_polygon_output(context, arguments, spatial_reference, points):
+def _create_polygon_output(context, arguments, spatial_reference, rows):
     output = _create_feature_class(context, arguments, "POLYGON", spatial_reference)
     _add_name_field(output)
-    geometry = arcpy.Polygon(arcpy.Array([arcpy.Point(x, y) for x, y in points]), spatial_reference)
-    _insert_rows(output, [(geometry, arguments.get("name") or arguments["output_name"])])
+    names_written = _insert_rows(output, rows)
     common.add_output_layer(output)
-    return {"output": output, "feature_count": 1, "geometry_type": "Polygon"}
+    return {"output": output, "feature_count": len(rows), "geometry_type": "Polygon", "names_written": names_written}
 
 
 def _create_feature_class(context, arguments, geometry_type, spatial_reference):
@@ -113,13 +181,44 @@ def _create_feature_class(context, arguments, geometry_type, spatial_reference):
 
 
 def _add_name_field(output):
-    arcpy.AddField_management(output, "NAME", "TEXT", "", "", 255)
+    if not _name_field(output):
+        arcpy.AddField_management(output, "NAME", "TEXT", "", "", 255)
 
 
 def _insert_rows(output, rows):
-    with arcpy.da.InsertCursor(output, ["SHAPE@", "NAME"]) as cursor:
+    name_field = _name_field(output)
+    fields = ["SHAPE@"]
+    if name_field:
+        fields.append(name_field)
+    with arcpy.da.InsertCursor(output, fields) as cursor:
         for geometry, name in rows:
-            cursor.insertRow([geometry, common._text(name)[:255]])
+            if name_field:
+                cursor.insertRow([geometry, common._text(name)[:255]])
+            else:
+                cursor.insertRow([geometry])
+    return bool(name_field)
+
+
+def _name_field(output):
+    for field in arcpy.ListFields(output):
+        if common._text(getattr(field, "name", "")).lower() == "name":
+            return getattr(field, "name")
+    return None
+
+
+def _target_layer(context, arguments, step_outputs, expected_shape_type):
+    target = common.find_layer(context, arguments["target_layer"], step_outputs)
+    description = arcpy.Describe(target)
+    shape_type = common._text(getattr(description, "shapeType", ""))
+    if shape_type.lower() != expected_shape_type.lower():
+        raise common.OperationError(u"目标图层几何类型是 %s，不能追加 %s 要素。" % (shape_type, expected_shape_type))
+    spatial_reference = getattr(description, "spatialReference", None)
+    _require_known_spatial_reference(spatial_reference)
+    return target, spatial_reference
+
+
+def _layer_name(layer):
+    return common._text(getattr(layer, "longName", getattr(layer, "name", "")))
 
 
 def _spatial_reference(context, arguments, step_outputs):
@@ -147,6 +246,127 @@ def _points(items, min_count):
     return points
 
 
+def _point_rows(items, spatial_reference):
+    rows = []
+    for index, item in enumerate(items, 1):
+        x, y = _point_xy(item)
+        name = _feature_name(item, "point_%s" % index)
+        geometry = arcpy.PointGeometry(arcpy.Point(x, y), spatial_reference)
+        rows.append((geometry, name))
+    if not rows:
+        raise common.OperationError(u"至少需要 1 个点要素。")
+    return rows
+
+
+def _polyline_rows(arguments, spatial_reference):
+    features = arguments.get("features")
+    rows = []
+    if features is not None:
+        _require_non_empty_features(features)
+        for index, item in enumerate(features, 1):
+            points = _closed_if_needed(_points(_feature_argument(item, "coordinates"), min_count=2), close=False)
+            rows.append((_polyline_geometry(points, spatial_reference), _feature_name(item, "line_%s" % index)))
+        return rows
+    if "coordinates" not in arguments:
+        raise common.OperationError(u"请提供 coordinates，或提供 features 数组。")
+    points = _points(arguments["coordinates"], min_count=2)
+    return [(_polyline_geometry(points, spatial_reference), arguments.get("name") or arguments.get("output_name") or "line_1")]
+
+
+def _polygon_rows(arguments, spatial_reference):
+    features = arguments.get("features")
+    rows = []
+    if features is not None:
+        _require_non_empty_features(features)
+        for index, item in enumerate(features, 1):
+            points = _closed_ring(_points(_feature_argument(item, "coordinates"), min_count=3))
+            rows.append((_polygon_geometry(points, spatial_reference), _feature_name(item, "polygon_%s" % index)))
+        return rows
+    if "coordinates" not in arguments:
+        raise common.OperationError(u"请提供 coordinates，或提供 features 数组。")
+    points = _closed_ring(_points(arguments["coordinates"], min_count=3))
+    return [(_polygon_geometry(points, spatial_reference), arguments.get("name") or arguments.get("output_name") or "polygon_1")]
+
+
+def _regular_polygon_rows(arguments, spatial_reference):
+    features = arguments.get("features")
+    rows = []
+    if features is not None:
+        _require_non_empty_features(features)
+        for index, item in enumerate(features, 1):
+            feature_arguments = _merge_feature_arguments(arguments, item, [
+                "center_x",
+                "center_y",
+                "radius",
+                "radius_unit",
+                "sides",
+                "start_angle_degrees"
+            ])
+            rows.append((_regular_polygon_geometry(feature_arguments, spatial_reference), _feature_name(item, "regular_polygon_%s" % index)))
+        return rows
+    _require_arguments(arguments, ["center_x", "center_y", "radius", "radius_unit", "sides"])
+    return [(_regular_polygon_geometry(arguments, spatial_reference), arguments.get("name") or arguments.get("output_name") or "regular_polygon_1")]
+
+
+def _star_polygon_rows(arguments, spatial_reference):
+    features = arguments.get("features")
+    rows = []
+    if features is not None:
+        _require_non_empty_features(features)
+        for index, item in enumerate(features, 1):
+            feature_arguments = _merge_feature_arguments(arguments, item, [
+                "center_x",
+                "center_y",
+                "outer_radius",
+                "outer_radius_unit",
+                "inner_radius",
+                "inner_radius_unit",
+                "point_count",
+                "start_angle_degrees"
+            ])
+            rows.append((_star_polygon_geometry(feature_arguments, spatial_reference), _feature_name(item, "star_%s" % index)))
+        return rows
+    _require_arguments(arguments, ["center_x", "center_y", "outer_radius", "outer_radius_unit"])
+    return [(_star_polygon_geometry(arguments, spatial_reference), arguments.get("name") or arguments.get("output_name") or "star_1")]
+
+
+def _polyline_geometry(points, spatial_reference):
+    return arcpy.Polyline(arcpy.Array([arcpy.Point(x, y) for x, y in points]), spatial_reference)
+
+
+def _polygon_geometry(points, spatial_reference):
+    return arcpy.Polygon(arcpy.Array([arcpy.Point(x, y) for x, y in points]), spatial_reference)
+
+
+def _require_non_empty_features(features):
+    if not isinstance(features, list) or not features:
+        raise common.OperationError(u"features 必须是非空数组。")
+
+
+def _feature_argument(item, name):
+    if not isinstance(item, dict) or name not in item:
+        raise common.OperationError(u"features 中每个要素都必须包含 %s。" % name)
+    return item[name]
+
+
+def _merge_feature_arguments(arguments, item, names):
+    if not isinstance(item, dict):
+        raise common.OperationError(u"features 中每个要素必须是对象。")
+    result = {}
+    for name in names:
+        if name in item:
+            result[name] = item[name]
+        elif name in arguments:
+            result[name] = arguments[name]
+    return result
+
+
+def _require_arguments(arguments, names):
+    missing = [name for name in names if name not in arguments]
+    if missing:
+        raise common.OperationError(u"缺少参数：%s。" % u"、".join(missing))
+
+
 def _point_xy(item):
     if isinstance(item, dict):
         return float(item["x"]), float(item["y"])
@@ -164,6 +384,12 @@ def _feature_name(item, default):
 def _closed_ring(points):
     if points[0] != points[-1]:
         points = points + [points[0]]
+    return points
+
+
+def _closed_if_needed(points, close):
+    if close:
+        return _closed_ring(points)
     return points
 
 
@@ -197,3 +423,41 @@ def _distance_to_map_units(value, unit, spatial_reference):
             raise common.OperationError(u"当前坐标系无法把 meters 转换为地图单位；请改用 map_units。")
         return distance / float(meters_per_unit)
     raise common.OperationError(u"Unsupported distance unit: %s" % unit)
+
+
+def estimate_append_point_features(context, arguments, step_outputs):
+    return _append_estimate(arguments, "点", len(arguments.get("points") or []))
+
+
+def estimate_append_polyline_features(context, arguments, step_outputs):
+    return _append_estimate(arguments, "线", _argument_feature_count(arguments))
+
+
+def estimate_append_polygon_features(context, arguments, step_outputs):
+    return _append_estimate(arguments, "面", _argument_feature_count(arguments))
+
+
+def estimate_append_regular_polygons(context, arguments, step_outputs):
+    return _append_estimate(arguments, "正多边形面", _argument_feature_count(arguments))
+
+
+def estimate_append_star_polygons(context, arguments, step_outputs):
+    return _append_estimate(arguments, "星形面", _argument_feature_count(arguments))
+
+
+def _argument_feature_count(arguments):
+    features = arguments.get("features")
+    if isinstance(features, list):
+        return len(features)
+    return 1
+
+
+def _append_estimate(arguments, label, count):
+    layer = common._text(arguments.get("target_layer", ""))
+    return {
+        "summary": u"将向已有图层 %s 追加 %s 个%s要素。此操作会直接修改目标图层数据，是否继续？" % (
+            layer,
+            count,
+            label
+        )
+    }

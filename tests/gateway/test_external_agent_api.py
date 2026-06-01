@@ -190,6 +190,73 @@ class ExternalAgentApiTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["workflow"]["steps"][0]["operation"], "edit.create_star_polygon")
 
+    def test_validate_accepts_batch_geometry_creation_workflow(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = WorkflowStore(pathlib.Path(directory) / "workflows.sqlite")
+            app.STATE = SimpleNamespace(
+                catalog=OperationCatalog(),
+                store=store,
+                planner=_PlannerThatMustNotRun()
+            )
+            workflow = {
+                "action": "execute",
+                "summary": "创建多个五角星到同一个图层。",
+                "steps": [
+                    _step("step_1", "edit.create_star_polygon", {
+                        "features": [
+                            {"center_x": 118.78, "center_y": 32.04, "name": "star_1"},
+                            {"center_x": 118.79, "center_y": 32.05, "name": "star_2"}
+                        ],
+                        "outer_radius": 0.01,
+                        "outer_radius_unit": "degrees",
+                        "point_count": 5,
+                        "wkid": 4326,
+                        "output_name": "stars"
+                    }, "把多个五角星写入同一个新面图层。")
+                ]
+            }
+
+            result = app._external_agent_validate({
+                "context": _context(is_saved=True),
+                "workflow": workflow
+            })
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["workflow"]["steps"][0]["arguments"]["output_name"], "stars")
+
+    def test_validate_accepts_append_geometry_workflow(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = WorkflowStore(pathlib.Path(directory) / "workflows.sqlite")
+            app.STATE = SimpleNamespace(
+                catalog=OperationCatalog(),
+                store=store,
+                planner=_PlannerThatMustNotRun()
+            )
+            workflow = {
+                "action": "execute",
+                "summary": "往已有面图层追加两个五角星。",
+                "steps": [
+                    _step("step_1", "edit.append_star_polygons", {
+                        "target_layer": "nanjing",
+                        "features": [
+                            {"center_x": 118.78, "center_y": 32.04, "name": "star_1"},
+                            {"center_x": 118.79, "center_y": 32.05, "name": "star_2"}
+                        ],
+                        "outer_radius": 0.01,
+                        "outer_radius_unit": "degrees",
+                        "point_count": 5
+                    }, "用户明确要求写入已有图层。")
+                ]
+            }
+
+            result = app._external_agent_validate({
+                "context": _context(is_saved=True),
+                "workflow": workflow
+            })
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["workflow"]["steps"][0]["arguments"]["target_layer"], "layer:nanjing")
+
     def test_arcmap_execute_workflow_requires_confirmation(self):
         with tempfile.TemporaryDirectory() as directory:
             store = WorkflowStore(pathlib.Path(directory) / "workflows.sqlite")

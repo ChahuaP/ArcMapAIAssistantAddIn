@@ -41,6 +41,9 @@ Use `propose`, `approve-latest`, and `arcmap-execute-approved` only when the use
 - Writes-data operations must include `output_name`; preserve user naming intent when provided.
 - Direct data edits remain protected by ArcMap-side confirmation.
 - Full auto requires explicit user authorization. For direct source-data edits, require explicit `allow_edits`.
+- Geometry creation follows user intent: create one new output layer when the user asks for a new shp/layer, append to `target_layer` only when the user explicitly asks to add features into an existing layer, and create separate layers only when the user asks for separate outputs.
+- Do not plan “create many shapefiles then merge” for ordinary multi-feature creation. Use `features` arrays in `edit.create_*` when one output layer should contain multiple features.
+- ArcGIS feature classes cannot mix point, line, and polygon geometry in one layer. If the requested features mix geometry types and the user asked for one shp, ask a clarification instead of forcing a merge.
 - When multiple ArcMap instances are open, do not guess. Use `arcmap-list` and select the intended instance by `hwnd` before syncing or executing.
 - Do not manually start `ArcMapBridge.exe`; run `arcmap-list` so the Gateway owns Bridge startup, target discovery, and shutdown.
 - Geometry creation, data management, and layout export are normal catalog operations. Read capabilities first and use `edit.*`, `data.*`, and `layout.*` only when those operation ids are present.

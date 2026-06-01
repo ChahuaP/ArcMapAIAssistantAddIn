@@ -12,6 +12,12 @@ GeoPilot is the execution bridge for ArcMap. The external agent is the planner.
 - If a pending or rejected custom tool matches the goal, tell the user it must be reviewed/enabled or revised before execution.
 - If a custom tool has a bug or bad parameter design, revise the same tool. Do not create a second tool with the same purpose.
 - For direct geometry creation, use `edit.*` operations before creating a custom tool. A request such as “创建一个五角星 feature” should map to `edit.create_star_polygon` when the user supplies or can confirm center/radius/coordinate system.
+- Geometry creation must follow user intent:
+  - If the user asks for one new shp/layer containing many features, use the `features` array on the matching `edit.create_*` operation and write one output dataset.
+  - If the user explicitly asks to add features into an existing layer, use the matching `edit.append_*` operation with `target_layer`; this is `edits_data` and requires edit authorization.
+  - If the user asks for separate outputs, create separate outputs.
+  - Do not create many temporary shapefiles and merge them just to build ordinary multi-feature output.
+  - Do not put mixed geometry types into one shapefile or feature class. ArcGIS feature classes are point, polyline, or polygon, not mixed geometry.
 - For layout work, use `layout.list_elements` before `layout.set_text` unless the text element name is already known. GeoPilot can update existing layout elements and export the layout; it does not invent a new legend/scale bar/north arrow unless a registered operation says so.
 - For data management operations marked `edits_data`, require the user's explicit `allow_edits` authorization because the original dataset is modified.
 

@@ -23,7 +23,7 @@ from gateway_py3.validators import ValidationError
 
 HOST = "127.0.0.1"
 PORT = 8765
-APP_VERSION = "0.16.2"
+APP_VERSION = "0.17.1"
 STATE = GatewayState()
 REJECTED_ERRORS = (
     KeyError,

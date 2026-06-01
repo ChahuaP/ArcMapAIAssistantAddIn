@@ -129,6 +129,59 @@ Use these as patterns only after checking `/api/capabilities`. Keep operation id
 }
 ```
 
+## Create Multiple Stars In One New Layer
+
+```json
+{
+  "action": "execute",
+  "summary": "创建多个五角星到同一个面图层。",
+  "steps": [
+    {
+      "id": "step_1",
+      "operation": "edit.create_star_polygon",
+      "arguments": {
+        "features": [
+          {"center_x": 118.78, "center_y": 32.04, "name": "star_1"},
+          {"center_x": 118.79, "center_y": 32.05, "name": "star_2"}
+        ],
+        "outer_radius": 0.01,
+        "outer_radius_unit": "degrees",
+        "point_count": 5,
+        "wkid": 4326,
+        "output_name": "stars"
+      },
+      "reason": "用户要一个输出图层，因此把多个五角星作为多个 feature 写入同一个新 polygon 图层。"
+    }
+  ]
+}
+```
+
+## Append Stars To An Existing Layer
+
+```json
+{
+  "action": "execute",
+  "summary": "向 stars 图层追加两个五角星。",
+  "steps": [
+    {
+      "id": "step_1",
+      "operation": "edit.append_star_polygons",
+      "arguments": {
+        "target_layer": "stars",
+        "features": [
+          {"center_x": 118.78, "center_y": 32.04, "name": "star_1"},
+          {"center_x": 118.79, "center_y": 32.05, "name": "star_2"}
+        ],
+        "outer_radius": 0.01,
+        "outer_radius_unit": "degrees",
+        "point_count": 5
+      },
+      "reason": "用户明确要求写入已有 stars 图层，因此直接追加 feature；该步骤需要 edit authorization。"
+    }
+  ]
+}
+```
+
 ## Copy And Repair Data
 
 Copying writes a new dataset:

@@ -103,6 +103,8 @@ Start the Python 3 gateway:
 
 ```powershell
 $env:DEEPSEEK_API_KEY = "your-key"
+# or
+$env:DASHSCOPE_API_KEY = "your-bailian-key"
 python -m gateway_py3
 ```
 
