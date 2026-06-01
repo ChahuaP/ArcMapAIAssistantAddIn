@@ -18,8 +18,7 @@ namespace GeoPilot.ArcMapBridgeExternal
         private const int FirstPort = 8766;
         private const int LastPort = 8789;
         private const int ArcMapIdleExitSeconds = 30;
-        private const string SyncCommandId = "syncContextButton";
-        private const string ExecuteCommandId = "executeWorkflowButton";
+        private const string BridgeCommandId = "openAssistantButton";
         private const string GatewayUrl = "http://127.0.0.1:8765";
         private const string SilentCommandFileName = "bridge_command.json";
 
@@ -231,26 +230,26 @@ namespace GeoPilot.ArcMapBridgeExternal
                 bool allowEdits = ExtractBool(request.Body, "allow_edits");
                 if (request.Action == "sync")
                 {
-                    ExecuteArcMapCommand(hwnd, SyncCommandId, "sync", false);
+                    ExecuteArcMapCommand(hwnd, "sync", false);
                     return "{\"ok\":true}";
                 }
                 if (request.Action == "execute")
                 {
-                    ExecuteArcMapCommand(hwnd, ExecuteCommandId, "execute", allowEdits);
+                    ExecuteArcMapCommand(hwnd, "execute", allowEdits);
                     return "{\"ok\":true,\"result\":{\"ok\":true,\"summary\":\"ArcMap command executed.\"}}";
                 }
                 return ErrorJson("Unknown request.");
             }
 
-            private void ExecuteArcMapCommand(int hwnd, string commandId, string silentAction, bool allowEdits)
+            private void ExecuteArcMapCommand(int hwnd, string silentAction, bool allowEdits)
             {
                 IApplication app = ResolveArcMap(hwnd);
                 IDocument document = app.Document;
                 ICommandBars commandBars = document.CommandBars;
-                ICommandItem item = commandBars.Find(commandId, false, false);
+                ICommandItem item = commandBars.Find(BridgeCommandId, false, false);
                 if (item == null)
                 {
-                    throw new InvalidOperationException("ArcMap command not found: " + commandId);
+                    throw new InvalidOperationException("ArcMap command not found: " + BridgeCommandId);
                 }
                 WriteSilentCommand(silentAction, allowEdits);
                 item.Execute();

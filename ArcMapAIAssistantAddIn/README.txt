@@ -1,9 +1,10 @@
 ArcMap AI Assistant Add-In
 ==========================
 
-This is the ArcMap Python add-in shell for ArcMap AI Assistant.
-It exposes native ArcMap toolbar buttons and hot-loads the installed
-Python 2 runtime.
+This is the ArcMap Python add-in shell for GeoPilot.
+It exposes one native ArcMap toolbar button that starts the local console.
+Gateway and ArcMap Bridge reuse the same command internally for silent sync
+and workflow execution.
 
 Install for development:
 
@@ -11,7 +12,7 @@ Install for development:
 2. Double-click ArcMapAIAssistantAddIn.esriaddin.
 3. Open ArcMap.
 4. If the toolbar is not visible, enable it from Customize > Toolbars > ArcMap AI Assistant.
-5. Use the toolbar buttons to start the AI backend, show the console, sync context, and execute approved workflows.
+5. Click the toolbar button to start GeoPilot and open the console.
 
 Runtime path:
 
@@ -26,14 +27,11 @@ config.xml or the add-in shell changes.
 Project layout:
 
 config.xml
-  ArcMap add-in metadata, target product, toolbar, and button declaration.
+  ArcMap add-in metadata, target product, toolbar, and the single console button.
 
 Install/ArcMapAIAssistant_addin.py
   Python implementation loaded by ArcMap under the Python 2.7 runtime.
-  It contains the native buttons and hot-loads the installed runtime.
-
-Images/
-  Optional button icons. The current minimal build does not use an icon.
+  It hot-loads the installed runtime and dispatches Bridge silent commands.
 
 makeaddin.py
   Packages the project into a .esriaddin file.

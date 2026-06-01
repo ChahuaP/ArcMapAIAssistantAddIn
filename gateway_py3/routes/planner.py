@@ -15,10 +15,8 @@ def plan_request(state, payload, port_checker=None):
         publish_progress(state, "sync_arcmap", "同步 ArcMap", mode)
         context = arcmap.sync_context(state, port_checker=port_checker)["context"]
     elif context is None:
-        stored_context = state.store.get_state("arcmap_context")
-        if not stored_context:
-            raise ValueError("请先同步 ArcMap 上下文。外部 agent 使用 arcmap-list 和 arcmap-sync；Web 用户点击同步上下文。")
-        context = stored_context["value"]
+        publish_progress(state, "sync_arcmap", "同步 ArcMap", mode)
+        context = arcmap.sync_context(state, port_checker=port_checker)["context"]
 
     project_id = payload.get("project_id") or ""
     if mode == FULL_AGENT_MODE and not project_id:
@@ -63,10 +61,7 @@ def repair_custom_tool_workflow(state, workflow_id, payload):
         raise ValueError("这个失败任务没有使用自建工具，不能进入自建工具迭代。")
     context = payload.get("context")
     if context is None:
-        stored_context = state.store.get_state("arcmap_context")
-        if not stored_context:
-            raise ValueError("请先同步 ArcMap 上下文。外部 agent 使用 arcmap-list 和 arcmap-sync；Web 用户点击同步上下文。")
-        context = stored_context["value"]
+        context = arcmap.sync_context(state)["context"]
     if not isinstance(context, dict):
         raise ValueError("context must be an object.")
     mode = source.get("mode") or public_config()["default_mode"]

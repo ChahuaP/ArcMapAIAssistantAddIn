@@ -67,21 +67,6 @@ def load_runtime():
     return runtime
 
 
-def run_command(command_text):
-    return load_runtime().handle_command(command_text)
-
-
-class AutoGatewayExtension(object):
-    """Implementation for ArcMapAIAssistant_addin.autoGatewayExtension (Extension)."""
-
-    def __init__(self):
-        self.enabled = True
-        try:
-            load_runtime().ensure_gateway_silent()
-        except Exception as exc:
-            show_message(u"GeoPilot 启动失败：%s" % exc)
-
-
 class OpenAssistantButton(object):
     """Implementation for ArcMapAIAssistant_addin.openAssistantButton (Button)."""
 
@@ -90,55 +75,10 @@ class OpenAssistantButton(object):
         self.checked = False
 
     def onClick(self):
-        try:
-            load_runtime().open_assistant()
-        except Exception as exc:
-            show_message(u"执行失败：%s" % exc)
-
-
-class StartGatewayButton(object):
-    """Implementation for ArcMapAIAssistant_addin.startGatewayButton (Button)."""
-
-    def __init__(self):
-        self.enabled = True
-        self.checked = False
-
-    def onClick(self):
-        try:
-            load_runtime().start_gateway()
-        except Exception as exc:
-            show_message(u"执行失败：%s" % exc)
-
-
-class SyncContextButton(object):
-    """Implementation for ArcMapAIAssistant_addin.syncContextButton (Button)."""
-
-    def __init__(self):
-        self.enabled = True
-        self.checked = False
-
-    def onClick(self):
         runtime = None
         try:
             runtime = load_runtime()
-            runtime.sync_context()
-        except Exception as exc:
-            if not runtime or not getattr(runtime, "suppress_last_error_popup", lambda: False)():
-                show_message(u"执行失败：%s" % exc)
-
-
-class ExecuteWorkflowButton(object):
-    """Implementation for ArcMapAIAssistant_addin.executeWorkflowButton (Button)."""
-
-    def __init__(self):
-        self.enabled = True
-        self.checked = False
-
-    def onClick(self):
-        runtime = None
-        try:
-            runtime = load_runtime()
-            runtime.execute_pending()
+            runtime.open_or_handle_bridge_command()
         except Exception as exc:
             if not runtime or not getattr(runtime, "suppress_last_error_popup", lambda: False)():
                 show_message(u"执行失败：%s" % exc)

@@ -92,7 +92,7 @@
         <div class="panel-head">
           <div class="panel-title">
             <h2>对话</h2>
-            <p id="status" class="chat-status">页面会自动刷新地图快照和任务状态。</p>
+            <p id="status" class="chat-status">页面会更新地图快照和任务状态。</p>
           </div>
           <button class="danger small" onclick="clearConversation()">清空对话</button>
         </div>
@@ -145,7 +145,7 @@
       <div class="panel-head">
         <div class="panel-title">
           <h2 id="contextTitle">地图快照</h2>
-          <p>最近一次从 ArcGIS 工具栏同步的上下文。</p>
+          <p>最近一次由 GeoPilot Bridge 读取的 ArcMap 上下文。</p>
         </div>
         <button class="ghost small" onclick="closeModal('contextModal')">关闭</button>
       </div>
@@ -159,7 +159,7 @@
           <div class="table-wrap">
             <table>
               <thead><tr><th>图层</th><th>类型</th><th>选择</th></tr></thead>
-              <tbody id="layerTable"><tr><td colspan="3">请在 ArcGIS 工具栏点击“同步上下文”。</td></tr></tbody>
+              <tbody id="layerTable"><tr><td colspan="3">发送任务或刷新工作台时会读取 ArcMap 上下文。</td></tr></tbody>
             </table>
           </div>
         </section>

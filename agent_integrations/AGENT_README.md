@@ -34,6 +34,6 @@ geopilot-arcmap/
 
 - The agent plans workflow JSON.
 - GeoPilot validates and queues the workflow.
-- `ArcMapBridge.exe` accepts local HTTP requests, finds ArcMap through the Running Object Table, and dispatches sync/execute to the existing ArcMap Python Add-in commands inside the ArcMap process. Bridge-triggered commands are silent; manual toolbar clicks still show ArcMap messages.
+- `ArcMapBridge.exe` accepts local HTTP requests, finds ArcMap through the Running Object Table, writes a silent command payload, and dispatches sync/execute through the single ArcMap Python Add-in command `openAssistantButton`. Bridge-triggered commands are silent; the manual toolbar button only starts the Web console.
 - The agent must not execute ArcPy directly.
 - The agent must not call GeoPilot `/plan`, because that would call another model API.

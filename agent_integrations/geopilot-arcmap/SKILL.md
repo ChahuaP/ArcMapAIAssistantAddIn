@@ -17,10 +17,10 @@ Use the local GeoPilot gateway and `ArcMapBridge.exe` as the ArcMap safety and e
    - If `arcmap-list` returns no bridges, report that ArcMap or the GeoPilot Add-in is not ready; do not continue to sync or execute.
 4. If more than one ArcMap instance is live, ask the user which target to use, then run `scripts/geopilot_cli.py arcmap-select --hwnd <hwnd>`.
    - ArcMap launch alone does not keep the Bridge running.
-   - The Bridge uses the ArcMap Running Object Table to find ArcMap windows, then invokes the existing GeoPilot Python Add-in commands inside ArcMap.
-   - Bridge-triggered sync/execute is silent in ArcMap. Manual toolbar clicks still show ArcMap Add-in message boxes.
+   - The Bridge uses the ArcMap Running Object Table to find ArcMap windows, writes a silent command payload, then invokes the single GeoPilot Python Add-in command `openAssistantButton` inside ArcMap.
+   - Bridge-triggered sync/execute is silent in ArcMap. A manual toolbar click on `启动控制台` opens the Web console and reads the current map context.
    - If a detected bridge port is occupied but does not respond, read `%LOCALAPPDATA%\ArcMapAIAssistant\logs\arcmap_bridge.log`.
-5. Run `scripts/geopilot_cli.py arcmap-sync` to make the selected ArcMap synchronize the current context.
+5. Run `scripts/geopilot_cli.py arcmap-sync` to make the selected ArcMap read the current context.
 6. Run `scripts/geopilot_cli.py capabilities` to inspect the operation summary and choose only registered operations.
    - For exact argument schemas, run `scripts/geopilot_cli.py capabilities --detail` before drafting the workflow.
 7. Draft a workflow JSON locally. For non-trivial planning, read `references/planning-contract.md` and `references/workflow-format.md`.

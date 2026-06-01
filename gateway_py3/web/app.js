@@ -1,4 +1,4 @@
-    const EXPECTED_GATEWAY_VERSION = '0.19.0';
+    const EXPECTED_GATEWAY_VERSION = '0.20.0';
     const API_ORIGIN = window.location.protocol === 'file:' ? 'http://127.0.0.1:8765' : '';
     const MODE_STORAGE_KEY = 'geopilot.currentMode';
     let eventSource = null;
@@ -60,7 +60,7 @@
     }
 
     function offlineMessage() {
-      return '本地网关未连接。请回到 ArcGIS 工具栏点击“启动网关”或“打开助手”。页面会自动恢复状态。';
+      return '本地网关未连接。请回到 ArcGIS 工具栏点击“启动控制台”。页面会自动恢复状态。';
     }
 
     async function api(path, options) {
@@ -573,7 +573,7 @@
         document.getElementById('layerCount').textContent = '0';
         document.getElementById('mxdState').textContent = '未知';
         document.getElementById('srState').textContent = '未知';
-        document.getElementById('layerTable').innerHTML = '<tr><td colspan="3">请在 ArcGIS 工具栏点击“同步上下文”。</td></tr>';
+        document.getElementById('layerTable').innerHTML = '<tr><td colspan="3">发送任务或刷新工作台时会读取 ArcMap 上下文。</td></tr>';
         return;
       }
       const ctx = item.value;

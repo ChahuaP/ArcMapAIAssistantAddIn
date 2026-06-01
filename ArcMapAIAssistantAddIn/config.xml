@@ -3,65 +3,34 @@
   <Name>ArcMap AI Assistant</Name>
   <AddInID>{7f42eea1-1f17-4cf4-9d4f-c0c8d28c0a23}</AddInID>
   <Description>ArcMap AI Assistant toolbar.</Description>
-  <Version>1.5</Version>
+  <Version>1.6</Version>
   <Image />
   <Author>Codex</Author>
   <Company />
-  <Date>05/19/2026</Date>
+  <Date>06/01/2026</Date>
   <Targets>
     <Target name="Desktop" version="10.1" />
   </Targets>
   <AddIn language="PYTHON" library="ArcMapAIAssistant_addin.py" namespace="ArcMapAIAssistant_addin">
     <ArcMap>
       <Commands>
-        <Button caption="显示控制台"
+        <Button caption="启动控制台"
                 category="ArcMap AI Assistant"
                 class="OpenAssistantButton"
                 id="ArcMapAIAssistant_addin.openAssistantButton"
-                message="Open ArcMap AI Assistant"
-                tip="显示 Web 控制台">
-          <Help heading="ArcMap AI Assistant" />
-        </Button>
-        <Button caption="启动网关"
-                category="ArcMap AI Assistant"
-                class="StartGatewayButton"
-                id="ArcMapAIAssistant_addin.startGatewayButton"
-                message="Start local gateway"
-                tip="启动本地 AI 网关">
-          <Help heading="ArcMap AI Assistant" />
-        </Button>
-        <Button caption="同步上下文"
-                category="ArcMap AI Assistant"
-                class="SyncContextButton"
-                id="ArcMapAIAssistant_addin.syncContextButton"
-                message="Sync current ArcMap context"
-                tip="同步当前 ArcMap 上下文">
-          <Help heading="ArcMap AI Assistant" />
-        </Button>
-        <Button caption="执行工作流"
-                category="ArcMap AI Assistant"
-                class="ExecuteWorkflowButton"
-                id="ArcMapAIAssistant_addin.executeWorkflowButton"
-                message="Execute approved workflow"
-                tip="执行已审批工作流">
+                message="Start GeoPilot console"
+                tip="启动 GeoPilot 控制台">
           <Help heading="ArcMap AI Assistant" />
         </Button>
       </Commands>
-      <Extensions>
-        <Extension autoLoad="true"
-                   class="AutoGatewayExtension"
-                   id="ArcMapAIAssistant_addin.autoGatewayExtension" />
-      </Extensions>
+      <Extensions />
       <Toolbars>
         <Toolbar caption="ArcMap AI Assistant"
                  category="ArcMap AI Assistant"
                  id="ArcMapAIAssistant_addin.toolbar"
                  showInitially="true">
           <Items>
-            <Button refID="ArcMapAIAssistant_addin.startGatewayButton" />
             <Button refID="ArcMapAIAssistant_addin.openAssistantButton" />
-            <Button refID="ArcMapAIAssistant_addin.syncContextButton" />
-            <Button refID="ArcMapAIAssistant_addin.executeWorkflowButton" />
           </Items>
         </Toolbar>
       </Toolbars>

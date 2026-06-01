@@ -45,7 +45,7 @@ def main():
     with zipfile.ZipFile(OUT_ZIP_NAME, "w", zipfile.ZIP_DEFLATED) as zip_file:
         for filename in ("config.xml", "README.txt", "makeaddin.py"):
             add_required_file(zip_file, filename)
-        for directory in ("Images", "Install"):
+        for directory in ("Install",):
             add_directory(zip_file, directory)
     print(OUT_ZIP_NAME)
 

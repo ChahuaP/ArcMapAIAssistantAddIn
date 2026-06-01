@@ -387,6 +387,25 @@ class ExternalAgentApiTests(unittest.TestCase):
         self.assertEqual(bridge.calls, [True])
         self.assertEqual(app.STATE.planner.calls[0]["context"]["layers"][0]["name"], "nanjing")
 
+    def test_semi_agent_plan_syncs_context_through_bridge(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = WorkflowStore(pathlib.Path(directory) / "workflows.sqlite")
+            app.STATE = SimpleNamespace(
+                catalog=OperationCatalog(),
+                store=store,
+                planner=_DraftPlanner(store),
+                reload_catalog=lambda: None
+            )
+            with _BridgePatch(sync_context=_context(is_saved=True)) as bridge:
+                result = app._plan_request({
+                    "command": "刷新地图",
+                    "mode": "semi_agent"
+                })
+
+        self.assertEqual(result["workflow"]["mode"], "semi_agent")
+        self.assertEqual(bridge.sync_calls, 1)
+        self.assertEqual(app.STATE.planner.calls[0]["context"]["layers"][0]["name"], "nanjing")
+
     def test_arcmap_register_selects_active_bridge(self):
         with tempfile.TemporaryDirectory() as directory:
             store = WorkflowStore(pathlib.Path(directory) / "workflows.sqlite")

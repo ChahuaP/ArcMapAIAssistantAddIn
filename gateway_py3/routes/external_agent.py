@@ -42,5 +42,5 @@ def context_from_payload(state, payload):
         return context
     stored_context = state.store.get_state("arcmap_context")
     if not stored_context:
-        raise ValueError("请先让 agent 运行 arcmap-list 和 arcmap-sync 同步 ArcMap 上下文。")
+        raise ValueError("请先让 agent 运行 arcmap-list 和 arcmap-sync 读取 ArcMap 上下文。")
     return stored_context["value"]

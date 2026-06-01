@@ -196,7 +196,7 @@
         await loadWorkbenchState();
       } catch (err) {
         setTile('gatewayState', 'bad', '未连接');
-        setTile('restartState', 'warn', '请启动网关');
+        setTile('restartState', 'warn', '启动控制台');
         setStatus(err.message);
         renderEmptyChat();
       }
@@ -281,7 +281,7 @@
         if (types.has('workflows') && !workflowsRefreshed) await refreshWorkflows(!transientUserMessage);
       } catch (err) {
         setTile('gatewayState', 'bad', '未连接');
-        setTile('restartState', 'warn', '请启动网关');
+        setTile('restartState', 'warn', '启动控制台');
       } finally {
         eventRefreshBusy = false;
         if (pendingEventTypes.size) {

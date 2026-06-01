@@ -71,22 +71,27 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(operations["edit.create_star_polygon"]["parameters_schema"]["required"], ["output_name"])
         self.assertEqual(star_properties["outer_radius_unit"]["enum"], ["map_units", "meters", "degrees"])
 
-    def test_python_addin_registers_auto_gateway_extension(self):
+    def test_python_addin_exposes_only_console_button(self):
         tree = ET.parse(str(ADDIN_ROOT / "config.xml"))
         namespace = {"addin": "http://schemas.esri.com/Desktop/AddIns"}
-        extension = tree.find(".//addin:Extensions/addin:Extension", namespace)
-        self.assertIsNotNone(extension)
-        self.assertEqual(extension.attrib.get("class"), "AutoGatewayExtension")
-        self.assertEqual(extension.attrib.get("autoLoad"), "true")
+        buttons = tree.findall(".//addin:Commands/addin:Button", namespace)
+        toolbar_buttons = tree.findall(".//addin:Toolbars/addin:Toolbar/addin:Items/addin:Button", namespace)
 
-    def test_external_arcmap_bridge_uses_rot_and_python_addin_commands(self):
+        self.assertEqual(len(buttons), 1)
+        self.assertEqual(buttons[0].attrib.get("class"), "OpenAssistantButton")
+        self.assertEqual(buttons[0].attrib.get("caption"), "启动控制台")
+        self.assertEqual(len(toolbar_buttons), 1)
+        self.assertEqual(toolbar_buttons[0].attrib.get("refID"), "ArcMapAIAssistant_addin.openAssistantButton")
+
+    def test_external_arcmap_bridge_uses_rot_and_single_python_addin_command(self):
         source = (EXTERNAL_BRIDGE_ROOT / "Program.cs").read_text(encoding="utf-8")
         project = (EXTERNAL_BRIDGE_ROOT / "ArcMapBridgeExternal.csproj").read_text(encoding="utf-8")
         build_script = (EXTERNAL_BRIDGE_ROOT / "build.ps1").read_text(encoding="utf-8-sig")
         self.assertIn("AppROTClass", source)
         self.assertIn("TcpListener", source)
-        self.assertIn('"syncContextButton"', source)
-        self.assertIn('"executeWorkflowButton"', source)
+        self.assertIn('"openAssistantButton"', source)
+        self.assertNotIn('"syncContextButton"', source)
+        self.assertNotIn('"executeWorkflowButton"', source)
         self.assertIn("allow_edits", source)
         self.assertIn("ExtractBool", source)
         self.assertIn("<AssemblyName>ArcMapBridge</AssemblyName>", project)
@@ -111,8 +116,10 @@ class CatalogTests(unittest.TestCase):
         self.assertIn('"gateway", "ArcMapAIAssistantGateway.exe"', gateway_client)
         self.assertNotIn('"dist"', gateway_client)
         self.assertNotIn('"python", "-m", "gateway_py3"', gateway_client)
+        self.assertIn("def open_or_handle_bridge_command", runtime)
         self.assertIn('_LAST_SILENT_COMMAND.get("allow_edits")', runtime)
         self.assertIn("if _LAST_COMMAND_WAS_SILENT:", runtime)
+        self.assertNotIn("def handle_command", runtime)
 
     def test_release_and_install_package_operation_catalog(self):
         build_script = (PACKAGING_ROOT / "build_release.ps1").read_text(encoding="utf-8-sig")

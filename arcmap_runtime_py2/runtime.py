@@ -9,13 +9,11 @@ import traceback
 
 import pythonaddins
 
-import config_manager
 import context_reader
 import gateway_client
 import workflow_executor
 
 
-reload(config_manager)
 reload(context_reader)
 reload(gateway_client)
 reload(workflow_executor)
@@ -51,112 +49,34 @@ def open_web():
     )
 
 
-def start_gateway():
-    gateway_client.ensure_running()
-    health = gateway_client.health()
-    show_message(u"本地网关已启动：%s 个能力。" % health.get("operation_count"))
-
-
-def ensure_gateway_silent():
-    try:
-        gateway_client.ensure_running()
-    except (RuntimeError, OSError) as exc:
-        _log_event(u"gateway.ensure_failed", _exception_text(exc))
-
-
-def show_gateway_status():
-    gateway_client.ensure_running()
-    health = gateway_client.health()
-    show_message(u"本地网关已启动：版本 %s，%s 个能力。ArcMap Bridge 由网关自动启动。" % (
-        health.get("app_version"),
-        health.get("operation_count")
-    ))
-
-
-def sync_context():
-    global _LAST_COMMAND_WAS_SILENT, _LAST_SILENT_COMMAND
-    _LAST_SILENT_COMMAND = _consume_silent_command("sync")
-    _LAST_COMMAND_WAS_SILENT = bool(_LAST_SILENT_COMMAND)
-    gateway_client.ensure_running()
-    _sync_current_context()
-    if not _LAST_COMMAND_WAS_SILENT:
-        show_message(u"已同步当前 ArcMap 上下文。")
-
-
-def handle_command(command_text):
-    command_text = (command_text or "").strip()
-    if not command_text:
+def open_or_handle_bridge_command():
+    command = _consume_silent_command()
+    if command:
+        _run_silent_command(command)
         return
-
-    try:
-        if command_text.startswith("/key "):
-            _save_key(command_text[len("/key "):])
-            return True
-        elif command_text == "/key":
-            show_message(u"请在输入框输入：/key 你的DeepSeekKey。保存后输入框会自动清空。")
-        elif command_text == "/open" or command_text == "/config":
-            gateway_client.ensure_running()
-            _sync_current_context()
-            open_web()
-            show_message(u"已打开 Web 控制台。")
-        elif command_text == "/start":
-            gateway_client.ensure_running()
-            show_message(u"本地网关已启动。")
-        elif command_text == "/health":
-            gateway_client.ensure_running()
-            health = gateway_client.health()
-            show_message(u"网关正常：版本 %s，%s 个操作。" % (
-                health.get("app_version"),
-                health.get("operation_count")
-            ))
-        elif command_text == "/execute":
-            gateway_client.ensure_running()
-            _execute_pending()
-        else:
-            gateway_client.ensure_running()
-            _plan(command_text)
-    except Exception as exc:
-        show_message(u"执行失败：%s" % _exception_text(exc))
-        raise
-    return False
+    open_assistant()
 
 
 def open_assistant():
+    _clear_silent_state()
     gateway_client.ensure_running()
     _sync_current_context()
     open_web()
 
 
-def execute_pending():
+def _run_silent_command(command):
     global _LAST_COMMAND_WAS_SILENT, _LAST_SILENT_COMMAND
-    _LAST_SILENT_COMMAND = _consume_silent_command("execute")
-    _LAST_COMMAND_WAS_SILENT = bool(_LAST_SILENT_COMMAND)
+    _LAST_SILENT_COMMAND = command
+    _LAST_COMMAND_WAS_SILENT = True
     gateway_client.ensure_running()
-    _execute_pending(silent=_LAST_COMMAND_WAS_SILENT)
-
-
-def _save_key(api_key):
-    path = config_manager.save_deepseek_key(api_key)
-    show_message(u"DeepSeek key 已保存到用户配置。输入 /health 检查网关。")
-
-
-def _plan(command_text):
-    stored = gateway_client.current_context()
-    if not stored:
-        raise RuntimeError(u"还没有地图上下文。请先点击“助手”或“同步”。")
-    context = stored["value"]
-    response = gateway_client.plan(command_text, context)
-    workflow = response["workflow"]
-    open_web()
-    action = workflow["workflow"].get("action", "execute")
+    action = command.get("action")
+    if action == "sync":
+        _sync_current_context()
+        return
     if action == "execute":
-        show_message(u"已生成工作流：%s。请在 Web 控制台审批，然后点击 ArcMap 工具栏“执行任务”。" % workflow["workflow"]["summary"])
-    elif action == "clarify":
-        show_message(u"需要你补充：%s" % workflow["workflow"]["summary"])
-    elif action == "unsupported":
-        show_message(u"当前还不支持：%s" % workflow["workflow"]["summary"])
-    else:
-        show_message(workflow["workflow"]["summary"])
+        _execute_pending(silent=True)
+        return
+    raise RuntimeError(u"未知 Bridge 指令：%s" % _unicode_text(action))
 
 
 def _execute_pending(silent=False):
@@ -198,7 +118,7 @@ def _sync_current_context():
     return context
 
 
-def _consume_silent_command(action):
+def _consume_silent_command():
     try:
         if not os.path.isfile(SILENT_COMMAND_FILE):
             return {}
@@ -207,9 +127,10 @@ def _consume_silent_command(action):
         if not isinstance(raw, unicode):
             raw = raw.decode("utf-8", "replace")
         payload = json.loads(raw.lstrip(u"\ufeff"))
-        if payload.get("action") != action:
-            return {}
         if float(payload.get("expires_at") or 0) < time.time():
+            return {}
+        action = payload.get("action")
+        if action not in ("sync", "execute"):
             return {}
         try:
             os.remove(SILENT_COMMAND_FILE)
@@ -223,6 +144,12 @@ def _consume_silent_command(action):
 
 def suppress_last_error_popup():
     return bool(_LAST_COMMAND_WAS_SILENT)
+
+
+def _clear_silent_state():
+    global _LAST_COMMAND_WAS_SILENT, _LAST_SILENT_COMMAND
+    _LAST_COMMAND_WAS_SILENT = False
+    _LAST_SILENT_COMMAND = {}
 
 
 def _log_event(kind, detail=None):

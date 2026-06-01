@@ -65,13 +65,11 @@ Customize > Toolbars > ArcMap AI Assistant
 
 ## Basic Use
 
-1. Click `启动网关` in the ArcMap toolbar.
-2. Click `显示控制台` to open the local Web console.
-3. Configure the model API key in the Web console.
-4. Click `同步上下文` in ArcMap.
-5. Type a GIS task in the Web console.
-6. Review and approve the generated task.
-7. Click `执行工作流` in ArcMap.
+1. Click `启动控制台` in the ArcMap toolbar.
+2. Configure the model API key in the Web console.
+3. Type a GIS task in the Web console.
+4. Review and send the generated task to ArcMap.
+5. GeoPilot syncs context and executes through ArcMap Bridge automatically.
 
 Example requests:
 
