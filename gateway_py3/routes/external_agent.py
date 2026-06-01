@@ -30,8 +30,7 @@ def propose_workflow(state, payload):
             "type": "external_agent",
             "source": str(payload.get("source") or "external_agent")
         }],
-        mode="external_agent",
-        project_id=str(payload.get("project_id") or "")
+        mode="external_agent"
     )
     return {"ok": True, "workflow": row}
 

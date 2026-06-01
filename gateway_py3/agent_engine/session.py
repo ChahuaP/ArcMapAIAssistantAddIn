@@ -9,8 +9,6 @@ class AgentSession:
     command: str
     context: Dict[str, Any]
     mode: str
-    project_id: str
-    project: Dict[str, Any] | None
     context_hash: str
     operation_count: int
     request_id: str = ""

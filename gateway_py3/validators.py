@@ -51,7 +51,6 @@ def prepare_workflow(workflow: Dict[str, Any], catalog: OperationCatalog, contex
     prepared = copy.deepcopy(workflow)
     normalize_workflow(prepared)
     normalize_workflow_arguments(prepared, catalog)
-    apply_project_output_location(prepared, catalog, context)
     remove_generated_output_add_layers(prepared, catalog)
     validate_workflow(prepared, catalog)
     validate_workflow_semantics(prepared, catalog, context)
@@ -141,54 +140,6 @@ def remove_generated_output_add_layers(workflow: Dict[str, Any], catalog: Operat
     workflow["steps"] = kept_steps
 
 
-def apply_project_output_location(workflow: Dict[str, Any], catalog: OperationCatalog, context: Dict[str, Any]) -> None:
-    if workflow.get("action") != "execute":
-        return
-    project_output = context.get("project_output_workspace")
-    if not isinstance(project_output, str) or not project_output.strip():
-        return
-    project_output = project_output.strip()
-    if not Path(project_output).exists():
-        try:
-            Path(project_output).mkdir(parents=True, exist_ok=True)
-        except OSError:
-            return
-    for step in workflow.get("steps") or []:
-        operation_id = step.get("operation")
-        if operation_id not in catalog.operations:
-            continue
-        operation = catalog.operations[operation_id]
-        if operation.get("side_effects") != "writes_data":
-            continue
-        arguments = step.get("arguments")
-        if not isinstance(arguments, dict):
-            continue
-        properties = (operation.get("parameters_schema") or {}).get("properties") or {}
-        if arguments.get("output_workspace") or arguments.get("output_folder"):
-            continue
-        _set_project_output_location(arguments, properties, project_output)
-
-
-def _set_project_output_location(
-    arguments: Dict[str, Any],
-    properties: Dict[str, Any],
-    project_output: str,
-    preferred: str | None = None
-) -> None:
-    arguments.pop("output_workspace", None)
-    arguments.pop("output_folder", None)
-    if preferred == "output_folder" and "output_folder" in properties:
-        arguments["output_folder"] = project_output
-        return
-    if preferred == "output_workspace" and "output_workspace" in properties:
-        arguments["output_workspace"] = project_output
-        return
-    if "output_workspace" in properties:
-        arguments["output_workspace"] = project_output
-    elif "output_folder" in properties:
-        arguments["output_folder"] = project_output
-
-
 def _existing_directory(value: Any) -> bool:
     if not isinstance(value, str) or not value.strip():
         return False
@@ -271,7 +222,7 @@ def friendly_validation_message(error: Exception) -> str:
     if "属性条件缺少 op" in message:
         return "属性条件 where 缺少 op。布尔条件必须写成 {\"op\":\"and\",\"conditions\":[...]} 或 {\"op\":\"or\",\"conditions\":[...]}，不能写 {\"and\":[...]}；叶子条件必须写 op，例如 {\"field\":\"NAME\",\"op\":\"like\",\"value\":\"%南京%\"}。请修正 workflow，不要向用户追问。"
     if "输出文件夹不存在" in message or "输出工作空间不可用" in message:
-        return message + " 如果这是用户指定的位置，请先调用 output_folder_resolve 核实并向用户追问；如果用户没有指定输出位置，请移除输出位置参数，让系统使用项目输出目录或 MXD 默认输出目录。"
+        return message + " 如果这是用户指定的位置，请先调用 output_folder_resolve 核实并向用户追问；如果用户没有指定输出位置，请移除输出位置参数，让系统使用 MXD 默认输出目录。"
     if "Unknown operation" in message:
         return "当前版本还不支持这个操作。请换成已有能力，或告诉我你想完成的 GIS 处理目标。"
     if message:
@@ -564,11 +515,11 @@ def _validate_output_location(operation: Dict[str, Any], arguments: Dict[str, An
         raise ValidationError("shp 输出必须使用 output_folder 指向已存在文件夹，不能输出到 GDB。")
     if arguments.get("output_folder"):
         if not _existing_directory(arguments["output_folder"]):
-            raise ValidationError("输出文件夹不存在：%s。请使用已存在的文件夹，或在项目模式下省略输出位置让系统使用项目 GeoPilot_Output。" % arguments["output_folder"])
+            raise ValidationError("输出文件夹不存在：%s。请使用已存在的文件夹，或在已保存 MXD 中省略输出位置使用默认输出位置。" % arguments["output_folder"])
         return
     if arguments.get("output_workspace"):
         if not _valid_output_workspace(arguments["output_workspace"]):
-            raise ValidationError("输出工作空间不可用：%s。请使用已存在的文件夹/GDB，或在项目模式下省略输出位置让系统使用项目 GeoPilot_Output。" % arguments["output_workspace"])
+            raise ValidationError("输出工作空间不可用：%s。请使用已存在的文件夹/GDB，或在已保存 MXD 中省略输出位置使用默认输出位置。" % arguments["output_workspace"])
         return
     workspace = (operation.get("output_policy") or {}).get("workspace", "")
     if context.get("is_saved") and workspace.startswith("mxd_default"):

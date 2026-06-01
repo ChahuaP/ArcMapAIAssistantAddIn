@@ -8,7 +8,7 @@ class FolderDialogError(Exception):
     pass
 
 
-def select_folder(title: str = "选择 GeoPilot 项目工作目录") -> dict:
+def select_folder(title: str = "选择文件夹") -> dict:
     command = _powershell_command(title)
     creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     try:

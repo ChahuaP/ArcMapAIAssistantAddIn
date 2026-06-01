@@ -249,7 +249,7 @@
       const items = visibleWorkflows(workflows);
       if (!items.length) {
         const text = currentMode === 'full_agent'
-          ? '当前项目暂无任务。'
+          ? '当前会话暂无任务。'
           : '暂无任务。';
         box.innerHTML = `<div class="section-card">${text}</div>`;
         return;
@@ -258,48 +258,6 @@
       list.className = 'task-list';
       items.forEach(item => list.appendChild(taskCard(item)));
       box.appendChild(list);
-    }
-
-    function renderSidebarItems(workflows) {
-      const box = document.getElementById('sidebarHistory');
-      if (currentMode === 'full_agent') {
-        box.innerHTML = '';
-        return;
-      }
-      const visible = visibleWorkflows(workflows).slice(0, 12);
-      if (!visible.length) {
-        box.innerHTML = '<div class="sidebar-session"><div><strong>暂无对话</strong><span>生成任务后会显示在这里</span></div></div>';
-        return;
-      }
-      box.innerHTML = '';
-      visible.forEach(item => {
-        const node = document.createElement('div');
-        node.className = `sidebar-session${item.id === selectedWorkflowId ? ' active' : ''}`;
-        node.innerHTML = `
-          <button type="button" class="sidebar-session-main" onclick="selectWorkflow('${escapeJs(item.id)}')">
-            <strong>${escapeHtml(shortCommand(item.command || ''))}</strong>
-            <span>${escapeHtml(statusText(item))}</span>
-          </button>
-          <button type="button" class="sidebar-delete" title="删除" aria-label="删除" onclick="deleteWorkflow('${escapeJs(item.id)}')">×</button>
-        `;
-        box.appendChild(node);
-      });
-    }
-
-    async function selectWorkflow(id) {
-      selectedWorkflowId = id;
-      renderSidebarItems(cachedWorkflows);
-      renderTasks(cachedWorkflows);
-      renderConversation(cachedWorkflows);
-      setStatus('已显示该任务会话。');
-      const item = cachedWorkflows.find(workflow => workflow.id === id);
-      if (item && !Object.prototype.hasOwnProperty.call(item, 'agent_trace')) {
-        try {
-          await loadWorkflowDetail(id);
-        } catch (err) {
-          setStatus(err.message);
-        }
-      }
     }
 
     function ensureSelectedWorkflow() {
@@ -324,16 +282,11 @@
 
     function visibleWorkflows(workflows) {
       return (workflows || []).filter(item => {
-        if (workflowMode(item) !== currentMode) return false;
-        if (currentMode !== 'full_agent') return true;
-        return Boolean(activeProject && item.project_id === activeProject.id);
+        return workflowMode(item) === currentMode;
       });
     }
 
     function clearScope() {
-      if (currentMode === 'full_agent') {
-        return {mode: currentMode, project_id: activeProject.id};
-      }
       return {mode: currentMode};
     }
 

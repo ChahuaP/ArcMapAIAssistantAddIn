@@ -15,6 +15,5 @@ def publish_agent_progress(state: Any, session: Any, stage: str, label: str, det
         "label": label,
         "detail": detail,
         "mode": session.mode,
-        "project_id": session.project_id,
         "request_id": getattr(session, "request_id", "") or "",
     })

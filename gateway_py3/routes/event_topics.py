@@ -18,12 +18,8 @@ def mutation_events(path: str, result: Dict[str, Any] | None) -> List[str]:
         return ["workflows.changed", "arcmap.changed"]
     if path == "/config":
         return ["config.changed"]
-    if path in ("/projects", "/projects/active"):
-        return ["projects.changed"]
-    if path.startswith("/projects/") and path.endswith("/delete"):
-        return ["projects.changed", "workflows.changed"]
     if path.startswith("/workflows/") or path == "/execution-result" or path == "/workflows/clear":
-        return ["workflows.changed", "projects.changed"]
+        return ["workflows.changed"]
     if path.startswith("/tools/"):
         return ["tools.changed", "catalog.changed"]
     return []

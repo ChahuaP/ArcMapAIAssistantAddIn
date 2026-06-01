@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 
-KNOWN_FOLDER_NAMES = ("desktop", "documents", "downloads", "project_output")
+KNOWN_FOLDER_NAMES = ("desktop", "documents", "downloads")
 INVALID_FOLDER_CHARS = set('<>:"/\\|?*\x00')
 
 
@@ -13,7 +13,7 @@ class OutputFolderResolver:
     def __init__(self, known_roots: Dict[str, Path] | None = None):
         self.known_roots = {key: Path(value) for key, value in (known_roots or {}).items()}
 
-    def resolve(self, arguments: Dict[str, Any], project_output: str = "") -> Dict[str, Any]:
+    def resolve(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
         path = _optional_string(arguments, "path")
         parent_path = _optional_string(arguments, "parent_path")
         folder_name = _optional_string(arguments, "folder_name")
@@ -28,9 +28,9 @@ class OutputFolderResolver:
         if parent_path:
             base = Path(parent_path.replace("/", "\\"))
         elif known_folder:
-            base = self._known_folder(known_folder, project_output)
+            base = self._known_folder(known_folder)
             if base is None:
-                return _clarify("未知输出位置：%s。请使用 desktop、documents、downloads 或 project_output。" % known_folder)
+                return _clarify("未知输出位置：%s。请使用 desktop、documents 或 downloads。" % known_folder)
         else:
             return _clarify("请提供输出文件夹的完整路径，或用 known_folder 加 folder_name 表达桌面/文档/下载下的目录。")
 
@@ -43,13 +43,11 @@ class OutputFolderResolver:
             target = base / folder_name
         return _resolve_existing_folder(target)
 
-    def _known_folder(self, name: str, project_output: str) -> Path | None:
+    def _known_folder(self, name: str) -> Path | None:
         if name not in KNOWN_FOLDER_NAMES:
             return None
         if name in self.known_roots:
             return self.known_roots[name]
-        if name == "project_output":
-            return Path(project_output) if project_output else None
         home = Path(os.environ.get("USERPROFILE") or str(Path.home()))
         if name == "desktop":
             return home / "Desktop"

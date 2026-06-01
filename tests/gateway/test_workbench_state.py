@@ -20,9 +20,9 @@ class WorkbenchStateTests(unittest.TestCase):
             state = SimpleNamespace(catalog=OperationCatalog(), store=store)
 
             with patch("gateway_py3.routes.arcmap.bridges", return_value=[{"pid": 1, "port": 8766, "hwnd": 2}]):
-                result = handle_get(state, "/api/workbench-state", "0.20.1")
+                result = handle_get(state, "/api/workbench-state", "0.20.2")
 
-        self.assertEqual(result["health"]["app_version"], "0.20.1")
+        self.assertEqual(result["health"]["app_version"], "0.20.2")
         self.assertIn("config", result)
         self.assertIn("context", result)
         self.assertEqual(result["arcmap"]["bridges"][0]["hwnd"], 2)
@@ -33,17 +33,16 @@ class WorkbenchStateTests(unittest.TestCase):
             store = WorkflowStore(pathlib.Path(directory) / "workflows.sqlite")
             first = store.create_draft("半代理", "ctx", _workflow("view.refresh_view"), [{"a": 1}], mode="semi_agent")
             time.sleep(0.01)
-            second = store.create_draft("全代理", "ctx", _workflow("view.refresh_view"), [{"b": 2}], mode="full_agent", project_id="project-1")
+            second = store.create_draft("全代理", "ctx", _workflow("view.refresh_view"), [{"b": 2}], mode="full_agent")
             state = SimpleNamespace(catalog=OperationCatalog(), store=store)
 
-            listed = handle_get(state, "/api/workflows", "0.20.1", {
+            listed = handle_get(state, "/api/workflows", "0.20.2", {
                 "mode": ["full_agent"],
-                "project_id": ["project-1"],
                 "limit": ["10"],
                 "include_trace": ["false"],
             })
-            detail = handle_get(state, "/workflows/%s" % second["id"], "0.20.1")
-            since = handle_get(state, "/api/workflows", "0.20.1", {"since": [str(first["updated_at"])], "limit": ["10"]})
+            detail = handle_get(state, "/workflows/%s" % second["id"], "0.20.2")
+            since = handle_get(state, "/api/workflows", "0.20.2", {"since": [str(first["updated_at"])], "limit": ["10"]})
 
         self.assertEqual([item["id"] for item in listed["workflows"]], [second["id"]])
         self.assertNotIn("agent_trace", listed["workflows"][0])

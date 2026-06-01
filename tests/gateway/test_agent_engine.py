@@ -13,15 +13,12 @@ class AgentEngineTests(unittest.TestCase):
             command="打开 nanjing",
             context={"layers": []},
             mode="full_agent",
-            project_id="project-1",
-            project={"id": "project-1"},
             context_hash="abc",
             operation_count=3,
             permissions={"auto_execute": True},
         )
 
         self.assertEqual(session.mode, "full_agent")
-        self.assertEqual(session.project_id, "project-1")
         self.assertTrue(session.permissions["auto_execute"])
 
     def test_tool_executor_wraps_runtime(self):
@@ -44,8 +41,6 @@ class AgentEngineTests(unittest.TestCase):
             command="刷新地图",
             context={},
             mode="semi_agent",
-            project_id="",
-            project=None,
             context_hash="ctx",
             operation_count=1,
         )

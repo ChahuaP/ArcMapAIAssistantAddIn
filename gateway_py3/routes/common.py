@@ -10,7 +10,6 @@ QUIET_ACCESS_PATHS = (
     "/context",
     "/events",
     "/health",
-    "/projects",
 )
 
 

@@ -434,8 +434,7 @@ class ExternalAgentApiTests(unittest.TestCase):
             with _BridgePatch(sync_context=_context(is_saved=True)) as bridge:
                 result = app._plan_request({
                     "command": "刷新地图",
-                    "mode": "full_agent",
-                    "project_id": "project-1"
+                    "mode": "full_agent"
                 })
 
             row = result["workflow"]
@@ -528,12 +527,11 @@ class _DraftPlanner:
         self.store = store
         self.calls = []
 
-    def plan(self, command, context, mode="semi_agent", project_id=None, request_id=None):
+    def plan(self, command, context, mode="semi_agent", request_id=None):
         self.calls.append({
             "command": command,
             "context": context,
             "mode": mode,
-            "project_id": project_id,
             "request_id": request_id
         })
         return self.store.create_draft(
@@ -547,8 +545,7 @@ class _DraftPlanner:
                 ]
             },
             [],
-            mode=mode,
-            project_id=project_id or ""
+            mode=mode
         )
 
 

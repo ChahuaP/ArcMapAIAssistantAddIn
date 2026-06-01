@@ -30,7 +30,6 @@ class AgentRunner:
             "context_hash": session.context_hash,
             "operation_count": session.operation_count,
             "mode": session.mode,
-            "project_id": session.project_id,
         })
         publish_agent_progress(self.state, session, "analyze", "分析任务")
 

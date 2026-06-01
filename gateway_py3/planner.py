@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import re
 from typing import Any, Dict, List, Tuple
 
@@ -43,16 +42,16 @@ Hard rules:
 - workflow_validate and workflow_propose must receive workflow_json: a valid JSON string containing the complete workflow object. Do not pass a nested workflow object or separate action/summary/steps arguments to these tools.
 - The final proposal must be submitted with workflow_propose, or as a JSON object with action, summary, and steps.
 - action must be exactly execute, clarify, unsupported, or answer.
-- answer is for normal conversation that does not need ArcGIS execution, such as explaining previous project activity.
+- answer is for normal conversation that does not need ArcGIS execution, such as explaining previous conversation activity.
 - clarify must be one clear Chinese question the user can answer.
 - unsupported must explain the missing capability in Chinese and contain no executable steps.
 - execute must contain ordered steps with id, operation, arguments, and reason.
 - Every execute step must include reason. workflow_validate and workflow_propose require it. If validation says reason is missing, add the missing reason yourself and continue; do not ask the user to clarify.
 - Do not invent argument names. If the operation index is not enough, call catalog_get_operation_schema before proposing that operation.
 - For workflow operation arguments, use output_folder when the schema says output_folder. folder_path is only for the file_resolve tool.
-- For output destinations, call output_folder_resolve with structured arguments only: path, parent_path, known_folder, folder_name. Use known_folder=desktop for the user's desktop, documents for documents, downloads for downloads, and project_output for the active project output folder.
+- For output destinations, call output_folder_resolve with structured arguments only: path, parent_path, known_folder, folder_name. Use known_folder=desktop for the user's desktop, documents for documents, and downloads for downloads.
 - Never use file_resolve for output folders. file_resolve is only for local GIS input files to open or process.
-- If the user names an output folder that does not resolve, ask one clear Chinese question or choose the active project output folder only when the user did not specify an output destination.
+- If the user names an output folder that does not resolve, ask one clear Chinese question. If the user did not specify an output destination, let ArcMap use the MXD/default geoprocessing output location.
 - When the user provides a numeric size with a unit, map it to the operation schema exactly. For example, "外接圆半径0.001度" is a concrete radius, not a clarification request; if the schema has radius_unit, set it to degrees.
 - output_name is the final user-visible base filename or dataset name. It may be Chinese. Do not translate or romanize a user-provided Chinese name.
 - output_name must be only the name body: no path, no extension such as .obj/.shp/.kmz, no dot, and no Windows-illegal characters <>:"/\|?*.
@@ -78,8 +77,7 @@ Hard rules:
 - For rectangles/squares described by upper-left and lower-right corners, use edit.create_rectangle_polygon with numeric left/top/right/bottom. Do not hand-build coordinates arrays unless the rectangle operation is unavailable.
 - Do not mention JSON, schema, tool calls, operation ids, catalog internals, or validation internals to the user.
 - Do not overwrite existing data.
-- If the current mode is full_agent, prefer the active project workdir for local data lookup and output planning.
-- In full_agent mode, generated data should use arcgis_context.project_output_workspace when the user does not provide an output location.
+- In full_agent mode, use recent_conversation as one continuous session until the user clears it. Do not assume any special workspace or hidden output folder.
 - If existing operation chains cannot satisfy the user but the capability is feasible as a reusable ArcPy algorithm, call toolbuilder_create_draft to create a disabled draft tool package. Do not stop at unsupported just because no built-in operation exists.
 - If operation_index already contains an enabled custom.* operation that matches the user's goal, use that operation in workflow_propose. Do not create or revise a custom tool just to run an already enabled capability.
 - toolbuilder_create_draft is an agent tool, not an ArcGIS operation id. Never call catalog_get_operation_schema for toolbuilder.create_draft or toolbuilder_create_draft.
@@ -132,32 +130,23 @@ class AgenticPlanner:
         command: str,
         context: Dict[str, Any],
         mode: str = "semi_agent",
-        project_id: str | None = None,
         request_id: str | None = None
     ) -> Dict[str, Any]:
         if mode == SEMI_AGENT_MODE:
             self.store.clear_workflows(mode=SEMI_AGENT_MODE)
-            project_id = ""
-        project = self.store.get_project(project_id) if mode == FULL_AGENT_MODE and project_id else None
-        if mode == FULL_AGENT_MODE and not project:
-            raise PlannerError("全代理模式需要先选择一个项目工作目录。")
-        if project:
-            context = _context_for_project(context, project)
         client = self.client or create_provider(mode=mode)
-        runtime = AgentToolRuntime(self.catalog, self.store, context, self.file_resolver, self.output_folder_resolver, project)
+        runtime = AgentToolRuntime(self.catalog, self.store, context, self.file_resolver, self.output_folder_resolver)
         tool_executor = AgentToolExecutor(runtime)
         session = AgentSession(
             command=command,
             context=context,
             mode=mode,
-            project_id=project_id or "",
-            project=project,
             context_hash=context_hash(context),
             operation_count=len(self.catalog.operations),
             request_id=request_id or "",
         )
-        messages = self._messages(command, context, tool_executor.operation_index(), mode, project)
-        strategy = _PlannerStrategy(self, command, context, mode, project_id)
+        messages = self._messages(command, context, tool_executor.operation_index(), mode)
+        strategy = _PlannerStrategy(self, command, context, mode)
         runner = AgentRunner(state=_PlannerEventState(self.events), client=client, tool_executor=tool_executor, strategy=strategy)
         return runner.run(session, messages)
 
@@ -166,17 +155,15 @@ class AgenticPlanner:
         command: str,
         context: Dict[str, Any],
         operation_index: List[Dict[str, str]],
-        mode: str,
-        project: Dict[str, Any] | None
+        mode: str
     ) -> List[Dict[str, Any]]:
         recent_conversation = []
         if mode == FULL_AGENT_MODE:
-            recent_conversation = _recent_conversation(self.store, project.get("id") if project else None, mode, 18)
+            recent_conversation = _recent_conversation(self.store, mode, 18)
         payload = {
             "user_request": command,
             "mode": mode,
             "arcgis_context": _context_summary(context),
-            "project": _project_summary(project, self.store) if project else None,
             "operation_index": operation_index,
             "custom_tools": _custom_tool_status(self.store),
             "recent_conversation": recent_conversation
@@ -202,8 +189,7 @@ class AgenticPlanner:
         context: Dict[str, Any],
         workflow: Dict[str, Any],
         trace: List[Dict[str, Any]],
-        mode: str,
-        project_id: str | None
+        mode: str
     ) -> Tuple[Dict[str, Any] | None, str]:
         generic_unsupported_feedback = _generic_unsupported_feedback(workflow, trace)
         if generic_unsupported_feedback:
@@ -218,7 +204,7 @@ class AgenticPlanner:
             prepared = prepare_workflow(workflow, self.catalog, context)
         except ValidationError as exc:
             return None, friendly_validation_message(exc)
-        return self._store_workflow(command, context, prepared, trace, mode, project_id), ""
+        return self._store_workflow(command, context, prepared, trace, mode), ""
 
     def _store_unfinalized_feedback(
         self,
@@ -226,13 +212,12 @@ class AgenticPlanner:
         context: Dict[str, Any],
         feedback: str,
         trace: List[Dict[str, Any]],
-        mode: str = "semi_agent",
-        project_id: str | None = None
+        mode: str = "semi_agent"
     ) -> Dict[str, Any]:
         summary, as_answer = _public_unfinalized_feedback(feedback, trace)
         if as_answer:
-            return self._store_answer(command, context, summary, trace, mode, project_id)
-        return self._store_clarification(command, context, summary, trace, mode, project_id)
+            return self._store_answer(command, context, summary, trace, mode)
+        return self._store_clarification(command, context, summary, trace, mode)
 
     def _store_workflow(
         self,
@@ -240,10 +225,9 @@ class AgenticPlanner:
         context: Dict[str, Any],
         workflow: Dict[str, Any],
         trace: List[Dict[str, Any]],
-        mode: str = "semi_agent",
-        project_id: str | None = None
+        mode: str = "semi_agent"
     ) -> Dict[str, Any]:
-        row = self.store.create_draft(command, context_hash(context), workflow, trace, mode=mode, project_id=project_id or "")
+        row = self.store.create_draft(command, context_hash(context), workflow, trace, mode=mode)
         write_event("agent.final_workflow", {
             "workflow_id": row["id"],
             "workflow": workflow
@@ -256,11 +240,10 @@ class AgenticPlanner:
         context: Dict[str, Any],
         summary: str,
         trace: List[Dict[str, Any]],
-        mode: str = "semi_agent",
-        project_id: str | None = None
+        mode: str = "semi_agent"
     ) -> Dict[str, Any]:
         workflow = {"action": "clarify", "summary": summary, "steps": []}
-        row = self.store.create_draft(command, context_hash(context), workflow, trace, mode=mode, project_id=project_id or "")
+        row = self.store.create_draft(command, context_hash(context), workflow, trace, mode=mode)
         write_event("agent.final_workflow", {
             "workflow_id": row["id"],
             "workflow": workflow
@@ -273,11 +256,10 @@ class AgenticPlanner:
         context: Dict[str, Any],
         summary: str,
         trace: List[Dict[str, Any]],
-        mode: str = "semi_agent",
-        project_id: str | None = None
+        mode: str = "semi_agent"
     ) -> Dict[str, Any]:
         workflow = {"action": "answer", "summary": summary, "steps": []}
-        row = self.store.create_draft(command, context_hash(context), workflow, trace, mode=mode, project_id=project_id or "")
+        row = self.store.create_draft(command, context_hash(context), workflow, trace, mode=mode)
         write_event("agent.final_workflow", {
             "workflow_id": row["id"],
             "workflow": workflow
@@ -297,28 +279,26 @@ class _PlannerStrategy:
         command: str,
         context: Dict[str, Any],
         mode: str,
-        project_id: str | None,
     ):
         self.planner = planner
         self.command = command
         self.context = context
         self.mode = mode
-        self.project_id = project_id
 
     def proposal_from_message(self, message: Dict[str, Any]) -> Dict[str, Any] | None:
         return self.planner._proposal_from_message(message)
 
     def try_finalize(self, workflow: Dict[str, Any], trace: List[Dict[str, Any]]) -> Tuple[Dict[str, Any] | None, str]:
-        return self.planner._try_finalize(self.command, self.context, workflow, trace, self.mode, self.project_id)
+        return self.planner._try_finalize(self.command, self.context, workflow, trace, self.mode)
 
     def store_unfinalized_feedback(self, feedback: str, trace: List[Dict[str, Any]]) -> Dict[str, Any]:
-        return self.planner._store_unfinalized_feedback(self.command, self.context, feedback, trace, self.mode, self.project_id)
+        return self.planner._store_unfinalized_feedback(self.command, self.context, feedback, trace, self.mode)
 
     def store_clarification(self, summary: str, trace: List[Dict[str, Any]]) -> Dict[str, Any]:
-        return self.planner._store_clarification(self.command, self.context, summary, trace, self.mode, self.project_id)
+        return self.planner._store_clarification(self.command, self.context, summary, trace, self.mode)
 
     def store_answer(self, summary: str, trace: List[Dict[str, Any]]) -> Dict[str, Any]:
-        return self.planner._store_answer(self.command, self.context, summary, trace, self.mode, self.project_id)
+        return self.planner._store_answer(self.command, self.context, summary, trace, self.mode)
 
     def repair_limit_for_feedback(self, feedback: str) -> int:
         return _repair_limit_for_feedback(feedback)
@@ -352,42 +332,10 @@ def _context_summary(context: Dict[str, Any]) -> Dict[str, Any]:
         "mxd_path": context.get("mxd_path"),
         "is_saved": context.get("is_saved"),
         "default_gdb": context.get("default_gdb"),
-        "project_output_workspace": context.get("project_output_workspace"),
-        "project": context.get("project"),
         "active_view": context.get("active_view"),
         "spatial_reference": context.get("spatial_reference"),
         "layers": layers
     }
-
-
-def _project_summary(project: Dict[str, Any], store: WorkflowStore) -> Dict[str, Any]:
-    return {
-        "id": project["id"],
-        "name": project["name"],
-        "workdir": project["workdir"],
-        "output_workspace": str(_project_output_workspace(project)),
-        "memory": store.list_project_memories(project["id"], limit=12),
-    }
-
-
-def _context_for_project(context: Dict[str, Any], project: Dict[str, Any]) -> Dict[str, Any]:
-    result = dict(context or {})
-    output_workspace = _project_output_workspace(project)
-    try:
-        output_workspace.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        raise PlannerError("项目输出目录不可用：%s" % exc)
-    result["project"] = {
-        "id": project["id"],
-        "name": project["name"],
-        "workdir": project["workdir"],
-    }
-    result["project_output_workspace"] = str(output_workspace)
-    return result
-
-
-def _project_output_workspace(project: Dict[str, Any]) -> Path:
-    return Path(project["workdir"]).expanduser().resolve() / "GeoPilot_Output"
 
 
 def _custom_tool_status(store: WorkflowStore) -> List[Dict[str, str]]:
@@ -407,9 +355,9 @@ def _custom_tool_status(store: WorkflowStore) -> List[Dict[str, str]]:
     return tools
 
 
-def _recent_conversation(store: WorkflowStore, project_id: str | None = None, mode: str | None = None, limit: int = 6) -> List[Dict[str, Any]]:
+def _recent_conversation(store: WorkflowStore, mode: str | None = None, limit: int = 6) -> List[Dict[str, Any]]:
     history = []
-    for row in reversed(store.list_recent(limit=limit, project_id=project_id, mode=mode, include_trace=False)):
+    for row in reversed(store.list_recent(limit=limit, mode=mode, include_trace=False)):
         workflow = row.get("workflow") or {}
         history.append({
             "command": row.get("command"),

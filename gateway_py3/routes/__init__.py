@@ -22,7 +22,6 @@ def handle_get(state, path, app_version, query=None):
     if path == "/api/workflows":
         return {"workflows": state.store.list_recent(
             limit=common.int_query(query, "limit", 50),
-            project_id=common.optional_query(query, "project_id"),
             mode=common.optional_query(query, "mode"),
             since=common.float_query(query, "since"),
             include_trace=common.bool_query(query, "include_trace", False),
@@ -31,14 +30,6 @@ def handle_get(state, path, app_version, query=None):
         return {"workflow": state.store.get(path.split("/")[2])}
     if path == "/api/workbench-state":
         return workbench_state(state, app_version)
-    if path == "/projects":
-        return {"projects": state.store.list_projects(), "active_project": state.store.get_active_project()}
-    if path == "/projects/active":
-        return {"project": state.store.get_active_project()}
-    if path.startswith("/projects/") and path.endswith("/memory"):
-        return {"memories": state.store.list_project_memories(path.split("/")[2])}
-    if path.startswith("/projects/") and path.endswith("/events"):
-        return {"events": state.store.list_project_events(path.split("/")[2])}
     if path == "/tools/pending":
         return {"tools": state.store.list_pending_tools()}
     if path == "/api/capabilities":
@@ -76,8 +67,6 @@ def workbench_state(state, app_version):
         },
         "config": config,
         "context": state.store.get_state("arcmap_context"),
-        "projects": state.store.list_projects(),
-        "active_project": state.store.get_active_project(),
         "workflows": state.store.list_recent(include_trace=False),
         "arcmap": arcmap_payload,
     }
@@ -113,13 +102,7 @@ def _handle_post(state, path, payload):
     if path == "/config":
         return {"config": save_config(common.config_payload(payload))}
     if path == "/dialog/select-folder":
-        return {"folder": select_folder(str(payload.get("title") or "选择 GeoPilot 项目工作目录"))}
-    if path == "/projects":
-        return {"project": state.store.create_project(payload.get("name") or "", payload.get("workdir") or "")}
-    if path == "/projects/active":
-        return {"project": state.store.set_active_project(payload.get("project_id") or "")}
-    if path.startswith("/projects/") and path.endswith("/delete"):
-        return state.store.delete_project(path.split("/")[2])
+        return {"folder": select_folder(str(payload.get("title") or "选择文件夹"))}
     if path == "/context":
         context = payload.get("context")
         if not isinstance(context, dict):
@@ -134,7 +117,7 @@ def _handle_post(state, path, payload):
     if path == "/execution-result":
         return {"workflow": state.store.finish(payload["workflow_id"], payload["status"], payload.get("result", {}))}
     if path == "/workflows/clear":
-        return state.store.clear_workflows(payload.get("project_id"), payload.get("mode"))
+        return state.store.clear_workflows(payload.get("mode"))
     if path.startswith("/workflows/") and path.endswith("/repair-custom-tool"):
         return planner.repair_custom_tool_workflow(state, path.split("/")[2], payload)
     if path.startswith("/workflows/") and path.endswith("/delete"):

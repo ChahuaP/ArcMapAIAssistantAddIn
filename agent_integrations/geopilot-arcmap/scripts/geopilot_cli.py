@@ -53,14 +53,12 @@ def main() -> int:
     propose_parser.add_argument("--context", help="Optional context JSON file.")
     propose_parser.add_argument("--command", dest="user_command", default="")
     propose_parser.add_argument("--source", default="codex")
-    propose_parser.add_argument("--project-id", default="")
 
     execute_workflow_parser = subparsers.add_parser("arcmap-execute-workflow")
     execute_workflow_parser.add_argument("--workflow", required=True, help="Workflow JSON file, or '-' for stdin.")
     execute_workflow_parser.add_argument("--context", help="Optional context JSON file.")
     execute_workflow_parser.add_argument("--command", dest="user_command", default="")
     execute_workflow_parser.add_argument("--source", default="codex")
-    execute_workflow_parser.add_argument("--project-id", default="")
     execute_workflow_parser.add_argument("--confirmed", action="store_true")
     execute_workflow_parser.add_argument("--allow-edits", action="store_true")
 
@@ -122,8 +120,7 @@ def main() -> int:
             payload = {
                 "workflow": _read_json_arg(args.workflow),
                 "command": args.user_command,
-                "source": args.source,
-                "project_id": args.project_id
+                "source": args.source
             }
             if getattr(args, "context", None):
                 payload["context"] = _read_json_arg(args.context)
@@ -133,7 +130,6 @@ def main() -> int:
                 "workflow": _read_json_arg(args.workflow),
                 "command": args.user_command,
                 "source": args.source,
-                "project_id": args.project_id,
                 "confirmed": args.confirmed,
                 "allow_edits": args.allow_edits
             }

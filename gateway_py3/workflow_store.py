@@ -9,17 +9,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .paths import data_dir
-from .workflow_store_projects import (
-    PROJECT_MEMORY_COMPACT_LIMIT,
-    PROJECT_MEMORY_KEEP_RECENT,
-    PROJECT_OUTPUT_DIR_NAME,
-    compact_memory_text,
-    insert_project_event,
-)
 from .workflow_store_schema import (
     init_database,
     pending_tool_row_to_dict,
-    project_row_to_dict,
     workflow_row_to_dict,
 )
 
@@ -54,8 +46,7 @@ class WorkflowStore:
         context_hash: str,
         workflow: Dict[str, Any],
         agent_trace: List[Dict[str, Any]],
-        mode: str = "semi_agent",
-        project_id: str = ""
+        mode: str = "semi_agent"
     ) -> Dict[str, Any]:
         workflow_id = str(uuid.uuid4())
         now = time.time()
@@ -63,14 +54,13 @@ class WorkflowStore:
             conn.execute(
                 """
                 INSERT INTO workflows
-                (id, status, mode, project_id, command, context_hash, workflow_json, agent_trace_json, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (id, status, mode, command, context_hash, workflow_json, agent_trace_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     workflow_id,
                     "draft",
                     mode,
-                    project_id or "",
                     command,
                     context_hash,
                     json.dumps(workflow, ensure_ascii=False, sort_keys=True),
@@ -79,19 +69,12 @@ class WorkflowStore:
                     now
                 )
             )
-            if project_id:
-                insert_project_event(conn, project_id, "workflow_created", {
-                    "workflow_id": workflow_id,
-                    "command": command,
-                    "summary": workflow.get("summary", ""),
-                    "action": workflow.get("action", ""),
-                }, now)
         return self.get(workflow_id)
 
     def get(self, workflow_id: str) -> Dict[str, Any]:
         with self._connection() as conn:
             row = conn.execute(
-                "SELECT id, status, mode, project_id, command, context_hash, workflow_json, agent_trace_json, created_at, updated_at, result_json FROM workflows WHERE id = ?",
+                "SELECT id, status, mode, command, context_hash, workflow_json, agent_trace_json, created_at, updated_at, result_json FROM workflows WHERE id = ?",
                 (workflow_id,)
             ).fetchone()
         if row is None:
@@ -101,7 +84,6 @@ class WorkflowStore:
     def list_recent(
         self,
         limit: int = 50,
-        project_id: str | None = None,
         mode: str | None = None,
         since: float | None = None,
         include_trace: bool = True
@@ -109,9 +91,6 @@ class WorkflowStore:
         limit = max(1, min(int(limit), 200))
         clauses = []
         params: List[Any] = []
-        if project_id:
-            clauses.append("project_id = ?")
-            params.append(project_id)
         if mode:
             clauses.append("mode = ?")
             params.append(mode)
@@ -123,7 +102,7 @@ class WorkflowStore:
         with self._connection() as conn:
             rows = conn.execute(
                 """
-                SELECT id, status, mode, project_id, command, context_hash, workflow_json, agent_trace_json, created_at, updated_at, result_json
+                SELECT id, status, mode, command, context_hash, workflow_json, agent_trace_json, created_at, updated_at, result_json
                 FROM workflows
                 %s
                 ORDER BY created_at DESC LIMIT ?
@@ -132,26 +111,16 @@ class WorkflowStore:
             ).fetchall()
         return [workflow_row_to_dict(row, include_trace=include_trace) for row in rows]
 
-    def clear_workflows(self, project_id: str | None = None, mode: str | None = None) -> Dict[str, Any]:
+    def clear_workflows(self, mode: str | None = None) -> Dict[str, Any]:
         with self._connection() as conn:
-            if project_id:
-                workflow_count = conn.execute("DELETE FROM workflows WHERE project_id = ?", (project_id,)).rowcount
-                memory_count = conn.execute("DELETE FROM project_memories WHERE project_id = ?", (project_id,)).rowcount
-                event_count = conn.execute("DELETE FROM project_events WHERE project_id = ?", (project_id,)).rowcount
-            elif mode:
+            if mode:
                 workflow_count = conn.execute("DELETE FROM workflows WHERE mode = ?", (mode,)).rowcount
-                memory_count = 0
-                event_count = 0
             else:
                 workflow_count = conn.execute("DELETE FROM workflows").rowcount
-                memory_count = conn.execute("DELETE FROM project_memories").rowcount
-                event_count = conn.execute("DELETE FROM project_events").rowcount
         return {
             "ok": True,
             "cleared": {
                 "workflows": workflow_count,
-                "project_memories": memory_count,
-                "project_events": event_count,
             }
         }
 
@@ -174,7 +143,7 @@ class WorkflowStore:
         with self._connection() as conn:
             row = conn.execute(
                 """
-                SELECT id, status, mode, project_id, command, context_hash, workflow_json, agent_trace_json, created_at, updated_at, result_json
+                SELECT id, status, mode, command, context_hash, workflow_json, agent_trace_json, created_at, updated_at, result_json
                 FROM workflows
                 WHERE status = 'approved_for_arcmap'
                 ORDER BY updated_at DESC
@@ -197,17 +166,7 @@ class WorkflowStore:
                 "UPDATE workflows SET status = ?, result_json = ?, updated_at = ? WHERE id = ?",
                 (status, json.dumps(result, ensure_ascii=False, sort_keys=True), time.time(), workflow_id)
             )
-        row = self.get(workflow_id)
-        if row.get("project_id"):
-            self.add_project_event(row["project_id"], "workflow_finished", {
-                "workflow_id": workflow_id,
-                "status": status,
-                "summary": row["workflow"].get("summary", ""),
-                "result": result,
-            })
-            if status == "succeeded":
-                self.add_project_memory(row["project_id"], row["workflow"].get("summary", ""), kind="workflow_result")
-        return row
+        return self.get(workflow_id)
 
     def set_state(self, key: str, value: Dict[str, Any]) -> Dict[str, Any]:
         now = time.time()
@@ -250,167 +209,6 @@ class WorkflowStore:
         with self._connection() as conn:
             conn.execute("UPDATE workflows SET status = ?, updated_at = ? WHERE id = ?", (status, time.time(), workflow_id))
         return self.get(workflow_id)
-
-    def create_project(self, name: str, workdir: str) -> Dict[str, Any]:
-        path = Path(workdir).expanduser().resolve()
-        if not path.exists() or not path.is_dir():
-            raise ValueError("项目工作目录不存在：%s" % workdir)
-        output_dir = path / PROJECT_OUTPUT_DIR_NAME
-        output_dir.mkdir(parents=True, exist_ok=True)
-        project_id = str(uuid.uuid4())
-        now = time.time()
-        with self._connection() as conn:
-            conn.execute(
-                "INSERT INTO projects (id, name, workdir, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-                (project_id, name.strip() or path.name, str(path), now, now)
-            )
-            insert_project_event(conn, project_id, "project_created", {
-                "name": name.strip() or path.name,
-                "workdir": str(path),
-                "output_workspace": str(output_dir)
-            }, now)
-        self.set_state("active_project_id", {"id": project_id})
-        return self.get_project(project_id)
-
-    def list_projects(self) -> List[Dict[str, Any]]:
-        with self._connection() as conn:
-            rows = conn.execute(
-                "SELECT id, name, workdir, created_at, updated_at FROM projects ORDER BY created_at DESC"
-            ).fetchall()
-        return [project_row_to_dict(row) for row in rows]
-
-    def get_project(self, project_id: str | None) -> Optional[Dict[str, Any]]:
-        if not project_id:
-            return None
-        with self._connection() as conn:
-            row = conn.execute(
-                "SELECT id, name, workdir, created_at, updated_at FROM projects WHERE id = ?",
-                (project_id,)
-            ).fetchone()
-        return project_row_to_dict(row) if row else None
-
-    def set_active_project(self, project_id: str) -> Dict[str, Any]:
-        project = self.get_project(project_id)
-        if not project:
-            raise KeyError(project_id)
-        with self._connection() as conn:
-            conn.execute("UPDATE projects SET updated_at = ? WHERE id = ?", (time.time(), project_id))
-        self.set_state("active_project_id", {"id": project_id})
-        return self.get_project(project_id)
-
-    def get_active_project(self) -> Optional[Dict[str, Any]]:
-        state = self.get_state("active_project_id")
-        if not state:
-            return None
-        return self.get_project((state.get("value") or {}).get("id"))
-
-    def add_project_memory(self, project_id: str, content: str, kind: str = "note") -> Dict[str, Any]:
-        if not content.strip():
-            raise ValueError("记忆内容不能为空。")
-        memory_id = str(uuid.uuid4())
-        now = time.time()
-        with self._connection() as conn:
-            conn.execute(
-                "INSERT INTO project_memories (id, project_id, kind, content, created_at) VALUES (?, ?, ?, ?, ?)",
-                (memory_id, project_id, kind, content.strip(), now)
-            )
-        if kind != "summary":
-            self.compact_project_memory(project_id)
-        return {"id": memory_id, "project_id": project_id, "kind": kind, "content": content.strip(), "created_at": now}
-
-    def list_project_memories(self, project_id: str, limit: int = 30) -> List[Dict[str, Any]]:
-        with self._connection() as conn:
-            rows = conn.execute(
-                """
-                SELECT id, project_id, kind, content, created_at
-                FROM project_memories
-                WHERE project_id = ?
-                ORDER BY created_at DESC LIMIT ?
-                """,
-                (project_id, limit)
-            ).fetchall()
-        return [
-            {"id": row[0], "project_id": row[1], "kind": row[2], "content": row[3], "created_at": row[4]}
-            for row in rows
-        ]
-
-    def add_project_event(self, project_id: str, event_type: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-        event_id = str(uuid.uuid4())
-        now = time.time()
-        with self._connection() as conn:
-            insert_project_event(conn, project_id, event_type, payload, now, event_id)
-        return {"id": event_id, "project_id": project_id, "event_type": event_type, "payload": payload, "created_at": now}
-
-    def list_project_events(self, project_id: str, limit: int = 80) -> List[Dict[str, Any]]:
-        with self._connection() as conn:
-            rows = conn.execute(
-                """
-                SELECT id, project_id, event_type, payload_json, created_at
-                FROM project_events
-                WHERE project_id = ?
-                ORDER BY created_at DESC LIMIT ?
-                """,
-                (project_id, limit)
-            ).fetchall()
-        return [
-            {"id": row[0], "project_id": row[1], "event_type": row[2], "payload": json.loads(row[3]), "created_at": row[4]}
-            for row in rows
-        ]
-
-    def delete_project(self, project_id: str) -> Dict[str, Any]:
-        active = self.get_active_project()
-        with self._connection() as conn:
-            cursor = conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
-            if cursor.rowcount == 0:
-                raise KeyError(project_id)
-            conn.execute("DELETE FROM workflows WHERE project_id = ?", (project_id,))
-            conn.execute("DELETE FROM project_memories WHERE project_id = ?", (project_id,))
-            conn.execute("DELETE FROM project_events WHERE project_id = ?", (project_id,))
-            if active and active.get("id") == project_id:
-                conn.execute("DELETE FROM app_state WHERE key = 'active_project_id'")
-        return {"ok": True}
-
-    def compact_project_memory(
-        self,
-        project_id: str,
-        max_items: int = PROJECT_MEMORY_COMPACT_LIMIT,
-        keep_recent: int = PROJECT_MEMORY_KEEP_RECENT
-    ) -> Dict[str, Any]:
-        with self._connection() as conn:
-            rows = conn.execute(
-                """
-                SELECT id, project_id, kind, content, created_at
-                FROM project_memories
-                WHERE project_id = ?
-                ORDER BY created_at ASC
-                """,
-                (project_id,)
-            ).fetchall()
-            memories = [
-                {"id": row[0], "project_id": row[1], "kind": row[2], "content": row[3], "created_at": row[4]}
-                for row in rows
-            ]
-            if len(memories) <= max_items:
-                return {"ok": True, "compacted": False, "count": len(memories)}
-            keep_recent = max(1, min(keep_recent, max_items - 1))
-            older = memories[:-keep_recent]
-            recent = memories[-keep_recent:]
-            summary = compact_memory_text(older)
-            delete_ids = [item["id"] for item in older]
-            placeholders = ",".join("?" for _ in delete_ids)
-            conn.execute("DELETE FROM project_memories WHERE id IN (%s)" % placeholders, delete_ids)
-            now = time.time()
-            summary_id = str(uuid.uuid4())
-            conn.execute(
-                "INSERT INTO project_memories (id, project_id, kind, content, created_at) VALUES (?, ?, ?, ?, ?)",
-                (summary_id, project_id, "summary", summary, min(recent[0]["created_at"], now) - 0.001)
-            )
-            insert_project_event(conn, project_id, "memory_compacted", {
-                "compacted_count": len(older),
-                "kept_recent_count": len(recent),
-                "summary_id": summary_id
-            }, now)
-        return {"ok": True, "compacted": True, "compacted_count": len(older), "kept_recent_count": len(recent)}
 
     def create_pending_tool(self, name: str, capability: str, payload: Dict[str, Any], files: Dict[str, str], tool_id: str | None = None) -> Dict[str, Any]:
         draft_id = tool_id or str(uuid.uuid4())

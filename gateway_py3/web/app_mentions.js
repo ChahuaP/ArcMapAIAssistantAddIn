@@ -219,7 +219,7 @@
       eventSource.addEventListener('error', () => {
         setTile('gatewayState', 'warn', '等待重连');
       });
-      ['workflows.changed', 'context.changed', 'projects.changed', 'tools.changed', 'catalog.changed', 'config.changed', 'arcmap.changed'].forEach(type => {
+      ['workflows.changed', 'context.changed', 'tools.changed', 'catalog.changed', 'config.changed', 'arcmap.changed'].forEach(type => {
         eventSource.addEventListener(type, () => scheduleEventRefresh(type));
       });
       eventSource.addEventListener('agent.progress', handleAgentProgressEvent);
@@ -243,7 +243,6 @@
         return;
       }
       if (payload.mode && payload.mode !== currentMode) return;
-      if (payload.project_id && currentMode === 'full_agent' && activeProject && payload.project_id !== activeProject.id) return;
       if (payload.request_id && activePlanRequestId && payload.request_id !== activePlanRequestId) return;
       setState({agentProgress: payload});
       if (modelWait) {
@@ -274,11 +273,6 @@
           if (!document.getElementById('capabilitiesModal').hidden) await loadCapabilities();
         }
         if (types.has('arcmap')) await loadArcMapBridges();
-        if (types.has('projects')) {
-          await loadProjects();
-          await refreshWorkflows(!transientUserMessage);
-          workflowsRefreshed = true;
-        }
         if (types.has('context')) await loadContext();
         if (types.has('tools') && !document.getElementById('toolsModal').hidden) await loadPendingTools();
         if (types.has('workflows') && !workflowsRefreshed) await refreshWorkflows(!transientUserMessage);

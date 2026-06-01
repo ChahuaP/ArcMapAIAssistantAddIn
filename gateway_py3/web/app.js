@@ -1,4 +1,4 @@
-    const EXPECTED_GATEWAY_VERSION = '0.20.1';
+    const EXPECTED_GATEWAY_VERSION = '0.20.2';
     const API_ORIGIN = window.location.protocol === 'file:' ? 'http://127.0.0.1:8765' : '';
     const MODE_STORAGE_KEY = 'geopilot.currentMode';
     let eventSource = null;
@@ -8,7 +8,6 @@
     let capabilitiesLoaded = false;
     let currentMode = 'semi_agent';
     let modeInitialized = false;
-    let activeProject = null;
     let latestArcgisContext = null;
     let arcmapBridges = [];
     let cachedWorkflows = [];
@@ -24,8 +23,6 @@
     const appState = {
       config: null,
       health: null,
-      projects: [],
-      activeProject: null,
       context: null,
       workflows: [],
       arcmapBridges: [],
@@ -37,7 +34,6 @@
     function setState(patch) {
       patch = patch || {};
       Object.assign(appState, patch);
-      if (Object.prototype.hasOwnProperty.call(patch, 'activeProject')) activeProject = patch.activeProject || null;
       if (Object.prototype.hasOwnProperty.call(patch, 'context')) latestArcgisContext = patch.context || null;
       if (Object.prototype.hasOwnProperty.call(patch, 'workflows')) cachedWorkflows = patch.workflows || [];
       if (Object.prototype.hasOwnProperty.call(patch, 'arcmapBridges')) arcmapBridges = patch.arcmapBridges || [];
@@ -46,15 +42,10 @@
 
     function renderApp(changedKeys) {
       const keys = new Set(changedKeys || []);
-      if (keys.has('projects')) {
-        renderProjects(appState.projects || []);
-        updateProjectStatus();
-      }
       if (keys.has('workflows')) {
         pruneTaskDetailsState(cachedWorkflows);
         ensureSelectedWorkflow();
         renderTasks(cachedWorkflows);
-        renderSidebarItems(cachedWorkflows);
         renderConversation(cachedWorkflows);
       }
       if (keys.has('arcmap')) renderArcMapBridgeState();
@@ -113,9 +104,9 @@
       box.innerHTML = '<div class="section-card">正在检查...</div>';
       try {
         const data = await api('/api/diagnostics');
-        document.getElementById('diagnosticsSummary').textContent = data.ok
-          ? `检查通过，当前版本 ${data.app_version}。`
-          : `发现需要处理的项目，当前版本 ${data.app_version}。`;
+      document.getElementById('diagnosticsSummary').textContent = data.ok
+        ? `检查通过，当前版本 ${data.app_version}。`
+          : `发现需要处理的事项，当前版本 ${data.app_version}。`;
         renderDiagnostics(data.checks || []);
       } catch (err) {
         document.getElementById('diagnosticsSummary').textContent = '诊断失败。';
@@ -268,7 +259,7 @@
       const notes = [
         '正在确认当前 ArcMap 目标和地图状态。',
         '正在读取可用操作与工具目录。',
-        '正在理解任务和项目上下文。',
+        '正在理解任务和会话上下文。',
         '需要时会读取字段和值样本。',
         '正在生成可校验的任务流程。',
         '正在做本地规则校验。',
@@ -313,7 +304,7 @@
       const version = data.app_version || '旧版本';
       setTile('gatewayState', 'ok', `已启动，${data.operation_count} 个能力`);
       if (data.app_version === EXPECTED_GATEWAY_VERSION) {
-        updateProjectStatus();
+        updateModeStatus();
       } else {
         setTile('restartState', 'warn', '需要重启网关');
       }
@@ -326,7 +317,6 @@
       applyConfig(data.config || {});
       applyArcMapBridges((data.arcmap && data.arcmap.bridges) || [], (data.arcmap && data.arcmap.error) || '');
       applyContextRecord(data.context || null);
-      applyProjects(data.projects || [], data.active_project || null);
       applyWorkflows(data.workflows || [], true);
       setStatus(`网关已连接，版本 ${(data.health && data.health.app_version) || EXPECTED_GATEWAY_VERSION}。`);
     }
@@ -537,28 +527,12 @@
 
     function updateModeUI() {
       const fullMode = currentMode === 'full_agent';
-      document.body.classList.toggle('mode-full', fullMode);
-      document.body.classList.toggle('mode-semi', !fullMode);
       document.getElementById('semiModeButton').classList.toggle('active', !fullMode);
       document.getElementById('fullModeButton').classList.toggle('active', fullMode);
-      document.getElementById('sidebarTitle').textContent = fullMode ? '项目' : '对话';
-      document.getElementById('newProjectButton').hidden = !fullMode;
-      if (!fullMode) document.getElementById('sidebarProjectForm').hidden = true;
-      document.getElementById('projectHistoryTitle').hidden = !fullMode;
-      document.getElementById('sidebarProjects').hidden = !fullMode;
-      document.getElementById('sidebarHistoryTitle').hidden = fullMode;
-      document.getElementById('sidebarHistory').hidden = fullMode;
-      document.getElementById('taskPanelHint').textContent = fullMode ? '显示当前项目的全部任务' : '显示半代理模式的全部任务';
-      const note = document.getElementById('modeNote');
-      if (fullMode) {
-        note.innerHTML = '<strong>全代理模式</strong><span>围绕当前项目工作目录规划，保留项目记忆。</span>';
-      } else {
-        note.innerHTML = '<strong>半代理模式</strong><span>一次对话处理一个明确任务，不使用项目工作目录。</span>';
-      }
-      updateProjectStatus();
+      document.getElementById('taskPanelHint').textContent = fullMode ? '显示当前会话的全部任务' : '显示半代理模式的全部任务';
+      updateModeStatus();
       renderCurrentModelHint(appState.config);
       ensureSelectedWorkflow();
-      renderSidebarItems(cachedWorkflows);
       renderTasks(cachedWorkflows);
       renderConversation(cachedWorkflows);
     }
@@ -649,141 +623,8 @@
       return parts.join(' · ');
     }
 
-    async function loadProjects() {
-      const data = await api('/projects');
-      applyProjects(data.projects || [], data.active_project || null);
-    }
-
-    function applyProjects(projects, active) {
-      setState({projects: projects || [], activeProject: active || null});
-      renderApp(['projects']);
-    }
-
-    function toggleProjectForm() {
-      if (currentMode !== 'full_agent') {
-        setStatus('半代理模式不使用项目。切换到全代理模式后再创建项目。');
-        return;
-      }
-      const form = document.getElementById('sidebarProjectForm');
-      form.hidden = !form.hidden;
-      if (!form.hidden) document.getElementById('projectName').focus();
-    }
-
-    async function chooseProjectFolder() {
-      if (currentMode !== 'full_agent') {
-        setStatus('半代理模式不使用项目。切换到全代理模式后再选择工作目录。');
-        return;
-      }
-      try {
-        setStatus('请选择项目工作目录...');
-        const data = await api('/dialog/select-folder', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({title: '选择 GeoPilot 项目工作目录'})
-        });
-        const folder = data.folder || {};
-        if (folder.cancelled) {
-          setStatus('已取消选择。');
-          return;
-        }
-        if (folder.path) {
-          document.getElementById('projectWorkdir').value = folder.path;
-          setStatus('已选择项目工作目录。');
-        }
-      } catch (err) {
-        setStatus(err.message);
-      }
-    }
-
-    async function createProject() {
-      if (currentMode !== 'full_agent') {
-        setStatus('半代理模式不使用项目。切换到全代理模式后再创建项目。');
-        return;
-      }
-      const name = document.getElementById('projectName').value.trim();
-      const workdir = document.getElementById('projectWorkdir').value.trim();
-      if (!workdir) {
-        setStatus('请选择项目工作目录。');
-        return;
-      }
-      const data = await api('/projects', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({name, workdir})
-      });
-      activeProject = data.project;
-      document.getElementById('projectName').value = '';
-      document.getElementById('projectWorkdir').value = '';
-      document.getElementById('sidebarProjectForm').hidden = true;
-      setStatus(`当前项目：${activeProject.name}`);
-      await loadProjects();
-      await refreshWorkflows();
-    }
-
-    async function activateProject(id) {
-      const data = await api('/projects/active', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({project_id: id})
-      });
-      activeProject = data.project;
-      setStatus(`当前项目：${activeProject.name}`);
-      await loadProjects();
-      await refreshWorkflows();
-    }
-
-    function renderProjects(projects) {
-      const sidebar = document.getElementById('sidebarProjects');
-      if (!projects.length) {
-        sidebar.innerHTML = '<div class="sidebar-session"><div><strong>暂无项目</strong><span>创建项目后会显示在这里</span></div></div>';
-        return;
-      }
-      sidebar.innerHTML = '';
-      projects.forEach(project => {
-        const active = activeProject && activeProject.id === project.id;
-        const node = document.createElement('div');
-        node.className = `sidebar-session${active ? ' active' : ''}`;
-        const sidebarButton = document.createElement('button');
-        sidebarButton.type = 'button';
-        sidebarButton.className = `sidebar-project${active ? ' active' : ''}`;
-        sidebarButton.onclick = () => activateProject(project.id);
-        sidebarButton.innerHTML = `
-          <strong>${escapeHtml(project.name)}</strong>
-          <span>${escapeHtml(project.workdir)}</span>
-        `;
-        const deleteButton = document.createElement('button');
-        deleteButton.type = 'button';
-        deleteButton.className = 'sidebar-delete';
-        deleteButton.title = '删除项目';
-        deleteButton.setAttribute('aria-label', '删除项目');
-        deleteButton.textContent = '×';
-        deleteButton.onclick = () => deleteProject(project.id, project.name);
-        node.appendChild(sidebarButton);
-        node.appendChild(deleteButton);
-        sidebar.appendChild(node);
-      });
-    }
-
-    async function deleteProject(id, name) {
-      if (!window.confirm(`确定删除项目“${name}”吗？这会清空该项目的对话、记忆和任务记录，但不会删除磁盘文件。`)) return;
-      await api(`/projects/${encodeURIComponent(id)}/delete`, {method: 'POST', body: '{}'});
-      if (activeProject && activeProject.id === id) {
-        activeProject = null;
-        selectedWorkflowId = '';
-        transientUserMessage = '';
-        transientAssistantMessage = '';
-      }
-      setStatus('项目已删除。');
-      await loadProjects();
-      await refreshWorkflows();
-    }
-
-    function updateProjectStatus() {
-      if (currentMode === 'full_agent') {
-        setTile('restartState', activeProject ? 'ok' : 'warn', activeProject ? `项目：${activeProject.name}` : '请选择项目');
-      } else {
-        setTile('restartState', 'ok', '半代理模式');
-      }
+    function updateModeStatus() {
+      setTile('restartState', 'ok', currentMode === 'full_agent' ? '全代理模式' : '半代理模式');
     }
 
     async function loadPendingTools() {
@@ -853,10 +694,6 @@
       const input = document.getElementById('command');
       const command = input.value.trim();
       if (!command) return;
-      if (currentMode === 'full_agent' && !activeProject) {
-        setStatus('全代理模式需要先在左侧创建或选择项目工作目录。');
-        return;
-      }
       input.value = '';
       transientUserMessage = command;
       transientAssistantMessage = '';
@@ -874,7 +711,7 @@
         const data = await api('/plan', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({command, mode: currentMode, project_id: currentMode === 'full_agent' && activeProject ? activeProject.id : '', request_id: requestId})
+          body: JSON.stringify({command, mode: currentMode, request_id: requestId})
         });
         transientUserMessage = '';
         transientAssistantMessage = '';
@@ -899,10 +736,6 @@
     }
 
     async function clearConversation() {
-      if (currentMode === 'full_agent' && !activeProject) {
-        setStatus('全代理模式需要先选择项目，才能清空项目对话。');
-        return;
-      }
       await api('/workflows/clear', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -911,8 +744,7 @@
       selectedWorkflowId = '';
       transientUserMessage = '';
       transientAssistantMessage = '';
-      setStatus(currentMode === 'full_agent' ? '已清空项目对话和上下文。' : '已清空。');
-      if (currentMode === 'full_agent') await loadProjects();
+      setStatus(currentMode === 'full_agent' ? '已清空全代理会话上下文。' : '已清空。');
       await refreshWorkflows();
     }
 
@@ -930,7 +762,6 @@
       transientUserMessage = '让 AI 修这个工具';
       transientAssistantMessage = '';
       startModelWait('AI 正在修订工具');
-      renderSidebarItems(cachedWorkflows);
       renderTasks(cachedWorkflows);
       renderConversation(cachedWorkflows);
       try {
@@ -949,7 +780,6 @@
       } finally {
         stopModelWait();
         repairingWorkflowIds.delete(id);
-        renderSidebarItems(cachedWorkflows);
         renderTasks(cachedWorkflows);
       }
     }
@@ -964,7 +794,6 @@
       params.set('limit', '50');
       params.set('mode', currentMode);
       params.set('include_trace', 'false');
-      if (currentMode === 'full_agent' && activeProject) params.set('project_id', activeProject.id);
       return `/api/workflows?${params.toString()}`;
     }
 
@@ -973,18 +802,5 @@
       pruneTaskDetailsState(cachedWorkflows);
       ensureSelectedWorkflow();
       renderTasks(cachedWorkflows);
-      renderSidebarItems(cachedWorkflows);
       if (renderChat) renderConversation(cachedWorkflows);
-    }
-
-    async function loadWorkflowDetail(id) {
-      const data = await api(`/workflows/${encodeURIComponent(id)}`);
-      const detail = data.workflow;
-      if (!detail || !detail.id) return;
-      const next = cachedWorkflows.slice();
-      const index = next.findIndex(item => item.id === detail.id);
-      if (index >= 0) next[index] = detail;
-      else next.unshift(detail);
-      applyWorkflows(next, false);
-      renderConversation(cachedWorkflows);
     }

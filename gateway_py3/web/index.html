@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="components.css">
 </head>
-<body class="mode-semi">
+<body>
   <div class="app">
     <header>
       <div class="topbar">
@@ -34,7 +34,7 @@
             </button>
             <button id="fullModeButton" class="mode-option" type="button" onclick="setMode('full_agent')">
               <strong>全代理模式</strong>
-              <span>项目记忆，工作目录</span>
+              <span>持续会话，长上下文</span>
             </button>
           </div>
         </div>
@@ -57,37 +57,6 @@
     </header>
 
     <main>
-      <aside class="project-sidebar" aria-label="对话与项目">
-        <div class="sidebar-head">
-          <h2 id="sidebarTitle">对话</h2>
-          <button id="newProjectButton" type="button" onclick="toggleProjectForm()" hidden>新建</button>
-        </div>
-        <div id="modeNote" class="mode-note">
-          <strong>半代理模式</strong>
-          <span>一次对话处理一个明确任务，不使用项目工作目录。</span>
-        </div>
-        <form id="sidebarProjectForm" class="sidebar-project-form" hidden onsubmit="event.preventDefault(); createProject();">
-          <label for="projectName">项目名称</label>
-          <input id="projectName" type="text" placeholder="南京分析项目">
-          <label for="projectWorkdir">工作目录</label>
-          <div class="folder-picker-row">
-            <input id="projectWorkdir" type="text" placeholder="D:\Data\NanjingProject">
-            <button type="button" class="ghost small" onclick="chooseProjectFolder()">选择</button>
-          </div>
-          <button type="submit" class="primary small">创建项目</button>
-        </form>
-        <div class="sidebar-scroll">
-          <div id="projectHistoryTitle" class="sidebar-section-title" hidden>项目</div>
-          <div id="sidebarProjects" class="compact-list" hidden>
-            <div class="sidebar-session"><div><strong>暂无项目</strong><span>创建项目后会显示在这里</span></div></div>
-          </div>
-          <div id="sidebarHistoryTitle" class="sidebar-section-title">对话</div>
-          <div id="sidebarHistory" class="compact-list">
-            <div class="sidebar-session"><div><strong>暂无对话</strong><span>生成任务后会显示在这里</span></div></div>
-          </div>
-        </div>
-      </aside>
-
       <section class="panel chat-panel">
         <div class="panel-head">
           <div class="panel-title">
@@ -254,7 +223,7 @@
               <button type="button" class="ghost small" onclick="openHealth()">检查网关</button>
             </div>
           </form>
-          <p class="hint">Key 只保存在当前 Windows 用户配置目录，不会写进项目代码。</p>
+          <p class="hint">Key 只保存在当前 Windows 用户配置目录，不会写进源码。</p>
           <p class="hint" id="speechConfigHint">语音识别使用千问 API Key。</p>
           <p class="hint" id="configPathHint">配置路径检查中。</p>
         </section>

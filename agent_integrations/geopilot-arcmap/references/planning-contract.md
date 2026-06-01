@@ -30,7 +30,7 @@ GeoPilot is the execution bridge for ArcMap. The external agent is the planner.
 - Do not recursively scan drive roots.
 - Input file lookup belongs to the agent or a dedicated resolver; workflow steps only contain operation arguments.
 - Output destinations must be existing folders or geodatabases when explicitly supplied.
-- If the user did not provide an output location, let GeoPilot use the MXD default output location or project output location.
+- If the user did not provide an output location, let GeoPilot use the MXD/default geoprocessing output location.
 - Use `output_folder` only when the operation schema declares it. Use `output_workspace` only when the schema declares it.
 - `output_name` is only the base name: no folder, no extension, no dot, and no Windows-illegal characters.
 

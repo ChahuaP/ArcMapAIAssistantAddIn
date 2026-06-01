@@ -47,7 +47,7 @@ class WebModeStateTests(unittest.TestCase):
         self.assertIn("if (!modeInitialized) {", html)
         self.assertIn("storeMode(mode);", html)
 
-    def test_full_agent_chat_renders_project_conversation_stream(self):
+    def test_full_agent_chat_renders_continuous_conversation_stream(self):
         html = _web_source()
 
         self.assertIn("if (currentMode === 'full_agent') {", html)
@@ -73,15 +73,21 @@ class WebModeStateTests(unittest.TestCase):
 
         self.assertIn("const items = visibleWorkflows(workflows);", html)
         self.assertIn("items.forEach(item => list.appendChild(taskCard(item)));", html)
-        self.assertIn("显示当前项目的全部任务", html)
+        self.assertIn("显示当前会话的全部任务", html)
         self.assertIn("显示半代理模式的全部任务", html)
         self.assertNotIn("显示会话", html)
         self.assertNotIn("查看对话", html)
 
-    def test_project_form_is_not_closed_by_config_polling_in_full_mode(self):
+    def test_full_agent_has_no_project_creation_ui(self):
         html = _web_source()
 
-        self.assertIn("if (!fullMode) document.getElementById('sidebarProjectForm').hidden = true;", html)
+        self.assertNotIn("conversation-sidebar", html)
+        self.assertNotIn("sidebarHistory", html)
+        self.assertNotIn("modeNote", html)
+        self.assertNotIn("sidebarProjectForm", html)
+        self.assertNotIn("createProject", html)
+        self.assertNotIn("/projects", html)
+        self.assertNotIn("project_id", html)
 
     def test_pending_user_message_survives_workflow_polling(self):
         html = _web_source()
@@ -108,19 +114,11 @@ class WebModeStateTests(unittest.TestCase):
         self.assertIn("api(`/tools/${id}/delete`", html)
         self.assertIn("自建工具已删除。", html)
 
-    def test_projects_can_be_deleted_from_ui(self):
+    def test_clear_full_agent_session_context(self):
         html = _web_source()
 
-        self.assertIn("async function deleteProject(id, name)", html)
-        self.assertIn("api(`/projects/${encodeURIComponent(id)}/delete`", html)
-        self.assertIn("不会删除磁盘文件", html)
-        self.assertIn("项目已删除。", html)
-
-    def test_clear_project_conversation_refreshes_context_state(self):
-        html = _web_source()
-
-        self.assertIn("已清空项目对话和上下文。", html)
-        self.assertIn("if (currentMode === 'full_agent') await loadProjects();", html)
+        self.assertIn("已清空全代理会话上下文。", html)
+        self.assertIn("return {mode: currentMode};", html)
 
     def test_failed_custom_tool_workflow_can_request_ai_revision(self):
         html = _web_source()
