@@ -5,7 +5,9 @@ from pathlib import Path
 import re
 from typing import Any, Dict, List, Tuple
 
-from .agent_tools import AgentToolError, AgentToolRuntime
+from .agent_engine import AgentRunner, AgentSession, AgentToolExecutor
+from .agent_engine.tools import tool_call_parts, workflow_from_proposal_arguments
+from .agent_tools import AgentToolRuntime
 from .catalog_loader import OperationCatalog
 from .custom_tool_contract import PLANNER_CUSTOM_TOOL_CONTRACT
 from .file_resolver import FileResolver
@@ -16,8 +18,6 @@ from .validators import ValidationError, context_hash, friendly_validation_messa
 from .workflow_store import WorkflowStore
 
 
-MAX_TOOL_ROUNDS = 8
-MAX_FILE_SEARCH_NUDGES = 1
 MAX_VALIDATION_REPAIRS = 3
 
 SYSTEM_PROMPT = """You are GeoPilot.
@@ -114,13 +114,15 @@ class AgenticPlanner:
         client: ChatProvider | None = None,
         store: WorkflowStore | None = None,
         file_resolver: FileResolver | None = None,
-        output_folder_resolver: OutputFolderResolver | None = None
+        output_folder_resolver: OutputFolderResolver | None = None,
+        event_bus: Any | None = None
     ):
         self.catalog = catalog or OperationCatalog()
         self.client = client
         self.store = store or WorkflowStore()
         self.file_resolver = file_resolver or FileResolver()
         self.output_folder_resolver = output_folder_resolver or OutputFolderResolver()
+        self.events = event_bus
 
     def plan(
         self,
@@ -138,135 +140,21 @@ class AgenticPlanner:
         if project:
             context = _context_for_project(context, project)
         client = self.client or create_provider(mode=mode)
-        tool_runtime = AgentToolRuntime(self.catalog, self.store, context, self.file_resolver, self.output_folder_resolver, project)
-        tools = tool_runtime.tools()
-        messages = self._messages(command, context, tool_runtime.operation_index(), mode, project)
-        trace: List[Dict[str, Any]] = []
-
-        write_event("agent.request", {
-            "command": command,
-            "context_hash": context_hash(context),
-            "operation_count": len(self.catalog.operations),
-            "mode": mode,
-            "project_id": project_id or ""
-        })
-
-        validation_feedback_count = 0
-        pending_question = ""
-        file_search_nudges = 0
-        for _ in range(MAX_TOOL_ROUNDS):
-            response = client.chat_agent(messages, tools)
-            assistant_message = response["message"]
-            usage = response.get("usage", {})
-            messages.append(_message_for_history(assistant_message))
-            trace.append({"type": "assistant", "usage": usage, "message": _redacted_message(assistant_message)})
-
-            try:
-                proposal = self._proposal_from_message(assistant_message)
-            except AgentToolError as exc:
-                return self._store_clarification(command, context, friendly_validation_message(exc), trace, mode, project_id)
-            if proposal is not None:
-                if (
-                    _premature_file_clarification(proposal, trace)
-                    and _generic_clarification(str(proposal.get("summary", "")))
-                    and file_search_nudges < MAX_FILE_SEARCH_NUDGES
-                ):
-                    messages.append(_file_search_nudge_message())
-                    file_search_nudges += 1
-                    continue
-                proposal = _merge_pending_question(proposal, pending_question)
-                finalized, feedback = self._try_finalize(command, context, proposal, trace, mode, project_id)
-                if finalized is not None:
-                    return finalized
-                validation_feedback_count += 1
-                if validation_feedback_count > _repair_limit_for_feedback(feedback):
-                    return self._store_unfinalized_feedback(command, context, feedback, trace, mode, project_id)
-                messages.append(_tool_message(_proposal_tool_call_id(assistant_message), {"ok": False, "error": feedback}))
-                continue
-
-            tool_calls = assistant_message.get("tool_calls") or []
-            if not tool_calls:
-                content_workflow = _json_workflow_from_content(assistant_message.get("content"))
-                if content_workflow is None:
-                    content_text = _assistant_content(assistant_message)
-                    tool_repair_feedback = _latest_unresolved_toolbuilder_repair_feedback(trace)
-                    if tool_repair_feedback:
-                        validation_feedback_count += 1
-                        if validation_feedback_count > _repair_limit_for_feedback(tool_repair_feedback):
-                            return self._store_unfinalized_feedback(command, context, tool_repair_feedback, trace, mode, project_id)
-                        messages.append(_assistant_repair_message(tool_repair_feedback))
-                        continue
-                    if (
-                        _file_result_can_continue(trace)
-                        and _generic_clarification(content_text)
-                        and file_search_nudges < MAX_FILE_SEARCH_NUDGES
-                    ):
-                        messages.append(_file_search_nudge_message())
-                        file_search_nudges += 1
-                        continue
-                    if content_text and not _generic_clarification(content_text):
-                        if _needs_public_rewrite(content_text):
-                            return self._store_unfinalized_feedback(command, context, content_text, trace, mode, project_id)
-                        return self._store_answer(command, context, content_text, trace, mode, project_id)
-                    summary = pending_question or "这个任务还不够明确，请补充要操作的数据、处理方式或输出位置。"
-                    return self._store_clarification(command, context, summary, trace, mode, project_id)
-                if (
-                    _premature_file_clarification(content_workflow, trace)
-                    and _generic_clarification(str(content_workflow.get("summary", "")))
-                    and file_search_nudges < MAX_FILE_SEARCH_NUDGES
-                ):
-                    messages.append(_file_search_nudge_message())
-                    file_search_nudges += 1
-                    continue
-                content_workflow = _merge_pending_question(content_workflow, pending_question)
-                finalized, feedback = self._try_finalize(command, context, content_workflow, trace, mode, project_id)
-                if finalized is not None:
-                    return finalized
-                if not _is_validation_repair_feedback(feedback):
-                    return self._store_unfinalized_feedback(command, context, feedback, trace, mode, project_id)
-                validation_feedback_count += 1
-                if validation_feedback_count > _repair_limit_for_feedback(feedback):
-                    return self._store_unfinalized_feedback(command, context, feedback, trace, mode, project_id)
-                messages.append(_assistant_repair_message(feedback))
-                continue
-
-            for tool_call in tool_calls:
-                try:
-                    name, arguments = _tool_call_parts(tool_call)
-                except AgentToolError as exc:
-                    result = {"ok": False, "error": friendly_validation_message(exc)}
-                    messages.append(_tool_message(tool_call.get("id"), result))
-                    trace.append({"type": "tool", "name": "<invalid>", "arguments": {}, "result": result})
-                    continue
-                write_event("agent.tool_call", {"name": name, "arguments": arguments})
-                try:
-                    result = tool_runtime.handle(name, arguments)
-                except (AgentToolError, ValidationError, ValueError) as exc:
-                    result = {"ok": False, "error": friendly_validation_message(exc)}
-                write_event("agent.tool_result", {"name": name, "result": result})
-                trace.append({"type": "tool", "name": name, "arguments": arguments, "result": result})
-                if not result.get("repairable"):
-                    pending_question = _question_from_tool_result(result) or pending_question
-
-                if name == "workflow_propose":
-                    if result.get("ok"):
-                        finalized, feedback = self._try_finalize(command, context, result["workflow"], trace, mode, project_id)
-                        if finalized is not None:
-                            return finalized
-                        validation_feedback_count += 1
-                        if validation_feedback_count > _repair_limit_for_feedback(feedback):
-                            return self._store_unfinalized_feedback(command, context, feedback, trace, mode, project_id)
-                        messages.append(_tool_message(tool_call.get("id"), {"ok": False, "error": feedback}))
-                        continue
-                    validation_feedback_count += 1
-                    error_text = result.get("error", "这个任务信息还不完整。")
-                    if validation_feedback_count > _repair_limit_for_feedback(error_text):
-                        return self._store_unfinalized_feedback(command, context, error_text, trace, mode, project_id)
-
-                messages.append(_tool_message(tool_call.get("id"), result))
-
-        repair_feedback = _latest_unresolved_toolbuilder_repair_feedback(trace)
-        return self._store_unfinalized_feedback(command, context, pending_question or repair_feedback or "这个任务还不够明确，请补充要操作的数据、处理方式或输出位置。", trace, mode, project_id)
+        runtime = AgentToolRuntime(self.catalog, self.store, context, self.file_resolver, self.output_folder_resolver, project)
+        tool_executor = AgentToolExecutor(runtime)
+        session = AgentSession(
+            command=command,
+            context=context,
+            mode=mode,
+            project_id=project_id or "",
+            project=project,
+            context_hash=context_hash(context),
+            operation_count=len(self.catalog.operations),
+        )
+        messages = self._messages(command, context, tool_executor.operation_index(), mode, project)
+        strategy = _PlannerStrategy(self, command, context, mode, project_id)
+        runner = AgentRunner(state=_PlannerEventState(self.events), client=client, tool_executor=tool_executor, strategy=strategy)
+        return runner.run(session, messages)
 
     def _messages(
         self,
@@ -295,9 +183,9 @@ class AgenticPlanner:
 
     def _proposal_from_message(self, message: Dict[str, Any]) -> Dict[str, Any] | None:
         for tool_call in message.get("tool_calls") or []:
-            name, arguments = _tool_call_parts(tool_call)
+            name, arguments = tool_call_parts(tool_call)
             if name == "workflow_propose":
-                return _workflow_from_proposal_arguments(arguments)
+                return workflow_from_proposal_arguments(arguments)
         return None
 
     def _try_finalize(
@@ -389,6 +277,54 @@ class AgenticPlanner:
         return row
 
 
+class _PlannerEventState:
+    def __init__(self, events: Any | None):
+        self.events = events
+
+
+class _PlannerStrategy:
+    def __init__(
+        self,
+        planner: AgenticPlanner,
+        command: str,
+        context: Dict[str, Any],
+        mode: str,
+        project_id: str | None,
+    ):
+        self.planner = planner
+        self.command = command
+        self.context = context
+        self.mode = mode
+        self.project_id = project_id
+
+    def proposal_from_message(self, message: Dict[str, Any]) -> Dict[str, Any] | None:
+        return self.planner._proposal_from_message(message)
+
+    def try_finalize(self, workflow: Dict[str, Any], trace: List[Dict[str, Any]]) -> Tuple[Dict[str, Any] | None, str]:
+        return self.planner._try_finalize(self.command, self.context, workflow, trace, self.mode, self.project_id)
+
+    def store_unfinalized_feedback(self, feedback: str, trace: List[Dict[str, Any]]) -> Dict[str, Any]:
+        return self.planner._store_unfinalized_feedback(self.command, self.context, feedback, trace, self.mode, self.project_id)
+
+    def store_clarification(self, summary: str, trace: List[Dict[str, Any]]) -> Dict[str, Any]:
+        return self.planner._store_clarification(self.command, self.context, summary, trace, self.mode, self.project_id)
+
+    def store_answer(self, summary: str, trace: List[Dict[str, Any]]) -> Dict[str, Any]:
+        return self.planner._store_answer(self.command, self.context, summary, trace, self.mode, self.project_id)
+
+    def repair_limit_for_feedback(self, feedback: str) -> int:
+        return _repair_limit_for_feedback(feedback)
+
+    def is_validation_repair_feedback(self, feedback: str) -> bool:
+        return _is_validation_repair_feedback(feedback)
+
+    def needs_public_rewrite(self, feedback: str) -> bool:
+        return _needs_public_rewrite(feedback)
+
+    def latest_unresolved_toolbuilder_repair_feedback(self, trace: List[Dict[str, Any]]) -> str:
+        return _latest_unresolved_toolbuilder_repair_feedback(trace)
+
+
 def _context_summary(context: Dict[str, Any]) -> Dict[str, Any]:
     layers = []
     for layer in context.get("layers", []) or []:
@@ -465,7 +401,7 @@ def _custom_tool_status(store: WorkflowStore) -> List[Dict[str, str]]:
 
 def _recent_conversation(store: WorkflowStore, project_id: str | None = None, mode: str | None = None, limit: int = 6) -> List[Dict[str, Any]]:
     history = []
-    for row in reversed(store.list_recent(limit=limit, project_id=project_id, mode=mode)):
+    for row in reversed(store.list_recent(limit=limit, project_id=project_id, mode=mode, include_trace=False)):
         workflow = row.get("workflow") or {}
         history.append({
             "command": row.get("command"),
@@ -474,57 +410,6 @@ def _recent_conversation(store: WorkflowStore, project_id: str | None = None, mo
             "summary": workflow.get("summary")
         })
     return history
-
-
-def _tool_call_parts(tool_call: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
-    function = tool_call.get("function") or {}
-    name = function.get("name")
-    raw_arguments = function.get("arguments") or "{}"
-    if not isinstance(name, str) or not name:
-        raise AgentToolError("Tool call missing function name.")
-    try:
-        arguments = json.loads(raw_arguments) if isinstance(raw_arguments, str) else raw_arguments
-    except ValueError:
-        raise AgentToolError("Tool arguments must be valid JSON.")
-    if not isinstance(arguments, dict):
-        raise AgentToolError("Tool arguments must be an object.")
-    return name, arguments
-
-
-def _workflow_from_proposal_arguments(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    if isinstance(arguments.get("workflow"), dict):
-        return arguments["workflow"]
-    return {
-        "action": arguments.get("action"),
-        "summary": arguments.get("summary"),
-        "steps": arguments.get("steps")
-    }
-
-
-def _json_workflow_from_content(content: Any) -> Dict[str, Any] | None:
-    if not isinstance(content, str) or not content.strip():
-        return None
-    try:
-        payload = json.loads(content)
-    except ValueError:
-        return None
-    return payload if isinstance(payload, dict) else None
-
-
-def _assistant_content(message: Dict[str, Any]) -> str:
-    content = message.get("content")
-    return content.strip() if isinstance(content, str) and content.strip() else ""
-
-
-def _question_from_tool_result(result: Dict[str, Any]) -> str:
-    status = result.get("status")
-    question = result.get("question")
-    if status in ("clarify", "unsupported") and isinstance(question, str) and question.strip():
-        return question.strip()
-    error = result.get("error")
-    if isinstance(error, str) and error.strip():
-        return error.strip()
-    return ""
 
 
 def _attribute_exploration_feedback(workflow: Dict[str, Any], trace: List[Dict[str, Any]]) -> str:
@@ -747,98 +632,3 @@ def _has_attribute_value_samples(layer: Dict[str, Any]) -> bool:
         if field.get("value_samples"):
             return True
     return False
-
-
-def _merge_pending_question(workflow: Dict[str, Any], pending_question: str) -> Dict[str, Any]:
-    if not pending_question or workflow.get("action") != "clarify":
-        return workflow
-    summary = workflow.get("summary")
-    if isinstance(summary, str) and summary.strip() and not _generic_clarification(summary):
-        return workflow
-    merged = dict(workflow)
-    merged["summary"] = pending_question
-    merged["steps"] = []
-    return merged
-
-
-def _generic_clarification(summary: str) -> bool:
-    text = summary.strip()
-    generic_markers = (
-        "不明确",
-        "不够明确",
-        "不清楚",
-        "需要更多信息",
-        "需要补充",
-        "补充要操作的数据",
-        "请补充要操作的数据",
-    )
-    return any(marker in text for marker in generic_markers)
-
-
-def _premature_file_clarification(workflow: Dict[str, Any], trace: List[Dict[str, Any]]) -> bool:
-    return workflow.get("action") == "clarify" and _file_result_can_continue(trace)
-
-
-def _file_result_can_continue(trace: List[Dict[str, Any]]) -> bool:
-    for item in reversed(trace):
-        if item.get("type") != "tool" or item.get("name") != "file_resolve":
-            continue
-        result = item.get("result") or {}
-        return result.get("status") == "clarify" and bool(result.get("child_directories"))
-    return False
-
-
-def _file_search_nudge_message() -> Dict[str, str]:
-    return {
-        "role": "user",
-        "content": (
-            "The last file_resolve result included child_directories. "
-            "Do not ask the user yet. Pick one plausible child directory from that list "
-            "and call file_resolve again with structured arguments. "
-            "Only ask the user if no plausible child directory remains."
-        )
-    }
-
-
-def _assistant_repair_message(feedback: str) -> Dict[str, str]:
-    return {
-        "role": "user",
-        "content": "The previous workflow or tool call did not pass validation. Repair it and continue; do not ask the user. Validation feedback: %s" % feedback
-    }
-
-
-def _message_for_history(message: Dict[str, Any]) -> Dict[str, Any]:
-    result = {
-        "role": message.get("role", "assistant"),
-        "content": message.get("content")
-    }
-    if message.get("reasoning_content"):
-        result["reasoning_content"] = message["reasoning_content"]
-    if message.get("tool_calls"):
-        result["tool_calls"] = message["tool_calls"]
-    return result
-
-
-def _tool_message(tool_call_id: str | None, result: Dict[str, Any]) -> Dict[str, Any]:
-    return {
-        "role": "tool",
-        "tool_call_id": tool_call_id or "workflow_propose",
-        "content": json.dumps(result, ensure_ascii=False, sort_keys=True)
-    }
-
-
-def _proposal_tool_call_id(message: Dict[str, Any]) -> str | None:
-    for tool_call in message.get("tool_calls") or []:
-        function = tool_call.get("function") or {}
-        if function.get("name") == "workflow_propose":
-            return tool_call.get("id")
-    return None
-
-
-def _redacted_message(message: Dict[str, Any]) -> Dict[str, Any]:
-    return {
-        "role": message.get("role"),
-        "content": message.get("content"),
-        "reasoning_content": message.get("reasoning_content"),
-        "tool_calls": message.get("tool_calls")
-    }

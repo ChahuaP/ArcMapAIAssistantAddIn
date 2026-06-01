@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from gateway_py3 import arcmap_bridge_client
+from gateway_py3.event_bus import serve_event_stream
 from gateway_py3.folder_dialog import FolderDialogError
 from gateway_py3.gateway_state import GatewayState
 from gateway_py3.llm_providers import ProviderError
@@ -23,7 +24,7 @@ from gateway_py3.validators import ValidationError
 
 HOST = "127.0.0.1"
 PORT = 8765
-APP_VERSION = "0.17.1"
+APP_VERSION = "0.19.0"
 STATE = GatewayState()
 REJECTED_ERRORS = (
     KeyError,
@@ -46,9 +47,16 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
-        path = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        path = parsed.path
+        if path == "/events":
+            try:
+                serve_event_stream(self, STATE.events)
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                return
+            return
         try:
-            payload = handle_get(STATE, path, APP_VERSION)
+            payload = handle_get(STATE, path, APP_VERSION, parse_qs(parsed.query))
             if payload is not None:
                 self._json(payload)
             elif is_static_path(path):
@@ -79,7 +87,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def log_message(self, fmt, *args):
         message = fmt % args
-        if route_common.is_poll_access_message(message):
+        if route_common.is_quiet_access_message(message):
             return
         write_event("http.access", {"message": message})
 
@@ -164,7 +172,7 @@ def _is_local_port_open(port):
 
 
 def _public_operation(operation):
-    return route_common.public_operation(operation)
+    return route_common.public_operation(operation, detail=True)
 
 
 def _public_error(exc):

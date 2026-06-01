@@ -252,4 +252,5 @@ scripts/geopilot_cli.py arcmap-list
 scripts/geopilot_cli.py arcmap-select --hwnd <hwnd>   # only when multiple ArcMap windows exist
 scripts/geopilot_cli.py arcmap-sync
 scripts/geopilot_cli.py capabilities
+scripts/geopilot_cli.py capabilities --detail   # when exact argument schemas are needed
 ```

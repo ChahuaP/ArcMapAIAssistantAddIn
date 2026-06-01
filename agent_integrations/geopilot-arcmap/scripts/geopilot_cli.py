@@ -22,7 +22,8 @@ def main() -> int:
     subparsers.add_parser("doctor")
     subparsers.add_parser("agent-diagnostics")
     subparsers.add_parser("context")
-    subparsers.add_parser("capabilities")
+    capabilities_parser = subparsers.add_parser("capabilities")
+    capabilities_parser.add_argument("--detail", action="store_true", help="Include full operation schemas.")
     subparsers.add_parser("workflows")
     subparsers.add_parser("open-console")
     subparsers.add_parser("approve-latest")
@@ -77,7 +78,8 @@ def main() -> int:
         if args.command == "context":
             return _print(_get(args.base_url, "/context"))
         if args.command == "capabilities":
-            return _print(_get(args.base_url, "/api/capabilities"))
+            path = "/api/capabilities?detail=1" if args.detail else "/api/capabilities"
+            return _print(_get(args.base_url, path))
         if args.command == "workflows":
             return _print(_get(args.base_url, "/api/workflows"))
         if args.command == "open-console":

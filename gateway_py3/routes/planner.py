@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 from gateway_py3 import arcmap_bridge_client
+from gateway_py3.agent_engine.events import AGENT_PROGRESS_EVENT
 from gateway_py3.llm_providers import FULL_AGENT_MODE, public_config
 from gateway_py3.routes import arcmap
 
@@ -11,6 +12,7 @@ def plan_request(state, payload, port_checker=None):
     mode = payload.get("mode") or public_config()["default_mode"]
     context = payload.get("context")
     if mode == FULL_AGENT_MODE:
+        publish_progress(state, "sync_arcmap", "同步 ArcMap", mode)
         context = arcmap.sync_context(state, port_checker=port_checker)["context"]
     elif context is None:
         stored_context = state.store.get_state("arcmap_context")
@@ -26,6 +28,7 @@ def plan_request(state, payload, port_checker=None):
     state.reload_catalog()
     response = {"workflow": row}
     if mode == FULL_AGENT_MODE and (row.get("workflow") or {}).get("action") == "execute":
+        publish_progress(state, "execute_arcmap", "执行到 ArcMap", mode, project_id)
         state.store.approve(row["id"])
         bridge = arcmap.active_bridge(state, port_checker=port_checker)
         response["execution"] = arcmap_bridge_client.execute_approved(
@@ -34,7 +37,21 @@ def plan_request(state, payload, port_checker=None):
             hwnd=bridge.get("hwnd")
         )
         response["workflow"] = state.store.get(row["id"])
+        publish_progress(state, "complete", "完成", mode, project_id)
     return response
+
+
+def publish_progress(state, stage, label, mode, project_id=""):
+    events = getattr(state, "events", None)
+    if events is None:
+        return
+    events.publish(AGENT_PROGRESS_EVENT, {
+        "stage": stage,
+        "label": label,
+        "detail": "",
+        "mode": mode,
+        "project_id": project_id or "",
+    })
 
 
 def repair_custom_tool_workflow(state, workflow_id, payload):

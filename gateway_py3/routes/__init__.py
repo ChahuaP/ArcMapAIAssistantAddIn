@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+from gateway_py3 import arcmap_bridge_client
 from gateway_py3.diagnostics import collect_agent_diagnostics, collect_diagnostics
 from gateway_py3.folder_dialog import select_folder
 from gateway_py3.llm_providers import public_config, save_config
-from gateway_py3.routes import common, external_agent, arcmap, planner, tools
+from gateway_py3.routes import common, external_agent, arcmap, planner, tools, voice
+from gateway_py3.routes.event_topics import publish_mutation_events
 
 
-def handle_get(state, path, app_version):
+def handle_get(state, path, app_version, query=None):
     if path == "/health":
         return {
             "ok": True,
@@ -18,7 +20,17 @@ def handle_get(state, path, app_version):
     if path == "/context":
         return {"context": state.store.get_state("arcmap_context")}
     if path == "/api/workflows":
-        return {"workflows": state.store.list_recent()}
+        return {"workflows": state.store.list_recent(
+            limit=common.int_query(query, "limit", 50),
+            project_id=common.optional_query(query, "project_id"),
+            mode=common.optional_query(query, "mode"),
+            since=common.float_query(query, "since"),
+            include_trace=common.bool_query(query, "include_trace", False),
+        )}
+    if path.startswith("/workflows/") and path.count("/") == 2:
+        return {"workflow": state.store.get(path.split("/")[2])}
+    if path == "/api/workbench-state":
+        return workbench_state(state, app_version)
     if path == "/projects":
         return {"projects": state.store.list_projects(), "active_project": state.store.get_active_project()}
     if path == "/projects/active":
@@ -30,10 +42,11 @@ def handle_get(state, path, app_version):
     if path == "/tools/pending":
         return {"tools": state.store.list_pending_tools()}
     if path == "/api/capabilities":
+        detail = common.bool_query(query, "detail", False)
         return {
             "app_version": app_version,
             "operation_count": len(state.catalog.operations),
-            "operations": [common.public_operation(operation) for operation in state.catalog.all_operations()]
+            "operations": [common.public_operation(operation, detail=detail) for operation in state.catalog.all_operations()]
         }
     if path == "/api/diagnostics":
         return collect_diagnostics(app_version, len(state.catalog.operations))
@@ -48,9 +61,39 @@ def handle_get(state, path, app_version):
     return None
 
 
+def workbench_state(state, app_version):
+    arcmap_payload = {"bridges": [], "error": ""}
+    try:
+        arcmap_payload["bridges"] = arcmap.bridges(state)
+    except arcmap_bridge_client.ArcMapBridgeError as exc:
+        arcmap_payload["error"] = str(exc)
+    config = public_config()
+    return {
+        "health": {
+            "ok": True,
+            "app_version": app_version,
+            "operation_count": len(state.catalog.operations),
+        },
+        "config": config,
+        "context": state.store.get_state("arcmap_context"),
+        "projects": state.store.list_projects(),
+        "active_project": state.store.get_active_project(),
+        "workflows": state.store.list_recent(include_trace=False),
+        "arcmap": arcmap_payload,
+    }
+
+
 def handle_post(state, path, payload):
+    result = _handle_post(state, path, payload)
+    publish_mutation_events(state, path, result)
+    return result
+
+
+def _handle_post(state, path, payload):
     if path == "/plan":
         return planner.plan_request(state, payload)
+    if path == "/voice/transcribe":
+        return voice.transcribe(state, payload)
     if path == "/agent/workflows/validate":
         return external_agent.validate_workflow(state, payload)
     if path == "/agent/workflows/propose":

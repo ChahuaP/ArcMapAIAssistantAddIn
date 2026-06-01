@@ -270,13 +270,76 @@
     }
     .composer-row {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-columns: minmax(0, 1fr) auto auto;
       gap: 10px;
       align-items: end;
     }
     .composer textarea {
       min-height: 104px;
       max-height: 180px;
+    }
+    .voice-button {
+      min-width: 58px;
+    }
+    .voice-button.recording {
+      color: #fff;
+      background: var(--red);
+      border-color: var(--red);
+      box-shadow: 0 12px 26px rgba(201, 57, 57, .18);
+    }
+    .voice-button.busy {
+      color: var(--primary-strong);
+      background: var(--primary-soft);
+      border-color: rgba(8, 124, 145, .25);
+    }
+    .voice-compare {
+      margin-top: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f7fbfb;
+      padding: 10px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .voice-compare[hidden] {
+      display: none;
+    }
+    .voice-compare .voice-compare-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 6px;
+      color: var(--ink-strong);
+      font-weight: 700;
+    }
+    .voice-compare p {
+      margin: 4px 0 0;
+      overflow-wrap: anywhere;
+    }
+    .voice-compare button {
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 14px;
+    }
+    body.mode-full .voice-button.recording {
+      color: #fff7df;
+      background: #7b332d;
+      border-color: #a54c42;
+    }
+    body.mode-full .voice-button.busy {
+      color: #f0cf72;
+      background: #30240f;
+      border-color: #8a7134;
+    }
+    body.mode-full .voice-compare {
+      background: #1b160e;
+      border-color: #4d3e20;
+      color: #d8c99c;
+    }
+    body.mode-full .voice-compare .voice-compare-head {
+      color: #fff7df;
     }
     .layer-mention-menu {
       position: absolute;

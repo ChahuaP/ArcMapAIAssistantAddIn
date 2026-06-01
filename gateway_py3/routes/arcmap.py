@@ -8,6 +8,9 @@ from gateway_py3.routes import external_agent
 from gateway_py3.validators import context_hash
 
 
+BRIDGE_CACHE_SECONDS = 2.0
+
+
 def sync_context(state, port_checker=None):
     bridge = active_bridge(state, port_checker=port_checker)
     before = state.store.get_state("arcmap_context")
@@ -52,6 +55,7 @@ def register(state, payload):
         "summary": payload.get("summary") if isinstance(payload.get("summary"), dict) else {},
     }
     state.store.set_state("arcmap_bridge:%s" % pid, bridge)
+    invalidate_bridge_cache(state)
     return {"ok": True, "bridge": bridge}
 
 
@@ -62,7 +66,7 @@ def set_active(state, payload, port_checker=None):
     if port <= 0 and pid <= 0 and hwnd <= 0:
         raise ValueError("pid, port or hwnd is required.")
     matches = []
-    for bridge in bridges(state, port_checker=port_checker):
+    for bridge in bridges(state, port_checker=port_checker, force=True):
         if hwnd > 0 and bridge.get("hwnd") == hwnd:
             matches.append(bridge)
         elif port > 0 and bridge.get("port") == port and (hwnd <= 0 or bridge.get("hwnd") == hwnd):
@@ -74,6 +78,7 @@ def set_active(state, payload, port_checker=None):
     if len(matches) > 1:
         raise ValueError("匹配到多个 ArcMap，请用 hwnd 精确选择。")
     state.store.set_state("arcmap_active_bridge", matches[0])
+    invalidate_bridge_cache(state)
     return {"ok": True, "bridge": matches[0]}
 
 
@@ -155,6 +160,7 @@ def active_bridge(state, port_checker=None):
             refreshed = target_bridge_from_health(health_result, bridge, hwnd)
             if refreshed:
                 state.store.set_state("arcmap_active_bridge", refreshed)
+                invalidate_bridge_cache(state)
                 return refreshed
             state.store.delete_state("arcmap_active_bridge")
         except (KeyError, TypeError, ValueError, arcmap_bridge_client.ArcMapBridgeError):
@@ -185,7 +191,10 @@ def target_bridge_from_health(health_result, stored_bridge, hwnd):
     return None
 
 
-def bridges(state, port_checker=None):
+def bridges(state, port_checker=None, force=False):
+    cached = getattr(state, "bridge_cache", None)
+    if not force and isinstance(cached, dict) and time.time() < float(cached.get("expires_at") or 0):
+        return list(cached.get("bridges") or [])
     check_port = port_checker or is_local_port_open
     arcmap_bridge_client.ensure_running()
     candidates = []
@@ -244,6 +253,8 @@ def bridges(state, port_checker=None):
             }
             state.store.set_state("arcmap_bridge:%s" % bridge["pid"], bridge)
             live.append(bridge)
+    mark_active_bridge(state, live)
+    state.bridge_cache = {"expires_at": time.time() + BRIDGE_CACHE_SECONDS, "bridges": live}
     return live
 
 
@@ -257,10 +268,33 @@ def is_local_port_open(port):
 
 
 def scan_bridge(state, port_checker=None):
-    live_bridges = bridges(state, port_checker=port_checker)
+    live_bridges = bridges(state, port_checker=port_checker, force=True)
     if len(live_bridges) == 1:
         state.store.set_state("arcmap_active_bridge", live_bridges[0])
+        mark_active_bridge(state, live_bridges)
+        state.bridge_cache = {"expires_at": time.time() + BRIDGE_CACHE_SECONDS, "bridges": live_bridges}
         return live_bridges[0]
     if len(live_bridges) > 1:
         raise arcmap_bridge_client.ArcMapBridgeError("检测到多个 ArcMap，请先选择目标窗口。")
     raise arcmap_bridge_client.ArcMapBridgeError("ArcMap Bridge 未连接。")
+
+
+def invalidate_bridge_cache(state):
+    state.bridge_cache = {"expires_at": 0.0, "bridges": []}
+
+
+def mark_active_bridge(state, live_bridges):
+    stored = state.store.get_state("arcmap_active_bridge")
+    active = stored.get("value") if stored and isinstance(stored.get("value"), dict) else None
+    if not active:
+        return
+    active_hwnd = int(active.get("hwnd") or 0)
+    active_port = int(active.get("port") or 0)
+    active_pid = int(active.get("pid") or 0)
+    for bridge in live_bridges:
+        if active_hwnd > 0 and int(bridge.get("hwnd") or 0) == active_hwnd:
+            bridge["active"] = True
+        elif active_hwnd <= 0 and active_port > 0 and int(bridge.get("port") or 0) == active_port:
+            bridge["active"] = True
+        elif active_hwnd <= 0 and active_pid > 0 and int(bridge.get("pid") or 0) == active_pid:
+            bridge["active"] = True

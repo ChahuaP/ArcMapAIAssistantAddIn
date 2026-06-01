@@ -98,48 +98,39 @@ class WorkflowStore:
             raise KeyError(workflow_id)
         return workflow_row_to_dict(row)
 
-    def list_recent(self, limit: int = 50, project_id: str | None = None, mode: str | None = None) -> List[Dict[str, Any]]:
+    def list_recent(
+        self,
+        limit: int = 50,
+        project_id: str | None = None,
+        mode: str | None = None,
+        since: float | None = None,
+        include_trace: bool = True
+    ) -> List[Dict[str, Any]]:
+        limit = max(1, min(int(limit), 200))
+        clauses = []
+        params: List[Any] = []
+        if project_id:
+            clauses.append("project_id = ?")
+            params.append(project_id)
+        if mode:
+            clauses.append("mode = ?")
+            params.append(mode)
+        if since is not None:
+            clauses.append("updated_at > ?")
+            params.append(float(since))
+        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        params.append(limit)
         with self._connection() as conn:
-            if project_id and mode:
-                rows = conn.execute(
-                    """
-                    SELECT id, status, mode, project_id, command, context_hash, workflow_json, agent_trace_json, created_at, updated_at, result_json
-                    FROM workflows
-                    WHERE project_id = ? AND mode = ?
-                    ORDER BY created_at DESC LIMIT ?
-                    """,
-                    (project_id, mode, limit)
-                ).fetchall()
-            elif project_id:
-                rows = conn.execute(
-                    """
-                    SELECT id, status, mode, project_id, command, context_hash, workflow_json, agent_trace_json, created_at, updated_at, result_json
-                    FROM workflows
-                    WHERE project_id = ?
-                    ORDER BY created_at DESC LIMIT ?
-                    """,
-                    (project_id, limit)
-                ).fetchall()
-            elif mode:
-                rows = conn.execute(
-                    """
-                    SELECT id, status, mode, project_id, command, context_hash, workflow_json, agent_trace_json, created_at, updated_at, result_json
-                    FROM workflows
-                    WHERE mode = ?
-                    ORDER BY created_at DESC LIMIT ?
-                    """,
-                    (mode, limit)
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    """
-                    SELECT id, status, mode, project_id, command, context_hash, workflow_json, agent_trace_json, created_at, updated_at, result_json
-                    FROM workflows
-                    ORDER BY created_at DESC LIMIT ?
-                    """,
-                    (limit,)
-                ).fetchall()
-        return [workflow_row_to_dict(row) for row in rows]
+            rows = conn.execute(
+                """
+                SELECT id, status, mode, project_id, command, context_hash, workflow_json, agent_trace_json, created_at, updated_at, result_json
+                FROM workflows
+                %s
+                ORDER BY created_at DESC LIMIT ?
+                """ % where,
+                params
+            ).fetchall()
+        return [workflow_row_to_dict(row, include_trace=include_trace) for row in rows]
 
     def clear_workflows(self, project_id: str | None = None, mode: str | None = None) -> Dict[str, Any]:
         with self._connection() as conn:

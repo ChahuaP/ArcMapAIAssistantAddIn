@@ -52,6 +52,8 @@ def init_database(conn) -> None:
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_workflows_project_updated ON workflows(project_id, updated_at)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_workflows_mode_updated ON workflows(mode, updated_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_workflows_project_mode_updated ON workflows(project_id, mode, updated_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_workflows_status_updated ON workflows(status, updated_at)")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS projects (
@@ -127,8 +129,8 @@ def migrate_workflows_schema(conn) -> None:
         conn.execute("ALTER TABLE workflows ADD COLUMN %s %s" % (column, definition))
 
 
-def workflow_row_to_dict(row) -> Dict[str, Any]:
-    return {
+def workflow_row_to_dict(row, include_trace: bool = True) -> Dict[str, Any]:
+    result = {
         "id": row[0],
         "status": row[1],
         "mode": row[2],
@@ -136,11 +138,13 @@ def workflow_row_to_dict(row) -> Dict[str, Any]:
         "command": row[4],
         "context_hash": row[5],
         "workflow": json.loads(row[6]),
-        "agent_trace": json.loads(row[7]),
         "created_at": row[8],
         "updated_at": row[9],
         "result": json.loads(row[10]) if row[10] else None
     }
+    if include_trace:
+        result["agent_trace"] = json.loads(row[7])
+    return result
 
 
 def project_row_to_dict(row) -> Dict[str, Any]:

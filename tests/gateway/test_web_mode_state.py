@@ -1,6 +1,8 @@
 import pathlib
 import unittest
 
+from gateway_py3.static_server import is_static_path
+
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
@@ -8,13 +10,19 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 def _web_source():
     web_root = ROOT / "gateway_py3" / "web"
     return "\n".join([
-        (web_root / "index.html").read_text(encoding="utf-8"),
-        (web_root / "app.js").read_text(encoding="utf-8"),
-        (web_root / "app_render.js").read_text(encoding="utf-8"),
-        (web_root / "app_mentions.js").read_text(encoding="utf-8"),
-        (web_root / "styles.css").read_text(encoding="utf-8"),
-        (web_root / "components.css").read_text(encoding="utf-8"),
+        _web_file("index.html"),
+        _web_file("app.js"),
+        _web_file("app_arcmap.js"),
+        _web_file("app_render.js"),
+        _web_file("app_mentions.js"),
+        _web_file("app_voice.js"),
+        _web_file("styles.css"),
+        _web_file("components.css"),
     ])
+
+
+def _web_file(name):
+    return (ROOT / "gateway_py3" / "web" / name).read_text(encoding="utf-8")
 
 
 def _server_source():
@@ -25,6 +33,8 @@ def _server_source():
         (gateway / "routes" / "__init__.py").read_text(encoding="utf-8"),
         (gateway / "routes" / "common.py").read_text(encoding="utf-8"),
         (gateway / "routes" / "planner.py").read_text(encoding="utf-8"),
+        (gateway / "routes" / "voice.py").read_text(encoding="utf-8"),
+        (gateway / "voice.py").read_text(encoding="utf-8"),
     ])
 
 
@@ -88,7 +98,8 @@ class WebModeStateTests(unittest.TestCase):
         self.assertIn("function renderModelWait()", html)
         self.assertIn("modelWaitBubble", html)
         self.assertIn("已等待", html)
-        self.assertIn("模型正在处理上下文和工具选择。", html)
+        self.assertIn("同步 ArcMap", html)
+        self.assertIn("执行到 ArcMap", html)
 
     def test_custom_tools_can_be_deleted_from_ui(self):
         html = _web_source()
@@ -116,7 +127,7 @@ class WebModeStateTests(unittest.TestCase):
         server = _server_source()
 
         self.assertIn("function usesCustomTool(workflow)", html)
-        self.assertIn("让 AI 修工具", html)
+        self.assertIn("让 AI 修这个工具", html)
         self.assertIn("let repairingWorkflowIds = new Set();", html)
         self.assertIn("repairingWorkflowIds.add(id);", html)
         self.assertIn("修复中...", html)
@@ -157,12 +168,64 @@ class WebModeStateTests(unittest.TestCase):
         self.assertIn("模型配置", html)
         self.assertNotIn("模型已配置", html)
         self.assertIn("provider_options", server)
+        self.assertIn("MiniMax-M3", server)
+        self.assertIn('id="activeModelHint"', html)
         self.assertIn("QWEN_PROVIDER", server)
         self.assertIn("qwen3.6-flash-2026-04-16", server)
         self.assertIn("DASHSCOPE_API_KEY", server)
         self.assertIn("function renderModelConfig(config)", html)
         self.assertIn("function collectProviderConfig()", html)
         self.assertIn('id="providerKeyFields"', html)
+
+    def test_voice_input_uses_qwen_asr_and_mode_model_correction(self):
+        html = _web_source()
+        voice_js = _web_file("app_voice.js")
+        server = _server_source()
+
+        self.assertIn('id="voiceButton"', html)
+        self.assertIn("function toggleVoiceInput()", html)
+        self.assertIn("window.toggleVoiceInput = toggleVoiceInput", html)
+        self.assertTrue(is_static_path("/app_voice.js"))
+        self.assertIn("api('/voice/transcribe'", html)
+        self.assertIn("context: latestArcgisContext || {}", html)
+        self.assertIn("applyVoiceText(data.text || '')", voice_js)
+        self.assertIn("renderVoiceComparison(data.raw_text || '', data.text || '')", voice_js)
+        self.assertIn('id="voiceCompare"', html)
+        self.assertIn("正在识别语音并校正指令", voice_js)
+        self.assertNotIn("校正图层名", voice_js)
+        self.assertNotIn("submitPlan", voice_js)
+        self.assertNotIn("'/plan'", voice_js)
+        self.assertIn("语音识别使用千问 API Key", html)
+        self.assertIn("qwen3-asr-flash", server)
+        self.assertIn("create_provider(mode=mode)", server)
+        self.assertIn("chat_text", server)
+        self.assertIn("DASHSCOPE_API_KEY", server)
+        self.assertIn("MiniMax-M3", server)
+
+    def test_web_uses_event_stream_instead_of_workflow_polling(self):
+        html = _web_source()
+        app = (ROOT / "gateway_py3" / "app.py").read_text(encoding="utf-8")
+        topics = (ROOT / "gateway_py3" / "routes" / "event_topics.py").read_text(encoding="utf-8")
+
+        self.assertIn("new EventSource(apiUrl('/events'))", html)
+        self.assertIn("scheduleEventRefresh(type)", html)
+        self.assertIn("loadWorkbenchState()", html)
+        self.assertIn("appState", html)
+        self.assertIn("workflows.changed", html)
+        self.assertIn("agent.progress", html)
+        self.assertIn("serve_event_stream(self, STATE.events)", app)
+        self.assertIn('"workflows.changed"', topics)
+        self.assertNotIn("setInterval(pollUpdates", html)
+        self.assertNotIn("POLL_INTERVAL_MS", html)
+        self.assertNotIn("async function pollUpdates", html)
+
+    def test_web_exposes_arcmap_target_selection(self):
+        html = _web_source()
+
+        self.assertIn("openArcMapTargets()", html)
+        self.assertIn("selectArcMapBridge", html)
+        self.assertIn("hwnd", html)
+        self.assertIn("pid", html)
 
     def test_skill_mentions_multi_arcmap_selection(self):
         skill = (ROOT / "agent_integrations" / "geopilot-arcmap" / "SKILL.md").read_text(encoding="utf-8")

@@ -21,7 +21,8 @@ Use the local GeoPilot gateway and `ArcMapBridge.exe` as the ArcMap safety and e
    - Bridge-triggered sync/execute is silent in ArcMap. Manual toolbar clicks still show ArcMap Add-in message boxes.
    - If a detected bridge port is occupied but does not respond, read `%LOCALAPPDATA%\ArcMapAIAssistant\logs\arcmap_bridge.log`.
 5. Run `scripts/geopilot_cli.py arcmap-sync` to make the selected ArcMap synchronize the current context.
-6. Run `scripts/geopilot_cli.py capabilities` and choose only registered operations.
+6. Run `scripts/geopilot_cli.py capabilities` to inspect the operation summary and choose only registered operations.
+   - For exact argument schemas, run `scripts/geopilot_cli.py capabilities --detail` before drafting the workflow.
 7. Draft a workflow JSON locally. For non-trivial planning, read `references/planning-contract.md` and `references/workflow-format.md`.
 8. Validate with `scripts/geopilot_cli.py validate --workflow workflow.json`.
 9. If validation fails, fix the workflow and validate again.

@@ -46,6 +46,7 @@
           </div>
           <div class="quick-actions" aria-label="常用信息">
             <button class="ghost small" onclick="openCapabilities()">能力范围</button>
+            <button class="ghost small" onclick="openArcMapTargets()">ArcMap目标</button>
             <button class="ghost small" onclick="openModal('contextModal')">地图快照</button>
             <button class="ghost small" onclick="openPendingTools()">工具管理</button>
             <button class="ghost small" onclick="openDiagnostics()">系统诊断</button>
@@ -100,8 +101,10 @@
           <div id="mentionMenu" class="layer-mention-menu" hidden></div>
           <div class="composer-row">
             <textarea id="command" aria-label="任务输入" placeholder="输入任务，按 Enter 发送，Shift+Enter 换行"></textarea>
+            <button id="voiceButton" class="ghost voice-button" type="button" onclick="toggleVoiceInput()">语音</button>
             <button id="sendButton" class="primary" onclick="submitPlan()">发送</button>
           </div>
+          <div id="voiceCompare" class="voice-compare" hidden></div>
         </div>
       </section>
 
@@ -111,7 +114,7 @@
             <h2>任务</h2>
             <p id="taskPanelHint">按时间显示全部任务</p>
           </div>
-          <button class="ghost small" onclick="refreshWorkflows()">刷新</button>
+          <button class="ghost small" onclick="refreshAll()">刷新</button>
         </div>
         <div class="panel-body" id="tasks">
           <div class="section-card">暂无任务。</div>
@@ -160,6 +163,26 @@
             </table>
           </div>
         </section>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="arcmapTargetsModal" hidden onclick="closeOnBackdrop(event)">
+    <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="arcmapTargetsTitle">
+      <div class="panel-head">
+        <div class="panel-title">
+          <h2 id="arcmapTargetsTitle">ArcMap 目标</h2>
+          <p>多开 ArcMap 时选择本次要操作的窗口。</p>
+        </div>
+        <div class="button-row modal-actions">
+          <button class="ghost small" onclick="loadArcMapBridges().then(renderArcMapTargets)">刷新</button>
+          <button class="ghost small" onclick="closeModal('arcmapTargetsModal')">关闭</button>
+        </div>
+      </div>
+      <div class="modal-body">
+        <div id="arcmapTargetsList" class="compact-list">
+          <div class="section-card">正在读取...</div>
+        </div>
       </div>
     </div>
   </div>
@@ -219,6 +242,7 @@
             <span class="dot" id="keyDot"></span>
             <strong id="keyBadge">Key 检查中</strong>
           </div>
+          <p class="hint" id="activeModelHint">当前模式使用的模型检查中。</p>
           <form onsubmit="event.preventDefault(); saveConfig();">
             <label for="semiProvider">半代理模型</label>
             <select id="semiProvider"></select>
@@ -231,6 +255,7 @@
             </div>
           </form>
           <p class="hint">Key 只保存在当前 Windows 用户配置目录，不会写进项目代码。</p>
+          <p class="hint" id="speechConfigHint">语音识别使用千问 API Key。</p>
           <p class="hint" id="configPathHint">配置路径检查中。</p>
         </section>
       </div>
@@ -238,7 +263,9 @@
   </div>
 
   <script src="app.js"></script>
+  <script src="app_arcmap.js"></script>
   <script src="app_render.js"></script>
   <script src="app_mentions.js"></script>
+  <script src="app_voice.js"></script>
 </body>
 </html>

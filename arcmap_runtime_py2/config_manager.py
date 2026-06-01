@@ -33,7 +33,7 @@ def save_deepseek_key(api_key):
     config.setdefault("semi_agent_provider", "deepseek")
     config.setdefault("semi_agent_model", "deepseek-v4-flash")
     config.setdefault("full_agent_provider", "minimax")
-    config.setdefault("full_agent_model", "MiniMax-M2.7")
+    config.setdefault("full_agent_model", "MiniMax-M3")
     providers = config.setdefault("providers", {})
     providers["deepseek"] = {
         "api_key": api_key,

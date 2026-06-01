@@ -33,6 +33,12 @@ class GeoPilotCliTests(unittest.TestCase):
         self.assertIn("/arcmap/active", text)
         self.assertIn("/agent/diagnostics", text)
 
+    def test_cli_can_request_detailed_capability_schema(self):
+        text = CLI_PATH.read_text(encoding="utf-8")
+
+        self.assertIn('"--detail"', text)
+        self.assertIn("/api/capabilities?detail=1", text)
+
 
 def _load_cli():
     spec = importlib.util.spec_from_file_location("geopilot_cli", CLI_PATH)

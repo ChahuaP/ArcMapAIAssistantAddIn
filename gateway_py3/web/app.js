@@ -1,10 +1,10 @@
-    const EXPECTED_GATEWAY_VERSION = '0.17.1';
+    const EXPECTED_GATEWAY_VERSION = '0.19.0';
     const API_ORIGIN = window.location.protocol === 'file:' ? 'http://127.0.0.1:8765' : '';
-    const POLL_INTERVAL_MS = 2500;
-    const HEALTH_INTERVAL_MS = 10000;
     const MODE_STORAGE_KEY = 'geopilot.currentMode';
-    let lastHealthCheck = 0;
-    let pollBusy = false;
+    let eventSource = null;
+    let eventRefreshBusy = false;
+    let eventRefreshTimer = 0;
+    let pendingEventTypes = new Set();
     let capabilitiesLoaded = false;
     let currentMode = 'semi_agent';
     let modeInitialized = false;
@@ -20,8 +20,44 @@
     let repairingWorkflowIds = new Set();
     let providerOptions = [];
     let modelOptions = [];
+    const appState = {
+      config: null,
+      health: null,
+      projects: [],
+      activeProject: null,
+      context: null,
+      workflows: [],
+      arcmapBridges: [],
+      agentProgress: null
+    };
     const taskDetailsState = new Map();
     let mentionState = null;
+
+    function setState(patch) {
+      patch = patch || {};
+      Object.assign(appState, patch);
+      if (Object.prototype.hasOwnProperty.call(patch, 'activeProject')) activeProject = patch.activeProject || null;
+      if (Object.prototype.hasOwnProperty.call(patch, 'context')) latestArcgisContext = patch.context || null;
+      if (Object.prototype.hasOwnProperty.call(patch, 'workflows')) cachedWorkflows = patch.workflows || [];
+      if (Object.prototype.hasOwnProperty.call(patch, 'arcmapBridges')) arcmapBridges = patch.arcmapBridges || [];
+      if (Object.prototype.hasOwnProperty.call(patch, 'currentMode')) currentMode = patch.currentMode || currentMode;
+    }
+
+    function renderApp(changedKeys) {
+      const keys = new Set(changedKeys || []);
+      if (keys.has('projects')) {
+        renderProjects(appState.projects || []);
+        updateProjectStatus();
+      }
+      if (keys.has('workflows')) {
+        pruneTaskDetailsState(cachedWorkflows);
+        ensureSelectedWorkflow();
+        renderTasks(cachedWorkflows);
+        renderSidebarItems(cachedWorkflows);
+        renderConversation(cachedWorkflows);
+      }
+      if (keys.has('arcmap')) renderArcMapBridgeState();
+    }
 
     function offlineMessage() {
       return '本地网关未连接。请回到 ArcGIS 工具栏点击“启动网关”或“打开助手”。页面会自动恢复状态。';
@@ -113,7 +149,7 @@
     async function loadCapabilities() {
       const box = document.getElementById('capabilityGroups');
       try {
-        const data = await api('/api/capabilities');
+        const data = await api('/api/capabilities?detail=1');
         capabilitiesLoaded = true;
         document.getElementById('capabilitiesSummary').textContent =
           `应用版本 ${data.app_version || EXPECTED_GATEWAY_VERSION}，${data.operation_count} 个能力。`;
@@ -218,16 +254,24 @@
     }
 
     function modelWaitStageIndex() {
-      return Math.min(3, Math.floor(modelWaitElapsed() / 18));
+      const order = ['sync_arcmap', 'read_capabilities', 'analyze', 'read_fields', 'model', 'generate_workflow', 'validate', 'execute_arcmap', 'complete'];
+      const stage = (modelWait && modelWait.stage) || (appState.agentProgress && appState.agentProgress.stage) || '';
+      const index = order.indexOf(stage);
+      if (index >= 0) return Math.min(7, index);
+      return Math.min(7, Math.floor(modelWaitElapsed() / 12));
     }
 
     function renderModelWait() {
-      const stages = ['已提交', '思考中', '仍在处理', '等待返回'];
+      const stages = ['同步 ArcMap', '读取能力', '分析任务', '读取字段', '生成 workflow', '校验任务', '执行到 ArcMap', '完成/失败'];
       const notes = [
-        '请求已发给模型。',
-        '模型正在处理上下文和工具选择。',
-        '长任务还在运行，页面没有卡住。',
-        '还在等待模型返回结果。'
+        '正在确认当前 ArcMap 目标和地图状态。',
+        '正在读取可用操作与工具目录。',
+        '正在理解任务和项目上下文。',
+        '需要时会读取字段和值样本。',
+        '正在生成可校验的任务流程。',
+        '正在做本地规则校验。',
+        '全代理模式会直接发送到 ArcMap。',
+        '等待最终结果返回。'
       ];
       const active = modelWaitStageIndex();
       return `
@@ -259,6 +303,11 @@
     async function openHealth(options) {
       const silent = options && options.silent;
       const data = await api('/health');
+      applyHealthData(data, silent);
+    }
+
+    function applyHealthData(data, silent) {
+      setState({health: data || null});
       const version = data.app_version || '旧版本';
       setTile('gatewayState', 'ok', `已启动，${data.operation_count} 个能力`);
       if (data.app_version === EXPECTED_GATEWAY_VERSION) {
@@ -266,8 +315,18 @@
       } else {
         setTile('restartState', 'warn', '需要重启网关');
       }
-      lastHealthCheck = Date.now();
       if (!silent) setStatus(`网关已连接，版本 ${version}。`);
+    }
+
+    async function loadWorkbenchState() {
+      const data = await api('/api/workbench-state');
+      applyHealthData(data.health || {}, true);
+      applyConfig(data.config || {});
+      applyArcMapBridges((data.arcmap && data.arcmap.bridges) || [], (data.arcmap && data.arcmap.error) || '');
+      applyContextRecord(data.context || null);
+      applyProjects(data.projects || [], data.active_project || null);
+      applyWorkflows(data.workflows || [], true);
+      setStatus(`网关已连接，版本 ${(data.health && data.health.app_version) || EXPECTED_GATEWAY_VERSION}。`);
     }
 
     function loadStoredMode() {
@@ -289,19 +348,7 @@
 
     async function loadConfig() {
       const data = await api('/config');
-      const providers = data.config.providers || {};
-      renderModelConfig(data.config);
-      const keyStates = providerKeyStates(providers);
-      const ok = keyStates.some(item => item.ok);
-      if (!modeInitialized) {
-        currentMode = loadStoredMode() || data.config.default_mode || currentMode;
-        modeInitialized = true;
-      }
-      updateModeUI();
-      document.getElementById('keyBadge').textContent = providerKeyLabel(keyStates);
-      document.getElementById('keyActionText').textContent = '模型配置';
-      document.getElementById('configPathHint').textContent = `配置文件：${data.config.config_path || '未知'}`;
-      setDot('keyDot', ok, !ok);
+      applyConfig(data.config);
     }
 
     async function saveConfig() {
@@ -319,16 +366,28 @@
           providers: collectProviderConfig()
         })
       });
-      const providers = data.config.providers || {};
-      renderModelConfig(data.config);
-      const keyStates = providerKeyStates(providers);
-      const ok = keyStates.some(item => item.ok);
-      document.getElementById('keyBadge').textContent = providerKeyLabel(keyStates);
-      document.getElementById('keyActionText').textContent = '模型配置';
-      document.getElementById('configPathHint').textContent = `配置文件：${data.config.config_path || '未知'}`;
-      setDot('keyDot', ok, !ok);
+      applyConfig(data.config);
       setStatus('模型配置已保存。');
       closeModal('keyModal');
+    }
+
+    function applyConfig(config) {
+      const providers = config.providers || {};
+      setState({config});
+      renderModelConfig(config);
+      const keyStates = providerKeyStates(providers);
+      const ok = keyStates.some(item => item.ok);
+      if (!modeInitialized) {
+        currentMode = loadStoredMode() || config.default_mode || currentMode;
+        modeInitialized = true;
+      }
+      updateModeUI();
+      document.getElementById('keyBadge').textContent = providerKeyLabel(keyStates);
+      document.getElementById('keyActionText').textContent = '模型配置';
+      document.getElementById('configPathHint').textContent = `配置文件：${config.config_path || '未知'}`;
+      renderSpeechConfigHint(config);
+      renderCurrentModelHint(config);
+      setDot('keyDot', ok, !ok);
     }
 
     function renderModelConfig(config) {
@@ -337,6 +396,24 @@
       renderModelSelect('semiProvider', config.semi_agent_provider, config.semi_agent_model);
       renderModelSelect('fullProvider', config.full_agent_provider, config.full_agent_model);
       renderProviderKeyFields(config.providers || {});
+      renderCurrentModelHint(config);
+    }
+
+    function renderCurrentModelHint(config) {
+      const node = document.getElementById('activeModelHint');
+      if (!node || !config) return;
+      const provider = currentMode === 'full_agent' ? config.full_agent_provider : config.semi_agent_provider;
+      const model = currentMode === 'full_agent' ? config.full_agent_model : config.semi_agent_model;
+      const modeLabel = currentMode === 'full_agent' ? '全代理' : '半代理';
+      node.textContent = `${modeLabel}当前使用：${providerLabel(provider)} ${model || ''}`.trim();
+    }
+
+    function renderSpeechConfigHint(config) {
+      const speech = config.speech || {};
+      const provider = providerLabel(speech.uses_provider || 'qwen');
+      const keyState = speech.has_api_key ? '已可用' : '未配置';
+      document.getElementById('speechConfigHint').textContent =
+        `语音识别使用 ${provider} API Key，模型 ${speech.model || 'qwen3-asr-flash'}，当前${keyState}。`;
     }
 
     function providerList(config) {
@@ -453,6 +530,7 @@
       storeMode(mode);
       updateModeUI();
       setStatus(mode === 'full_agent' ? '已切换到全代理模式。' : '已切换到半代理模式。');
+      await refreshWorkflows();
     }
 
     function updateModeUI() {
@@ -476,6 +554,7 @@
         note.innerHTML = '<strong>半代理模式</strong><span>一次对话处理一个明确任务，不使用项目工作目录。</span>';
       }
       updateProjectStatus();
+      renderCurrentModelHint(appState.config);
       ensureSelectedWorkflow();
       renderSidebarItems(cachedWorkflows);
       renderTasks(cachedWorkflows);
@@ -484,10 +563,13 @@
 
     async function loadContext() {
       const data = await api('/context');
-      const item = data.context;
+      applyContextRecord(data.context);
+    }
+
+    function applyContextRecord(item) {
       if (!item || !item.value) {
-        latestArcgisContext = null;
-        setTile('arcgisState', arcmapBridges.length ? 'warn' : 'bad', arcmapBridges.length ? `${arcmapBridges.length} 个 ArcMap` : '未连接');
+        setState({context: null});
+        renderArcMapBridgeState();
         document.getElementById('layerCount').textContent = '0';
         document.getElementById('mxdState').textContent = '未知';
         document.getElementById('srState').textContent = '未知';
@@ -495,9 +577,11 @@
         return;
       }
       const ctx = item.value;
-      latestArcgisContext = ctx;
+      setState({context: ctx});
       const layers = ctx.layers || [];
-      setTile('arcgisState', 'ok', `已同步，${layers.length} 个图层`);
+      const target = activeArcMapBridge();
+      const bridgeText = target ? ` · ${arcmapBridgeLabel(target, arcmapBridges.length)}` : '';
+      setTile('arcgisState', 'ok', `已同步，${layers.length} 个图层${bridgeText}`);
       document.getElementById('layerCount').textContent = layers.length;
       document.getElementById('mxdState').textContent = ctx.is_saved ? '已保存' : '未保存';
       document.getElementById('srState').textContent = (ctx.spatial_reference && ctx.spatial_reference.name) || '未知';
@@ -517,21 +601,60 @@
     async function loadArcMapBridges() {
       try {
         const data = await api('/arcmap/bridges');
-        arcmapBridges = data.bridges || [];
-        if (!latestArcgisContext) {
-          setTile('arcgisState', arcmapBridges.length ? 'warn' : 'bad', arcmapBridges.length ? `${arcmapBridges.length} 个 ArcMap` : '未连接');
-        }
+        applyArcMapBridges(data.bridges || []);
       } catch (err) {
-        arcmapBridges = [];
-        if (!latestArcgisContext) setTile('arcgisState', 'bad', '未连接');
+        applyArcMapBridges([], err.message);
       }
+    }
+
+    function applyArcMapBridges(bridges, error) {
+      setState({arcmapBridges: bridges || []});
+      renderArcMapBridgeState(error || '');
+    }
+
+    function renderArcMapBridgeState(error) {
+      if (latestArcgisContext) {
+        const layers = latestArcgisContext.layers || [];
+        const target = activeArcMapBridge();
+        const bridgeText = target ? ` · ${arcmapBridgeLabel(target, arcmapBridges.length)}` : '';
+        setTile('arcgisState', 'ok', `已同步，${layers.length} 个图层${bridgeText}`);
+        return;
+      }
+      if (error) {
+        setTile('arcgisState', 'bad', '未连接');
+        return;
+      }
+      if (!arcmapBridges.length) {
+        setTile('arcgisState', 'bad', '未连接');
+        return;
+      }
+      const target = activeArcMapBridge() || arcmapBridges[0];
+      setTile('arcgisState', arcmapBridges.length > 1 ? 'warn' : 'ok', arcmapBridgeLabel(target, arcmapBridges.length));
+    }
+
+    function activeArcMapBridge() {
+      return arcmapBridges.find(item => item.active) || arcmapBridges.find(item => item.hwnd) || arcmapBridges[0] || null;
+    }
+
+    function arcmapBridgeLabel(bridge, count) {
+      if (!bridge) return '未连接';
+      const summary = bridge.summary || {};
+      const title = summary.title || summary.name || 'ArcMap';
+      const parts = [title];
+      if (bridge.hwnd) parts.push(`hwnd ${bridge.hwnd}`);
+      if (bridge.pid) parts.push(`pid ${bridge.pid}`);
+      if (count > 1) parts.push(`${count} 个`);
+      return parts.join(' · ');
     }
 
     async function loadProjects() {
       const data = await api('/projects');
-      activeProject = data.active_project || null;
-      renderProjects(data.projects || []);
-      updateProjectStatus();
+      applyProjects(data.projects || [], data.active_project || null);
+    }
+
+    function applyProjects(projects, active) {
+      setState({projects: projects || [], activeProject: active || null});
+      renderApp(['projects']);
     }
 
     function toggleProjectForm() {
@@ -800,7 +923,7 @@
       if (repairingWorkflowIds.has(id)) return;
       repairingWorkflowIds.add(id);
       selectedWorkflowId = id;
-      transientUserMessage = '让 AI 修工具';
+      transientUserMessage = '让 AI 修这个工具';
       transientAssistantMessage = '';
       startModelWait('AI 正在修订工具');
       renderSidebarItems(cachedWorkflows);
@@ -828,11 +951,36 @@
     }
 
     async function refreshWorkflows(renderChat = true) {
-      const data = await api('/api/workflows');
-      cachedWorkflows = data.workflows || [];
+      const data = await api(workflowListPath());
+      applyWorkflows(data.workflows || [], renderChat);
+    }
+
+    function workflowListPath() {
+      const params = new URLSearchParams();
+      params.set('limit', '50');
+      params.set('mode', currentMode);
+      params.set('include_trace', 'false');
+      if (currentMode === 'full_agent' && activeProject) params.set('project_id', activeProject.id);
+      return `/api/workflows?${params.toString()}`;
+    }
+
+    function applyWorkflows(workflows, renderChat = true) {
+      setState({workflows: workflows || []});
       pruneTaskDetailsState(cachedWorkflows);
       ensureSelectedWorkflow();
       renderTasks(cachedWorkflows);
       renderSidebarItems(cachedWorkflows);
       if (renderChat) renderConversation(cachedWorkflows);
+    }
+
+    async function loadWorkflowDetail(id) {
+      const data = await api(`/workflows/${encodeURIComponent(id)}`);
+      const detail = data.workflow;
+      if (!detail || !detail.id) return;
+      const next = cachedWorkflows.slice();
+      const index = next.findIndex(item => item.id === detail.id);
+      if (index >= 0) next[index] = detail;
+      else next.unshift(detail);
+      applyWorkflows(next, false);
+      renderConversation(cachedWorkflows);
     }

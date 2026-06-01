@@ -21,12 +21,15 @@ SUPPORTED_PROVIDERS = (DEEPSEEK_PROVIDER, MINIMAX_PROVIDER, ZHIPU_PROVIDER, QWEN
 SEMI_AGENT_MODE = "semi_agent"
 FULL_AGENT_MODE = "full_agent"
 MINIMAX_TOKEN_PLAN_BASE_URL = "https://api.minimaxi.com/v1"
+MINIMAX_MODEL = "MiniMax-M3"
 ZHIPU_BASE_URL = "https://open.bigmodel.cn/api/paas/v4"
 QWEN_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+QWEN_ASR_MODEL = "qwen3-asr-flash"
 MODEL_REQUEST_TIMEOUT_SECONDS = 300
 MINIMAX_TEXT_TOOL_CALL_RE = re.compile(r"<minimax:tool_call>(.*?)</minimax:tool_call>", re.IGNORECASE | re.DOTALL)
 MINIMAX_TEXT_INVOKE_RE = re.compile(r"<invoke\s+name=\"([^\"]+)\">(.*?)</invoke>", re.IGNORECASE | re.DOTALL)
 MINIMAX_TEXT_PARAMETER_RE = re.compile(r"<parameter\s+name=\"([^\"]+)\">(.*?)</parameter>", re.IGNORECASE | re.DOTALL)
+MINIMAX_THINKING_BLOCK_RE = re.compile(r"<think[^>]*>.*?</think>", re.IGNORECASE | re.DOTALL)
 
 MODEL_OPTIONS = (
     {
@@ -49,8 +52,8 @@ MODEL_OPTIONS = (
     },
     {
         "provider": MINIMAX_PROVIDER,
-        "model": "MiniMax-M2.7",
-        "label": "MiniMax M2.7",
+        "model": MINIMAX_MODEL,
+        "label": "MiniMax M3",
         "thinking": False,
     },
     {
@@ -75,14 +78,14 @@ DEFAULT_CONFIG = {
     "semi_agent_provider": DEEPSEEK_PROVIDER,
     "semi_agent_model": "deepseek-v4-flash",
     "full_agent_provider": MINIMAX_PROVIDER,
-    "full_agent_model": "MiniMax-M2.7",
+    "full_agent_model": MINIMAX_MODEL,
     "providers": {
         DEEPSEEK_PROVIDER: {
             "model": "deepseek-v4-flash",
             "base_url": "https://api.deepseek.com",
         },
         MINIMAX_PROVIDER: {
-            "model": "MiniMax-M2.7",
+            "model": MINIMAX_MODEL,
             "base_url": MINIMAX_TOKEN_PLAN_BASE_URL,
         },
         ZHIPU_PROVIDER: {
@@ -93,6 +96,10 @@ DEFAULT_CONFIG = {
             "model": "qwen3.6-flash-2026-04-16",
             "base_url": QWEN_BASE_URL,
         },
+    },
+    "speech": {
+        "provider": "qwen_asr",
+        "model": QWEN_ASR_MODEL,
     },
 }
 
@@ -165,6 +172,20 @@ class ChatProvider:
         result["_usage"] = normalize_usage(self.provider_id, payload.get("usage", {}))
         return result
 
+    def chat_text(self, messages: List[Dict[str, str]]) -> Dict[str, Any]:
+        payload = self._post_chat_completion({
+            "model": self.model,
+            "messages": messages,
+            "temperature": 0.1,
+        })
+        content = payload["choices"][0]["message"].get("content")
+        if not isinstance(content, str) or not content.strip():
+            raise ProviderError("%s returned empty text content." % self.provider_id)
+        return {
+            "text": content.strip(),
+            "_usage": normalize_usage(self.provider_id, payload.get("usage", {})),
+        }
+
     def chat_agent(self, messages: List[Dict[str, Any]], tools: List[Dict[str, Any]]) -> Dict[str, Any]:
         payload = self._post_chat_completion({
             "model": self.model,
@@ -220,6 +241,29 @@ class DeepSeekProvider(ChatProvider):
 
 class MiniMaxProvider(ChatProvider):
     provider_id = MINIMAX_PROVIDER
+
+    def chat_json(self, messages: List[Dict[str, str]]) -> Dict[str, Any]:
+        payload = self._post_chat_completion({
+            "model": self.model,
+            "messages": messages,
+            "response_format": {"type": "json_object"},
+            "temperature": 0.1,
+        })
+        content = _strip_minimax_thinking(payload["choices"][0]["message"]["content"])
+        try:
+            result = json.loads(content)
+        except ValueError:
+            raise ProviderError("%s returned non-JSON content." % self.provider_id)
+        result["_usage"] = normalize_usage(self.provider_id, payload.get("usage", {}))
+        return result
+
+    def chat_text(self, messages: List[Dict[str, str]]) -> Dict[str, Any]:
+        result = super().chat_text(messages)
+        text = _strip_minimax_thinking(result["text"])
+        if not text:
+            raise ProviderError("%s returned empty text content." % self.provider_id)
+        result["text"] = text
+        return result
 
     def chat_agent(self, messages: List[Dict[str, Any]], tools: List[Dict[str, Any]]) -> Dict[str, Any]:
         payload = self._post_chat_completion({
@@ -310,6 +354,7 @@ def public_config(config: Dict[str, Any] | None = None) -> Dict[str, Any]:
         "providers": providers,
         "provider_options": [dict(item) for item in PROVIDER_OPTIONS],
         "model_options": [dict(item) for item in MODEL_OPTIONS],
+        "speech": public_speech_config(config),
         "config_path": str(status["active_path"]),
         "config_file_exists": bool(status["active_path"].exists()),
         "checked_config_paths": [str(path) for path in status["checked_paths"]],
@@ -317,6 +362,27 @@ def public_config(config: Dict[str, Any] | None = None) -> Dict[str, Any]:
         "has_minimax_api_key": providers[MINIMAX_PROVIDER]["has_api_key"],
         "has_zhipu_api_key": providers[ZHIPU_PROVIDER]["has_api_key"],
         "has_qwen_api_key": providers[QWEN_PROVIDER]["has_api_key"],
+    }
+
+
+def public_speech_config(config: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    settings = speech_settings(config)
+    return {
+        "provider": settings["provider"],
+        "model": settings["model"],
+        "base_url": provider_settings(QWEN_PROVIDER, config)["base_url"],
+        "has_api_key": bool(provider_api_key(QWEN_PROVIDER, config)),
+        "uses_provider": QWEN_PROVIDER,
+    }
+
+
+def speech_settings(config: Dict[str, Any] | None = None) -> Dict[str, str]:
+    config = config or load_config()
+    speech = config.get("speech") if isinstance(config.get("speech"), dict) else {}
+    defaults = DEFAULT_CONFIG["speech"]
+    return {
+        "provider": str(speech.get("provider") or defaults["provider"]).strip(),
+        "model": str(speech.get("model") or defaults["model"]).strip(),
     }
 
 
@@ -418,6 +484,7 @@ def _thinking_enabled(provider_id: str, model: str) -> bool:
 
 
 def _normalize_minimax_agent_message(message: Dict[str, Any]) -> Dict[str, Any]:
+    message = _strip_minimax_message_thinking(message)
     if message.get("tool_calls"):
         return message
     calls = _minimax_text_tool_calls(message.get("content"))
@@ -427,6 +494,22 @@ def _normalize_minimax_agent_message(message: Dict[str, Any]) -> Dict[str, Any]:
     normalized["content"] = None
     normalized["tool_calls"] = calls
     return normalized
+
+
+def _strip_minimax_message_thinking(message: Dict[str, Any]) -> Dict[str, Any]:
+    content = message.get("content")
+    if not isinstance(content, str):
+        return message
+    normalized = dict(message)
+    cleaned = _strip_minimax_thinking(content)
+    normalized["content"] = cleaned if cleaned else None
+    return normalized
+
+
+def _strip_minimax_thinking(content: Any) -> Any:
+    if not isinstance(content, str):
+        return content
+    return MINIMAX_THINKING_BLOCK_RE.sub("", content).strip()
 
 
 def _minimax_text_tool_calls(content: Any) -> List[Dict[str, Any]]:
@@ -511,6 +594,7 @@ def _normalized_config(config: Dict[str, Any]) -> Dict[str, Any]:
     providers = config.get("providers") if isinstance(config.get("providers"), dict) else {}
     for provider_id in SUPPORTED_PROVIDERS:
         normalized["providers"][provider_id].update(providers.get(provider_id) or {})
+        normalized["providers"][provider_id]["model"] = _normalize_model_id(normalized["providers"][provider_id]["model"])
 
     obsolete_keys = [key for key in ("deepseek_api_key", "model", "base_url") if key in config]
     if obsolete_keys:
@@ -521,10 +605,15 @@ def _normalized_config(config: Dict[str, Any]) -> Dict[str, Any]:
             normalized[key] = config[key]
     for key in ("semi_agent_model", "full_agent_model"):
         if config.get(key):
-            normalized[key] = config[key]
+            normalized[key] = _normalize_model_id(config[key])
     for model_key, provider_key in (("semi_agent_model", "semi_agent_provider"), ("full_agent_model", "full_agent_provider")):
         if not config.get(model_key):
             normalized[model_key] = _default_model_for_provider(normalized[provider_key])
+    if isinstance(config.get("speech"), dict):
+        speech = config["speech"]
+        for key in ("provider", "model"):
+            if isinstance(speech.get(key), str) and speech[key].strip():
+                normalized["speech"][key] = speech[key].strip()
     _validate_config(normalized)
     return normalized
 
@@ -543,7 +632,15 @@ def _merge_config(existing: Dict[str, Any], patch: Dict[str, Any]) -> Dict[str, 
         for field in ("api_key", "model", "base_url"):
             value = provider_patch.get(field)
             if isinstance(value, str) and value.strip():
-                merged["providers"][provider_id][field] = value.strip().rstrip("/") if field == "base_url" else value.strip()
+                if field == "model":
+                    merged["providers"][provider_id][field] = _normalize_model_id(value)
+                else:
+                    merged["providers"][provider_id][field] = value.strip().rstrip("/") if field == "base_url" else value.strip()
+    speech = patch.get("speech") if isinstance(patch.get("speech"), dict) else {}
+    for field in ("provider", "model"):
+        value = speech.get(field)
+        if isinstance(value, str) and value.strip():
+            merged["speech"][field] = value.strip()
     _validate_config(merged)
     return merged
 
@@ -557,6 +654,11 @@ def _validate_config(config: Dict[str, Any]) -> None:
             raise ProviderError("未知模型供应商：%s。" % config[key])
     _validate_mode_model(config, "semi_agent_provider", "semi_agent_model")
     _validate_mode_model(config, "full_agent_provider", "full_agent_model")
+    speech = speech_settings(config)
+    if speech["provider"] != "qwen_asr":
+        raise ProviderError("未知语音识别供应商：%s。" % speech["provider"])
+    if speech["model"] != QWEN_ASR_MODEL:
+        raise ProviderError("未知语音识别模型：%s。" % speech["model"])
 
 
 def _validate_mode_model(config: Dict[str, Any], provider_key: str, model_key: str) -> None:
@@ -565,6 +667,10 @@ def _validate_mode_model(config: Dict[str, Any], provider_key: str, model_key: s
     known_models = {item["model"] for item in MODEL_OPTIONS_BY_PROVIDER[provider_id]}
     if model not in known_models:
         raise ProviderError("模型 %s 不属于供应商 %s。" % (model, provider_label(provider_id)))
+
+
+def _normalize_model_id(model: str) -> str:
+    return str(model).strip()
 
 
 def _default_model_for_provider(provider_id: str) -> str:

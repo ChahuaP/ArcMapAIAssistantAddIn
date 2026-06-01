@@ -56,7 +56,7 @@
       let text = wf.summary;
       if (action === 'execute') {
         text += item.status === 'draft'
-          ? '\n\n已生成任务。确认后会发送到当前 ArcMap 并自动执行。'
+          ? '\n\n已生成任务，等待执行确认。'
           : '\n\n任务已发送到 ArcMap。';
       } else if (action === 'clarify') {
         text += '\n\n信息不够，当前不会执行任何操作。';
@@ -286,12 +286,20 @@
       });
     }
 
-    function selectWorkflow(id) {
+    async function selectWorkflow(id) {
       selectedWorkflowId = id;
       renderSidebarItems(cachedWorkflows);
       renderTasks(cachedWorkflows);
       renderConversation(cachedWorkflows);
       setStatus('已显示该任务会话。');
+      const item = cachedWorkflows.find(workflow => workflow.id === id);
+      if (item && !Object.prototype.hasOwnProperty.call(item, 'agent_trace')) {
+        try {
+          await loadWorkflowDetail(id);
+        } catch (err) {
+          setStatus(err.message);
+        }
+      }
     }
 
     function ensureSelectedWorkflow() {
@@ -359,7 +367,7 @@
         const repairButton = document.createElement('button');
         const repairPending = repairingWorkflowIds.has(item.id);
         repairButton.className = 'success small';
-        repairButton.textContent = repairPending ? '修复中...' : '让 AI 修工具';
+        repairButton.textContent = repairPending ? '修复中...' : '让 AI 修这个工具';
         repairButton.disabled = repairPending;
         repairButton.onclick = () => repairCustomTool(item.id);
         actions.appendChild(repairButton);
@@ -439,19 +447,19 @@
       if (action === 'clarify') return '需要补充信息。';
       if (action === 'unsupported') return '暂不支持。';
       if (action === 'answer') return '已回答。';
-      if (item.status === 'draft') return '任务已生成，等待确认。';
+      if (item.status === 'draft') return '任务已生成，待执行。';
       if (item.status === 'approved_for_arcmap') return '已发送到 ArcMap，等待自动执行。';
       return statusLabel(item, action);
     }
 
     function statusLabel(item, action) {
       if (action === 'answer') return '已回答';
-      if (action === 'clarify') return '需要回答';
+      if (action === 'clarify') return '需要补充';
       if (action === 'unsupported') return '暂不支持';
-      if (item.status === 'draft') return '待确认';
-      if (item.status === 'approved_for_arcmap') return '待自动执行';
+      if (item.status === 'draft') return '待执行';
+      if (item.status === 'approved_for_arcmap') return '待执行';
       if (item.status === 'claimed_by_arcmap' || item.status === 'executing') return '执行中';
       if (item.status === 'succeeded') return '已完成';
-      if (item.status === 'failed') return '失败';
+      if (item.status === 'failed') return usesCustomTool(item.workflow) ? '失败，可修复' : '失败';
       return item.status;
     }

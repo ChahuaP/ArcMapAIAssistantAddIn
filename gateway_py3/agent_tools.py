@@ -16,6 +16,7 @@ from .custom_tool_contract import (
     toolbuilder_catalog_misuse_result,
 )
 from .file_resolver import FileResolver
+from .layer_profiles import layer_value_profile, matching_layers_exact
 from .output_folder_resolver import OutputFolderResolver
 from .tool_builder import ToolBuilderError, create_draft_tool, get_tool_package, revise_draft_tool
 from .validators import ValidationError, friendly_validation_message, prepare_workflow
@@ -249,23 +250,14 @@ class AgentToolRuntime:
     def _arcgis_get_layer_profile(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
         _reject_unknown(arguments, {"layer"})
         layer_value = _required_string(arguments, "layer")
-        matches = _matching_layers_exact(layer_value, self.context.get("layers", []) or [])
+        matches = matching_layers_exact(layer_value, self.context.get("layers", []) or [])
         if len(matches) != 1:
             if len(matches) > 1:
                 return {"ok": False, "error": "图层“%s”不唯一，请使用 layer_ref。" % layer_value}
             return {"ok": False, "error": "当前地图没有精确匹配“%s”的图层。" % layer_value}
-        layer = matches[0]
         return {
             "ok": True,
-            "layer": {
-                "layer_ref": layer.get("layer_ref"),
-                "name": layer.get("name"),
-                "longName": layer.get("longName"),
-                "geometry_type": layer.get("geometry_type"),
-                "selected_count": layer.get("selected_count"),
-                "fields": _profile_fields(layer.get("fields", []) or []),
-                "value_profile_truncated": bool(layer.get("value_profile_truncated"))
-            }
+            "layer": layer_value_profile(matches[0]),
         }
 
     def _file_resolve(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
@@ -499,31 +491,6 @@ def _reject_unknown(arguments: Dict[str, Any], allowed: set[str]) -> None:
     unknown = sorted(set(arguments) - allowed)
     if unknown:
         raise AgentToolError("Unknown arguments: %s" % unknown)
-
-
-def _matching_layers_exact(value: str, layers: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    raw = value[1:] if value.startswith("@") else value
-    matches = []
-    for layer in layers:
-        if raw in (
-            layer.get("layer_ref"),
-            layer.get("name"),
-            layer.get("longName"),
-            layer.get("dataSource")
-        ):
-            matches.append(layer)
-    return matches
-
-
-def _profile_fields(fields: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    result = []
-    for field in fields:
-        result.append({
-            "name": field.get("name"),
-            "type": field.get("type"),
-            "value_samples": field.get("value_samples", [])[:20]
-        })
-    return result
 
 
 def _workflow_from_arguments(arguments: Dict[str, Any]) -> Dict[str, Any]:

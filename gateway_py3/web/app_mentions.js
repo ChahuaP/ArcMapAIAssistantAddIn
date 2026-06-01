@@ -193,12 +193,7 @@
 
     async function refreshAll() {
       try {
-        await loadConfig();
-        await openHealth({silent: true});
-        await loadArcMapBridges();
-        await loadProjects();
-        await loadContext();
-        await refreshWorkflows();
+        await loadWorkbenchState();
       } catch (err) {
         setTile('gatewayState', 'bad', '未连接');
         setTile('restartState', 'warn', '请启动网关');
@@ -207,23 +202,91 @@
       }
     }
 
-    async function pollUpdates() {
-      if (pollBusy) return;
-      pollBusy = true;
-      try {
-        if (Date.now() - lastHealthCheck > HEALTH_INTERVAL_MS) {
-          await loadConfig();
-          await openHealth({silent: true});
-          await loadArcMapBridges();
+    function connectEventStream() {
+      if (!window.EventSource) {
+        setStatus('当前浏览器不支持实时事件流。请用新版浏览器打开 GeoPilot。');
+        return;
+      }
+      if (eventSource) eventSource.close();
+      eventSource = new EventSource(apiUrl('/events'));
+      eventSource.addEventListener('open', () => {
+        if (appState.health) {
+          applyHealthData(appState.health, true);
+        } else {
+          setTile('gatewayState', 'ok', '已连接');
         }
-        await loadProjects();
-        await loadContext();
-        await refreshWorkflows(false);
+      });
+      eventSource.addEventListener('error', () => {
+        setTile('gatewayState', 'warn', '等待重连');
+      });
+      ['workflows.changed', 'context.changed', 'projects.changed', 'tools.changed', 'catalog.changed', 'config.changed', 'arcmap.changed'].forEach(type => {
+        eventSource.addEventListener(type, () => scheduleEventRefresh(type));
+      });
+      eventSource.addEventListener('agent.progress', handleAgentProgressEvent);
+    }
+
+    function scheduleEventRefresh(type) {
+      pendingEventTypes.add(eventSlice(type));
+      if (eventRefreshTimer) return;
+      eventRefreshTimer = window.setTimeout(refreshFromEvents, 80);
+    }
+
+    function eventSlice(type) {
+      return String(type || '').replace(/\.changed$/, '');
+    }
+
+    function handleAgentProgressEvent(event) {
+      let payload = {};
+      try {
+        payload = JSON.parse(event.data || '{}');
+      } catch (err) {
+        return;
+      }
+      if (payload.mode && payload.mode !== currentMode) return;
+      if (payload.project_id && currentMode === 'full_agent' && activeProject && payload.project_id !== activeProject.id) return;
+      setState({agentProgress: payload});
+      if (modelWait) {
+        modelWait.label = payload.label || modelWait.label;
+        modelWait.stage = payload.stage || modelWait.stage;
+        updateModelWait();
+      } else if (payload.label) {
+        setStatus(payload.label);
+      }
+    }
+
+    async function refreshFromEvents() {
+      eventRefreshTimer = 0;
+      if (eventRefreshBusy) {
+        eventRefreshTimer = window.setTimeout(refreshFromEvents, 80);
+        return;
+      }
+      const types = new Set(pendingEventTypes);
+      pendingEventTypes.clear();
+      eventRefreshBusy = true;
+      try {
+        let workflowsRefreshed = false;
+        if (types.has('config')) await loadConfig();
+        if (types.has('catalog')) {
+          capabilitiesLoaded = false;
+          if (!document.getElementById('capabilitiesModal').hidden) await loadCapabilities();
+        }
+        if (types.has('arcmap')) await loadArcMapBridges();
+        if (types.has('projects')) {
+          await loadProjects();
+          await refreshWorkflows(!transientUserMessage);
+          workflowsRefreshed = true;
+        }
+        if (types.has('context')) await loadContext();
+        if (types.has('tools') && !document.getElementById('toolsModal').hidden) await loadPendingTools();
+        if (types.has('workflows') && !workflowsRefreshed) await refreshWorkflows(!transientUserMessage);
       } catch (err) {
         setTile('gatewayState', 'bad', '未连接');
         setTile('restartState', 'warn', '请启动网关');
       } finally {
-        pollBusy = false;
+        eventRefreshBusy = false;
+        if (pendingEventTypes.size) {
+          eventRefreshTimer = window.setTimeout(refreshFromEvents, 80);
+        }
       }
     }
 
@@ -255,4 +318,4 @@
 
     renderEmptyChat();
     refreshAll();
-    setInterval(pollUpdates, POLL_INTERVAL_MS);
+    connectEventStream();
