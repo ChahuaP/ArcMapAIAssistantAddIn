@@ -742,6 +742,11 @@ def _merge_config(existing: Dict[str, Any], patch: Dict[str, Any]) -> Dict[str, 
     providers = patch.get("providers") if isinstance(patch.get("providers"), dict) else {}
     for provider_id in SUPPORTED_PROVIDERS:
         provider_patch = providers.get(provider_id) or {}
+        clear_secret_fields = provider_patch.get("clear_secret_fields")
+        if isinstance(clear_secret_fields, list):
+            for field in clear_secret_fields:
+                if field in PROVIDER_SECRET_FIELDS[provider_id]:
+                    merged["providers"][provider_id].pop(field, None)
         for field in ("model", "base_url") + PROVIDER_SECRET_FIELDS[provider_id]:
             value = provider_patch.get(field)
             if isinstance(value, str) and value.strip():

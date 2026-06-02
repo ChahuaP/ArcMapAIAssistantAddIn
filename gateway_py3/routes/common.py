@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from gateway_py3.llm_providers import DEEPSEEK_PROVIDER, SUPPORTED_PROVIDERS
+from gateway_py3.llm_providers import DEEPSEEK_PROVIDER, PROVIDER_SECRET_FIELDS, SUPPORTED_PROVIDERS
 from gateway_py3.validators import ValidationError
 
 
@@ -26,6 +26,15 @@ def config_payload(payload):
         for field in ("api_key", "token_plan_api_key", "model", "base_url"):
             if isinstance(source.get(field), str) and source[field].strip():
                 item[field] = source[field].strip()
+        clear_secret_fields = source.get("clear_secret_fields")
+        if isinstance(clear_secret_fields, list):
+            allowed_secret_fields = set(PROVIDER_SECRET_FIELDS[provider_id])
+            invalid = [field for field in clear_secret_fields if field not in allowed_secret_fields]
+            if invalid:
+                raise ValueError("未知 Key 字段：%s。" % "、".join(str(field) for field in invalid))
+            fields_to_clear = sorted(set(clear_secret_fields))
+            if fields_to_clear:
+                item["clear_secret_fields"] = fields_to_clear
         if provider_id == DEEPSEEK_PROVIDER and item.get("api_key") and not item["api_key"].startswith("sk-"):
             raise ValueError("DeepSeek API key must start with sk-.")
         if item:

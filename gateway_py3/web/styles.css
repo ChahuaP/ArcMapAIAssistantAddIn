@@ -386,6 +386,15 @@
     .provider-card .hint {
       margin: 0;
     }
+    .provider-key-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: center;
+    }
+    .provider-key-row input {
+      min-width: 0;
+    }
     .dot {
       width: 8px;
       height: 8px;

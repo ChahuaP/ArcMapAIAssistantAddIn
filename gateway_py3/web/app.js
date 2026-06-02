@@ -1,4 +1,4 @@
-    const EXPECTED_GATEWAY_VERSION = '0.21.0';
+    const EXPECTED_GATEWAY_VERSION = '0.21.1';
     const API_ORIGIN = window.location.protocol === 'file:' ? 'http://127.0.0.1:8765' : '';
     const MODE_STORAGE_KEY = 'geopilot.currentMode';
     let eventSource = null;
@@ -20,6 +20,7 @@
     let repairingWorkflowIds = new Set();
     let providerOptions = [];
     let modelOptions = [];
+    let pendingProviderKeyClears = {};
     const appState = {
       config: null,
       health: null,
@@ -358,6 +359,7 @@
           providers: collectProviderConfig()
         })
       });
+      pendingProviderKeyClears = {};
       applyConfig(data.config);
       setStatus('模型配置已保存。');
       closeModal('keyModal');
@@ -486,10 +488,52 @@
     function providerKeyFieldHtml(provider, field, settings) {
       const keyStatus = settings.key_status || {};
       const saved = keyStatus[field.field] ? '已保存' : '未配置';
+      const hasSavedKey = Boolean(keyStatus[field.field]);
       return `
-        <label for="${providerInputId(provider.id, field.field)}">${escapeHtml(field.label)} <span class="muted">${escapeHtml(saved)}</span></label>
-        <input id="${providerInputId(provider.id, field.field)}" type="password" placeholder="${escapeHtml(field.placeholder)}" autocomplete="off">
+        <label for="${providerInputId(provider.id, field.field)}">${escapeHtml(field.label)} <span id="${providerKeyStatusId(provider.id, field.field)}" class="muted">${escapeHtml(saved)}</span></label>
+        <div class="provider-key-row">
+          <input id="${providerInputId(provider.id, field.field)}" type="password" placeholder="${escapeHtml(field.placeholder)}" autocomplete="off" oninput="handleProviderKeyInput('${escapeJs(provider.id)}', '${escapeJs(field.field)}')">
+          <button id="${providerClearButtonId(provider.id, field.field)}" type="button" class="danger small" data-saved="${hasSavedKey ? '1' : '0'}" ${hasSavedKey ? '' : 'disabled'} onclick="markProviderKeyForClear('${escapeJs(provider.id)}', '${escapeJs(field.field)}', '${escapeJs(field.label)}')">清除</button>
+        </div>
       `;
+    }
+
+    function markProviderKeyForClear(providerId, field, label) {
+      if (!window.confirm(`确定清除 ${providerLabel(providerId)} 的 ${label} 吗？`)) return;
+      const fields = pendingProviderKeyClears[providerId] || [];
+      if (!fields.includes(field)) fields.push(field);
+      pendingProviderKeyClears[providerId] = fields;
+      const input = document.getElementById(providerInputId(providerId, field));
+      if (input) {
+        input.value = '';
+        input.placeholder = '保存后清除';
+      }
+      const status = document.getElementById(providerKeyStatusId(providerId, field));
+      if (status) status.textContent = '保存后清除';
+      const button = document.getElementById(providerClearButtonId(providerId, field));
+      if (button) {
+        button.textContent = '待清除';
+        button.disabled = true;
+      }
+      setStatus('保存模型配置后会清除这个 Key。');
+    }
+
+    function handleProviderKeyInput(providerId, field) {
+      const fields = pendingProviderKeyClears[providerId] || [];
+      pendingProviderKeyClears[providerId] = fields.filter(item => item !== field);
+      if (!pendingProviderKeyClears[providerId].length) delete pendingProviderKeyClears[providerId];
+      const input = document.getElementById(providerInputId(providerId, field));
+      const button = document.getElementById(providerClearButtonId(providerId, field));
+      const status = document.getElementById(providerKeyStatusId(providerId, field));
+      if (button) {
+        button.textContent = '清除';
+        button.disabled = button.dataset.saved !== '1';
+      }
+      if (status) {
+        status.textContent = input && input.value.trim()
+          ? '待保存'
+          : ((button && button.dataset.saved === '1') ? '已保存' : '未配置');
+      }
     }
 
     function providerRuntimeKeyLabel(settings) {
@@ -510,10 +554,20 @@
           const input = document.getElementById(providerInputId(provider.id, field.field));
           if (input && input.value.trim()) item[field.field] = input.value.trim();
         });
+        const clearSecretFields = pendingProviderKeyClears[provider.id] || [];
+        if (clearSecretFields.length) item.clear_secret_fields = clearSecretFields.slice();
         if (baseUrlInput && baseUrlInput.value.trim()) item.base_url = baseUrlInput.value.trim();
         if (Object.keys(item).length) providers[provider.id] = item;
       });
       return providers;
+    }
+
+    function providerKeyStatusId(providerId, field) {
+      return `providerKeyStatus_${providerId}_${field || 'api_key'}`;
+    }
+
+    function providerClearButtonId(providerId, field) {
+      return `providerKeyClear_${providerId}_${field || 'api_key'}`;
     }
 
     function providerInputId(providerId, field) {
