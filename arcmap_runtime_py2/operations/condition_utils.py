@@ -1,8 +1,6 @@
 # -*- coding: utf-8 -*-
 from __future__ import absolute_import
 
-import uuid
-
 import arcpy
 
 import condition_protocol
@@ -45,16 +43,9 @@ def condition_fields(condition):
 
 def count_where(layer, condition):
     where_clause = compile_where(layer, condition)
-    temp_name = "arcmap_ai_count_%s" % uuid.uuid4().hex
-    try:
-        arcpy.MakeFeatureLayer_management(layer, temp_name, where_clause)
-        result = arcpy.GetCount_management(temp_name)
+    with common.read_layer(layer, False, where_clause) as source:
+        result = arcpy.GetCount_management(source)
         return int(result.getOutput(0))
-    finally:
-        try:
-            arcpy.Delete_management(temp_name)
-        except (ARCPY_EXECUTE_ERROR, RuntimeError):
-            pass
 
 
 def field_exists(layer, field_name):

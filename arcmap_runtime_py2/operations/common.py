@@ -4,6 +4,7 @@ from __future__ import absolute_import
 import csv
 import os
 import re
+import uuid
 
 import arcpy
 
@@ -100,7 +101,7 @@ def output_gdb(context, output_workspace=None):
     mxd_path = context.get("mxd_path")
     if not mxd_path:
         raise OperationError(u"当前 MXD 未保存。请指定输出 GDB，或先保存 MXD。")
-    folder = os.path.dirname(mxd_path)
+    folder = os.path.dirname(_path_text(mxd_path))
     gdb = os.path.join(folder, "ArcMapAI_Output.gdb")
     if not arcpy.Exists(gdb):
         arcpy.CreateFileGDB_management(folder, "ArcMapAI_Output.gdb")
@@ -109,7 +110,7 @@ def output_gdb(context, output_workspace=None):
 
 def output_directory(context, output_folder=None):
     if output_folder:
-        folder = _text(output_folder)
+        folder = _path_text(output_folder)
         if not os.path.isdir(folder):
             raise OperationError(u"Output folder not found: %s" % folder)
         return folder
@@ -117,7 +118,7 @@ def output_directory(context, output_folder=None):
     mxd_path = context.get("mxd_path")
     if not mxd_path:
         raise OperationError(u"当前 MXD 未保存。请指定输出文件夹，或先保存 MXD。")
-    folder = os.path.join(os.path.dirname(mxd_path), "ArcMapAI_Output")
+    folder = os.path.join(os.path.dirname(_path_text(mxd_path)), "ArcMapAI_Output")
     if not os.path.isdir(folder):
         os.makedirs(folder)
     return folder
@@ -192,7 +193,7 @@ def output_file(context, output_name, extension, output_folder=None):
 def _folder_workspace(output_workspace):
     if not output_workspace:
         return None
-    workspace = _text(output_workspace)
+    workspace = _path_text(output_workspace)
     if workspace.lower().endswith(u".gdb"):
         raise OperationError(u"Shapefile output requires an output folder, not a geodatabase: %s" % workspace)
     return workspace
@@ -248,6 +249,7 @@ def _normalize_extension(extension):
 
 
 def add_output_layer(path):
+    path = _path_text(path)
     mxd = current_mxd()
     df = active_data_frame(mxd)
     if _layer_source_exists(mxd, df, path):
@@ -286,15 +288,68 @@ class auto_add_outputs_disabled(object):
 
 def export_table_to_csv(layer, path, selected_only):
     fields = [f.name for f in arcpy.ListFields(layer) if f.type not in ("Geometry", "Raster", "Blob")]
-    with open(path, "wb") as f:
+    with open(_path_text(path), "wb") as f:
         writer = csv.writer(f)
         writer.writerow([field.encode("utf-8") for field in fields])
-        cursor_layer = layer
-        if selected_only:
-            cursor_layer = layer
-        with arcpy.da.SearchCursor(cursor_layer, fields) as cursor:
-            for row in cursor:
-                writer.writerow([_csv_value(value) for value in row])
+        with read_layer(layer, selected_only) as cursor_layer:
+            with arcpy.da.SearchCursor(cursor_layer, fields) as cursor:
+                for row in cursor:
+                    writer.writerow([_csv_value(value) for value in row])
+
+
+def read_layer(layer, selected_only=False, where_clause=None):
+    return _ReadLayer(layer, selected_only, where_clause)
+
+
+class _ReadLayer(object):
+    def __init__(self, layer, selected_only=False, where_clause=None):
+        self.layer = layer
+        self.selected_only = bool(selected_only)
+        self.where_clause = where_clause
+        self.temp_layer = None
+
+    def __enter__(self):
+        if self.selected_only:
+            require_selection(self.layer)
+            if not self.where_clause:
+                return self.layer
+            self.temp_layer = "arcmap_ai_selected_%s" % uuid.uuid4().hex
+            arcpy.MakeFeatureLayer_management(self.layer, self.temp_layer, self.where_clause)
+            return self.temp_layer
+
+        self.temp_layer = "arcmap_ai_read_%s" % uuid.uuid4().hex
+        arcpy.MakeFeatureLayer_management(self.layer, self.temp_layer, self.where_clause)
+        clear_layer_selection(self.temp_layer)
+        return self.temp_layer
+
+    def __exit__(self, exc_type, exc, tb):
+        if self.temp_layer:
+            delete_layer(self.temp_layer)
+        return False
+
+
+def require_selection(layer):
+    try:
+        desc = arcpy.Describe(layer)
+        fid_set = getattr(desc, "FIDSet", None)
+    except (ARCPY_EXECUTE_ERROR, RuntimeError, AttributeError, TypeError) as exc:
+        raise OperationError(u"无法读取当前图层选择集：%s" % _text(exc))
+    if fid_set is not None and not _text(fid_set).strip():
+        raise OperationError(u"当前图层没有已选要素。")
+
+
+def clear_layer_selection(layer):
+    try:
+        arcpy.SelectLayerByAttribute_management(layer, "CLEAR_SELECTION")
+    except (ARCPY_EXECUTE_ERROR, RuntimeError):
+        pass
+
+
+def delete_layer(layer):
+    try:
+        arcpy.Delete_management(layer)
+    except (ARCPY_EXECUTE_ERROR, RuntimeError):
+        pass
 
 
 def _csv_value(value):
@@ -314,7 +369,7 @@ def _text(value):
 
 
 def _resolve_output_workspace(context, output_workspace):
-    return _text(output_workspace).strip()
+    return _path_text(output_workspace).strip()
 
 
 def _layer_source_exists(mxd, df, path):
@@ -389,11 +444,24 @@ def _find_live_layer_exact(raw, layers=None):
 def _safe_data_source(layer):
     try:
         if layer.supports("DATASOURCE"):
-            return layer.dataSource
+            return _path_text(layer.dataSource)
     except (ARCPY_EXECUTE_ERROR, RuntimeError, AttributeError, TypeError):
         pass
     return None
 
 
 def _normalize_path(path):
-    return os.path.normcase(os.path.normpath(_text(path)))
+    return os.path.normcase(os.path.normpath(_path_text(path)))
+
+
+def _path_text(value):
+    if isinstance(value, unicode):
+        return value
+    if isinstance(value, bytes):
+        for encoding in ("utf-8", "mbcs"):
+            try:
+                return value.decode(encoding)
+            except (UnicodeDecodeError, LookupError):
+                pass
+        return value.decode("utf-8", "replace")
+    return unicode(value)

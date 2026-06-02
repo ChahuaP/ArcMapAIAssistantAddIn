@@ -226,13 +226,16 @@ def _check_install_dir(install_dir: Path, app_version: str, installed_version: s
 
 
 def _check_addin(install: Dict[str, Any]) -> Dict[str, Any]:
-    addin_dir = install.get("addin_dir") or ""
-    if not addin_dir:
+    addin_dirs = install.get("addin_dirs") or install.get("addin_dir") or ""
+    if isinstance(addin_dirs, str):
+        addin_dirs = [addin_dirs] if addin_dirs else []
+    if not addin_dirs:
         return _item("installed_addin", "ArcMap 插件", "warn", "安装记录里没有插件目录。请重新安装最新版。")
-    path = Path(addin_dir) / "arcmapaiassistantaddin.esriaddin"
-    if path.exists():
-        return _item("installed_addin", "ArcMap 插件", "ok", "插件文件存在。", path)
-    return _item("installed_addin", "ArcMap 插件", "bad", "插件文件不存在。", path)
+    paths = [Path(addin_dir) / "arcmapaiassistantaddin.esriaddin" for addin_dir in addin_dirs]
+    missing = [path for path in paths if not path.exists()]
+    if not missing:
+        return _item("installed_addin", "ArcMap 插件", "ok", "插件文件存在：%s 个目录。" % len(paths), paths[0])
+    return _item("installed_addin", "ArcMap 插件", "bad", "插件文件不存在：%s" % ", ".join([str(path) for path in missing]), missing[0])
 
 
 def _check_provider_network(config: Dict[str, Any]) -> List[Dict[str, Any]]:

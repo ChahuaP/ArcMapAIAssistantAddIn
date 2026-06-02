@@ -1,6 +1,6 @@
 ﻿param(
     [string]$InstallDir = "",
-    [string]$DesktopVersion = "Desktop10.1",
+    [string]$DesktopVersion = "",
     [switch]$Quiet
 )
 
@@ -33,8 +33,26 @@ function Copy-CleanDirectory {
     Copy-Item -LiteralPath $Source -Destination $Destination -Recurse -Force
 }
 
+function Get-ArcMapDesktopVersions {
+    if ($DesktopVersion) {
+        return @($DesktopVersion)
+    }
+    $addinRoot = Join-Path $HOME "Documents\ArcGIS\AddIns"
+    if (-not (Test-Path -LiteralPath $addinRoot)) {
+        return @("Desktop10.1")
+    }
+    $versions = Get-ChildItem -LiteralPath $addinRoot -Directory -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match "^Desktop10\.\d+$" } |
+        Sort-Object Name |
+        Select-Object -ExpandProperty Name
+    if (-not $versions) {
+        return @("Desktop10.1")
+    }
+    return @($versions)
+}
+
 function Test-InstallHealth {
-    param([string]$TargetRoot, [string]$AddinTargetDir)
+    param([string]$TargetRoot, [string[]]$AddinTargetDirs)
     $required = @(
         (Join-Path $TargetRoot "arcmap_runtime_py2\runtime.py"),
         (Join-Path $TargetRoot "operation_catalog\catalog.json"),
@@ -44,9 +62,11 @@ function Test-InstallHealth {
         (Join-Path $TargetRoot "StartGateway.cmd"),
         (Join-Path $TargetRoot "help.html"),
         (Join-Path $TargetRoot "uninstall.ico"),
-        (Join-Path $TargetRoot "VERSION"),
-        (Join-Path $AddinTargetDir "arcmapaiassistantaddin.esriaddin")
+        (Join-Path $TargetRoot "VERSION")
     )
+    foreach ($addinTargetDir in $AddinTargetDirs) {
+        $required += (Join-Path $addinTargetDir "arcmapaiassistantaddin.esriaddin")
+    }
     $missing = @()
     foreach ($path in $required) {
         if (-not (Test-Path -LiteralPath $path)) {
@@ -109,25 +129,33 @@ Copy-Item -LiteralPath $versionFile -Destination (Join-Path $targetRoot "VERSION
 $configDir = Join-Path $env:APPDATA "ArcMapAIAssistant"
 New-Item -ItemType Directory -Path $configDir -Force | Out-Null
 $addinId = "{7f42eea1-1f17-4cf4-9d4f-c0c8d28c0a23}"
-$addinTargetDir = Join-Path $HOME "Documents\ArcGIS\AddIns\$DesktopVersion\$addinId"
+$desktopVersions = @(Get-ArcMapDesktopVersions)
+$addinTargetDirs = @()
+foreach ($version in $desktopVersions) {
+    $addinTargetDirs += (Join-Path $HOME "Documents\ArcGIS\AddIns\$version\$addinId")
+}
 $installConfig = @{
     install_dir = $targetRoot
     app_version = $appVersion
-    addin_dir = $addinTargetDir
+    addin_dirs = $addinTargetDirs
+    addin_dir = $addinTargetDirs[0]
     bridge_exe = (Join-Path $targetRoot "bridge\ArcMapBridge.exe")
-    desktop_version = $DesktopVersion
+    desktop_versions = $desktopVersions
+    desktop_version = $desktopVersions[0]
     installed_at = (Get-Date).ToString("s")
 }
 $installConfig | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $configDir "install.json") -Encoding UTF8
 
-New-Item -ItemType Directory -Path $addinTargetDir -Force | Out-Null
-Copy-Item -LiteralPath $addin -Destination (Join-Path $addinTargetDir "arcmapaiassistantaddin.esriaddin") -Force
-Test-InstallHealth $targetRoot $addinTargetDir
+foreach ($addinTargetDir in $addinTargetDirs) {
+    New-Item -ItemType Directory -Path $addinTargetDir -Force | Out-Null
+    Copy-Item -LiteralPath $addin -Destination (Join-Path $addinTargetDir "arcmapaiassistantaddin.esriaddin") -Force
+}
+Test-InstallHealth $targetRoot $addinTargetDirs
 
 Write-Host ""
 Write-Host "安装完成。"
 Write-Host "安装自检：通过。"
-Write-Host "ArcMap 插件目录：$addinTargetDir"
+Write-Host "ArcMap 插件目录：$($addinTargetDirs -join ', ')"
 Write-Host "ArcMapBridge：$(Join-Path $targetRoot "bridge\ArcMapBridge.exe")"
 Write-Host "程序目录：$targetRoot"
 Write-Host "配置文件：$(Join-Path $configDir "install.json")"

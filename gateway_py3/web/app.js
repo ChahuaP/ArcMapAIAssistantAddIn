@@ -1,4 +1,4 @@
-    const EXPECTED_GATEWAY_VERSION = '0.20.3';
+    const EXPECTED_GATEWAY_VERSION = '0.20.6';
     const API_ORIGIN = window.location.protocol === 'file:' ? 'http://127.0.0.1:8765' : '';
     const MODE_STORAGE_KEY = 'geopilot.currentMode';
     let eventSource = null;
@@ -376,7 +376,9 @@
       updateModeUI();
       document.getElementById('keyBadge').textContent = providerKeyLabel(keyStates);
       document.getElementById('keyActionText').textContent = '模型配置';
-      document.getElementById('configPathHint').textContent = `配置文件：${config.config_path || '未知'}`;
+      document.getElementById('configPathHint').textContent = config.config_error
+        ? `配置文件：${config.config_path || '未知'}。旧配置无效，请重新保存模型配置：${config.config_error}`
+        : `配置文件：${config.config_path || '未知'}`;
       renderSpeechConfigHint(config);
       renderCurrentModelHint(config);
       setDot('keyDot', ok, !ok);
@@ -397,7 +399,7 @@
       const provider = currentMode === 'full_agent' ? config.full_agent_provider : config.semi_agent_provider;
       const model = currentMode === 'full_agent' ? config.full_agent_model : config.semi_agent_model;
       const modeLabel = currentMode === 'full_agent' ? '全代理' : '半代理';
-      node.textContent = `${modeLabel}当前使用：${providerLabel(provider)} ${model || ''}`.trim();
+      node.textContent = `${modeLabel}当前使用：${modelOptionLabel(provider, model)}`.trim();
     }
 
     function renderSpeechConfigHint(config) {
@@ -428,11 +430,18 @@
     function renderModelSelect(id, provider, model) {
       const select = document.getElementById(id);
       select.innerHTML = '';
-      modelOptions.forEach(option => {
-        const node = document.createElement('option');
-        node.value = modelChoiceValue(option.provider, option.model);
-        node.textContent = option.label || `${providerLabel(option.provider)} ${option.model}`;
-        select.appendChild(node);
+      providerOptions.forEach(providerOption => {
+        const options = modelOptions.filter(option => option.provider === providerOption.id);
+        if (!options.length) return;
+        const group = document.createElement('optgroup');
+        group.label = providerOption.label || providerOption.id;
+        options.forEach(option => {
+          const node = document.createElement('option');
+          node.value = modelChoiceValue(option.provider, modelOptionId(option));
+          node.textContent = option.label || modelOptionId(option);
+          group.appendChild(node);
+        });
+        select.appendChild(group);
       });
       select.value = selectedModelValue(provider, model);
     }
@@ -487,19 +496,35 @@
 
     function parseModelChoice(value) {
       const parts = String(value || '').split('|');
-      return {provider: parts[0] || 'deepseek', model: parts[1] || 'deepseek-v4-flash'};
+      const first = firstModelOption();
+      return {provider: parts[0] || first.provider, model: parts[1] || modelOptionId(first)};
     }
 
     function modelChoiceValue(provider, model) {
-      return `${provider || 'deepseek'}|${model || 'deepseek-v4-flash'}`;
+      const first = firstModelOption();
+      return `${provider || first.provider}|${model || modelOptionId(first)}`;
     }
 
     function selectedModelValue(provider, model) {
       const value = modelChoiceValue(provider, model);
-      const known = new Set(modelOptions.map(option => modelChoiceValue(option.provider, option.model)));
+      const known = new Set(modelOptions.map(option => modelChoiceValue(option.provider, modelOptionId(option))));
       if (known.has(value)) return value;
-      const first = modelOptions[0] || {provider: 'deepseek', model: 'deepseek-v4-flash'};
-      return modelChoiceValue(first.provider, first.model);
+      const first = firstModelOption();
+      return modelChoiceValue(first.provider, modelOptionId(first));
+    }
+
+    function firstModelOption() {
+      return modelOptions[0] || {provider: 'deepseek', id: 'deepseek-v4-flash-thinking', model: 'deepseek-v4-flash-thinking'};
+    }
+
+    function modelOptionId(option) {
+      return String((option && (option.id || option.model)) || '').trim();
+    }
+
+    function modelOptionLabel(provider, model) {
+      const option = modelOptions.find(item => item.provider === provider && modelOptionId(item) === model);
+      if (option) return option.label || modelOptionId(option);
+      return `${providerLabel(provider)} ${model || ''}`.trim();
     }
 
     function providerKeyStates(providers) {

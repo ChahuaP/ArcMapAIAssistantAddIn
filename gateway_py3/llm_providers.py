@@ -31,41 +31,43 @@ MINIMAX_TEXT_INVOKE_RE = re.compile(r"<invoke\s+name=\"([^\"]+)\">(.*?)</invoke>
 MINIMAX_TEXT_PARAMETER_RE = re.compile(r"<parameter\s+name=\"([^\"]+)\">(.*?)</parameter>", re.IGNORECASE | re.DOTALL)
 MINIMAX_THINKING_BLOCK_RE = re.compile(r"<think[^>]*>.*?</think>", re.IGNORECASE | re.DOTALL)
 
+
+def _model_option(provider: str, option_id: str, api_model: str, label: str, thinking: bool = False) -> Dict[str, Any]:
+    return {
+        "provider": provider,
+        "model": option_id,
+        "id": option_id,
+        "api_model": api_model,
+        "label": label,
+        "thinking": thinking,
+    }
+
+
 MODEL_OPTIONS = (
-    {
-        "provider": DEEPSEEK_PROVIDER,
-        "model": "deepseek-v4-flash",
-        "label": "DeepSeek V4 Flash 思考",
-        "thinking": True,
-    },
-    {
-        "provider": DEEPSEEK_PROVIDER,
-        "model": "deepseek-v4-pro",
-        "label": "DeepSeek V4 Pro 思考",
-        "thinking": True,
-    },
-    {
-        "provider": ZHIPU_PROVIDER,
-        "model": "glm-5.1",
-        "label": "智谱 GLM-5.1",
-        "thinking": True,
-    },
-    {
-        "provider": MINIMAX_PROVIDER,
-        "model": MINIMAX_MODEL,
-        "label": "MiniMax M3",
-        "thinking": False,
-    },
-    {
-        "provider": QWEN_PROVIDER,
-        "model": "qwen3.6-flash-2026-04-16",
-        "label": "千问 Qwen3.6 Flash",
-        "thinking": False,
-    },
+    _model_option(DEEPSEEK_PROVIDER, "deepseek-v4-flash-thinking", "deepseek-v4-flash", "DeepSeek V4 Flash 思考", True),
+    _model_option(DEEPSEEK_PROVIDER, "deepseek-v4-flash-non-thinking", "deepseek-v4-flash", "DeepSeek V4 Flash 非思考"),
+    _model_option(DEEPSEEK_PROVIDER, "deepseek-v4-pro-thinking", "deepseek-v4-pro", "DeepSeek V4 Pro 思考", True),
+    _model_option(DEEPSEEK_PROVIDER, "deepseek-v4-pro-non-thinking", "deepseek-v4-pro", "DeepSeek V4 Pro 非思考"),
+    _model_option(ZHIPU_PROVIDER, "glm-5.1-thinking", "glm-5.1", "智谱 GLM-5.1 思考", True),
+    _model_option(MINIMAX_PROVIDER, "MiniMax-M2.5", "MiniMax-M2.5", "MiniMax M2.5"),
+    _model_option(MINIMAX_PROVIDER, "MiniMax-M2.7", "MiniMax-M2.7", "MiniMax M2.7"),
+    _model_option(MINIMAX_PROVIDER, MINIMAX_MODEL, MINIMAX_MODEL, "MiniMax M3"),
+    _model_option(QWEN_PROVIDER, "qwen3.7-plus", "qwen3.7-plus", "阿里百炼 Qwen3.7 Plus"),
+    _model_option(QWEN_PROVIDER, "deepseek-v4-flash", "deepseek-v4-flash", "阿里百炼 DeepSeek V4 Flash"),
+    _model_option(QWEN_PROVIDER, "qwen3.6-flash-2026-04-16", "qwen3.6-flash-2026-04-16", "阿里百炼 Qwen3.6 Flash"),
+    _model_option(QWEN_PROVIDER, "qwen3.6-35b-a3b", "qwen3.6-35b-a3b", "阿里百炼 Qwen3.6 35B A3B"),
+    _model_option(QWEN_PROVIDER, "qwen3.7-max-2026-05-17", "qwen3.7-max-2026-05-17", "阿里百炼 Qwen3.7 Max"),
+    _model_option(QWEN_PROVIDER, "glm-5.1", "glm-5.1", "阿里百炼 GLM-5.1"),
+    _model_option(QWEN_PROVIDER, "qwen3.6-plus-2026-04-02", "qwen3.6-plus-2026-04-02", "阿里百炼 Qwen3.6 Plus"),
+    _model_option(QWEN_PROVIDER, "qwen3.7-max-preview", "qwen3.7-max-preview", "阿里百炼 Qwen3.7 Max Preview"),
 )
 MODEL_OPTIONS_BY_PROVIDER = {
     provider_id: [item for item in MODEL_OPTIONS if item["provider"] == provider_id]
     for provider_id in SUPPORTED_PROVIDERS
+}
+MODEL_OPTIONS_BY_KEY = {
+    (item["provider"], item["model"]): item
+    for item in MODEL_OPTIONS
 }
 THINKING_MODELS = {
     (item["provider"], item["model"])
@@ -76,12 +78,12 @@ THINKING_MODELS = {
 DEFAULT_CONFIG = {
     "default_mode": SEMI_AGENT_MODE,
     "semi_agent_provider": DEEPSEEK_PROVIDER,
-    "semi_agent_model": "deepseek-v4-flash",
+    "semi_agent_model": "deepseek-v4-flash-thinking",
     "full_agent_provider": MINIMAX_PROVIDER,
     "full_agent_model": MINIMAX_MODEL,
     "providers": {
         DEEPSEEK_PROVIDER: {
-            "model": "deepseek-v4-flash",
+            "model": "deepseek-v4-flash-thinking",
             "base_url": "https://api.deepseek.com",
         },
         MINIMAX_PROVIDER: {
@@ -89,7 +91,7 @@ DEFAULT_CONFIG = {
             "base_url": MINIMAX_TOKEN_PLAN_BASE_URL,
         },
         ZHIPU_PROVIDER: {
-            "model": "glm-5.1",
+            "model": "glm-5.1-thinking",
             "base_url": ZHIPU_BASE_URL,
         },
         QWEN_PROVIDER: {
@@ -136,7 +138,7 @@ PROVIDER_OPTIONS = (
     },
     {
         "id": QWEN_PROVIDER,
-        "label": "千问",
+        "label": "阿里百炼",
         "env_key": ENV_KEYS[QWEN_PROVIDER],
         "key_placeholder": "阿里云百炼 API Key",
     },
@@ -151,10 +153,11 @@ class ChatProvider:
     provider_id = ""
 
     def __init__(self, api_key: str | None = None, model: str | None = None, base_url: str | None = None, timeout: int = MODEL_REQUEST_TIMEOUT_SECONDS):
-        provider_config = provider_settings(self.provider_id)
+        provider_config = provider_settings(self.provider_id) if model is None else {}
         self.api_key = api_key or provider_api_key(self.provider_id)
-        self.model = model or provider_config["model"]
-        self.base_url = (base_url or provider_config["base_url"]).rstrip("/")
+        self.model_id = model or provider_config["model"]
+        self.model = api_model_for(self.provider_id, self.model_id)
+        self.base_url = (base_url or provider_config.get("base_url") or DEFAULT_CONFIG["providers"][self.provider_id]["base_url"]).rstrip("/")
         self.timeout = timeout
 
     def chat_json(self, messages: List[Dict[str, str]]) -> Dict[str, Any]:
@@ -232,7 +235,7 @@ class DeepSeekProvider(ChatProvider):
     provider_id = DEEPSEEK_PROVIDER
 
     def _prepare_body(self, body: Dict[str, Any]) -> Dict[str, Any]:
-        if _thinking_enabled(self.provider_id, self.model):
+        if _thinking_enabled(self.provider_id, self.model_id):
             body["thinking"] = {"type": "enabled"}
             body["reasoning_effort"] = "max"
             body.pop("temperature", None)
@@ -283,7 +286,7 @@ class ZhipuProvider(ChatProvider):
     provider_id = ZHIPU_PROVIDER
 
     def _prepare_body(self, body: Dict[str, Any]) -> Dict[str, Any]:
-        if _thinking_enabled(self.provider_id, self.model):
+        if _thinking_enabled(self.provider_id, self.model_id):
             body["thinking"] = {"type": "enabled"}
         return body
 
@@ -293,16 +296,18 @@ class QwenProvider(ChatProvider):
 
 
 def create_provider(mode: str | None = None, provider_id: str | None = None) -> ChatProvider:
-    selected = provider_id or provider_for_mode(mode or public_config()["default_mode"])
-    model = None if provider_id else model_for_mode(mode or public_config()["default_mode"])
+    config = load_config()
+    selected = provider_id or provider_for_mode(mode or config["default_mode"], config)
+    model = provider_settings(selected, config)["model"] if provider_id else model_for_mode(mode or config["default_mode"], config)
+    base_url = provider_settings(selected, config)["base_url"]
     if selected == DEEPSEEK_PROVIDER:
-        return DeepSeekProvider(model=model)
+        return DeepSeekProvider(model=model, base_url=base_url)
     if selected == MINIMAX_PROVIDER:
-        return MiniMaxProvider(model=model)
+        return MiniMaxProvider(model=model, base_url=base_url)
     if selected == ZHIPU_PROVIDER:
-        return ZhipuProvider(model=model)
+        return ZhipuProvider(model=model, base_url=base_url)
     if selected == QWEN_PROVIDER:
-        return QwenProvider(model=model)
+        return QwenProvider(model=model, base_url=base_url)
     raise ProviderError("未知模型供应商：%s。" % selected)
 
 
@@ -310,11 +315,7 @@ def load_config() -> Dict[str, Any]:
     path = active_config_path()
     if not path or not path.exists():
         return _normalized_config({})
-    with path.open("r", encoding="utf-8-sig") as f:
-        data = json.load(f)
-    if not isinstance(data, dict):
-        raise ProviderError("配置文件格式错误：config.json 必须是 JSON 对象。")
-    return _normalized_config(data)
+    return _normalized_config(_read_config_payload(path))
 
 
 def save_config(config: Dict[str, Any]) -> Dict[str, Any]:
@@ -322,10 +323,8 @@ def save_config(config: Dict[str, Any]) -> Dict[str, Any]:
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
         existing = load_config()
-    except ProviderError as exc:
-        if "旧字段" not in str(exc):
-            raise
-        existing = _normalized_config({})
+    except ProviderError:
+        existing = _normalized_config(_read_existing_config_payload(), validate=False)
     merged = _merge_config(existing, config)
     with path.open("w", encoding="utf-8-sig") as f:
         json.dump(merged, f, ensure_ascii=False, indent=2, sort_keys=True)
@@ -333,7 +332,13 @@ def save_config(config: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def public_config(config: Dict[str, Any] | None = None) -> Dict[str, Any]:
-    config = config or load_config()
+    config_error = ""
+    if config is None:
+        try:
+            config = load_config()
+        except ProviderError as exc:
+            config = _normalized_config(_read_existing_config_payload(), validate=False)
+            config_error = str(exc)
     status = config_status(config)
     providers = {}
     for provider_id in SUPPORTED_PROVIDERS:
@@ -357,11 +362,12 @@ def public_config(config: Dict[str, Any] | None = None) -> Dict[str, Any]:
         "speech": public_speech_config(config),
         "config_path": str(status["active_path"]),
         "config_file_exists": bool(status["active_path"].exists()),
+        "config_error": config_error,
         "checked_config_paths": [str(path) for path in status["checked_paths"]],
         "has_deepseek_api_key": providers[DEEPSEEK_PROVIDER]["has_api_key"],
         "has_minimax_api_key": providers[MINIMAX_PROVIDER]["has_api_key"],
         "has_zhipu_api_key": providers[ZHIPU_PROVIDER]["has_api_key"],
-        "has_qwen_api_key": providers[QWEN_PROVIDER]["has_api_key"],
+        "has_bailian_api_key": providers[QWEN_PROVIDER]["has_api_key"],
     }
 
 
@@ -446,6 +452,21 @@ def active_config_path() -> Path:
     return config_path()
 
 
+def _read_existing_config_payload() -> Dict[str, Any]:
+    path = active_config_path()
+    if not path.exists():
+        return {}
+    return _read_config_payload(path)
+
+
+def _read_config_payload(path: Path) -> Dict[str, Any]:
+    with path.open("r", encoding="utf-8-sig") as f:
+        data = json.load(f)
+    if not isinstance(data, dict):
+        raise ProviderError("配置文件格式错误：config.json 必须是 JSON 对象。")
+    return data
+
+
 def config_status(config: Dict[str, Any] | None = None) -> Dict[str, Any]:
     active_path = active_config_path()
     if config is None:
@@ -477,6 +498,13 @@ def normalize_usage(provider_id: str, usage: Dict[str, Any]) -> Dict[str, Any]:
     result = dict(usage or {})
     result["provider"] = provider_id
     return result
+
+
+def api_model_for(provider_id: str, model: str) -> str:
+    option = MODEL_OPTIONS_BY_KEY.get((provider_id, model))
+    if not option:
+        raise ProviderError("模型 %s 不属于供应商 %s。" % (model, provider_label(provider_id)))
+    return str(option.get("api_model") or option["model"]).strip()
 
 
 def _thinking_enabled(provider_id: str, model: str) -> bool:
@@ -553,7 +581,7 @@ def provider_label(provider_id: str) -> str:
         DEEPSEEK_PROVIDER: "DeepSeek",
         MINIMAX_PROVIDER: "MiniMax",
         ZHIPU_PROVIDER: "智谱",
-        QWEN_PROVIDER: "千问",
+        QWEN_PROVIDER: "阿里百炼",
     }.get(provider_id, provider_id)
 
 
@@ -569,7 +597,7 @@ def provider_http_error(provider_id: str, status_code: int, detail: str) -> str:
         if provider_id == ZHIPU_PROVIDER:
             return "智谱 API Key 无效。请在右上角“API Key”里重新保存智谱 API Key。原始信息：%s" % readable
         if provider_id == QWEN_PROVIDER:
-            return "千问 API Key 无效。请在右上角“API Key”里重新保存阿里云百炼 API Key，并确认接口地址为 https://dashscope.aliyuncs.com/compatible-mode/v1。原始信息：%s" % readable
+            return "阿里百炼 API Key 无效。请在右上角“API Key”里重新保存阿里云百炼 API Key，并确认接口地址为 https://dashscope.aliyuncs.com/compatible-mode/v1。原始信息：%s" % readable
     return "%s HTTP %s：%s" % (label, status_code, readable)
 
 
@@ -589,7 +617,7 @@ def _extract_http_error_message(detail: str) -> str:
     return detail.strip()
 
 
-def _normalized_config(config: Dict[str, Any]) -> Dict[str, Any]:
+def _normalized_config(config: Dict[str, Any], validate: bool = True) -> Dict[str, Any]:
     normalized = json.loads(json.dumps(DEFAULT_CONFIG))
     providers = config.get("providers") if isinstance(config.get("providers"), dict) else {}
     for provider_id in SUPPORTED_PROVIDERS:
@@ -614,7 +642,8 @@ def _normalized_config(config: Dict[str, Any]) -> Dict[str, Any]:
         for key in ("provider", "model"):
             if isinstance(speech.get(key), str) and speech[key].strip():
                 normalized["speech"][key] = speech[key].strip()
-    _validate_config(normalized)
+    if validate:
+        _validate_config(normalized)
     return normalized
 
 
@@ -652,6 +681,8 @@ def _validate_config(config: Dict[str, Any]) -> None:
     for key in ("semi_agent_provider", "full_agent_provider"):
         if config[key] not in SUPPORTED_PROVIDERS:
             raise ProviderError("未知模型供应商：%s。" % config[key])
+    for provider_id in SUPPORTED_PROVIDERS:
+        _validate_provider_model(provider_id, config["providers"][provider_id]["model"])
     _validate_mode_model(config, "semi_agent_provider", "semi_agent_model")
     _validate_mode_model(config, "full_agent_provider", "full_agent_model")
     speech = speech_settings(config)
@@ -664,8 +695,11 @@ def _validate_config(config: Dict[str, Any]) -> None:
 def _validate_mode_model(config: Dict[str, Any], provider_key: str, model_key: str) -> None:
     provider_id = config[provider_key]
     model = config[model_key]
-    known_models = {item["model"] for item in MODEL_OPTIONS_BY_PROVIDER[provider_id]}
-    if model not in known_models:
+    _validate_provider_model(provider_id, model)
+
+
+def _validate_provider_model(provider_id: str, model: str) -> None:
+    if (provider_id, model) not in MODEL_OPTIONS_BY_KEY:
         raise ProviderError("模型 %s 不属于供应商 %s。" % (model, provider_label(provider_id)))
 
 
@@ -677,4 +711,7 @@ def _default_model_for_provider(provider_id: str) -> str:
     options = MODEL_OPTIONS_BY_PROVIDER.get(provider_id) or []
     if not options:
         raise ProviderError("未知模型供应商：%s。" % provider_id)
+    default = DEFAULT_CONFIG["providers"].get(provider_id, {}).get("model")
+    if default in {item["model"] for item in options}:
+        return default
     return options[0]["model"]

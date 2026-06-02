@@ -20,9 +20,9 @@ class WorkbenchStateTests(unittest.TestCase):
             state = SimpleNamespace(catalog=OperationCatalog(), store=store)
 
             with patch("gateway_py3.routes.arcmap.bridges", return_value=[{"pid": 1, "port": 8766, "hwnd": 2}]):
-                result = handle_get(state, "/api/workbench-state", "0.20.3")
+                result = handle_get(state, "/api/workbench-state", "0.20.6")
 
-        self.assertEqual(result["health"]["app_version"], "0.20.3")
+        self.assertEqual(result["health"]["app_version"], "0.20.6")
         self.assertIn("config", result)
         self.assertIn("context", result)
         self.assertEqual(result["arcmap"]["bridges"][0]["hwnd"], 2)
@@ -36,13 +36,13 @@ class WorkbenchStateTests(unittest.TestCase):
             second = store.create_draft("全代理", "ctx", _workflow("view.refresh_view"), [{"b": 2}], mode="full_agent")
             state = SimpleNamespace(catalog=OperationCatalog(), store=store)
 
-            listed = handle_get(state, "/api/workflows", "0.20.3", {
+            listed = handle_get(state, "/api/workflows", "0.20.6", {
                 "mode": ["full_agent"],
                 "limit": ["10"],
                 "include_trace": ["false"],
             })
-            detail = handle_get(state, "/workflows/%s" % second["id"], "0.20.3")
-            since = handle_get(state, "/api/workflows", "0.20.3", {"since": [str(first["updated_at"])], "limit": ["10"]})
+            detail = handle_get(state, "/workflows/%s" % second["id"], "0.20.6")
+            since = handle_get(state, "/api/workflows", "0.20.6", {"since": [str(first["updated_at"])], "limit": ["10"]})
 
         self.assertEqual([item["id"] for item in listed["workflows"]], [second["id"]])
         self.assertNotIn("agent_trace", listed["workflows"][0])

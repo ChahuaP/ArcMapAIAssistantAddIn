@@ -4,7 +4,6 @@ from __future__ import absolute_import
 import json
 import os
 import re
-import uuid
 import zipfile
 
 import arcpy
@@ -41,11 +40,11 @@ def export_layer_kml(context, arguments, step_outputs):
     output = common.output_file(context, arguments["output_name"], ".kmz", arguments.get("output_folder"))
     selected_only = bool(arguments.get("selected_only", False))
     if _is_feature_layer(layer):
-        source = _feature_kml_source(layer, selected_only)
-        feature_count = _feature_count(source)
+        with common.read_layer(layer, selected_only) as source:
+            feature_count = _feature_count(source)
         if feature_count <= 0:
             raise common.OperationError(u"KML 导出的图层没有要素，已停止生成空 KMZ。")
-        written_count = _write_feature_kmz(source, getattr(layer, "name", "layer"), output)
+        written_count = _write_feature_kmz(layer, getattr(layer, "name", "layer"), output, selected_only=selected_only)
         return {
             "output": output,
             "selected_only": selected_only,
@@ -79,7 +78,7 @@ def split_by_field(context, arguments, step_outputs):
     output_format = _output_format(arguments)
     prefix = common.safe_output_name(arguments["output_name"])
     output_base = _output_base(context, arguments, output_format)
-    input_source = layer if bool(arguments.get("selected_only", False)) else (common._safe_data_source(layer) or layer)
+    selected_only = bool(arguments.get("selected_only", False))
     outputs = []
     output_items = []
     used_names = set()
@@ -89,22 +88,15 @@ def split_by_field(context, arguments, step_outputs):
         _ensure_output_available(output)
         where_clause = _where_for_value(layer, field.name, value)
         if output_format == "kmz":
-            feature_count = _write_feature_kmz(input_source, name, output, where_clause)
+            feature_count = _write_feature_kmz(layer, name, output, where_clause, selected_only)
             outputs.append(output)
             output_items.append({"value": common._text(value), "output": output, "feature_count": feature_count})
         else:
-            temp_layer = "arcmap_ai_split_%s" % uuid.uuid4().hex
-            try:
-                with common.auto_add_outputs_disabled():
-                    arcpy.MakeFeatureLayer_management(input_source, temp_layer, where_clause)
-                    arcpy.CopyFeatures_management(temp_layer, output)
-                outputs.append(output)
-                output_items.append({"value": common._text(value), "output": output})
-            finally:
-                try:
-                    arcpy.Delete_management(temp_layer)
-                except (common.ARCPY_EXECUTE_ERROR, RuntimeError):
-                    pass
+            with common.auto_add_outputs_disabled():
+                with common.read_layer(layer, selected_only, where_clause) as source:
+                    arcpy.CopyFeatures_management(source, output)
+            outputs.append(output)
+            output_items.append({"value": common._text(value), "output": output})
 
     common.refresh()
     return {"outputs": outputs, "output_items": output_items, "count": len(outputs), "output_format": output_format}
@@ -132,64 +124,49 @@ def _is_feature_layer(layer):
     return bool(getattr(desc, "shapeType", None))
 
 
-def _feature_kml_source(layer, selected_only):
-    if selected_only:
-        _require_selection(layer)
-        return layer
-    return common._safe_data_source(layer) or layer
-
-
-def _require_selection(layer):
-    desc = arcpy.Describe(layer)
-    fid_set = getattr(desc, "FIDSet", None)
-    if fid_set is not None and not common._text(fid_set).strip():
-        raise common.OperationError(u"当前图层没有已选要素，不能按 selected_only 导出 KML。")
-
-
 def _feature_count(layer):
     result = arcpy.GetCount_management(layer)
     value = result.getOutput(0) if hasattr(result, "getOutput") else result
     return int(value)
 
 
-def _write_feature_kmz(source, layer_name, output, where_clause=None):
+def _write_feature_kmz(source, layer_name, output, where_clause=None, selected_only=False):
     document_name = _xml_text(layer_name or "layer")
-    spatial_reference = _require_spatial_reference(source)
-    wgs84 = arcpy.SpatialReference(4326)
-    fields = _kml_attribute_fields(source)
-    field_names = [field.name for field in fields]
-    parts = [
-        u'<?xml version="1.0" encoding="UTF-8"?>',
-        u'<kml xmlns="http://www.opengis.net/kml/2.2">',
-        u"<Document>",
-        u"<name>%s</name>" % document_name,
-        u'<Style id="feature_style">',
-        u"<LineStyle><color>ff6e6e6e</color><width>1.2</width></LineStyle>",
-        u"<PolyStyle><color>7d5ca6ff</color><outline>1</outline></PolyStyle>",
-        u"</Style>"
-    ]
-    written_count = 0
-    cursor_fields = ["SHAPE@"] + field_names
-    cursor_args = [source, cursor_fields]
-    if where_clause:
-        cursor_args.append(where_clause)
-    with arcpy.da.SearchCursor(*cursor_args) as cursor:
-        for index, row in enumerate(cursor, 1):
-            geometry = _project_geometry(row[0], spatial_reference, wgs84)
-            if geometry is None:
-                continue
-            geometry_xml = _geometry_kml(geometry)
-            if not geometry_xml:
-                continue
-            values = row[1:]
-            name = _feature_name(fields, values, index)
-            parts.append(u"<Placemark>")
-            parts.append(u"<name>%s</name>" % _xml_text(name))
-            parts.append(u"<styleUrl>#feature_style</styleUrl>")
-            parts.append(_extended_data_kml(fields, values))
-            parts.append(geometry_xml)
-            parts.append(u"</Placemark>")
-            written_count += 1
+    with common.read_layer(source, selected_only, where_clause) as cursor_source:
+        spatial_reference = _require_spatial_reference(cursor_source)
+        wgs84 = arcpy.SpatialReference(4326)
+        fields = _kml_attribute_fields(cursor_source)
+        field_names = [field.name for field in fields]
+        parts = [
+            u'<?xml version="1.0" encoding="UTF-8"?>',
+            u'<kml xmlns="http://www.opengis.net/kml/2.2">',
+            u"<Document>",
+            u"<name>%s</name>" % document_name,
+            u'<Style id="feature_style">',
+            u"<LineStyle><color>ff6e6e6e</color><width>1.2</width></LineStyle>",
+            u"<PolyStyle><color>7d5ca6ff</color><outline>1</outline></PolyStyle>",
+            u"</Style>"
+        ]
+        written_count = 0
+        cursor_fields = ["SHAPE@"] + field_names
+        cursor_args = [cursor_source, cursor_fields]
+        with arcpy.da.SearchCursor(*cursor_args) as cursor:
+            for index, row in enumerate(cursor, 1):
+                geometry = _project_geometry(row[0], spatial_reference, wgs84)
+                if geometry is None:
+                    continue
+                geometry_xml = _geometry_kml(geometry)
+                if not geometry_xml:
+                    continue
+                values = row[1:]
+                name = _feature_name(fields, values, index)
+                parts.append(u"<Placemark>")
+                parts.append(u"<name>%s</name>" % _xml_text(name))
+                parts.append(u"<styleUrl>#feature_style</styleUrl>")
+                parts.append(_extended_data_kml(fields, values))
+                parts.append(geometry_xml)
+                parts.append(u"</Placemark>")
+                written_count += 1
     if written_count <= 0:
         raise common.OperationError(u"KML 导出的图层没有可写入的几何，已停止生成空 KMZ。")
     parts.append(u"</Document>")
@@ -404,19 +381,19 @@ def _xml_text(value):
 
 
 def _unique_field_values(layer, field_name, include_null, selected_only):
-    source = layer if selected_only else (common._safe_data_source(layer) or layer)
     values = []
     seen = set()
-    with arcpy.da.SearchCursor(source, [field_name]) as cursor:
-        for row in cursor:
-            value = row[0]
-            if value is None and not include_null:
-                continue
-            key = _value_key(value)
-            if key in seen:
-                continue
-            seen.add(key)
-            values.append(value)
+    with common.read_layer(layer, selected_only) as source:
+        with arcpy.da.SearchCursor(source, [field_name]) as cursor:
+            for row in cursor:
+                value = row[0]
+                if value is None and not include_null:
+                    continue
+                key = _value_key(value)
+                if key in seen:
+                    continue
+                seen.add(key)
+                values.append(value)
     return sorted(values, key=lambda item: common._text(item) if item is not None else u"")
 
 

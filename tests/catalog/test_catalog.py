@@ -123,9 +123,28 @@ class CatalogTests(unittest.TestCase):
         self.assertIn("if _LAST_COMMAND_WAS_SILENT:", runtime)
         self.assertNotIn("def handle_command", runtime)
 
+    def test_runtime_read_data_uses_live_layers_and_unicode_paths(self):
+        common = (RUNTIME_ROOT / "operations" / "common.py").read_text(encoding="utf-8")
+        export_ops = (RUNTIME_ROOT / "operations" / "export_ops.py").read_text(encoding="utf-8")
+        condition_utils = (RUNTIME_ROOT / "operations" / "condition_utils.py").read_text(encoding="utf-8")
+        layer_ops = (RUNTIME_ROOT / "operations" / "layer_ops.py").read_text(encoding="utf-8")
+
+        self.assertIn("def read_layer(layer, selected_only=False, where_clause=None):", common)
+        self.assertIn("arcpy.MakeFeatureLayer_management(self.layer, self.temp_layer, self.where_clause)", common)
+        self.assertIn("clear_layer_selection(self.temp_layer)", common)
+        self.assertIn("require_selection(self.layer)", common)
+        self.assertIn('path = common._path_text(arguments["path"])', layer_ops)
+
+        self.assertIn("with common.read_layer(layer, selected_only, where_clause) as source:", export_ops)
+        self.assertIn("with common.read_layer(layer, selected_only) as source:", export_ops)
+        self.assertIn("with common.read_layer(layer, False, where_clause) as source:", condition_utils)
+        self.assertNotIn("common._safe_data_source(layer) or layer", export_ops)
+        self.assertNotIn("class _read_layer", export_ops)
+
     def test_release_and_install_package_operation_catalog(self):
         build_script = (PACKAGING_ROOT / "build_release.ps1").read_text(encoding="utf-8-sig")
         install_script = (PACKAGING_ROOT / "install.ps1").read_text(encoding="utf-8-sig")
+        uninstall_script = (PACKAGING_ROOT / "uninstall.ps1").read_text(encoding="utf-8-sig")
         self.assertIn('"operation_catalog"', build_script)
         self.assertIn('"app\\operation_catalog"', build_script)
         self.assertIn('"agent_integrations\\geopilot-arcmap"', build_script)
@@ -140,6 +159,11 @@ class CatalogTests(unittest.TestCase):
         self.assertIn('"catalog.json"', install_script)
         self.assertIn('"VERSION"', install_script)
         self.assertIn("app_version", install_script)
+        self.assertIn("Get-ArcMapDesktopVersions", install_script)
+        self.assertIn("addin_dirs", install_script)
+        self.assertIn("desktop_versions", install_script)
+        self.assertIn("Desktop10\\.", install_script)
+        self.assertIn("Get-AddinTargetDirs", uninstall_script)
         self.assertIn("bridge_exe", install_script)
         self.assertIn("Test-InstallHealth", install_script)
         self.assertIn("build\\release_staging\\ArcMapAIAssistant", build_script)

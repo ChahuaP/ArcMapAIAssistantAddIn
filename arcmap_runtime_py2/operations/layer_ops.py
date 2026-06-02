@@ -13,7 +13,7 @@ RGB_BAND_INDEX = "1;2;3"
 
 
 def add_layer(context, arguments, step_outputs):
-    path = arguments["path"]
+    path = common._path_text(arguments["path"])
     if not os.path.exists(path) and not arcpy.Exists(path):
         raise common.OperationError("Layer path not found: %s" % path)
     mxd = common.current_mxd()

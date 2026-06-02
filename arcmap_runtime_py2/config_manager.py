@@ -31,13 +31,13 @@ def save_deepseek_key(api_key):
             del config[key]
     config.setdefault("default_mode", "semi_agent")
     config.setdefault("semi_agent_provider", "deepseek")
-    config.setdefault("semi_agent_model", "deepseek-v4-flash")
+    config.setdefault("semi_agent_model", "deepseek-v4-flash-thinking")
     config.setdefault("full_agent_provider", "minimax")
     config.setdefault("full_agent_model", "MiniMax-M3")
     providers = config.setdefault("providers", {})
     providers["deepseek"] = {
         "api_key": api_key,
-        "model": "deepseek-v4-flash",
+        "model": "deepseek-v4-flash-thinking",
         "base_url": "https://api.deepseek.com"
     }
     with open(path, "wb") as f:

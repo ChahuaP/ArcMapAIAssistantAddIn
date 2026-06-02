@@ -1,5 +1,5 @@
 ﻿param(
-    [string]$DesktopVersion = "Desktop10.1",
+    [string]$DesktopVersion = "",
     [switch]$RemoveUserConfig,
     [switch]$Quiet
 )
@@ -56,6 +56,21 @@ function Read-InstallDir {
     }
 }
 
+function Get-AddinTargetDirs {
+    param([string]$AddinId)
+    if ($DesktopVersion) {
+        return @((Join-Path $HOME "Documents\ArcGIS\AddIns\$DesktopVersion\$AddinId"))
+    }
+    $addinRoot = Join-Path $HOME "Documents\ArcGIS\AddIns"
+    if (-not (Test-Path -LiteralPath $addinRoot)) {
+        return @()
+    }
+    $dirs = Get-ChildItem -LiteralPath $addinRoot -Directory -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match "^Desktop10\.\d+$" } |
+        ForEach-Object { Join-Path $_.FullName $AddinId }
+    return @($dirs)
+}
+
 if (-not $Quiet) {
     Write-Host "即将卸载 ArcMap AI Assistant。"
     $answer = Read-Host "是否继续？输入 Y 确认"
@@ -68,8 +83,9 @@ if (-not $Quiet) {
 Stop-Gateway
 
 $addinId = "{7f42eea1-1f17-4cf4-9d4f-c0c8d28c0a23}"
-$addinTargetDir = Join-Path $HOME "Documents\ArcGIS\AddIns\$DesktopVersion\$addinId"
-Remove-PathIfExists $addinTargetDir
+foreach ($addinTargetDir in Get-AddinTargetDirs $addinId) {
+    Remove-PathIfExists $addinTargetDir
+}
 
 $installDir = Read-InstallDir
 Remove-InstallDirIfValid $installDir
