@@ -23,7 +23,7 @@ def config_payload(payload):
     for provider_id in SUPPORTED_PROVIDERS:
         source = providers.get(provider_id) or {}
         item = {}
-        for field in ("api_key", "model", "base_url"):
+        for field in ("api_key", "token_plan_api_key", "model", "base_url"):
             if isinstance(source.get(field), str) and source[field].strip():
                 item[field] = source[field].strip()
         if provider_id == DEEPSEEK_PROVIDER and item.get("api_key") and not item["api_key"].startswith("sk-"):

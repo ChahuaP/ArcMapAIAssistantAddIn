@@ -330,6 +330,10 @@
       color: var(--muted);
       font-size: 13px;
     }
+    .muted {
+      color: var(--muted);
+      font-weight: 500;
+    }
     .button-row {
       display: flex;
       flex-wrap: wrap;

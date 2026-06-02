@@ -115,7 +115,13 @@ ENV_KEY_ALIASES = {
     DEEPSEEK_PROVIDER: ("DEEPSEEK_API_KEY",),
     MINIMAX_PROVIDER: ("MINIMAX_API_KEY",),
     ZHIPU_PROVIDER: ("ZHIPU_API_KEY", "BIGMODEL_API_KEY"),
-    QWEN_PROVIDER: ("DASHSCOPE_API_KEY", "QWEN_API_KEY", "BAILIAN_API_KEY"),
+    QWEN_PROVIDER: ("BAILIAN_TOKEN_PLAN_API_KEY", "DASHSCOPE_TOKEN_PLAN_API_KEY", "DASHSCOPE_API_KEY", "QWEN_API_KEY", "BAILIAN_API_KEY"),
+}
+PROVIDER_SECRET_FIELDS = {
+    DEEPSEEK_PROVIDER: ("api_key",),
+    MINIMAX_PROVIDER: ("api_key",),
+    ZHIPU_PROVIDER: ("api_key",),
+    QWEN_PROVIDER: ("token_plan_api_key", "api_key"),
 }
 PROVIDER_OPTIONS = (
     {
@@ -123,24 +129,38 @@ PROVIDER_OPTIONS = (
         "label": "DeepSeek",
         "env_key": ENV_KEYS[DEEPSEEK_PROVIDER],
         "key_placeholder": "DeepSeek API Key",
+        "key_fields": [
+            {"field": "api_key", "label": "API Key", "placeholder": "DeepSeek API Key"},
+        ],
     },
     {
         "id": MINIMAX_PROVIDER,
         "label": "MiniMax",
         "env_key": ENV_KEYS[MINIMAX_PROVIDER],
         "key_placeholder": "MiniMax Token Plan Key",
+        "key_fields": [
+            {"field": "api_key", "label": "Token Plan API Key", "placeholder": "MiniMax Token Plan API Key"},
+        ],
     },
     {
         "id": ZHIPU_PROVIDER,
         "label": "智谱",
         "env_key": ENV_KEYS[ZHIPU_PROVIDER],
         "key_placeholder": "智谱开放平台 Key",
+        "key_fields": [
+            {"field": "api_key", "label": "API Key", "placeholder": "智谱开放平台 API Key"},
+        ],
     },
     {
         "id": QWEN_PROVIDER,
         "label": "阿里百炼",
         "env_key": ENV_KEYS[QWEN_PROVIDER],
+        "env_keys": list(ENV_KEY_ALIASES[QWEN_PROVIDER]),
         "key_placeholder": "阿里云百炼 API Key",
+        "key_fields": [
+            {"field": "api_key", "label": "API Key", "placeholder": "阿里百炼 API Key"},
+            {"field": "token_plan_api_key", "label": "Token Plan API Key", "placeholder": "阿里百炼 Token Plan API Key"},
+        ],
     },
 )
 
@@ -349,6 +369,8 @@ def public_config(config: Dict[str, Any] | None = None) -> Dict[str, Any]:
             "model": settings["model"],
             "base_url": settings["base_url"],
             "env_key": ENV_KEYS[provider_id],
+            "key_status": provider_key_status(provider_id, config),
+            "api_key_source": provider_api_key_source(provider_id, config),
         }
     return {
         "default_mode": config["default_mode"],
@@ -373,11 +395,13 @@ def public_config(config: Dict[str, Any] | None = None) -> Dict[str, Any]:
 
 def public_speech_config(config: Dict[str, Any] | None = None) -> Dict[str, Any]:
     settings = speech_settings(config)
+    source = provider_api_key_source(QWEN_PROVIDER, config)
     return {
         "provider": settings["provider"],
         "model": settings["model"],
         "base_url": provider_settings(QWEN_PROVIDER, config)["base_url"],
         "has_api_key": bool(provider_api_key(QWEN_PROVIDER, config)),
+        "api_key_source": source,
         "uses_provider": QWEN_PROVIDER,
     }
 
@@ -418,13 +442,71 @@ def provider_settings(provider_id: str, config: Dict[str, Any] | None = None) ->
 
 
 def provider_api_key(provider_id: str, config: Dict[str, Any] | None = None) -> str | None:
-    for env_key in ENV_KEY_ALIASES[provider_id]:
-        if os.environ.get(env_key):
-            return os.environ[env_key]
+    return provider_api_key_resolution(provider_id, config)["value"]
+
+
+def provider_api_key_source(provider_id: str, config: Dict[str, Any] | None = None) -> Dict[str, str]:
+    resolution = provider_api_key_resolution(provider_id, config)
+    return {
+        "field": resolution["field"],
+        "source": resolution["source"],
+        "env_key": resolution["env_key"],
+        "label": resolution["label"],
+    }
+
+
+def provider_api_key_resolution(provider_id: str, config: Dict[str, Any] | None = None) -> Dict[str, str | None]:
     config = config or load_config()
     settings = (config.get("providers") or {}).get(provider_id) or {}
-    key = settings.get("api_key")
-    return key if isinstance(key, str) and key.strip() else None
+    for item in _api_key_resolution_order(provider_id):
+        source = item["source"]
+        field = item.get("field") or ""
+        env_key = item.get("env_key") or ""
+        value = None
+        if source == "config":
+            candidate = settings.get(field)
+            if isinstance(candidate, str) and candidate.strip():
+                value = candidate.strip()
+        elif source == "env" and env_key and os.environ.get(env_key):
+            value = os.environ[env_key].strip()
+        if value:
+            return {
+                "value": value,
+                "field": field,
+                "source": source,
+                "env_key": env_key,
+                "label": item["label"],
+            }
+    return {"value": None, "field": "", "source": "", "env_key": "", "label": "未配置"}
+
+
+def provider_key_status(provider_id: str, config: Dict[str, Any] | None = None) -> Dict[str, bool]:
+    config = config or load_config()
+    settings = (config.get("providers") or {}).get(provider_id) or {}
+    return {
+        field: bool(isinstance(settings.get(field), str) and settings[field].strip())
+        for field in PROVIDER_SECRET_FIELDS[provider_id]
+    }
+
+
+def _api_key_resolution_order(provider_id: str) -> List[Dict[str, str]]:
+    if provider_id == QWEN_PROVIDER:
+        return [
+            {"source": "config", "field": "token_plan_api_key", "label": "Token Plan API Key（配置文件）"},
+            {"source": "env", "field": "token_plan_api_key", "env_key": "BAILIAN_TOKEN_PLAN_API_KEY", "label": "Token Plan API Key（环境变量 BAILIAN_TOKEN_PLAN_API_KEY）"},
+            {"source": "env", "field": "token_plan_api_key", "env_key": "DASHSCOPE_TOKEN_PLAN_API_KEY", "label": "Token Plan API Key（环境变量 DASHSCOPE_TOKEN_PLAN_API_KEY）"},
+            {"source": "config", "field": "api_key", "label": "API Key（配置文件）"},
+            {"source": "env", "field": "api_key", "env_key": "DASHSCOPE_API_KEY", "label": "API Key（环境变量 DASHSCOPE_API_KEY）"},
+            {"source": "env", "field": "api_key", "env_key": "QWEN_API_KEY", "label": "API Key（环境变量 QWEN_API_KEY）"},
+            {"source": "env", "field": "api_key", "env_key": "BAILIAN_API_KEY", "label": "API Key（环境变量 BAILIAN_API_KEY）"},
+        ]
+    return [
+        *[
+            {"source": "env", "field": "api_key", "env_key": env_key, "label": "API Key（环境变量 %s）" % env_key}
+            for env_key in ENV_KEY_ALIASES[provider_id]
+        ],
+        {"source": "config", "field": "api_key", "label": "API Key（配置文件）"},
+    ]
 
 
 def checked_config_paths() -> List[Path]:
@@ -488,6 +570,8 @@ def missing_api_key_message(provider_id: str) -> str:
             return "%s API Key 配置文件读取失败：%s。请在网页右上角重新保存 Key。" % (label, exc)
         settings = (config.get("providers") or {}).get(provider_id) or {}
         if settings:
+            if provider_id == QWEN_PROVIDER:
+                return "%s Key 未找到。已读取配置文件：%s，但没有 providers.%s.api_key 或 providers.%s.token_plan_api_key 字段。" % (label, active_path, provider_id, provider_id)
             return "%s API Key 未找到。已读取配置文件：%s，但没有 providers.%s.api_key 字段。" % (label, active_path, provider_id)
         return "%s API Key 未找到。配置文件里没有 %s 配置。请在网页右上角重新保存 Key。" % (label, provider_id)
     checked = "；".join(str(path) for path in checked_config_paths())
@@ -597,7 +681,7 @@ def provider_http_error(provider_id: str, status_code: int, detail: str) -> str:
         if provider_id == ZHIPU_PROVIDER:
             return "智谱 API Key 无效。请在右上角“API Key”里重新保存智谱 API Key。原始信息：%s" % readable
         if provider_id == QWEN_PROVIDER:
-            return "阿里百炼 API Key 无效。请在右上角“API Key”里重新保存阿里云百炼 API Key，并确认接口地址为 https://dashscope.aliyuncs.com/compatible-mode/v1。原始信息：%s" % readable
+            return "阿里百炼 Key 无效。请在右上角“模型配置”里重新保存阿里百炼 API Key 或 Token Plan API Key，并确认接口地址为 https://dashscope.aliyuncs.com/compatible-mode/v1。原始信息：%s" % readable
     return "%s HTTP %s：%s" % (label, status_code, readable)
 
 
@@ -658,7 +742,7 @@ def _merge_config(existing: Dict[str, Any], patch: Dict[str, Any]) -> Dict[str, 
     providers = patch.get("providers") if isinstance(patch.get("providers"), dict) else {}
     for provider_id in SUPPORTED_PROVIDERS:
         provider_patch = providers.get(provider_id) or {}
-        for field in ("api_key", "model", "base_url"):
+        for field in ("model", "base_url") + PROVIDER_SECRET_FIELDS[provider_id]:
             value = provider_patch.get(field)
             if isinstance(value, str) and value.strip():
                 if field == "model":

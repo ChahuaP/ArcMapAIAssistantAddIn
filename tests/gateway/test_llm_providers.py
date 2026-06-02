@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from gateway_py3.llm_providers import DeepSeekProvider, ProviderError, load_config, public_config
+from gateway_py3.llm_providers import DeepSeekProvider, ProviderError, load_config, provider_api_key, provider_api_key_source, public_config
 
 
 class LlmProviderConfigTests(unittest.TestCase):
@@ -50,6 +50,35 @@ class LlmProviderConfigTests(unittest.TestCase):
 
         self.assertIn("deepseek-chat", config["config_error"])
         self.assertTrue(config["providers"]["deepseek"]["has_api_key"])
+
+    def test_qwen_token_plan_key_has_explicit_runtime_priority(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "config.json"
+            path.write_text(json.dumps({
+                "providers": {
+                    "qwen": {
+                        "api_key": "regular-config-key",
+                        "token_plan_api_key": "token-plan-config-key",
+                    }
+                },
+            }), encoding="utf-8")
+
+            with patch.dict(os.environ, {
+                "ARCMAP_AI_CONFIG": str(path),
+                "BAILIAN_TOKEN_PLAN_API_KEY": "",
+                "DASHSCOPE_TOKEN_PLAN_API_KEY": "",
+                "DASHSCOPE_API_KEY": "regular-env-key",
+            }, clear=False):
+                key = provider_api_key("qwen")
+                source = provider_api_key_source("qwen")
+                config = public_config()
+
+        self.assertEqual(key, "token-plan-config-key")
+        self.assertEqual(source["field"], "token_plan_api_key")
+        self.assertEqual(source["source"], "config")
+        self.assertIn("Token Plan", source["label"])
+        self.assertTrue(config["providers"]["qwen"]["key_status"]["token_plan_api_key"])
+        self.assertTrue(config["providers"]["qwen"]["key_status"]["api_key"])
 
 
 if __name__ == "__main__":

@@ -51,7 +51,7 @@ def transcribe_qwen_asr(audio_data_uri: str) -> str:
     settings = speech_settings()
     api_key = provider_api_key(QWEN_PROVIDER)
     if not api_key:
-        raise ProviderError("语音识别需要配置阿里百炼 API Key。请在右上角“模型配置”里填写阿里百炼 Key，语音识别和阿里百炼模型共用同一个 DASHSCOPE_API_KEY。")
+        raise ProviderError("语音识别需要配置阿里百炼 API Key 或 Token Plan API Key。请在右上角“模型配置”里填写阿里百炼 Key。")
     payload = {
         "model": settings["model"],
         "stream": False,

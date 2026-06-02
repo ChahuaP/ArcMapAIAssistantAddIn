@@ -1,4 +1,4 @@
-    const EXPECTED_GATEWAY_VERSION = '0.20.6';
+    const EXPECTED_GATEWAY_VERSION = '0.21.0';
     const API_ORIGIN = window.location.protocol === 'file:' ? 'http://127.0.0.1:8765' : '';
     const MODE_STORAGE_KEY = 'geopilot.currentMode';
     let eventSource = null;
@@ -406,8 +406,9 @@
       const speech = config.speech || {};
       const provider = providerLabel(speech.uses_provider || 'qwen');
       const keyState = speech.has_api_key ? '已可用' : '未配置';
+      const sourceLabel = speech.api_key_source && speech.api_key_source.label ? `，运行时使用：${speech.api_key_source.label}` : '';
       document.getElementById('speechConfigHint').textContent =
-        `语音识别使用 ${provider} API Key，模型 ${speech.model || 'qwen3-asr-flash'}，当前${keyState}。`;
+        `语音识别使用 ${provider} API Key 或 Token Plan API Key，模型 ${speech.model || 'qwen3-asr-flash'}，当前${keyState}${sourceLabel}。`;
     }
 
     function providerList(config) {
@@ -416,14 +417,18 @@
           id: String(item.id || '').trim(),
           label: String(item.label || item.id || '').trim(),
           env_key: String(item.env_key || '').trim(),
-          key_placeholder: String(item.key_placeholder || 'API Key').trim()
+          env_keys: Array.isArray(item.env_keys) ? item.env_keys.map(value => String(value || '').trim()).filter(Boolean) : [],
+          key_placeholder: String(item.key_placeholder || 'API Key').trim(),
+          key_fields: providerKeyFields(item)
         })).filter(item => item.id);
       }
       return Object.entries(config.providers || {}).map(([id, item]) => ({
         id,
         label: String((item && item.label) || id),
         env_key: String((item && item.env_key) || ''),
-        key_placeholder: 'API Key'
+        env_keys: [],
+        key_placeholder: 'API Key',
+        key_fields: [{field: 'api_key', label: 'API Key', placeholder: 'API Key'}]
       }));
     }
 
@@ -456,33 +461,63 @@
         card.innerHTML = `
           <div class="provider-card-head">
             <strong>${escapeHtml(provider.label)}</strong>
-            <span>${settings.has_api_key ? '已保存' : '未配置'}</span>
+            <span>${settings.has_api_key ? '可用' : '未配置'}</span>
           </div>
-          <label for="${providerInputId(provider.id)}">API Key</label>
-          <input id="${providerInputId(provider.id)}" type="password" placeholder="${escapeHtml(provider.key_placeholder || 'API Key')}" autocomplete="off">
+          ${provider.key_fields.map(field => providerKeyFieldHtml(provider, field, settings)).join('')}
           <label for="${providerBaseUrlId(provider.id)}">接口地址</label>
           <input id="${providerBaseUrlId(provider.id)}" type="text" value="${escapeHtml(settings.base_url || '')}" autocomplete="off">
-          ${provider.env_key ? `<p class="hint">也可使用环境变量 ${escapeHtml(provider.env_key)}。</p>` : ''}
+          <p class="hint">运行时使用：${escapeHtml(providerRuntimeKeyLabel(settings))}</p>
+          ${providerEnvKeys(provider).length ? `<p class="hint">也可使用环境变量 ${escapeHtml(providerEnvKeys(provider).join('、'))}。</p>` : ''}
         `;
         box.appendChild(card);
       });
     }
 
+    function providerKeyFields(provider) {
+      const fields = Array.isArray(provider.key_fields) ? provider.key_fields : [];
+      const normalized = fields.map(field => ({
+        field: String(field.field || '').trim(),
+        label: String(field.label || field.field || '').trim(),
+        placeholder: String(field.placeholder || field.label || 'API Key').trim()
+      })).filter(field => field.field);
+      return normalized.length ? normalized : [{field: 'api_key', label: 'API Key', placeholder: provider.key_placeholder || 'API Key'}];
+    }
+
+    function providerKeyFieldHtml(provider, field, settings) {
+      const keyStatus = settings.key_status || {};
+      const saved = keyStatus[field.field] ? '已保存' : '未配置';
+      return `
+        <label for="${providerInputId(provider.id, field.field)}">${escapeHtml(field.label)} <span class="muted">${escapeHtml(saved)}</span></label>
+        <input id="${providerInputId(provider.id, field.field)}" type="password" placeholder="${escapeHtml(field.placeholder)}" autocomplete="off">
+      `;
+    }
+
+    function providerRuntimeKeyLabel(settings) {
+      return (settings.api_key_source && settings.api_key_source.label) || (settings.has_api_key ? '已配置 Key' : '未配置');
+    }
+
+    function providerEnvKeys(provider) {
+      if (Array.isArray(provider.env_keys) && provider.env_keys.length) return provider.env_keys;
+      return provider.env_key ? [provider.env_key] : [];
+    }
+
     function collectProviderConfig() {
       const providers = {};
       providerOptions.forEach(provider => {
-        const apiKeyInput = document.getElementById(providerInputId(provider.id));
         const baseUrlInput = document.getElementById(providerBaseUrlId(provider.id));
         const item = {};
-        if (apiKeyInput && apiKeyInput.value.trim()) item.api_key = apiKeyInput.value.trim();
+        provider.key_fields.forEach(field => {
+          const input = document.getElementById(providerInputId(provider.id, field.field));
+          if (input && input.value.trim()) item[field.field] = input.value.trim();
+        });
         if (baseUrlInput && baseUrlInput.value.trim()) item.base_url = baseUrlInput.value.trim();
         if (Object.keys(item).length) providers[provider.id] = item;
       });
       return providers;
     }
 
-    function providerInputId(providerId) {
-      return `providerKey_${providerId}`;
+    function providerInputId(providerId, field) {
+      return `providerKey_${providerId}_${field || 'api_key'}`;
     }
 
     function providerBaseUrlId(providerId) {
