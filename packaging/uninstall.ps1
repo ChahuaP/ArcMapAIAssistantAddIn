@@ -75,11 +75,13 @@ $installDir = Read-InstallDir
 Remove-InstallDirIfValid $installDir
 
 $appConfigDir = Join-Path $env:APPDATA "ArcMapAIAssistant"
+$localDataDir = Join-Path $env:LOCALAPPDATA "ArcMapAIAssistant"
 if ($RemoveUserConfig) {
     Remove-PathIfExists $appConfigDir
+    Remove-PathIfExists $localDataDir
 } else {
     Remove-PathIfExists (Join-Path $appConfigDir "install.json")
-    Write-Host "已保留 API Key 等用户配置。如需彻底删除，请用 -RemoveUserConfig。"
+    Write-Host "已保留 API Key、模型配置、自建工具、工作流记录和日志。如需彻底删除，请用 -RemoveUserConfig。"
 }
 
 Write-Host "卸载完成。"

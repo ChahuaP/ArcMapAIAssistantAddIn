@@ -148,6 +148,7 @@ class CatalogTests(unittest.TestCase):
     def test_windows_installer_uses_inno_setup(self):
         build_script = (PACKAGING_ROOT / "build_release.ps1").read_text(encoding="utf-8-sig")
         inno_script = (PACKAGING_ROOT / "GeoPilotSetup.iss").read_text(encoding="utf-8")
+        uninstall_script = (PACKAGING_ROOT / "uninstall.ps1").read_text(encoding="utf-8-sig")
         self.assertIn("ISCC.exe", build_script)
         self.assertIn("Programs\\Inno Setup 6\\ISCC.exe", build_script)
         self.assertIn("Stop-BuildOutputGateway", build_script)
@@ -160,6 +161,14 @@ class CatalogTests(unittest.TestCase):
         self.assertIn(r'Name: "{autoprograms}\GeoPilot\帮助"', inno_script)
         self.assertIn(r'Name: "{autoprograms}\GeoPilot\卸载 GeoPilot"', inno_script)
         self.assertIn('IconFilename: "{app}\\uninstall.ico"', inno_script)
+        self.assertIn("TNewCheckBox", inno_script)
+        self.assertIn("同时删除用户配置和本地数据", inno_script)
+        self.assertIn("UninstallUserDataParameter", inno_script)
+        self.assertIn("-RemoveUserConfig", inno_script)
+        self.assertIn('$appConfigDir = Join-Path $env:APPDATA "ArcMapAIAssistant"', uninstall_script)
+        self.assertIn('$localDataDir = Join-Path $env:LOCALAPPDATA "ArcMapAIAssistant"', uninstall_script)
+        self.assertIn("Remove-PathIfExists $appConfigDir", uninstall_script)
+        self.assertIn("Remove-PathIfExists $localDataDir", uninstall_script)
         self.assertNotIn("打开 GeoPilot", inno_script)
         self.assertNotIn("启动 AI 后台", inno_script)
 
