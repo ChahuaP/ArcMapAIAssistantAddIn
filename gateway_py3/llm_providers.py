@@ -341,11 +341,13 @@ def load_config() -> Dict[str, Any]:
 def save_config(config: Dict[str, Any]) -> Dict[str, Any]:
     path = config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
+    validate_existing = True
     try:
         existing = load_config()
     except ProviderError:
         existing = _normalized_config(_read_existing_config_payload(), validate=False)
-    merged = _merge_config(existing, config)
+        validate_existing = False
+    merged = _merge_config(existing, config, validate_existing=validate_existing)
     with path.open("w", encoding="utf-8-sig") as f:
         json.dump(merged, f, ensure_ascii=False, indent=2, sort_keys=True)
     return public_config(merged)
@@ -731,8 +733,8 @@ def _normalized_config(config: Dict[str, Any], validate: bool = True) -> Dict[st
     return normalized
 
 
-def _merge_config(existing: Dict[str, Any], patch: Dict[str, Any]) -> Dict[str, Any]:
-    merged = _normalized_config(existing)
+def _merge_config(existing: Dict[str, Any], patch: Dict[str, Any], validate_existing: bool = True) -> Dict[str, Any]:
+    merged = _normalized_config(existing, validate=validate_existing)
     for key in ("default_mode", "semi_agent_provider", "full_agent_provider"):
         if patch.get(key):
             merged[key] = str(patch[key]).strip()

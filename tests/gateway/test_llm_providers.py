@@ -119,6 +119,51 @@ class LlmProviderConfigTests(unittest.TestCase):
         self.assertTrue(public["providers"]["qwen"]["key_status"]["api_key"])
         self.assertFalse(public["providers"]["qwen"]["key_status"]["token_plan_api_key"])
 
+    def test_save_config_repairs_invalid_saved_provider_models(self):
+        with tempfile.TemporaryDirectory() as directory:
+            appdata = pathlib.Path(directory) / "appdata"
+            localappdata = pathlib.Path(directory) / "localappdata"
+            config_dir = appdata / "ArcMapAIAssistant"
+            config_dir.mkdir(parents=True)
+            localappdata.mkdir()
+            (config_dir / "config.json").write_text(json.dumps({
+                "semi_agent_provider": "deepseek",
+                "semi_agent_model": "deepseek-v4-flash",
+                "providers": {
+                    "deepseek": {
+                        "api_key": "sk-test",
+                        "model": "deepseek-chat",
+                        "base_url": "https://api.deepseek.com",
+                    },
+                    "zhipu": {
+                        "model": "glm-5.1",
+                        "base_url": "https://open.bigmodel.cn/api/paas/v4",
+                    }
+                },
+            }), encoding="utf-8")
+
+            with patch.dict(os.environ, {
+                "APPDATA": str(appdata),
+                "LOCALAPPDATA": str(localappdata),
+                "ARCMAP_AI_CONFIG": "",
+            }, clear=False):
+                with self.assertRaises(ProviderError):
+                    load_config()
+                save_config({
+                    "semi_agent_provider": "deepseek",
+                    "semi_agent_model": "deepseek-v4-flash-thinking",
+                    "providers": {
+                        "deepseek": {"model": "deepseek-v4-flash-thinking"},
+                        "zhipu": {"model": "glm-5.1-thinking"},
+                    }
+                })
+                config = load_config()
+
+        self.assertEqual(config["semi_agent_model"], "deepseek-v4-flash-thinking")
+        self.assertEqual(config["providers"]["deepseek"]["model"], "deepseek-v4-flash-thinking")
+        self.assertEqual(config["providers"]["zhipu"]["model"], "glm-5.1-thinking")
+        self.assertEqual(config["providers"]["deepseek"]["api_key"], "sk-test")
+
     def test_config_payload_only_allows_known_secret_fields_to_clear(self):
         payload = config_payload({
             "providers": {
