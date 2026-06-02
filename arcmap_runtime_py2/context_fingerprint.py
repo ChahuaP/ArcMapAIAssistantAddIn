@@ -3,7 +3,11 @@ from __future__ import absolute_import
 
 import hashlib
 import json
-import os
+
+try:
+    import path_utils
+except ImportError:
+    from . import path_utils
 
 
 def context_hash(context):
@@ -68,7 +72,7 @@ def _spatial_reference(value):
 def _normalize_path(value):
     if not value:
         return ""
-    return os.path.normcase(os.path.normpath(value))
+    return path_utils.normcase(path_utils.normpath(value))
 
 
 def _selection_sort_key(value):

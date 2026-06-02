@@ -4,16 +4,21 @@ from __future__ import absolute_import
 import json
 import os
 
+try:
+    import path_utils
+except ImportError:
+    from . import path_utils
+
 
 def config_dir():
     root = os.environ.get("APPDATA")
     if not root:
         root = os.path.expanduser("~")
-    return os.path.join(root, "ArcMapAIAssistant")
+    return path_utils.join_path(root, "ArcMapAIAssistant")
 
 
 def config_path():
-    return os.path.join(config_dir(), "config.json")
+    return path_utils.join_path(config_dir(), "config.json")
 
 
 def save_deepseek_key(api_key):
@@ -21,9 +26,9 @@ def save_deepseek_key(api_key):
     if not api_key.startswith("sk-"):
         raise ValueError(u"DeepSeek API key 应该以 sk- 开头。")
     path = config_path()
-    folder = os.path.dirname(path)
-    if not os.path.isdir(folder):
-        os.makedirs(folder)
+    folder = path_utils.dirname(path)
+    if not path_utils.isdir(folder):
+        path_utils.makedirs(folder)
 
     config = load_config()
     for key in ("deepseek_api_key", "model", "base_url"):
@@ -40,16 +45,16 @@ def save_deepseek_key(api_key):
         "model": "deepseek-v4-flash-thinking",
         "base_url": "https://api.deepseek.com"
     }
-    with open(path, "wb") as f:
+    with path_utils.open_binary(path, "wb") as f:
         f.write(json.dumps(config, ensure_ascii=False, indent=2, sort_keys=True).encode("utf-8"))
     return path
 
 
 def load_config():
     path = config_path()
-    if not os.path.isfile(path):
+    if not path_utils.isfile(path):
         return {}
-    with open(path, "rb") as f:
+    with path_utils.open_binary(path, "rb") as f:
         return json.loads(f.read().decode("utf-8"))
 
 

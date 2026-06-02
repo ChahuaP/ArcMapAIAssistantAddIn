@@ -2,11 +2,15 @@
 from __future__ import absolute_import
 
 import math
-import os
 
 import arcpy
 
 from operations import common
+
+try:
+    import path_utils
+except ImportError:
+    from .. import path_utils
 
 
 def create_empty_feature_layer(context, arguments, step_outputs):
@@ -189,8 +193,8 @@ def _create_feature_class(context, arguments, geometry_type, spatial_reference):
         arguments.get("output_folder"),
         arguments.get("output_format")
     )
-    workspace = os.path.dirname(output)
-    name = os.path.basename(output)
+    workspace = path_utils.dirname(output)
+    name = path_utils.basename(output)
     arcpy.CreateFeatureclass_management(workspace, name, geometry_type, "", "DISABLED", "DISABLED", spatial_reference)
     return output
 

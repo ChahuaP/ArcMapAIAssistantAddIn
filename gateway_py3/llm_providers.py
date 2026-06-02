@@ -230,25 +230,30 @@ class ChatProvider:
             raise ProviderError(missing_api_key_message(self.provider_id))
         body = self._prepare_body(dict(body))
         data = json.dumps(body, ensure_ascii=False).encode("utf-8")
-        request = urllib.request.Request(
-            "%s/chat/completions" % self.base_url,
-            data=data,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": "Bearer %s" % self.api_key,
-            },
-            method="POST",
-        )
+        url = "%s/chat/completions" % self.base_url
         try:
+            request = urllib.request.Request(
+                url,
+                data=data,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": "Bearer %s" % self.api_key,
+                },
+                method="POST",
+            )
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                return json.loads(response.read().decode("utf-8"))
+                response_text = response.read().decode("utf-8")
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
             raise ProviderError(provider_http_error(self.provider_id, exc.code, detail))
         except (TimeoutError, socket.timeout):
             raise ProviderError("%s 响应超时：已等待 %s 秒。请重试，或切换到更快的模型。" % (provider_label(self.provider_id), self.timeout))
         except (OSError, ValueError, urllib.error.URLError) as exc:
-            raise ProviderError(str(exc))
+            raise ProviderError(provider_network_error(self.provider_id, self.base_url, exc))
+        try:
+            return json.loads(response_text)
+        except ValueError:
+            raise ProviderError("%s 响应格式错误：模型接口没有返回有效 JSON。请确认接口地址和模型供应商匹配。" % provider_label(self.provider_id))
 
 
 class DeepSeekProvider(ChatProvider):
@@ -669,6 +674,27 @@ def provider_label(provider_id: str) -> str:
         ZHIPU_PROVIDER: "智谱",
         QWEN_PROVIDER: "阿里百炼",
     }.get(provider_id, provider_id)
+
+
+def provider_network_error(provider_id: str, base_url: str, exc: BaseException) -> str:
+    label = provider_label(provider_id)
+    reason = getattr(exc, "reason", exc)
+    errno = getattr(reason, "errno", getattr(exc, "errno", None))
+    text = "%s %s" % (reason.__class__.__name__, reason)
+    lowered = text.lower()
+    if isinstance(reason, socket.gaierror) or errno == 11001 or "getaddrinfo" in lowered:
+        detail = "无法解析模型接口域名"
+    elif isinstance(reason, (TimeoutError, socket.timeout)) or errno == 10060 or "timed out" in lowered or "timeout" in lowered:
+        detail = "连接模型接口超时"
+    elif errno == 10061 or "connection refused" in lowered:
+        detail = "模型接口拒绝连接"
+    elif errno in (10051, 10065) or "network is unreachable" in lowered:
+        detail = "当前网络无法到达模型接口"
+    elif isinstance(exc, ValueError):
+        detail = "模型接口地址不合法"
+    else:
+        detail = "无法连接模型接口"
+    return "%s 网络连接失败：%s。请检查网络、DNS、代理、防火墙和接口地址：%s。" % (label, detail, base_url)
 
 
 def provider_http_error(provider_id: str, status_code: int, detail: str) -> str:

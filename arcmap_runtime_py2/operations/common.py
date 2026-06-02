@@ -2,11 +2,15 @@
 from __future__ import absolute_import
 
 import csv
-import os
 import re
 import uuid
 
 import arcpy
+
+try:
+    import path_utils
+except ImportError:
+    from .. import path_utils
 
 
 try:
@@ -87,12 +91,12 @@ def output_gdb(context, output_workspace=None):
         if workspace.lower().endswith(u".gdb"):
             gdb = workspace
         else:
-            if not os.path.isdir(workspace):
+            if not path_utils.isdir(workspace):
                 raise OperationError(u"Output folder not found: %s" % workspace)
-            gdb = os.path.join(workspace, "ArcMapAI_Output.gdb")
-        folder = os.path.dirname(gdb)
-        name = os.path.basename(gdb)
-        if not folder or not os.path.isdir(folder):
+            gdb = path_utils.join_path(workspace, "ArcMapAI_Output.gdb")
+        folder = path_utils.dirname(gdb)
+        name = path_utils.basename(gdb)
+        if not folder or not path_utils.isdir(folder):
             raise OperationError(u"Output workspace folder not found: %s" % folder)
         if not arcpy.Exists(gdb):
             arcpy.CreateFileGDB_management(folder, name)
@@ -101,8 +105,8 @@ def output_gdb(context, output_workspace=None):
     mxd_path = context.get("mxd_path")
     if not mxd_path:
         raise OperationError(u"当前 MXD 未保存。请指定输出 GDB，或先保存 MXD。")
-    folder = os.path.dirname(_path_text(mxd_path))
-    gdb = os.path.join(folder, "ArcMapAI_Output.gdb")
+    folder = path_utils.dirname(mxd_path)
+    gdb = path_utils.join_path(folder, "ArcMapAI_Output.gdb")
     if not arcpy.Exists(gdb):
         arcpy.CreateFileGDB_management(folder, "ArcMapAI_Output.gdb")
     return gdb
@@ -111,16 +115,16 @@ def output_gdb(context, output_workspace=None):
 def output_directory(context, output_folder=None):
     if output_folder:
         folder = _path_text(output_folder)
-        if not os.path.isdir(folder):
+        if not path_utils.isdir(folder):
             raise OperationError(u"Output folder not found: %s" % folder)
         return folder
 
     mxd_path = context.get("mxd_path")
     if not mxd_path:
         raise OperationError(u"当前 MXD 未保存。请指定输出文件夹，或先保存 MXD。")
-    folder = os.path.join(os.path.dirname(_path_text(mxd_path)), "ArcMapAI_Output")
-    if not os.path.isdir(folder):
-        os.makedirs(folder)
+    folder = path_utils.join_path(path_utils.dirname(mxd_path), "ArcMapAI_Output")
+    if not path_utils.isdir(folder):
+        path_utils.makedirs(folder)
     return folder
 
 
@@ -140,7 +144,7 @@ def safe_output_name(name):
 def output_feature_class(context, output_name, output_workspace=None):
     gdb = output_gdb(context, output_workspace)
     name = safe_output_name(output_name)
-    path = os.path.join(gdb, name)
+    path = path_utils.join_path(gdb, name)
     if arcpy.Exists(path):
         raise OperationError("Output already exists: %s" % path)
     return path
@@ -149,8 +153,8 @@ def output_feature_class(context, output_name, output_workspace=None):
 def output_shapefile(context, output_name, output_folder=None):
     folder = output_directory(context, output_folder)
     name = safe_output_name(output_name)
-    path = os.path.join(folder, name + ".shp")
-    if arcpy.Exists(path) or os.path.exists(path):
+    path = path_utils.join_path(folder, name + ".shp")
+    if arcpy.Exists(path) or path_utils.exists(path):
         raise OperationError("Output already exists: %s" % path)
     return path
 
@@ -184,8 +188,8 @@ def output_file(context, output_name, extension, output_folder=None):
     folder = output_directory(context, output_folder)
     name = safe_output_name(output_name)
     extension = _normalize_extension(extension)
-    path = os.path.join(folder, name + extension)
-    if os.path.exists(path):
+    path = path_utils.join_path(folder, name + extension)
+    if path_utils.exists(path):
         raise OperationError("Output already exists: %s" % path)
     return path
 
@@ -288,7 +292,7 @@ class auto_add_outputs_disabled(object):
 
 def export_table_to_csv(layer, path, selected_only):
     fields = [f.name for f in arcpy.ListFields(layer) if f.type not in ("Geometry", "Raster", "Blob")]
-    with open(_path_text(path), "wb") as f:
+    with path_utils.open_binary(path, "wb") as f:
         writer = csv.writer(f)
         writer.writerow([field.encode("utf-8") for field in fields])
         with read_layer(layer, selected_only) as cursor_layer:
@@ -451,17 +455,8 @@ def _safe_data_source(layer):
 
 
 def _normalize_path(path):
-    return os.path.normcase(os.path.normpath(_path_text(path)))
+    return path_utils.normcase(path_utils.normpath(path))
 
 
 def _path_text(value):
-    if isinstance(value, unicode):
-        return value
-    if isinstance(value, bytes):
-        for encoding in ("utf-8", "mbcs"):
-            try:
-                return value.decode(encoding)
-            except (UnicodeDecodeError, LookupError):
-                pass
-        return value.decode("utf-8", "replace")
-    return unicode(value)
+    return path_utils.to_unicode_path(value)

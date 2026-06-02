@@ -141,6 +141,30 @@ class CatalogTests(unittest.TestCase):
         self.assertNotIn("common._safe_data_source(layer) or layer", export_ops)
         self.assertNotIn("class _read_layer", export_ops)
 
+    def test_runtime_operations_route_paths_through_path_utils(self):
+        operation_files = [
+            RUNTIME_ROOT / "operations" / "common.py",
+            RUNTIME_ROOT / "operations" / "layer_ops.py",
+            RUNTIME_ROOT / "operations" / "export_ops.py",
+            RUNTIME_ROOT / "operations" / "edit_geometry_ops.py",
+        ]
+        forbidden = [
+            "os.path.exists(",
+            "os.path.isfile(",
+            "os.path.isdir(",
+            "os.path.join(",
+            "os.path.dirname(",
+            "os.path.basename(",
+            "os.makedirs(",
+            "open(_path_text(",
+            "open(output",
+        ]
+        for path in operation_files:
+            source = path.read_text(encoding="utf-8")
+            self.assertIn("path_utils", source, str(path))
+            for text in forbidden:
+                self.assertNotIn(text, source, "%s still uses %s" % (path, text))
+
     def test_release_and_install_package_operation_catalog(self):
         build_script = (PACKAGING_ROOT / "build_release.ps1").read_text(encoding="utf-8-sig")
         install_script = (PACKAGING_ROOT / "install.ps1").read_text(encoding="utf-8-sig")

@@ -1,7 +1,9 @@
 import json
 import os
 import pathlib
+import socket
 import tempfile
+import urllib.error
 import unittest
 from unittest.mock import patch
 
@@ -182,6 +184,21 @@ class LlmProviderConfigTests(unittest.TestCase):
                     }
                 }
             })
+
+    def test_model_dns_failure_returns_chinese_message(self):
+        provider = DeepSeekProvider(api_key="sk-test", model="deepseek-v4-flash-thinking", base_url="https://bad.example")
+        error = urllib.error.URLError(socket.gaierror(11001, "getaddrinfo failed"))
+
+        with patch("urllib.request.urlopen", side_effect=error):
+            with self.assertRaises(ProviderError) as raised:
+                provider.chat_text([{"role": "user", "content": "你好"}])
+
+        message = str(raised.exception)
+        self.assertIn("网络连接失败", message)
+        self.assertIn("无法解析模型接口域名", message)
+        self.assertIn("https://bad.example", message)
+        self.assertNotIn("urlopen", message)
+        self.assertNotIn("getaddrinfo failed", message)
 
 
 if __name__ == "__main__":

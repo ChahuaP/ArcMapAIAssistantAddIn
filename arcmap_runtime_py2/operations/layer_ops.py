@@ -1,11 +1,14 @@
 # -*- coding: utf-8 -*-
 from __future__ import absolute_import
 
-import os
-
 import arcpy
 
 from operations import common
+
+try:
+    import path_utils
+except ImportError:
+    from .. import path_utils
 
 
 RASTER_RGB_EXTENSIONS = (".tif", ".tiff")
@@ -14,7 +17,7 @@ RGB_BAND_INDEX = "1;2;3"
 
 def add_layer(context, arguments, step_outputs):
     path = common._path_text(arguments["path"])
-    if not os.path.exists(path) and not arcpy.Exists(path):
+    if not path_utils.exists(path) and not arcpy.Exists(path):
         raise common.OperationError("Layer path not found: %s" % path)
     mxd = common.current_mxd()
     df = common.active_data_frame(mxd)
@@ -22,12 +25,12 @@ def add_layer(context, arguments, step_outputs):
     if needs_add:
         arcpy.mapping.AddLayer(df, layer, "TOP")
     common.refresh()
-    return {"added_layer": path, "layer_name": getattr(layer, "name", os.path.splitext(os.path.basename(path))[0])}
+    return {"added_layer": path, "layer_name": getattr(layer, "name", path_utils.splitext(path_utils.basename(path))[0])}
 
 
 def _layer_for_path(path, mxd, df):
     if _is_rgb_raster_path(path):
-        layer_name = os.path.basename(path)
+        layer_name = path_utils.basename(path)
         before_count = _matching_layer_count(mxd, df, path, None)
         result = _make_raster_layer(path, layer_name)
         layer = _layer_from_result(result)
@@ -53,7 +56,7 @@ def _is_rgb_raster_path(path):
 
 
 def _looks_like_rgb_raster(path):
-    return os.path.splitext(path)[1].lower() in RASTER_RGB_EXTENSIONS
+    return path_utils.splitext(path)[1].lower() in RASTER_RGB_EXTENSIONS
 
 
 def _layer_from_result(result):
@@ -86,7 +89,7 @@ def _matches_layer(item, path, layer):
         return True
     if layer is not None and getattr(item, "name", "") == getattr(layer, "name", None):
         return True
-    return getattr(item, "name", "") == os.path.basename(path)
+    return getattr(item, "name", "") == path_utils.basename(path)
 
 
 def set_layer_visibility(context, arguments, step_outputs):

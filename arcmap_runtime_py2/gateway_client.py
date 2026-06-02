@@ -7,6 +7,11 @@ import subprocess
 import time
 import urllib2
 
+try:
+    import path_utils
+except ImportError:
+    from . import path_utils
+
 
 try:
     unicode
@@ -16,7 +21,7 @@ except NameError:
 
 BASE_URL = "http://127.0.0.1:8765"
 EXPECTED_APP_VERSION = "0.21.2"
-REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+REPO_ROOT = path_utils.abspath(path_utils.join_path(os.path.dirname(__file__), ".."))
 CREATE_NO_WINDOW = 0x08000000
 PLAN_TIMEOUT_SECONDS = 360
 
@@ -100,13 +105,13 @@ def stop_gateway():
 
 
 def start_gateway():
-    log_dir = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "ArcMapAIAssistant", "logs")
-    if not os.path.isdir(log_dir):
-        os.makedirs(log_dir)
-    stdout_path = os.path.join(log_dir, "gateway_stdout.log")
-    stderr_path = os.path.join(log_dir, "gateway_stderr.log")
-    stdout = open(stdout_path, "ab")
-    stderr = open(stderr_path, "ab")
+    log_dir = path_utils.join_path(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "ArcMapAIAssistant", "logs")
+    if not path_utils.isdir(log_dir):
+        path_utils.makedirs(log_dir)
+    stdout_path = path_utils.join_path(log_dir, "gateway_stdout.log")
+    stderr_path = path_utils.join_path(log_dir, "gateway_stderr.log")
+    stdout = path_utils.open_binary(stdout_path, "ab")
+    stderr = path_utils.open_binary(stderr_path, "ab")
 
     command = _gateway_command()
     try:
@@ -142,8 +147,8 @@ def execution_result(workflow_id, status, result):
 
 
 def _gateway_command():
-    exe = os.path.join(REPO_ROOT, "gateway", "ArcMapAIAssistantGateway.exe")
-    if not os.path.isfile(exe):
+    exe = path_utils.join_path(REPO_ROOT, "gateway", "ArcMapAIAssistantGateway.exe")
+    if not path_utils.isfile(exe):
         raise RuntimeError(u"缺少本地网关 EXE：%s。请重新安装 GeoPilot。" % exe)
     return [exe]
 
@@ -179,6 +184,8 @@ def _request_json(request, timeout):
     except urllib2.HTTPError as exc:
         message = _http_error_message(exc)
         raise RuntimeError(message)
+    except urllib2.URLError as exc:
+        raise RuntimeError(_url_error_message(exc))
 
 
 def _http_error_message(exc):
@@ -190,3 +197,28 @@ def _http_error_message(exc):
     except (ValueError, UnicodeDecodeError, UnicodeEncodeError, AttributeError, TypeError):
         pass
     return "HTTP %s: %s" % (exc.code, getattr(exc, "reason", "request failed"))
+
+
+def _url_error_message(exc):
+    reason = getattr(exc, "reason", exc)
+    errno = getattr(reason, "errno", None)
+    text = _unicode_text(reason).lower()
+    if errno == 10061 or u"connection refused" in text:
+        return u"本地网关未连接：127.0.0.1:8765 拒绝连接。请重新点击“启动控制台”。"
+    if errno == 10060 or u"timed out" in text or u"timeout" in text:
+        return u"本地网关响应超时。请确认 GeoPilot 网关正在运行。"
+    if errno == 11001 or u"getaddrinfo" in text:
+        return u"本机地址解析失败，无法连接 GeoPilot 网关。请检查本机网络配置。"
+    return u"无法连接 GeoPilot 本地网关。请重新点击“启动控制台”。"
+
+
+def _unicode_text(value):
+    if isinstance(value, unicode):
+        return value
+    try:
+        return unicode(value)
+    except (UnicodeDecodeError, UnicodeEncodeError, TypeError, ValueError):
+        try:
+            return str(value).decode("utf-8", "replace")
+        except (UnicodeDecodeError, UnicodeEncodeError, TypeError, AttributeError):
+            return u""

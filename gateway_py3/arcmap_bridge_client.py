@@ -97,7 +97,7 @@ def _request(
         result = _error_payload(exc)
         raise ArcMapBridgeError(result.get("error") or "ArcMap Bridge request failed.")
     except URLError as exc:
-        raise ArcMapBridgeError("ArcMap Bridge 未连接。请确认 ArcMap 已打开并加载 GeoPilot Add-in。%s" % exc.reason)
+        raise ArcMapBridgeError("ArcMap Bridge 未连接：%s。请确认 ArcMap 已打开并加载 GeoPilot Add-in。" % _local_network_reason(exc))
     if result.get("ok") is False:
         raise ArcMapBridgeError(result.get("error") or "ArcMap Bridge request failed.")
     return result
@@ -108,6 +108,19 @@ def _error_payload(exc: HTTPError) -> Dict[str, Any]:
         return json.loads(exc.read().decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError):
         return {"error": "HTTP %s" % exc.code}
+
+
+def _local_network_reason(exc: URLError) -> str:
+    reason = getattr(exc, "reason", exc)
+    errno = getattr(reason, "errno", None)
+    text = str(reason).lower()
+    if errno == 10061 or "connection refused" in text:
+        return "本地 Bridge 端口拒绝连接"
+    if errno == 10060 or "timed out" in text or "timeout" in text:
+        return "连接本地 Bridge 超时"
+    if errno == 11001 or "getaddrinfo" in text:
+        return "本机地址解析失败"
+    return "无法连接本地 Bridge 服务"
 
 
 def _bridge_exe_path() -> Path | None:

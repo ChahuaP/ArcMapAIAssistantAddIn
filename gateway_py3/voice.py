@@ -17,6 +17,7 @@ from gateway_py3.llm_providers import (
     create_provider,
     provider_api_key,
     provider_http_error,
+    provider_network_error,
     provider_settings,
     speech_settings,
 )
@@ -91,25 +92,30 @@ def validate_audio_data_uri(audio_data_uri: str) -> None:
 def post_qwen_chat_completion(payload: Dict[str, Any], api_key: str) -> Dict[str, Any]:
     base_url = provider_settings(QWEN_PROVIDER)["base_url"]
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    request = urllib.request.Request(
-        "%s/chat/completions" % base_url,
-        data=data,
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": "Bearer %s" % api_key,
-        },
-        method="POST",
-    )
+    url = "%s/chat/completions" % base_url
     try:
+        request = urllib.request.Request(
+            url,
+            data=data,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": "Bearer %s" % api_key,
+            },
+            method="POST",
+        )
         with urllib.request.urlopen(request, timeout=MODEL_REQUEST_TIMEOUT_SECONDS) as response:
-            return json.loads(response.read().decode("utf-8"))
+            response_text = response.read().decode("utf-8")
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
         raise ProviderError(provider_http_error(QWEN_PROVIDER, exc.code, detail))
     except (TimeoutError, socket.timeout):
         raise ProviderError("Qwen-ASR 响应超时。请缩短录音后重试。")
     except (OSError, ValueError, urllib.error.URLError) as exc:
-        raise ProviderError(str(exc))
+        raise ProviderError(provider_network_error(QWEN_PROVIDER, base_url, exc))
+    try:
+        return json.loads(response_text)
+    except ValueError:
+        raise ProviderError("Qwen-ASR 响应格式错误：语音识别接口没有返回有效 JSON。请确认接口地址和模型供应商匹配。")
 
 
 def correct_voice_command(raw_text: str, context: Dict[str, Any], mode: str | None) -> str:

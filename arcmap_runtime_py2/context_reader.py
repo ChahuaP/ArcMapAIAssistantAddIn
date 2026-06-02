@@ -1,10 +1,17 @@
 # -*- coding: utf-8 -*-
 from __future__ import absolute_import
 
-import os
-
 import arcpy
-import context_fingerprint
+
+try:
+    import context_fingerprint
+except ImportError:
+    from . import context_fingerprint
+
+try:
+    import path_utils
+except ImportError:
+    from . import path_utils
 
 
 try:
@@ -50,19 +57,19 @@ def context_hash(context):
 
 def _mxd_path(mxd):
     path = getattr(mxd, "filePath", None)
-    if path and os.path.exists(path):
-        return path
+    if path and path_utils.exists(path):
+        return path_utils.to_unicode_path(path)
     return ""
 
 
 def _default_geodatabase(mxd):
     default_gdb = getattr(mxd, "defaultGeodatabase", None)
     if default_gdb:
-        return default_gdb
+        return path_utils.to_unicode_path(default_gdb)
     env = getattr(arcpy, "env", None)
     workspace = getattr(env, "workspace", None)
     if workspace and unicode(workspace).lower().endswith(u".gdb"):
-        return workspace
+        return path_utils.to_unicode_path(workspace)
     return ""
 
 
@@ -187,7 +194,10 @@ def _sample_text(value):
 def _safe_support(layer, support_name, attr_name):
     try:
         if layer.supports(support_name):
-            return getattr(layer, attr_name)
+            value = getattr(layer, attr_name)
+            if attr_name == "dataSource" and value:
+                return path_utils.to_unicode_path(value)
+            return value
     except (RuntimeError, AttributeError, TypeError):
         return None
     return None

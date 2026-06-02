@@ -2,7 +2,6 @@
 from __future__ import absolute_import
 
 import json
-import os
 import re
 import zipfile
 
@@ -10,6 +9,11 @@ import arcpy
 
 from operations import common
 from operations import condition_utils
+
+try:
+    import path_utils
+except ImportError:
+    from .. import path_utils
 
 
 def export_map_png(context, arguments, step_outputs):
@@ -172,7 +176,7 @@ def _write_feature_kmz(source, layer_name, output, where_clause=None, selected_o
     parts.append(u"</Document>")
     parts.append(u"</kml>")
     kml_text = u"\n".join(parts).encode("utf-8")
-    with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
+    with zipfile.ZipFile(path_utils.to_unicode_path(output), "w", zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("doc.kml", kml_text)
     return written_count
 
@@ -426,14 +430,14 @@ def _output_base(context, arguments, output_format):
 
 def _output_path(output_base, output_name, output_format):
     if output_format == "gdb":
-        return os.path.join(output_base, output_name)
+        return path_utils.join_path(output_base, output_name)
     if output_format == "kmz":
-        return os.path.join(output_base, output_name + ".kmz")
-    return os.path.join(output_base, output_name + ".shp")
+        return path_utils.join_path(output_base, output_name + ".kmz")
+    return path_utils.join_path(output_base, output_name + ".shp")
 
 
 def _ensure_output_available(path):
-    if arcpy.Exists(path) or os.path.exists(path):
+    if arcpy.Exists(path) or path_utils.exists(path):
         raise common.OperationError("Output already exists: %s" % path)
 
 

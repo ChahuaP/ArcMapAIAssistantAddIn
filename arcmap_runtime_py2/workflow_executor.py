@@ -7,7 +7,12 @@ import json
 import os
 import sys
 
-import context_reader
+try:
+    import context_reader
+    import path_utils
+except ImportError:
+    from . import context_reader
+    from . import path_utils
 
 
 try:
@@ -28,8 +33,8 @@ except NameError:
 PY2 = sys.version_info[0] == 2
 
 
-CATALOG_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "operation_catalog"))
-CUSTOM_TOOLS_ROOT = os.path.join(
+CATALOG_ROOT = path_utils.abspath(path_utils.join_path(os.path.dirname(__file__), "..", "operation_catalog"))
+CUSTOM_TOOLS_ROOT = path_utils.join_path(
     os.environ.get("APPDATA", os.path.expanduser("~")),
     "ArcMapAIAssistant",
     "custom_tools",
@@ -77,20 +82,20 @@ def execute(workflow_row, context, confirm_callback=None):
 
 
 def _load_operations():
-    with open(os.path.join(CATALOG_ROOT, "catalog.json"), "r") as f:
+    with path_utils.open_text(path_utils.join_path(CATALOG_ROOT, "catalog.json"), "r") as f:
         catalog = json.load(f)
     operations = {}
     for rel_path in catalog["packs"]:
-        with open(os.path.join(CATALOG_ROOT, rel_path), "r") as f:
+        with path_utils.open_text(path_utils.join_path(CATALOG_ROOT, rel_path), "r") as f:
             pack = json.load(f)
         for operation in pack["operations"]:
             operations[operation["id"]] = operation
-    if os.path.isdir(CUSTOM_TOOLS_ROOT):
-        for name in sorted(os.listdir(CUSTOM_TOOLS_ROOT)):
-            spec_path = os.path.join(CUSTOM_TOOLS_ROOT, name, "operation_spec.json")
-            if not os.path.isfile(spec_path):
+    if path_utils.isdir(CUSTOM_TOOLS_ROOT):
+        for name in sorted(path_utils.listdir(CUSTOM_TOOLS_ROOT)):
+            spec_path = path_utils.join_path(CUSTOM_TOOLS_ROOT, name, "operation_spec.json")
+            if not path_utils.isfile(spec_path):
                 continue
-            with open(spec_path, "r") as f:
+            with path_utils.open_text(spec_path, "r") as f:
                 operation = json.load(f)
             operation = _canonicalize_operation(operation)
             operations[operation["id"]] = operation
@@ -263,7 +268,7 @@ def _call_executor(executor_path, context, arguments, step_outputs):
 def _prepare_runtime_arguments(operation, context, arguments, step_outputs):
     if not _is_custom_operation(operation):
         return arguments
-    runtime_arguments = dict(arguments)
+    runtime_arguments = _normalize_path_arguments(dict(arguments))
     common = _operations_common()
     for name in _layer_argument_names(operation):
         if name not in runtime_arguments:
@@ -311,9 +316,10 @@ def _validate_custom_output_artifact(policy, output_path):
     output_type = _output_policy_type(policy)
     if output_type not in ("file", "raster"):
         return
-    if not os.path.isfile(output_path):
+    output_path = path_utils.to_unicode_path(output_path)
+    if not path_utils.isfile(output_path):
         raise WorkflowExecutionError(u"自定义工具没有生成输出文件：%s" % output_path)
-    if os.path.getsize(output_path) <= 0:
+    if path_utils.getsize(output_path) <= 0:
         raise WorkflowExecutionError(u"自定义工具生成了空文件：%s" % output_path)
     if _obj_output_policy(policy, output_path):
         _validate_obj_file(output_path)
@@ -327,7 +333,7 @@ def _obj_output_policy(policy, output_path):
 def _validate_obj_file(output_path):
     has_vertex = False
     has_face = False
-    with open(output_path, "r") as handle:
+    with path_utils.open_text(output_path, "r") as handle:
         for line in handle:
             if line.startswith("v "):
                 has_vertex = True
@@ -381,6 +387,7 @@ def _exception_text(exc):
 def _call_custom_executor(executor_path, context, arguments, step_outputs):
     module, function_name = _load_custom_module(executor_path)
     module.open = _custom_tool_open_factory(arguments)
+    module.os = _custom_tool_os()
     function = getattr(module, function_name)
     return function(context, arguments, step_outputs)
 
@@ -407,9 +414,10 @@ def _load_custom_module(executor_path):
         raise WorkflowExecutionError(u"自定义工具 executor 格式不正确。")
     tool_id = parts[1]
     function_name = parts[2]
-    executor_file = os.path.join(CUSTOM_TOOLS_ROOT, tool_id, "executor.py")
-    if not os.path.isfile(executor_file):
+    executor_file = path_utils.join_path(CUSTOM_TOOLS_ROOT, tool_id, "executor.py")
+    if not path_utils.isfile(executor_file):
         raise WorkflowExecutionError(u"自定义工具文件不存在：%s" % executor_file)
+    _reject_legacy_custom_path_code(executor_file)
     module = imp.load_source("geopilot_custom_%s" % tool_id.replace("-", "_"), executor_file)
     import arcpy
     module.arcpy = arcpy
@@ -417,7 +425,7 @@ def _load_custom_module(executor_path):
 
 
 def _custom_tool_open_factory(arguments):
-    output_path = arguments.get("output_path")
+    output_path = path_utils.to_unicode_path(arguments.get("output_path"))
 
     def custom_tool_open(path, mode="r"):
         if not output_path:
@@ -426,9 +434,57 @@ def _custom_tool_open_factory(arguments):
             raise WorkflowExecutionError(u"自定义工具只能写 arguments[\"output_path\"]。")
         if mode not in ("w", "wb"):
             raise WorkflowExecutionError(u"自定义工具只能用 w/wb 模式写 output_path。")
-        return _Utf8WriteHandle(open(path, mode), mode)
+        if "b" in mode:
+            handle = path_utils.open_binary(output_path, mode)
+        else:
+            handle = path_utils.open_text(output_path, mode)
+        return _Utf8WriteHandle(handle, mode)
 
     return custom_tool_open
+
+
+class _CustomToolOs(object):
+    def __init__(self):
+        self.path = _CustomToolPath()
+
+    def __getattr__(self, name):
+        return getattr(os, name)
+
+
+class _CustomToolPath(object):
+    def dirname(self, value):
+        return path_utils.dirname(value)
+
+    def basename(self, value):
+        return path_utils.basename(value)
+
+    def join(self, *parts):
+        return path_utils.join_path(*parts)
+
+    def exists(self, value):
+        return path_utils.exists(value)
+
+    def isfile(self, value):
+        return path_utils.isfile(value)
+
+    def isdir(self, value):
+        return path_utils.isdir(value)
+
+    def abspath(self, value):
+        return path_utils.abspath(value)
+
+    def normpath(self, value):
+        return path_utils.normpath(value)
+
+    def normcase(self, value):
+        return path_utils.normcase(value)
+
+    def splitext(self, value):
+        return path_utils.splitext(value)
+
+
+def _custom_tool_os():
+    return _CustomToolOs()
 
 
 class _Utf8WriteHandle(object):
@@ -471,17 +527,44 @@ def _same_path(left, right):
 
 
 def _normalize_path(value):
-    text = _path_text(value)
-    return os.path.normcase(os.path.abspath(text))
+    return path_utils.normalize_path(value)
 
 
 def _path_text(value):
-    if isinstance(value, unicode):
-        return value
-    if PY2 and isinstance(value, str):
-        encoding = sys.getfilesystemencoding() or "mbcs"
-        try:
-            return value.decode(encoding)
-        except UnicodeDecodeError:
-            return value.decode("utf-8", "replace")
-    return str(value)
+    return path_utils.to_unicode_path(value)
+
+
+def _normalize_path_arguments(value, path_context=False, key=None):
+    current_path_context = path_context or _is_path_argument_name(key)
+    if isinstance(value, dict):
+        return dict((item_key, _normalize_path_arguments(item_value, current_path_context, item_key)) for item_key, item_value in value.items())
+    if isinstance(value, list):
+        return [_normalize_path_arguments(item, current_path_context, key) for item in value]
+    if current_path_context and isinstance(value, basestring):
+        return path_utils.to_unicode_path(value)
+    return value
+
+
+def _is_path_argument_name(key):
+    if not key:
+        return False
+    text = str(key).lower()
+    return "path" in text or "folder" in text or "workspace" in text
+
+
+def _reject_legacy_custom_path_code(executor_file):
+    with path_utils.open_text(executor_file, "r") as handle:
+        code = handle.read()
+    forbidden = (
+        ".decode(",
+        ".encode(",
+        "sys.getfilesystemencoding",
+        "str(output_path)",
+        "unicode(output_path)",
+    )
+    for pattern in forbidden:
+        if pattern in code:
+            raise WorkflowExecutionError(
+                u"自定义工具包含旧路径编码逻辑（%s），需要重新审核后再运行。GeoPilot 现在会统一传入 Unicode 路径，工具不要自行 encode/decode。"
+                % pattern
+            )

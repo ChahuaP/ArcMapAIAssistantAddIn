@@ -9,9 +9,16 @@ import traceback
 
 import pythonaddins
 
-import context_reader
-import gateway_client
-import workflow_executor
+try:
+    import context_reader
+    import gateway_client
+    import path_utils
+    import workflow_executor
+except ImportError:
+    from . import context_reader
+    from . import gateway_client
+    from . import path_utils
+    from . import workflow_executor
 
 
 reload(context_reader)
@@ -25,10 +32,10 @@ except NameError:
     unicode = str
 
 
-REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-OPEN_WEB_CMD = os.path.join(REPO_ROOT, "OpenAssistantWeb.cmd")
+REPO_ROOT = path_utils.abspath(path_utils.join_path(os.path.dirname(__file__), ".."))
+OPEN_WEB_CMD = path_utils.join_path(REPO_ROOT, "OpenAssistantWeb.cmd")
 CREATE_NO_WINDOW = 0x08000000
-SILENT_COMMAND_FILE = os.path.join(
+SILENT_COMMAND_FILE = path_utils.join_path(
     os.environ.get("LOCALAPPDATA", os.path.expanduser("~")),
     "ArcMapAIAssistant",
     "bridge_command.json"
@@ -120,9 +127,9 @@ def _sync_current_context():
 
 def _consume_silent_command():
     try:
-        if not os.path.isfile(SILENT_COMMAND_FILE):
+        if not path_utils.isfile(SILENT_COMMAND_FILE):
             return {}
-        with open(SILENT_COMMAND_FILE, "rb") as handle:
+        with path_utils.open_binary(SILENT_COMMAND_FILE, "rb") as handle:
             raw = handle.read()
         if not isinstance(raw, unicode):
             raw = raw.decode("utf-8", "replace")
@@ -133,7 +140,7 @@ def _consume_silent_command():
         if action not in ("sync", "execute"):
             return {}
         try:
-            os.remove(SILENT_COMMAND_FILE)
+            path_utils.remove(SILENT_COMMAND_FILE)
         except OSError:
             pass
         return payload if isinstance(payload, dict) else {}
@@ -154,12 +161,12 @@ def _clear_silent_state():
 
 def _log_event(kind, detail=None):
     try:
-        log_dir = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "ArcMapAIAssistant", "logs")
-        if not os.path.isdir(log_dir):
-            os.makedirs(log_dir)
-        path = os.path.join(log_dir, "arcmap_runtime.log")
+        log_dir = path_utils.join_path(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "ArcMapAIAssistant", "logs")
+        if not path_utils.isdir(log_dir):
+            path_utils.makedirs(log_dir)
+        path = path_utils.join_path(log_dir, "arcmap_runtime.log")
         message = u"%s\t%s\t%s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), kind, _unicode_text(detail or ""))
-        with open(path, "ab") as handle:
+        with path_utils.open_binary(path, "ab") as handle:
             handle.write(message.encode("utf-8", "replace"))
     except (IOError, OSError):
         pass

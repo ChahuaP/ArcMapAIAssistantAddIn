@@ -24,6 +24,7 @@ from .tool_builder_rules import (
 
 def validate_executor_contract(spec: Dict[str, Any], code: str) -> None:
     tree = _validate_executor_code(code)
+    _validate_path_encoding_workarounds(tree)
     _validate_reserved_field_usage(tree)
     _validate_output_open_calls(tree, spec)
     if spec.get("side_effects") != "writes_data":
@@ -102,6 +103,10 @@ def _validate_call(func: ast.AST) -> None:
     if isinstance(func, ast.Name) and func.id in DISALLOWED_CALLS:
         raise ToolBuilderError("自定义工具不能调用不安全函数：%s。" % func.id)
     chain = _attribute_chain(func)
+    if chain and chain[-1] in ("encode", "decode"):
+        raise ToolBuilderError("executor_code 不能自行 encode/decode 路径或文本；GeoPilot 运行时会统一传入 Unicode 路径。")
+    if chain == ("sys", "getfilesystemencoding"):
+        raise ToolBuilderError("executor_code 不能读取 sys.getfilesystemencoding() 自行处理路径；GeoPilot 运行时会统一处理中文路径。")
     if chain[:2] == ("arcpy", "mp"):
         raise ToolBuilderError("自定义工具运行在 ArcMap Python 2.7，不能使用 ArcGIS Pro 的 arcpy.mp。")
     if chain[:2] == ("arcpy", "mapping"):
@@ -199,6 +204,16 @@ def _validate_reserved_field_usage(tree: ast.AST) -> None:
                 lowered = field_name.lower()
                 if lowered in RESERVED_CURSOR_WRITE_FIELDS:
                     raise ToolBuilderError("自定义工具不能写入 ArcGIS 系统字段 %s；OID/FID/OBJECTID 只能读取，不能写入。" % field_name)
+
+
+def _validate_path_encoding_workarounds(tree: ast.AST) -> None:
+    output_path_variables = _argument_key_variables(tree, "output_path")
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        chain = _call_chain(node.func)
+        if chain in (("str",), ("unicode",)) and node.args and _is_output_path_reference(node.args[0], output_path_variables):
+            raise ToolBuilderError("executor_code 不能对 arguments[\"output_path\"] 调用 str()/unicode() 做路径自修；它在运行时已经是 Unicode 路径。")
 
 
 def _is_add_field_call(chain: tuple[str, ...]) -> bool:
