@@ -60,7 +60,6 @@ function Test-InstallHealth {
         (Join-Path $TargetRoot "bridge\ArcMapBridge.exe"),
         (Join-Path $TargetRoot "OpenAssistantWeb.cmd"),
         (Join-Path $TargetRoot "StartGateway.cmd"),
-        (Join-Path $TargetRoot "help.html"),
         (Join-Path $TargetRoot "uninstall.ico"),
         (Join-Path $TargetRoot "VERSION")
     )
@@ -87,7 +86,6 @@ $runtimeSource = Join-Path $appSource "arcmap_runtime_py2"
 $catalogSource = Join-Path $appSource "operation_catalog"
 $openCmd = Join-Path $appSource "OpenAssistantWeb.cmd"
 $startCmd = Join-Path $appSource "StartGateway.cmd"
-$helpHtml = Join-Path $appSource "help.html"
 $uninstallIcon = Join-Path $appSource "uninstall.ico"
 $versionFile = Join-Path $appSource "VERSION"
 
@@ -98,7 +96,6 @@ Require-File (Join-Path $runtimeSource "runtime.py") "缺少 ArcMap runtime：$r
 Require-File (Join-Path $catalogSource "catalog.json") "缺少操作目录：$catalogSource"
 Require-File $openCmd "缺少打开控制台脚本：$openCmd"
 Require-File $startCmd "缺少启动后台脚本：$startCmd"
-Require-File $helpHtml "缺少帮助文件：$helpHtml"
 Require-File $uninstallIcon "缺少卸载图标：$uninstallIcon"
 Require-File $versionFile "缺少版本文件：$versionFile"
 $appVersion = (Get-Content -Encoding UTF8 -LiteralPath $versionFile -Raw).Trim()
@@ -122,7 +119,6 @@ Copy-CleanDirectory (Join-Path $appSource "gateway") (Join-Path $targetRoot "gat
 Copy-CleanDirectory (Join-Path $appSource "bridge") (Join-Path $targetRoot "bridge")
 Copy-Item -LiteralPath $openCmd -Destination (Join-Path $targetRoot "OpenAssistantWeb.cmd") -Force
 Copy-Item -LiteralPath $startCmd -Destination (Join-Path $targetRoot "StartGateway.cmd") -Force
-Copy-Item -LiteralPath $helpHtml -Destination (Join-Path $targetRoot "help.html") -Force
 Copy-Item -LiteralPath $uninstallIcon -Destination (Join-Path $targetRoot "uninstall.ico") -Force
 Copy-Item -LiteralPath $versionFile -Destination (Join-Path $targetRoot "VERSION") -Force
 

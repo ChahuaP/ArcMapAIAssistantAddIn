@@ -69,7 +69,7 @@ def collect_agent_diagnostics(app_version: str, operation_count: int, state: Any
         "first_run_steps": [
             "health",
             "arcmap-list",
-            "arcmap-select when multiple ArcMap windows are listed",
+            "多开 ArcMap 时只保留一个窗口，或用外部 agent 指定 hwnd",
             "arcmap-sync",
             "capabilities",
             "validate",
@@ -151,11 +151,11 @@ def _check_agent_context(context: Any) -> Dict[str, Any]:
 def _check_agent_bridge(active_bridge: Any) -> Dict[str, Any]:
     if isinstance(active_bridge, dict) and active_bridge.get("port"):
         title = ((active_bridge.get("summary") or {}).get("title") or "").strip()
-        detail = "已选择 ArcMap Bridge，port=%s。" % active_bridge.get("port")
+        detail = "已连接 ArcMap Bridge，port=%s。" % active_bridge.get("port")
         if title:
-            detail = detail[:-1] + "，窗口=%s。" % title
-        return _item("agent_bridge", "ArcMap 目标", "ok", detail)
-    return _item("agent_bridge", "ArcMap 目标", "warn", "还没有选择 ArcMap 目标；运行 arcmap-list，多个窗口时再运行 arcmap-select。")
+            detail = detail[:-1] + "，当前窗口=%s。" % title
+        return _item("agent_bridge", "地图窗口", "ok", detail)
+    return _item("agent_bridge", "地图窗口", "warn", "未固定 ArcMap 窗口；多开时请只保留一个窗口，或用外部 agent 指定 hwnd。")
 
 
 def _check_agent_permission(permission: Any) -> Dict[str, Any]:

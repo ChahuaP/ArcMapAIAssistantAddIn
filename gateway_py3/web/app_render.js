@@ -42,7 +42,7 @@
 
     function renderEmptyChat() {
       const chat = document.getElementById('chatLog');
-      chat.innerHTML = '<div class="empty-chat"><div><strong>等待任务</strong><span>在下方输入你想完成的 GIS 操作。</span></div></div>';
+      chat.innerHTML = `<div class="empty-chat"><div><strong>等待任务</strong><span>${escapeHtml(taskScopeText())}</span></div></div>`;
     }
 
     function removeEmptyChat() {
@@ -248,9 +248,7 @@
       box.innerHTML = '';
       const items = visibleWorkflows(workflows);
       if (!items.length) {
-        const text = currentMode === 'full_agent'
-          ? '当前会话暂无任务。'
-          : '暂无任务。';
+        const text = `${taskScopeLabel()}暂无任务。`;
         box.innerHTML = `<div class="section-card">${text}</div>`;
         return;
       }

@@ -32,7 +32,6 @@ Source: "{#MySourceDir}\*"; DestDir: "{tmp}\GeoPilotPackage"; Flags: recursesubd
 Source: "{#MySourceDir}\packaging\uninstall.ps1"; DestDir: "{app}\packaging"; Flags: ignoreversion
 
 [Icons]
-Name: "{autoprograms}\GeoPilot\帮助"; Filename: "{app}\help.html"; WorkingDir: "{app}"
 Name: "{autoprograms}\GeoPilot\卸载 GeoPilot"; Filename: "{uninstallexe}"; IconFilename: "{app}\uninstall.ico"
 
 [Run]

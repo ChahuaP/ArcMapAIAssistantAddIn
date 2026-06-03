@@ -5,101 +5,110 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <title>GeoPilot</title>
+  <link rel="stylesheet" href="tokens.css">
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="components.css">
 </head>
 <body>
-  <div class="app">
-    <header>
-      <div class="topbar">
-        <div class="brand">
-          <div class="brand-mark" aria-hidden="true">
-            <svg viewBox="0 0 64 64" role="img" focusable="false">
-              <path d="M32 5 56 18v28L32 59 8 46V18L32 5Z" fill="none" stroke="rgba(255,255,255,.92)" stroke-width="4" stroke-linejoin="round"/>
-              <path d="M32 14 45 25 36 50H28L19 25 32 14Z" fill="rgba(255,255,255,.95)"/>
-              <path d="M32 23a8 8 0 1 1 0 16 8 8 0 0 1 0-16Z" fill="#087c91"/>
-            </svg>
-          </div>
-          <div>
-            <h1>GeoPilot</h1>
-            <p>自然语言 GIS 工作流，确认后在 ArcGIS 执行</p>
-          </div>
+  <div class="app command-deck">
+    <aside class="rail" aria-label="GeoPilot 控制轨">
+      <div class="rail-brand">
+        <div class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 64 64" role="img" focusable="false">
+            <path d="M32 5 56 18v28L32 59 8 46V18L32 5Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round" opacity=".92"/>
+            <path d="M32 14 45 25 36 50H28L19 25 32 14Z" fill="currentColor" opacity=".95"/>
+            <path d="M32 23a8 8 0 1 1 0 16 8 8 0 0 1 0-16Z" fill="var(--primary-strong)"/>
+          </svg>
         </div>
-        <div class="mode-hub" aria-label="工作模式">
-          <div class="mode-label">工作模式</div>
-          <div class="mode-switch">
-            <button id="semiModeButton" class="mode-option active" type="button" onclick="setMode('semi_agent')">
-              <strong>半代理模式</strong>
-              <span>单次任务，短上下文</span>
-            </button>
-            <button id="fullModeButton" class="mode-option" type="button" onclick="setMode('full_agent')">
-              <strong>全代理模式</strong>
-              <span>持续会话，长上下文</span>
-            </button>
-          </div>
-        </div>
-        <div class="top-controls">
-          <div class="status-line" aria-live="polite">
-            <div class="status-tile warn" id="gatewayState"><span>网关</span><strong>检查中</strong></div>
-            <div class="status-tile warn" id="arcgisState"><span>ArcMap</span><strong>未连接</strong></div>
-            <div class="status-tile warn" id="restartState"><span>当前模式</span><strong>检查中</strong></div>
-          </div>
-          <div class="quick-actions" aria-label="常用信息">
-            <button class="ghost small" onclick="openCapabilities()">能力范围</button>
-            <button class="ghost small" onclick="openArcMapTargets()">ArcMap目标</button>
-            <button class="ghost small" onclick="openModal('contextModal')">地图快照</button>
-            <button class="ghost small" onclick="openPendingTools()">工具管理</button>
-            <button class="ghost small" onclick="openDiagnostics()">系统诊断</button>
-            <button class="ghost small" onclick="openModal('keyModal')"><span id="keyActionText">模型配置</span></button>
-          </div>
+        <div>
+          <h1>GeoPilot</h1>
+          <p>ArcGIS Command Deck</p>
         </div>
       </div>
-    </header>
 
-    <main>
-      <section class="panel chat-panel">
-        <div class="panel-head">
-          <div class="panel-title">
-            <h2>对话</h2>
+      <section class="rail-block" aria-label="连接状态">
+        <div class="rail-block-title">实时状态</div>
+        <div class="status-line rail-status" aria-live="polite">
+          <div class="status-tile warn" id="gatewayState"><span>网关</span><strong>检查中</strong></div>
+          <div class="status-tile warn" id="arcgisState"><span>ArcMap</span><strong>未连接</strong></div>
+          <div class="status-tile warn" id="restartState"><span>当前模式</span><strong>检查中</strong></div>
+        </div>
+      </section>
+
+      <nav class="rail-block rail-actions" aria-label="常用操作">
+        <div class="rail-block-title">操作</div>
+        <button class="ghost small" type="button" onclick="openCapabilities()">能力范围</button>
+        <button class="ghost small" type="button" onclick="openModal('contextModal')">地图快照</button>
+        <button class="ghost small" type="button" onclick="openPendingTools()">工具管理</button>
+        <button class="ghost small" type="button" onclick="openDiagnostics()">系统诊断</button>
+        <button class="ghost small" type="button" onclick="openModal('keyModal')"><span id="keyActionText">模型配置</span></button>
+      </nav>
+    </aside>
+
+    <main class="stage" aria-label="GeoPilot 指令工作区">
+      <section class="mode-board" aria-label="工作模式">
+        <div class="mode-board-copy">
+          <span>Mode</span>
+          <h2>选择代理强度</h2>
+        </div>
+        <div class="mode-switch">
+          <button id="semiModeButton" class="mode-option active" type="button" onclick="setMode('semi_agent')">
+            <strong>半代理模式</strong>
+            <span>单次任务，短上下文</span>
+          </button>
+          <button id="fullModeButton" class="mode-option" type="button" onclick="setMode('full_agent')">
+            <strong>全代理模式</strong>
+            <span>持续会话，长上下文</span>
+          </button>
+        </div>
+      </section>
+
+      <section class="chat-panel command-canvas" aria-labelledby="chatTitle">
+        <div class="canvas-head">
+          <div>
+            <h2 id="chatTitle">指令画布</h2>
             <p id="status" class="chat-status">页面会更新地图快照和任务状态。</p>
           </div>
-          <button class="danger small" onclick="clearConversation()">清空对话</button>
+          <button class="danger small" type="button" onclick="clearConversation()">清空对话</button>
         </div>
-        <div id="chatLog" class="chat-log"></div>
-        <div class="composer">
+
+        <div id="chatLog" class="chat-log" aria-live="polite"></div>
+
+        <div class="composer" aria-label="任务输入">
           <div id="mentionMenu" class="layer-mention-menu" hidden></div>
           <div class="composer-row">
             <textarea id="command" aria-label="任务输入" placeholder="输入任务，按 Enter 发送，Shift+Enter 换行"></textarea>
             <button id="voiceButton" class="ghost voice-button" type="button" onclick="toggleVoiceInput()">语音</button>
-            <button id="sendButton" class="primary" onclick="submitPlan()">发送</button>
+            <button id="sendButton" class="primary" type="button" onclick="submitPlan()">发送</button>
           </div>
           <div id="voiceCompare" class="voice-compare" hidden></div>
         </div>
       </section>
-
-      <aside class="panel task-panel">
-        <div class="panel-head">
-          <div class="panel-title">
-            <h2>任务</h2>
-            <p id="taskPanelHint">按时间显示全部任务</p>
-          </div>
-          <button class="ghost small" onclick="refreshAll()">刷新</button>
-        </div>
-        <div class="panel-body" id="tasks">
-          <div class="section-card">暂无任务。</div>
-        </div>
-      </aside>
     </main>
+
+    <aside class="inspector task-panel" aria-labelledby="taskTitle">
+      <div class="inspector-head">
+        <div>
+          <span>Queue</span>
+          <h2 id="taskTitle">任务队列</h2>
+          <p id="taskPanelHint">显示半代理模式的全部任务</p>
+        </div>
+        <button class="ghost small" type="button" onclick="refreshAll()">刷新</button>
+      </div>
+      <div class="panel-body" id="tasks">
+        <div class="section-card">半代理模式暂无任务。</div>
+      </div>
+    </aside>
   </div>
 
   <div class="modal" id="capabilitiesModal" hidden onclick="closeOnBackdrop(event)">
-    <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="capabilitiesTitle">
+    <div class="modal-panel command-modal" role="dialog" aria-modal="true" aria-labelledby="capabilitiesTitle">
       <div class="panel-head">
         <div class="panel-title">
           <h2 id="capabilitiesTitle">当前能力范围</h2>
           <p id="capabilitiesSummary">从本地操作目录读取。</p>
         </div>
-        <button class="ghost small" onclick="closeModal('capabilitiesModal')">关闭</button>
+        <button class="ghost small" type="button" onclick="closeModal('capabilitiesModal')">关闭</button>
       </div>
       <div class="modal-body">
         <div id="capabilityGroups" class="modal-grid">
@@ -110,13 +119,13 @@
   </div>
 
   <div class="modal" id="contextModal" hidden onclick="closeOnBackdrop(event)">
-    <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="contextTitle">
+    <div class="modal-panel command-modal" role="dialog" aria-modal="true" aria-labelledby="contextTitle">
       <div class="panel-head">
         <div class="panel-title">
           <h2 id="contextTitle">地图快照</h2>
           <p>最近一次由 GeoPilot Bridge 读取的 ArcMap 上下文。</p>
         </div>
-        <button class="ghost small" onclick="closeModal('contextModal')">关闭</button>
+        <button class="ghost small" type="button" onclick="closeModal('contextModal')">关闭</button>
       </div>
       <div class="modal-body stack">
         <section class="section-card">
@@ -136,36 +145,16 @@
     </div>
   </div>
 
-  <div class="modal" id="arcmapTargetsModal" hidden onclick="closeOnBackdrop(event)">
-    <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="arcmapTargetsTitle">
-      <div class="panel-head">
-        <div class="panel-title">
-          <h2 id="arcmapTargetsTitle">ArcMap 目标</h2>
-          <p>多开 ArcMap 时选择本次要操作的窗口。</p>
-        </div>
-        <div class="button-row modal-actions">
-          <button class="ghost small" onclick="loadArcMapBridges().then(renderArcMapTargets)">刷新</button>
-          <button class="ghost small" onclick="closeModal('arcmapTargetsModal')">关闭</button>
-        </div>
-      </div>
-      <div class="modal-body">
-        <div id="arcmapTargetsList" class="compact-list">
-          <div class="section-card">正在读取...</div>
-        </div>
-      </div>
-    </div>
-  </div>
-
   <div class="modal" id="diagnosticsModal" hidden onclick="closeOnBackdrop(event)">
-    <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="diagnosticsTitle">
+    <div class="modal-panel command-modal" role="dialog" aria-modal="true" aria-labelledby="diagnosticsTitle">
       <div class="panel-head">
         <div class="panel-title">
           <h2 id="diagnosticsTitle">系统诊断</h2>
           <p id="diagnosticsSummary">检查安装、配置、目录、版本和网络。</p>
         </div>
         <div class="button-row modal-actions">
-          <button class="ghost small" onclick="loadDiagnostics()">重新检查</button>
-          <button class="ghost small" onclick="closeModal('diagnosticsModal')">关闭</button>
+          <button class="ghost small" type="button" onclick="loadDiagnostics()">重新检查</button>
+          <button class="ghost small" type="button" onclick="closeModal('diagnosticsModal')">关闭</button>
         </div>
       </div>
       <div class="modal-body">
@@ -177,15 +166,15 @@
   </div>
 
   <div class="modal" id="toolsModal" hidden onclick="closeOnBackdrop(event)">
-    <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="toolsTitle">
+    <div class="modal-panel command-modal" role="dialog" aria-modal="true" aria-labelledby="toolsTitle">
       <div class="panel-head">
         <div class="panel-title">
           <h2 id="toolsTitle">工具管理</h2>
           <p id="toolsSummary">新工具审核通过并启用后，会进入能力目录。</p>
         </div>
         <div class="button-row modal-actions">
-          <button class="ghost small" onclick="loadPendingTools()">刷新</button>
-          <button class="ghost small" onclick="closeModal('toolsModal')">关闭</button>
+          <button class="ghost small" type="button" onclick="loadPendingTools()">刷新</button>
+          <button class="ghost small" type="button" onclick="closeModal('toolsModal')">关闭</button>
         </div>
       </div>
       <div class="modal-body">
@@ -197,13 +186,13 @@
   </div>
 
   <div class="modal" id="keyModal" hidden onclick="closeOnBackdrop(event)">
-    <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="keyTitle">
+    <div class="modal-panel command-modal" role="dialog" aria-modal="true" aria-labelledby="keyTitle">
       <div class="panel-head">
         <div class="panel-title">
           <h2 id="keyTitle">模型配置</h2>
           <p>选择半代理和全代理使用的模型，并保存对应供应商 Key。</p>
         </div>
-        <button class="ghost small" onclick="closeModal('keyModal')">关闭</button>
+        <button class="ghost small" type="button" onclick="closeModal('keyModal')">关闭</button>
       </div>
       <div class="modal-body">
         <section class="section-card">
@@ -223,7 +212,6 @@
               <button type="button" class="ghost small" onclick="openHealth()">检查网关</button>
             </div>
           </form>
-          <p class="hint">Key 只保存在当前 Windows 用户配置目录，不会写进源码。</p>
           <p class="hint" id="speechConfigHint">语音识别使用阿里百炼 API Key 或 Token Plan API Key。</p>
           <p class="hint" id="configPathHint">配置路径检查中。</p>
         </section>
@@ -232,7 +220,6 @@
   </div>
 
   <script src="app.js"></script>
-  <script src="app_arcmap.js"></script>
   <script src="app_render.js"></script>
   <script src="app_mentions.js"></script>
   <script src="app_voice.js"></script>

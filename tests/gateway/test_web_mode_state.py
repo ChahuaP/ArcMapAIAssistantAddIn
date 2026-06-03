@@ -12,10 +12,10 @@ def _web_source():
     return "\n".join([
         _web_file("index.html"),
         _web_file("app.js"),
-        _web_file("app_arcmap.js"),
         _web_file("app_render.js"),
         _web_file("app_mentions.js"),
         _web_file("app_voice.js"),
+        _web_file("tokens.css"),
         _web_file("styles.css"),
         _web_file("components.css"),
     ])
@@ -73,8 +73,10 @@ class WebModeStateTests(unittest.TestCase):
 
         self.assertIn("const items = visibleWorkflows(workflows);", html)
         self.assertIn("items.forEach(item => list.appendChild(taskCard(item)));", html)
-        self.assertIn("显示当前会话的全部任务", html)
+        self.assertIn("function taskScopeText()", html)
+        self.assertIn("显示${taskScopeLabel()}的全部任务", html)
         self.assertIn("显示半代理模式的全部任务", html)
+        self.assertIn("'全代理模式' : '半代理模式'", html)
         self.assertNotIn("显示会话", html)
         self.assertNotIn("查看对话", html)
 
@@ -245,13 +247,14 @@ class WebModeStateTests(unittest.TestCase):
         self.assertNotIn("POLL_INTERVAL_MS", html)
         self.assertNotIn("async function pollUpdates", html)
 
-    def test_web_exposes_arcmap_target_selection(self):
+    def test_web_does_not_expose_unreliable_arcmap_target_selection(self):
         html = _web_source()
+        index_html = _web_file("index.html")
 
-        self.assertIn("openArcMapTargets()", html)
-        self.assertIn("selectArcMapBridge", html)
-        self.assertIn("hwnd", html)
-        self.assertIn("pid", html)
+        self.assertNotIn("openArcMapTargets()", index_html)
+        self.assertNotIn("arcmapTargetsModal", index_html)
+        self.assertNotIn("ArcMap目标", index_html)
+        self.assertNotIn("ArcMap 目标", index_html)
 
     def test_skill_mentions_multi_arcmap_selection(self):
         skill = (ROOT / "agent_integrations" / "geopilot-arcmap" / "SKILL.md").read_text(encoding="utf-8")

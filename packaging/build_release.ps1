@@ -212,7 +212,6 @@ Copy-TreeFiltered (Join-Path $repoRoot "arcmap_runtime_py2") (Join-Path $stageRo
 Copy-TreeFiltered (Join-Path $repoRoot "operation_catalog") (Join-Path $stageRoot "app\operation_catalog")
 Copy-Item -LiteralPath $gatewayDist -Destination (Join-Path $stageRoot "app\gateway") -Recurse -Force
 Write-AppCommandFiles (Join-Path $stageRoot "app")
-Copy-Item -LiteralPath (Join-Path $repoRoot "gateway_py3\web\help.html") -Destination (Join-Path $stageRoot "app\help.html") -Force
 Copy-Item -LiteralPath (Join-Path $repoRoot "packaging\uninstall.ico") -Destination (Join-Path $stageRoot "app\uninstall.ico") -Force
 Copy-Item -LiteralPath $externalBridgeExe -Destination (Join-Path $stageRoot "app\bridge\ArcMapBridge.exe") -Force
 Copy-Item -LiteralPath $addinPackage -Destination (Join-Path $stageRoot "ArcMapAIAssistantAddIn\ArcMapAIAssistantAddIn.esriaddin") -Force

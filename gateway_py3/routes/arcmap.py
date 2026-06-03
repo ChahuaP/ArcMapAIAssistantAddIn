@@ -275,7 +275,7 @@ def scan_bridge(state, port_checker=None):
         state.bridge_cache = {"expires_at": time.time() + BRIDGE_CACHE_SECONDS, "bridges": live_bridges}
         return live_bridges[0]
     if len(live_bridges) > 1:
-        raise arcmap_bridge_client.ArcMapBridgeError("检测到多个 ArcMap，请先选择目标窗口。")
+        raise arcmap_bridge_client.ArcMapBridgeError("检测到多个 ArcMap 窗口。当前 Web 控制台无法可靠判断要操作哪一个；请只保留一个 ArcMap 窗口后重试，或用外部 agent 指定 hwnd。")
     raise arcmap_bridge_client.ArcMapBridgeError("ArcMap Bridge 未连接。")
 
 

@@ -52,16 +52,14 @@ def _direct_asset(path: str) -> str | None:
         name = path.lstrip("/")
         if name in {
             "index.html",
+            "tokens.css",
             "styles.css",
             "components.css",
             "app.js",
-            "app_arcmap.js",
             "app_render.js",
             "app_mentions.js",
             "app_voice.js",
             "favicon.svg",
-            "help.html",
-            "library_explainer.html",
         }:
             return name
     return None

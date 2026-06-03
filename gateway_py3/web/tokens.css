@@ -1,0 +1,114 @@
+/* Hallmark · tokens: GeoPilot Command Deck · genre: modern-minimal · anchor hue: survey-teal */
+:root {
+  --color-paper: oklch(96.5% 0.006 230);
+  --color-paper-2: oklch(92.8% 0.012 222);
+  --color-paper-3: oklch(88.6% 0.018 220);
+  --color-surface: oklch(98.8% 0.004 230);
+  --color-surface-2: oklch(96.1% 0.008 224);
+  --color-surface-3: oklch(91.6% 0.014 222);
+
+  --color-ink: oklch(23.8% 0.033 236);
+  --color-ink-strong: oklch(15.5% 0.038 238);
+  --color-muted: oklch(50.5% 0.034 230);
+  --color-subtle: oklch(67% 0.028 225);
+  --color-rule: oklch(83.8% 0.021 222);
+  --color-rule-strong: oklch(72.4% 0.031 222);
+
+  --color-rail: oklch(19.2% 0.036 236);
+  --color-rail-2: oklch(15.6% 0.04 238);
+  --color-rail-ink: oklch(94.2% 0.012 220);
+  --color-rail-muted: oklch(73% 0.022 222);
+
+  --color-accent: oklch(52.5% 0.116 194);
+  --color-accent-strong: oklch(40.5% 0.105 199);
+  --color-accent-soft: oklch(93.8% 0.04 195);
+  --color-accent-tint: oklch(97.4% 0.017 195);
+  --color-accent-ink: oklch(98.8% 0.004 230);
+  --color-focus: oklch(72% 0.15 190);
+
+  --color-copper: oklch(60% 0.12 52);
+  --color-copper-soft: oklch(95.5% 0.042 64);
+  --color-success: oklch(56% 0.13 148);
+  --color-success-ink: oklch(30% 0.088 148);
+  --color-success-soft: oklch(94.6% 0.052 148);
+  --color-warning: oklch(63% 0.125 78);
+  --color-warning-ink: oklch(35% 0.083 72);
+  --color-warning-soft: oklch(95.4% 0.055 86);
+  --color-danger: oklch(55% 0.145 25);
+  --color-danger-ink: oklch(33% 0.1 25);
+  --color-danger-soft: oklch(95.3% 0.041 25);
+  --color-violet: oklch(53% 0.15 278);
+  --color-violet-soft: oklch(94.6% 0.036 278);
+
+  --color-code-bg: var(--color-rail);
+  --color-code-ink: var(--color-rail-ink);
+  --color-backdrop: oklch(15.5% 0.038 238 / 0.56);
+
+  --font-display: "Segoe UI Variable Display", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", Arial, sans-serif;
+  --font-body: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", Arial, sans-serif;
+  --font-mono: "Cascadia Mono", Consolas, "SFMono-Regular", monospace;
+
+  --space-3xs: 0.25rem;
+  --space-2xs: 0.5rem;
+  --space-xs: 0.75rem;
+  --space-sm: 1rem;
+  --space-md: 1.5rem;
+  --space-lg: 2rem;
+  --space-xl: 3rem;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.9375rem;
+  --text-md: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.375rem;
+  --text-display: 1.75rem;
+
+  --radius-control: 6px;
+  --radius-card: 8px;
+  --radius-pill: 999px;
+  --rule-thin: 1px;
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-fast: 120ms;
+  --dur-base: 180ms;
+  --dur-slow: 260ms;
+
+  --shadow-panel: 0 18px 44px oklch(15.5% 0.038 238 / 0.14);
+  --shadow-soft: 0 8px 22px oklch(15.5% 0.038 238 / 0.08);
+  --shadow-hover: 0 16px 32px oklch(15.5% 0.038 238 / 0.13);
+  --shadow-accent: 0 14px 30px oklch(52.5% 0.116 194 / 0.25);
+  --shadow-rail: 0 18px 42px oklch(16.5% 0.046 240 / 0.22);
+  --shadow-modal: 0 26px 76px oklch(15.5% 0.038 238 / 0.32);
+
+  --ink: var(--color-ink);
+  --ink-strong: var(--color-ink-strong);
+  --muted: var(--color-muted);
+  --subtle: var(--color-subtle);
+  --line: var(--color-rule);
+  --line-strong: var(--color-rule-strong);
+  --page: var(--color-paper);
+  --panel: var(--color-surface);
+  --panel-soft: var(--color-surface-2);
+  --primary: var(--color-accent);
+  --primary-strong: var(--color-accent-strong);
+  --primary-soft: var(--color-accent-soft);
+  --green: var(--color-success);
+  --green-soft: var(--color-success-soft);
+  --amber: var(--color-warning);
+  --amber-soft: var(--color-warning-soft);
+  --red: var(--color-danger);
+  --red-soft: var(--color-danger-soft);
+  --violet: var(--color-violet);
+  --violet-soft: var(--color-violet-soft);
+  --shadow: var(--shadow-panel);
+  --soft-shadow: var(--shadow-soft);
+  --mode-panel: var(--color-surface);
+  --mode-panel-head: var(--color-surface-2);
+  --mode-chat-user: var(--color-accent);
+  --mode-chat-assistant: var(--color-surface);
+  --mode-task-bg: var(--color-surface);
+  --mode-top-accent: oklch(52.5% 0.116 194 / 0.16);
+}

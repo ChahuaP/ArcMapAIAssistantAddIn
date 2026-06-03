@@ -258,7 +258,7 @@
     function renderModelWait() {
       const stages = ['同步 ArcMap', '读取能力', '分析任务', '读取字段', '生成 workflow', '校验任务', '执行到 ArcMap', '完成/失败'];
       const notes = [
-        '正在确认当前 ArcMap 目标和地图状态。',
+        '正在读取 ArcMap 窗口和地图状态。',
         '正在读取可用操作与工具目录。',
         '正在理解任务和会话上下文。',
         '需要时会读取字段和值样本。',
@@ -643,7 +643,7 @@
       const fullMode = currentMode === 'full_agent';
       document.getElementById('semiModeButton').classList.toggle('active', !fullMode);
       document.getElementById('fullModeButton').classList.toggle('active', fullMode);
-      document.getElementById('taskPanelHint').textContent = fullMode ? '显示当前会话的全部任务' : '显示半代理模式的全部任务';
+      document.getElementById('taskPanelHint').textContent = taskScopeText();
       updateModeStatus();
       renderCurrentModelHint(appState.config);
       ensureSelectedWorkflow();
@@ -739,6 +739,14 @@
 
     function updateModeStatus() {
       setTile('restartState', 'ok', currentMode === 'full_agent' ? '全代理模式' : '半代理模式');
+    }
+
+    function taskScopeLabel() {
+      return currentMode === 'full_agent' ? '全代理模式' : '半代理模式';
+    }
+
+    function taskScopeText() {
+      return `显示${taskScopeLabel()}的全部任务`;
     }
 
     async function loadPendingTools() {
