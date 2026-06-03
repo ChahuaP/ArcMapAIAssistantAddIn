@@ -11,7 +11,7 @@ The project is built for ArcGIS Desktop / ArcMap, not ArcGIS Pro.
 - Plans workflows with a local Python 3 gateway and selectable LLM providers.
 - Executes approved ArcPy operations from a fixed operation catalog.
 - Supports common map, layer, selection, analysis, table, and export operations.
-- Provides a local Web console for conversation, task review, API key configuration, capabilities, and workflow queue.
+- Provides a local Web console for conversation, task review, model configuration, capabilities, diagnostics, and workflow queue.
 - Packages into a single Windows setup executable, so normal users do not need to install Python 3.
 
 ## Safety Model
@@ -34,7 +34,7 @@ For end users:
 
 - Windows
 - ArcGIS Desktop / ArcMap
-- DeepSeek API key, MiniMax Token Plan API key, or DashScope API key
+- At least one supported model provider key: DeepSeek, MiniMax, Zhipu, or Alibaba Bailian / DashScope
 - A release package built from this repository
 
 For developers:
@@ -66,7 +66,7 @@ Customize > Toolbars > ArcMap AI Assistant
 ## Basic Use
 
 1. Click `启动控制台` in the ArcMap toolbar.
-2. Configure the model API key in the Web console.
+2. Configure the model provider and API key in the Web console.
 3. Type a GIS task in the Web console.
 4. Review and send the generated task to ArcMap.
 5. GeoPilot syncs context and executes through ArcMap Bridge automatically.
@@ -79,6 +79,24 @@ Example requests:
 - `打开 D:\Data\shapefile 下所有 shp`
 - `把 nanjing 当前选中的要素导出到 D:\Data，输出名 nanjing_selected`
 - `把 nanjing 图层按 NAME 字段拆分导出为 shp，输出到 D:\Data`
+
+## API Key Safety
+
+API keys are user-local runtime configuration, not source files.
+
+- The Web console writes keys to the current Windows user's GeoPilot config file under `%APPDATA%\ArcMapAIAssistant\config.json`.
+- Public config responses expose only key status and source labels, never raw key values.
+- Local key and secret files such as `.env`, `config.json`, `*.local.json`, `*secrets*.json`, and `*api_keys*.json` are ignored by Git.
+- Do not place real API keys in README examples, tests, operation catalogs, or source code.
+
+Alibaba Bailian / DashScope supports both regular API Key and Token Plan API Key. Runtime priority is:
+
+```text
+providers.qwen.token_plan_api_key
+BAILIAN_TOKEN_PLAN_API_KEY / DASHSCOPE_TOKEN_PLAN_API_KEY
+providers.qwen.api_key
+DASHSCOPE_API_KEY / QWEN_API_KEY / BAILIAN_API_KEY
+```
 
 ## Build A Release
 
@@ -103,6 +121,12 @@ Start the Python 3 gateway:
 $env:DEEPSEEK_API_KEY = "your-key"
 # or
 $env:DASHSCOPE_API_KEY = "your-bailian-key"
+# or
+$env:BAILIAN_TOKEN_PLAN_API_KEY = "your-token-plan-key"
+# or
+$env:MINIMAX_API_KEY = "your-minimax-key"
+# or
+$env:ZHIPU_API_KEY = "your-zhipu-key"
 python -m gateway_py3
 ```
 
@@ -149,6 +173,7 @@ Operation descriptions and execution code are intentionally separate. The model 
 ## Current Limitations
 
 - ArcMap basemap automation is not enabled. ArcMap can add WMS/WMTS manually through GIS Servers, but stable automated basemap creation needs a future ArcObjects or prepared `.lyr` implementation.
+- If multiple ArcMap windows are open, the Web console cannot reliably infer which window should be controlled. Keep one ArcMap window open for Web-console workflows, or use the external agent CLI `arcmap-list` and `arcmap-select --hwnd <hwnd>`.
 - The project targets ArcMap and ArcPy, not ArcGIS Pro.
 - The Web console and gateway run locally on `127.0.0.1`.
 

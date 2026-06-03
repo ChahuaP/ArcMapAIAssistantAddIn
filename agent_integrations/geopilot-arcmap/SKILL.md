@@ -1,5 +1,6 @@
 ---
 name: geopilot-arcmap
+version: 1.0.0
 description: "Use when Codex needs to inspect or operate ArcMap through the local GeoPilot gateway without calling GeoPilot's own model API: read ArcMap context, run agent diagnostics, read operation capabilities, draft GeoPilot workflow JSON, validate it locally, submit or execute it through ArcMap Bridge, or help with ArcMap GIS tasks such as opening layers, selecting features, analysis, export, geometry creation/editing, data management, layout export, and custom tool drafts."
 ---
 

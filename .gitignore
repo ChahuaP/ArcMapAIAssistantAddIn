@@ -3,6 +3,13 @@ config/basemap_providers.local.json
 *.pyo
 *.pyd
 __pycache__/
+.env
+.env.local
+.env.*.local
+config.json
+*secrets*.json
+*api_keys*.json
+tests/
 .claude/
 *.local.json
 CONTEXT.md
