@@ -42,11 +42,11 @@
 
     function renderEmptyChat() {
       const chat = document.getElementById('chatLog');
-      chat.innerHTML = `<div class="empty-chat"><div><strong>等待任务</strong><span>${escapeHtml(taskScopeText())}</span></div></div>`;
+      chat.innerHTML = `<div class="chat-empty"><div><p class="chat-empty-title">等待任务</p><span class="chat-empty-hint">${escapeHtml(taskScopeText())}</span></div></div>`;
     }
 
     function removeEmptyChat() {
-      const empty = document.querySelector('.empty-chat');
+      const empty = document.querySelector('.chat-empty');
       if (empty) empty.remove();
     }
 
@@ -73,7 +73,7 @@
       const row = document.createElement('div');
       row.className = `bubble-row ${role === 'user' ? 'user' : 'assistant'}`;
       const bubble = document.createElement('div');
-      bubble.className = `bubble ${role === 'assistant' ? 'markdown-bubble' : 'plain-bubble'}`;
+      bubble.className = `bubble ${role === 'assistant' ? '' : 'plain'}`;
       if (role === 'assistant') {
         bubble.innerHTML = renderAssistantMarkdown(text);
       } else {
@@ -91,7 +91,7 @@
       row.className = 'bubble-row assistant';
       const bubble = document.createElement('div');
       bubble.id = 'modelWaitBubble';
-      bubble.className = 'bubble markdown-bubble';
+      bubble.className = 'bubble';
       bubble.innerHTML = renderModelWait();
       row.appendChild(bubble);
       chat.appendChild(row);
@@ -249,7 +249,7 @@
       const items = visibleWorkflows(workflows);
       if (!items.length) {
         const text = `${taskScopeLabel()}暂无任务。`;
-        box.innerHTML = `<div class="section-card">${text}</div>`;
+        box.innerHTML = `<div class="empty-state-card">${text}</div>`;
         return;
       }
       const list = document.createElement('div');
@@ -295,7 +295,7 @@
       card.innerHTML = `
         <div class="task-top">
           <span class="tag ${tagClass(item, action)}">${statusLabel(item, action)}</span>
-          ${item.id === selectedWorkflowId ? '<span class="task-meta">当前</span>' : ''}
+          ${item.id === selectedWorkflowId ? '<span class="task-current">当前</span>' : ''}
         </div>
         <p class="task-title">${escapeHtml(workflowTitle(item.workflow))}</p>
         <div class="task-meta">${escapeHtml(shortCommand(item.command))}</div>
@@ -306,10 +306,10 @@
         ${writesData(item.workflow) ? '<div class="task-note warn">这个任务会写出新数据。若当前 MXD 未保存，需要在对话中说明输出文件夹或 GDB。</div>' : ''}
       `;
       const actions = document.createElement('div');
-      actions.className = 'button-row';
+      actions.className = 'task-actions';
       if (item.status === 'draft' && action === 'execute') {
         const approveButton = document.createElement('button');
-        approveButton.className = 'success small';
+        approveButton.className = 'btn btn-success btn-sm';
         approveButton.textContent = '发送并执行';
         approveButton.onclick = () => approve(item.id);
         actions.appendChild(approveButton);
@@ -317,14 +317,14 @@
       if (item.status === 'failed' && usesCustomTool(item.workflow)) {
         const repairButton = document.createElement('button');
         const repairPending = repairingWorkflowIds.has(item.id);
-        repairButton.className = 'success small';
+        repairButton.className = 'btn btn-success btn-sm';
         repairButton.textContent = repairPending ? '修复中...' : '让 AI 修这个工具';
         repairButton.disabled = repairPending;
         repairButton.onclick = () => repairCustomTool(item.id);
         actions.appendChild(repairButton);
       }
       const deleteButton = document.createElement('button');
-      deleteButton.className = 'danger small';
+      deleteButton.className = 'btn btn-danger btn-sm';
       deleteButton.textContent = '删除';
       deleteButton.onclick = () => deleteWorkflow(item.id);
       actions.appendChild(deleteButton);
@@ -332,7 +332,7 @@
 
       const steps = document.createElement('details');
       restoreTaskDetailsState(steps, item.id, 'steps', item.status === 'draft');
-      steps.innerHTML = `<summary>执行步骤</summary>${stepList(item.workflow)}`;
+      steps.innerHTML = `<summary>执行步骤</summary><ol class="task-steps">${stepItems(item.workflow)}</ol>`;
       card.appendChild(steps);
 
       const tech = document.createElement('details');
@@ -361,10 +361,10 @@
       });
     }
 
-    function stepList(workflow) {
+    function stepItems(workflow) {
       const steps = workflow.steps || [];
-      if (!steps.length) return '<div class="task-meta">没有执行步骤。</div>';
-      return '<ol class="task-meta">' + steps.map(step => `<li>${escapeHtml(step.reason || step.operation)}</li>`).join('') + '</ol>';
+      if (!steps.length) return '<li>没有执行步骤。</li>';
+      return steps.map(step => `<li>${escapeHtml(step.reason || step.operation)}</li>`).join('');
     }
 
     function writesData(workflow) {

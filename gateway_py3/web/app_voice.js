@@ -150,14 +150,14 @@
       const correctionText = hasCorrection ? corrected : '未校验';
       const actionText = voiceCorrectionBusy ? '校验中' : (hasCorrection ? '重新校验' : '校验文本');
       box.innerHTML = `
-        <div class="voice-panel-head">
+        <div class="voice-panel-header">
           <div class="voice-panel-title">
             <strong>${title}</strong>
             <span>${subtitle}</span>
           </div>
           <div class="voice-panel-actions">
-            <button id="voiceCorrectButton" class="ghost small" type="button" onclick="correctVoiceText()"${voiceCorrectionBusy ? ' disabled' : ''}>${actionText}</button>
-            <button class="ghost small" type="button" onclick="closeVoiceComparison()" aria-label="关闭语音结果">关闭</button>
+            <button id="voiceCorrectButton" class="btn btn-ghost btn-sm" type="button" onclick="correctVoiceText()"${voiceCorrectionBusy ? ' disabled' : ''}>${actionText}</button>
+            <button class="btn btn-ghost btn-sm" type="button" onclick="closeVoiceComparison()" aria-label="关闭语音结果">关闭</button>
           </div>
         </div>
         <div class="voice-transcript-grid">

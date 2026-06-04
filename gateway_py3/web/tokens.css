@@ -1,114 +1,100 @@
-/* Hallmark · tokens: GeoPilot Command Deck · genre: modern-minimal · anchor hue: survey-teal */
+/* Hallmark · tokens: GeoPilot Console · genre: modern-minimal · tone: luxury
+ * anchor: warm-neutral paper + indigo-slate accent
+ * paper-band: light · display-style: geometric-sans · accent-hue: cool
+ */
 :root {
-  --color-paper: oklch(96.5% 0.006 230);
-  --color-paper-2: oklch(92.8% 0.012 222);
-  --color-paper-3: oklch(88.6% 0.018 220);
-  --color-surface: oklch(98.8% 0.004 230);
-  --color-surface-2: oklch(96.1% 0.008 224);
-  --color-surface-3: oklch(91.6% 0.014 222);
+  /* ── Paper ── */
+  --color-paper:    oklch(97.2% 0.006 75);
+  --color-paper-2:  oklch(94.2% 0.009 72);
+  --color-paper-3:  oklch(90.5% 0.012 70);
 
-  --color-ink: oklch(23.8% 0.033 236);
-  --color-ink-strong: oklch(15.5% 0.038 238);
-  --color-muted: oklch(50.5% 0.034 230);
-  --color-subtle: oklch(67% 0.028 225);
-  --color-rule: oklch(83.8% 0.021 222);
-  --color-rule-strong: oklch(72.4% 0.031 222);
+  /* ── Surface ── */
+  --color-surface:   oklch(99.2% 0.003 75);
+  --color-surface-2: oklch(97.6% 0.005 73);
+  --color-surface-3: oklch(94% 0.008 71);
 
-  --color-rail: oklch(19.2% 0.036 236);
-  --color-rail-2: oklch(15.6% 0.04 238);
-  --color-rail-ink: oklch(94.2% 0.012 220);
-  --color-rail-muted: oklch(73% 0.022 222);
+  /* ── Ink ── */
+  --color-ink:        oklch(22% 0.014 268);
+  --color-ink-strong: oklch(13% 0.018 270);
+  --color-muted:      oklch(48% 0.012 266);
+  --color-subtle:     oklch(62% 0.009 264);
+  --color-rule:       oklch(88% 0.007 73);
+  --color-rule-2:     oklch(80% 0.011 71);
 
-  --color-accent: oklch(52.5% 0.116 194);
-  --color-accent-strong: oklch(40.5% 0.105 199);
-  --color-accent-soft: oklch(93.8% 0.04 195);
-  --color-accent-tint: oklch(97.4% 0.017 195);
-  --color-accent-ink: oklch(98.8% 0.004 230);
-  --color-focus: oklch(72% 0.15 190);
+  /* ── Rail (dark sidebar) ── */
+  --color-rail:       oklch(17% 0.022 268);
+  --color-rail-2:     oklch(13.5% 0.026 270);
+  --color-rail-3:     oklch(22% 0.018 266);
+  --color-rail-ink:   oklch(93% 0.006 75);
+  --color-rail-muted: oklch(64% 0.012 266);
+  --color-rail-rule:  oklch(25% 0.018 268);
 
-  --color-copper: oklch(60% 0.12 52);
-  --color-copper-soft: oklch(95.5% 0.042 64);
-  --color-success: oklch(56% 0.13 148);
-  --color-success-ink: oklch(30% 0.088 148);
-  --color-success-soft: oklch(94.6% 0.052 148);
-  --color-warning: oklch(63% 0.125 78);
-  --color-warning-ink: oklch(35% 0.083 72);
-  --color-warning-soft: oklch(95.4% 0.055 86);
-  --color-danger: oklch(55% 0.145 25);
-  --color-danger-ink: oklch(33% 0.1 25);
-  --color-danger-soft: oklch(95.3% 0.041 25);
-  --color-violet: oklch(53% 0.15 278);
-  --color-violet-soft: oklch(94.6% 0.036 278);
+  /* ── Accent ── */
+  --color-accent:       oklch(44% 0.12 268);
+  --color-accent-strong: oklch(34% 0.11 270);
+  --color-accent-soft:  oklch(95% 0.03 268);
+  --color-accent-tint:  oklch(97.5% 0.014 268);
+  --color-accent-ink:   oklch(99% 0.003 75);
+  --color-focus:        oklch(60% 0.16 268);
 
-  --color-code-bg: var(--color-rail);
-  --color-code-ink: var(--color-rail-ink);
-  --color-backdrop: oklch(15.5% 0.038 238 / 0.56);
+  /* ── Semantic ── */
+  --color-success:     oklch(48% 0.13 155);
+  --color-success-ink: oklch(26% 0.085 155);
+  --color-success-soft: oklch(96% 0.04 155);
+  --color-warning:     oklch(72% 0.13 82);
+  --color-warning-ink: oklch(34% 0.085 78);
+  --color-warning-soft: oklch(96.5% 0.05 82);
+  --color-danger:      oklch(51% 0.16 25);
+  --color-danger-ink:  oklch(28% 0.11 25);
+  --color-danger-soft: oklch(96.5% 0.035 25);
 
-  --font-display: "Segoe UI Variable Display", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", Arial, sans-serif;
-  --font-body: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", Arial, sans-serif;
-  --font-mono: "Cascadia Mono", Consolas, "SFMono-Regular", monospace;
+  /* ── Special ── */
+  --color-code-bg:    oklch(16% 0.02 268);
+  --color-code-ink:   oklch(92% 0.008 75);
+  --color-backdrop:   oklch(10% 0.016 270 / 0.48);
 
-  --space-3xs: 0.25rem;
-  --space-2xs: 0.5rem;
-  --space-xs: 0.75rem;
-  --space-sm: 1rem;
-  --space-md: 1.5rem;
-  --space-lg: 2rem;
-  --space-xl: 3rem;
+  /* ── Typography ── */
+  --font-display: "Segoe UI Variable Display", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+  --font-body:    "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono:    "Cascadia Mono", "Cascadia Code", Consolas, monospace;
 
-  --text-xs: 0.75rem;
-  --text-sm: 0.8125rem;
-  --text-base: 0.9375rem;
-  --text-md: 1rem;
-  --text-lg: 1.125rem;
-  --text-xl: 1.375rem;
-  --text-display: 1.75rem;
+  /* ── Spacing ── */
+  --space-2xs: 0.25rem;
+  --space-xs:  0.5rem;
+  --space-sm:  0.75rem;
+  --space-md:  1rem;
+  --space-lg:  1.5rem;
+  --space-xl:  2rem;
+  --space-2xl: 3rem;
 
-  --radius-control: 6px;
-  --radius-card: 8px;
+  /* ── Type scale ── */
+  --text-xs:  0.6875rem;
+  --text-sm:  0.8125rem;
+  --text-md:  0.9375rem;
+  --text-lg:  1.125rem;
+  --text-xl:  1.375rem;
+  --text-2xl: 1.75rem;
+
+  /* ── Radii ── */
+  --radius-sm:   4px;
+  --radius-md:   6px;
+  --radius-lg:   10px;
+  --radius-xl:   14px;
   --radius-pill: 999px;
-  --rule-thin: 1px;
 
-  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
-  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
-  --dur-fast: 120ms;
-  --dur-base: 180ms;
-  --dur-slow: 260ms;
+  /* ── Motion ── */
+  --ease-out:     cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in:      cubic-bezier(0.7, 0, 0.84, 0);
+  --ease-in-out:  cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-instant:  80ms;
+  --dur-fast:     140ms;
+  --dur-normal:   200ms;
+  --dur-slow:     300ms;
 
-  --shadow-panel: 0 18px 44px oklch(15.5% 0.038 238 / 0.14);
-  --shadow-soft: 0 8px 22px oklch(15.5% 0.038 238 / 0.08);
-  --shadow-hover: 0 16px 32px oklch(15.5% 0.038 238 / 0.13);
-  --shadow-accent: 0 14px 30px oklch(52.5% 0.116 194 / 0.25);
-  --shadow-rail: 0 18px 42px oklch(16.5% 0.046 240 / 0.22);
-  --shadow-modal: 0 26px 76px oklch(15.5% 0.038 238 / 0.32);
-
-  --ink: var(--color-ink);
-  --ink-strong: var(--color-ink-strong);
-  --muted: var(--color-muted);
-  --subtle: var(--color-subtle);
-  --line: var(--color-rule);
-  --line-strong: var(--color-rule-strong);
-  --page: var(--color-paper);
-  --panel: var(--color-surface);
-  --panel-soft: var(--color-surface-2);
-  --primary: var(--color-accent);
-  --primary-strong: var(--color-accent-strong);
-  --primary-soft: var(--color-accent-soft);
-  --green: var(--color-success);
-  --green-soft: var(--color-success-soft);
-  --amber: var(--color-warning);
-  --amber-soft: var(--color-warning-soft);
-  --red: var(--color-danger);
-  --red-soft: var(--color-danger-soft);
-  --violet: var(--color-violet);
-  --violet-soft: var(--color-violet-soft);
-  --shadow: var(--shadow-panel);
-  --soft-shadow: var(--shadow-soft);
-  --mode-panel: var(--color-surface);
-  --mode-panel-head: var(--color-surface-2);
-  --mode-chat-user: var(--color-accent);
-  --mode-chat-assistant: var(--color-surface);
-  --mode-task-bg: var(--color-surface);
-  --mode-top-accent: oklch(52.5% 0.116 194 / 0.16);
+  /* ── Elevation ── */
+  --shadow-xs: 0 1px 2px oklch(13% 0.018 270 / 0.04);
+  --shadow-sm: 0 2px 6px oklch(13% 0.018 270 / 0.05);
+  --shadow-md: 0 4px 16px oklch(13% 0.018 270 / 0.07);
+  --shadow-lg: 0 8px 32px oklch(13% 0.018 270 / 0.10);
+  --shadow-xl: 0 16px 48px oklch(13% 0.018 270 / 0.14);
 }

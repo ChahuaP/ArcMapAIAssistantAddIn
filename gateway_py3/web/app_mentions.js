@@ -104,7 +104,7 @@
       mentionState.items.forEach((item, index) => {
         const button = document.createElement('button');
         button.type = 'button';
-        button.className = index === mentionState.activeIndex ? 'active' : '';
+        button.className = `mention-item${index === mentionState.activeIndex ? ' active' : ''}`;
         button.innerHTML = `
           <strong>${escapeHtml(item.label)}</strong>
           <span>${escapeHtml(item.kind === 'field' ? '字段 · ' + item.detail : item.detail)}</span>
@@ -309,7 +309,7 @@
     document.addEventListener('keydown', event => {
       if (event.key === 'Escape') {
         hideMentionMenu();
-        document.querySelectorAll('.modal').forEach(modal => { modal.hidden = true; });
+        document.querySelectorAll('.overlay').forEach(modal => { modal.hidden = true; });
       }
     });
 

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import os
+
 from gateway_py3 import arcmap_bridge_client
 from gateway_py3.diagnostics import collect_agent_diagnostics, collect_diagnostics
 from gateway_py3.folder_dialog import select_folder
 from gateway_py3.llm_providers import public_config, save_config
+from gateway_py3.paths import config_path, log_dir
 from gateway_py3.routes import common, external_agent, arcmap, planner, tools, voice
 from gateway_py3.routes.event_topics import publish_mutation_events
 
@@ -105,6 +108,16 @@ def _handle_post(state, path, payload):
         return {"config": save_config(common.config_payload(payload))}
     if path == "/dialog/select-folder":
         return {"folder": select_folder(str(payload.get("title") or "选择文件夹"))}
+    if path == "/open-path":
+        target = payload.get("target")
+        if target == "log_dir":
+            resolved = log_dir()
+        elif target == "config_file":
+            resolved = config_path()
+        else:
+            raise ValueError("不支持的路径类型。")
+        os.startfile(str(resolved))
+        return {"ok": True, "path": str(resolved)}
     if path == "/context":
         context = payload.get("context")
         if not isinstance(context, dict):

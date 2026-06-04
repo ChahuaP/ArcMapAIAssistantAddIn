@@ -19,3 +19,4 @@ release/
 ArcMapBridgeExternal/bin/
 ArcMapBridgeExternal/obj/
 ArcMapAIAssistantAddIn/*.esriaddin
+.hallmark/

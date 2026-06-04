@@ -82,7 +82,7 @@
     }
 
     function closeOnBackdrop(event) {
-      if (event.target.classList.contains('modal')) event.target.hidden = true;
+      if (event.target.classList.contains('overlay')) event.target.hidden = true;
     }
 
     async function openCapabilities() {
@@ -95,6 +95,36 @@
       await loadDiagnostics();
     }
 
+    function openChangelog() {
+      openModal('changelogModal');
+    }
+
+    async function openLogDir() {
+      try {
+        await api('/open-path', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({target: 'log_dir'})
+        });
+        setStatus('已打开日志目录。');
+      } catch (err) {
+        setStatus(err.message);
+      }
+    }
+
+    async function openConfigFile() {
+      try {
+        await api('/open-path', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({target: 'config_file'})
+        });
+        setStatus('已打开配置文件。');
+      } catch (err) {
+        setStatus(err.message);
+      }
+    }
+
     async function openPendingTools() {
       openModal('toolsModal');
       await loadPendingTools();
@@ -102,7 +132,7 @@
 
     async function loadDiagnostics() {
       const box = document.getElementById('diagnosticsList');
-      box.innerHTML = '<div class="section-card">正在检查...</div>';
+      box.innerHTML = '<div class="empty-state-card">正在检查...</div>';
       try {
         const data = await api('/api/diagnostics');
       document.getElementById('diagnosticsSummary').textContent = data.ok
@@ -111,7 +141,7 @@
         renderDiagnostics(data.checks || []);
       } catch (err) {
         document.getElementById('diagnosticsSummary').textContent = '诊断失败。';
-        box.innerHTML = `<div class="section-card">${escapeHtml(err.message)}</div>`;
+        box.innerHTML = `<div class="empty-state-card">${escapeHtml(err.message)}</div>`;
       }
     }
 
@@ -119,17 +149,17 @@
       const labels = {ok: '正常', warn: '提醒', bad: '异常'};
       const box = document.getElementById('diagnosticsList');
       if (!checks.length) {
-        box.innerHTML = '<div class="section-card">没有诊断结果。</div>';
+        box.innerHTML = '<div class="empty-state-card">没有诊断结果。</div>';
         return;
       }
       box.innerHTML = '';
       checks.forEach(item => {
         const status = item.status || 'warn';
         const card = document.createElement('div');
-        card.className = `diagnostic-card ${status}`;
+        card.className = `diag-card ${status}`;
         card.innerHTML = `
-          <span class="diagnostic-state">${escapeHtml(labels[status] || status)}</span>
-          <div>
+          <span class="diag-badge">${escapeHtml(labels[status] || status)}</span>
+          <div class="diag-body">
             <strong>${escapeHtml(item.label || item.id || '')}</strong>
             <p>${escapeHtml(item.detail || '')}</p>
             ${item.path ? `<code>${escapeHtml(item.path)}</code>` : ''}
@@ -148,7 +178,7 @@
           `应用版本 ${data.app_version || EXPECTED_GATEWAY_VERSION}，${data.operation_count} 个能力。`;
         renderCapabilities(data.operations || []);
       } catch (err) {
-        box.innerHTML = `<div class="section-card">${escapeHtml(err.message)}</div>`;
+        box.innerHTML = `<div class="empty-state-card">${escapeHtml(err.message)}</div>`;
       }
     }
 
@@ -174,7 +204,7 @@
           card.innerHTML = `
             <strong>${escapeHtml(operationTitle(operation))}</strong>
             <p>${escapeHtml(operation.summary || '')}</p>
-            ${operation.example ? `<p class="hint">例如：${escapeHtml(operation.example)}</p>` : ''}
+            ${operation.example ? `<p>例如：${escapeHtml(operation.example)}</p>` : ''}
             <code>${escapeHtml(operation.id)}</code>
           `;
           list.appendChild(card);
@@ -270,13 +300,13 @@
       const active = modelWaitStageIndex();
       return `
         <div class="model-wait" aria-live="polite">
-          <div class="model-wait-head">
-            <strong>${escapeHtml(modelWait.label)}</strong>
-            <span>${formatDuration(modelWaitElapsed())}</span>
+          <div class="model-wait-header">
+            <strong class="model-wait-title">${escapeHtml(modelWait.label)}</strong>
+            <span class="model-wait-time">${formatDuration(modelWaitElapsed())}</span>
           </div>
-          <div class="model-wait-bar" aria-hidden="true"><span></span></div>
+          <div class="model-wait-progress" aria-hidden="true"><div class="model-wait-bar"></div></div>
           <div class="model-wait-steps">
-            ${stages.map((stage, index) => `<span class="${index === active ? 'active' : index < active ? 'done' : ''}">${stage}</span>`).join('')}
+            ${stages.map((stage, index) => `<span class="model-wait-step ${index === active ? 'active' : index < active ? 'done' : ''}">${stage}</span>`).join('')}
           </div>
           <div class="model-wait-note">${notes[active]}</div>
         </div>
@@ -285,13 +315,13 @@
 
     function setTile(id, state, text) {
       const tile = document.getElementById(id);
-      tile.className = `status-tile ${state}`;
-      tile.querySelector('strong').textContent = text;
+      tile.className = `status-item ${state}`;
+      tile.querySelector('.status-val').textContent = text;
     }
 
     function setDot(id, ok, warn) {
       const dot = document.getElementById(id);
-      dot.className = 'dot' + (ok ? ' ok' : warn ? ' warn' : '');
+      dot.className = 'config-dot' + (ok ? ' ok' : warn ? ' warn' : '');
     }
 
     async function openHealth(options) {
@@ -304,6 +334,8 @@
       setState({health: data || null});
       const version = data.app_version || '旧版本';
       setTile('gatewayState', 'ok', `已启动，${data.operation_count} 个能力`);
+      const versionNode = document.getElementById('versionInfo');
+      if (versionNode) versionNode.textContent = version;
       if (data.app_version === EXPECTED_GATEWAY_VERSION) {
         updateModeStatus();
       } else {
@@ -461,15 +493,15 @@
         const card = document.createElement('section');
         card.className = 'provider-card';
         card.innerHTML = `
-          <div class="provider-card-head">
+          <div class="provider-card-header">
             <strong>${escapeHtml(provider.label)}</strong>
             <span>${settings.has_api_key ? '可用' : '未配置'}</span>
           </div>
           ${provider.key_fields.map(field => providerKeyFieldHtml(provider, field, settings)).join('')}
           <label for="${providerBaseUrlId(provider.id)}">接口地址</label>
           <input id="${providerBaseUrlId(provider.id)}" type="text" value="${escapeHtml(settings.base_url || '')}" autocomplete="off">
-          <p class="hint">运行时使用：${escapeHtml(providerRuntimeKeyLabel(settings))}</p>
-          ${providerEnvKeys(provider).length ? `<p class="hint">也可使用环境变量 ${escapeHtml(providerEnvKeys(provider).join('、'))}。</p>` : ''}
+          <p class="form-hint">运行时使用：${escapeHtml(providerRuntimeKeyLabel(settings))}</p>
+          ${providerEnvKeys(provider).length ? `<p class="form-hint">也可使用环境变量 ${escapeHtml(providerEnvKeys(provider).join('、'))}。</p>` : ''}
         `;
         box.appendChild(card);
       });
@@ -490,10 +522,10 @@
       const saved = keyStatus[field.field] ? '已保存' : '未配置';
       const hasSavedKey = Boolean(keyStatus[field.field]);
       return `
-        <label for="${providerInputId(provider.id, field.field)}">${escapeHtml(field.label)} <span id="${providerKeyStatusId(provider.id, field.field)}" class="muted">${escapeHtml(saved)}</span></label>
+        <label for="${providerInputId(provider.id, field.field)}">${escapeHtml(field.label)} <span id="${providerKeyStatusId(provider.id, field.field)}" class="form-hint">${escapeHtml(saved)}</span></label>
         <div class="provider-key-row">
           <input id="${providerInputId(provider.id, field.field)}" type="password" placeholder="${escapeHtml(field.placeholder)}" autocomplete="off" oninput="handleProviderKeyInput('${escapeJs(provider.id)}', '${escapeJs(field.field)}')">
-          <button id="${providerClearButtonId(provider.id, field.field)}" type="button" class="danger small" data-saved="${hasSavedKey ? '1' : '0'}" ${hasSavedKey ? '' : 'disabled'} onclick="markProviderKeyForClear('${escapeJs(provider.id)}', '${escapeJs(field.field)}', '${escapeJs(field.label)}')">清除</button>
+          <button id="${providerClearButtonId(provider.id, field.field)}" type="button" class="btn btn-danger btn-sm" data-saved="${hasSavedKey ? '1' : '0'}" ${hasSavedKey ? '' : 'disabled'} onclick="markProviderKeyForClear('${escapeJs(provider.id)}', '${escapeJs(field.field)}', '${escapeJs(field.label)}')">清除</button>
         </div>
       `;
     }
@@ -757,33 +789,33 @@
     function renderPendingTools(tools) {
       const box = document.getElementById('pendingToolsList');
       if (!tools.length) {
-        box.innerHTML = '<div class="section-card">暂无自定义工具。</div>';
+        box.innerHTML = '<div class="empty-state-card">暂无自定义工具。</div>';
         return;
       }
       box.innerHTML = '';
       tools.forEach(tool => {
         const statusText = {pending_review: '待审核', enabled: '已启用', rejected: '已拒绝'}[tool.status] || tool.status;
         const card = document.createElement('div');
-        card.className = 'compact-item';
+        card.className = 'tool-item';
         const revision = ((tool.payload || {}).revision || {}).number || 1;
         card.innerHTML = `
           <strong>${escapeHtml(tool.name)} · ${escapeHtml(statusText)}</strong>
           <p>${escapeHtml(tool.capability)}</p>
-          <p class="hint">${escapeHtml((tool.payload.operation_spec || {}).id || '')} · rev ${escapeHtml(revision)}</p>
+          <p class="form-hint">${escapeHtml((tool.payload.operation_spec || {}).id || '')} · rev ${escapeHtml(revision)}</p>
         `;
         if (tool.status === 'pending_review') {
           const actions = document.createElement('div');
-          actions.className = 'button-row';
+          actions.className = 'tool-actions';
           actions.innerHTML = `
-            <button class="success small" onclick="enableTool('${escapeJs(tool.id)}')">启用</button>
-            <button class="ghost small" onclick="rejectTool('${escapeJs(tool.id)}')">拒绝</button>
-            <button class="danger small" onclick="deleteTool('${escapeJs(tool.id)}')">删除</button>
+            <button class="btn btn-success btn-sm" onclick="enableTool('${escapeJs(tool.id)}')">启用</button>
+            <button class="btn btn-danger-outline btn-sm" onclick="rejectTool('${escapeJs(tool.id)}')">拒绝</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteTool('${escapeJs(tool.id)}')">删除</button>
           `;
           card.appendChild(actions);
         } else {
           const actions = document.createElement('div');
-          actions.className = 'button-row';
-          actions.innerHTML = `<button class="danger small" onclick="deleteTool('${escapeJs(tool.id)}')">删除</button>`;
+          actions.className = 'tool-actions';
+          actions.innerHTML = `<button class="btn btn-danger btn-sm" onclick="deleteTool('${escapeJs(tool.id)}')">删除</button>`;
           card.appendChild(actions);
         }
         box.appendChild(card);

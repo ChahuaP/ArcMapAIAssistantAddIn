@@ -39,7 +39,7 @@ REJECTED_ERRORS = (
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "ArcMapAIAssistantGateway/0.1"
+    server_version = "ArcMapAIAssistantGateway/1.0"
 
     def do_OPTIONS(self):
         self.send_response(204)
