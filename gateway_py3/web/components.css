@@ -241,9 +241,9 @@
 
 .composer-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) 104px;
   gap: 10px;
-  align-items: end;
+  align-items: stretch;
 }
 
 .composer textarea {
@@ -253,8 +253,19 @@
   background: color-mix(in oklch, var(--panel), var(--color-paper) 18%);
 }
 
+.composer-actions {
+  display: grid;
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.composer-actions button {
+  width: 100%;
+  min-height: 0;
+}
+
 .voice-button {
-  min-width: 58px;
+  min-width: 0;
 }
 
 .voice-button.recording {
@@ -270,45 +281,94 @@
   color: var(--primary-strong);
 }
 
-.voice-compare {
-  margin-top: 10px;
-  padding: 10px;
-  border: 1px solid var(--line);
+.voice-panel {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid color-mix(in oklch, var(--primary), var(--line) 62%);
   border-radius: var(--radius-card);
-  background: var(--panel-soft);
+  background:
+    linear-gradient(180deg, color-mix(in oklch, var(--primary-soft), var(--panel) 58%), var(--panel-soft)),
+    var(--panel-soft);
   color: var(--muted);
   font-size: var(--text-sm);
 }
 
-.voice-compare[hidden] {
+.voice-panel[hidden] {
   display: none;
 }
 
-.voice-compare .voice-compare-head {
+.voice-panel-head {
   display: flex;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 6px;
-  color: var(--ink-strong);
-  font-weight: 700;
+  gap: 12px;
 }
 
-.voice-compare p {
-  margin: 4px 0 0;
+.voice-panel-title {
+  min-width: 0;
+}
+
+.voice-panel-title strong,
+.voice-transcript span {
+  display: block;
+  color: var(--ink-strong);
+  font-weight: 760;
+}
+
+.voice-panel-title span {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+
+.voice-panel-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.voice-transcript-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.voice-transcript {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--panel);
+}
+
+.voice-transcript.corrected {
+  border-color: color-mix(in oklch, var(--green), var(--line) 44%);
+  background: var(--green-soft);
+}
+
+.voice-transcript.pending {
+  border-style: dashed;
+  background: color-mix(in oklch, var(--panel), var(--color-paper-2) 42%);
+}
+
+.voice-transcript p {
+  margin: 5px 0 0;
+  color: var(--ink);
   overflow-wrap: anywhere;
 }
 
-.voice-compare button {
-  border: 0;
-  background: transparent;
+.voice-transcript.pending p {
   color: var(--muted);
-  cursor: pointer;
-  font-size: var(--text-sm);
 }
 
 .layer-mention-menu {
   position: absolute;
-  right: 96px;
+  right: 128px;
   bottom: calc(100% - 6px);
   left: 14px;
   z-index: 8;
@@ -701,6 +761,24 @@ pre {
   }
 
   .composer-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .composer-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: none;
+  }
+
+  .voice-panel-head {
+    flex-direction: column;
+  }
+
+  .voice-panel-actions,
+  .voice-panel-actions button {
+    width: 100%;
+  }
+
+  .voice-transcript-grid {
     grid-template-columns: minmax(0, 1fr);
   }
 

@@ -78,10 +78,12 @@
           <div id="mentionMenu" class="layer-mention-menu" hidden></div>
           <div class="composer-row">
             <textarea id="command" aria-label="任务输入" placeholder="输入任务，按 Enter 发送，Shift+Enter 换行"></textarea>
-            <button id="voiceButton" class="ghost voice-button" type="button" onclick="toggleVoiceInput()">语音</button>
-            <button id="sendButton" class="primary" type="button" onclick="submitPlan()">发送</button>
+            <div class="composer-actions">
+              <button id="voiceButton" class="ghost voice-button" type="button" onclick="toggleVoiceInput()">语音</button>
+              <button id="sendButton" class="primary" type="button" onclick="submitPlan()">发送</button>
+            </div>
           </div>
-          <div id="voiceCompare" class="voice-compare" hidden></div>
+          <div id="voiceCompare" class="voice-panel" hidden></div>
         </div>
       </section>
     </main>

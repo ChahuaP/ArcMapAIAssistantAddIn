@@ -2,9 +2,12 @@
     let voiceStream = null;
     let voiceChunks = [];
     let voiceBusy = false;
+    let voiceCorrectionBusy = false;
+    let lastVoiceRawText = '';
+    let lastVoiceCorrectedText = '';
 
     async function toggleVoiceInput() {
-      if (voiceBusy) return;
+      if (voiceBusy || voiceCorrectionBusy) return;
       if (voiceRecorder && voiceRecorder.state === 'recording') {
         voiceRecorder.stop();
         return;
@@ -58,7 +61,7 @@
       }
       voiceBusy = true;
       setVoiceButton('busy', '识别中');
-      setStatus('正在识别语音并校正指令...');
+      setStatus('正在识别语音...');
       try {
         const blob = new Blob(voiceChunks, {type: mimeType});
         const audioDataUri = await blobToDataUri(blob);
@@ -66,20 +69,59 @@
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({
-            audio_data_uri: audioDataUri,
-            mode: currentMode,
-            context: latestArcgisContext || {}
+            audio_data_uri: audioDataUri
           })
         });
-        applyVoiceText(data.text || '');
-        renderVoiceComparison(data.raw_text || '', data.text || '');
-        setStatus(data.raw_text && data.raw_text !== data.text ? '语音已识别并校正。' : '语音已识别。');
+        const text = String(data.text || data.raw_text || '').trim();
+        applyVoiceText(text);
+        lastVoiceRawText = text;
+        lastVoiceCorrectedText = '';
+        renderVoiceComparison(lastVoiceRawText, lastVoiceCorrectedText);
+        setStatus('语音已识别。');
       } catch (err) {
         setStatus(err.message);
       } finally {
         voiceBusy = false;
         voiceChunks = [];
         setVoiceButton('', '语音');
+      }
+    }
+
+    async function correctVoiceText() {
+      if (voiceBusy || voiceCorrectionBusy) return;
+      const input = document.getElementById('command');
+      const text = String((input && input.value) || lastVoiceRawText || '').trim();
+      if (!text) {
+        setStatus('没有可校验的语音文本。');
+        return;
+      }
+      voiceCorrectionBusy = true;
+      setVoiceCorrectionButton(true);
+      setVoiceButton('busy', '语音');
+      setStatus('正在校验语音文本...');
+      try {
+        const data = await api('/voice/correct', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            text,
+            mode: currentMode,
+            context: latestArcgisContext || {}
+          })
+        });
+        const raw = String(data.raw_text || text).trim();
+        const corrected = String(data.text || raw).trim();
+        lastVoiceRawText = raw;
+        lastVoiceCorrectedText = corrected;
+        applyVoiceText(corrected);
+        renderVoiceComparison(lastVoiceRawText, lastVoiceCorrectedText);
+        setStatus(corrected && corrected !== raw ? '语音文本已校验并更新输入框。' : '语音文本已校验。');
+      } catch (err) {
+        setStatus(err.message);
+      } finally {
+        voiceCorrectionBusy = false;
+        setVoiceCorrectionButton(false);
+        if (!voiceBusy) setVoiceButton('', '语音');
       }
     }
 
@@ -102,13 +144,32 @@
         return;
       }
       box.hidden = false;
+      const hasCorrection = Boolean(corrected);
+      const title = hasCorrection ? '已校验' : '已识别';
+      const subtitle = hasCorrection ? '输入框已更新' : '输入框已填入识别文本';
+      const correctionText = hasCorrection ? corrected : '未校验';
+      const actionText = voiceCorrectionBusy ? '校验中' : (hasCorrection ? '重新校验' : '校验文本');
       box.innerHTML = `
-        <div class="voice-compare-head">
-          <span>语音校正</span>
-          <button type="button" onclick="closeVoiceComparison()" aria-label="关闭语音校正结果">×</button>
+        <div class="voice-panel-head">
+          <div class="voice-panel-title">
+            <strong>${title}</strong>
+            <span>${subtitle}</span>
+          </div>
+          <div class="voice-panel-actions">
+            <button id="voiceCorrectButton" class="ghost small" type="button" onclick="correctVoiceText()"${voiceCorrectionBusy ? ' disabled' : ''}>${actionText}</button>
+            <button class="ghost small" type="button" onclick="closeVoiceComparison()" aria-label="关闭语音结果">关闭</button>
+          </div>
         </div>
-        <p><strong>原识别文本：</strong>${escapeHtml(raw || '无')}</p>
-        <p><strong>校正后文本：</strong>${escapeHtml(corrected || '无')}</p>
+        <div class="voice-transcript-grid">
+          <section class="voice-transcript">
+            <span>识别文本</span>
+            <p>${escapeHtml(raw || '无')}</p>
+          </section>
+          <section class="voice-transcript ${hasCorrection ? 'corrected' : 'pending'}">
+            <span>校验结果</span>
+            <p>${escapeHtml(correctionText)}</p>
+          </section>
+        </div>
       `;
     }
 
@@ -143,5 +204,13 @@
       button.disabled = state === 'busy';
     }
 
+    function setVoiceCorrectionButton(isBusy) {
+      const button = document.getElementById('voiceCorrectButton');
+      if (!button) return;
+      button.disabled = Boolean(isBusy);
+      button.textContent = isBusy ? '校验中' : (lastVoiceCorrectedText ? '重新校验' : '校验文本');
+    }
+
     window.toggleVoiceInput = toggleVoiceInput;
+    window.correctVoiceText = correctVoiceText;
     window.closeVoiceComparison = closeVoiceComparison;

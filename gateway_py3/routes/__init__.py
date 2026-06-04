@@ -83,6 +83,8 @@ def _handle_post(state, path, payload):
         return planner.plan_request(state, payload)
     if path == "/voice/transcribe":
         return voice.transcribe(state, payload)
+    if path == "/voice/correct":
+        return voice.correct(state, payload)
     if path == "/agent/workflows/validate":
         return external_agent.validate_workflow(state, payload)
     if path == "/agent/workflows/propose":

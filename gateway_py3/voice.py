@@ -29,20 +29,34 @@ MAX_VOICE_VALUE_PROFILE_LAYERS = 3
 AUDIO_DATA_URI_RE = re.compile(r"^data:audio/[a-z0-9.+-]+(?:;[^,]*)?;base64,([a-z0-9+/=\r\n]+)$", re.IGNORECASE)
 
 
-def transcribe_and_correct(payload: Dict[str, Any], stored_context: Dict[str, Any] | None = None) -> Dict[str, Any]:
-    mode = str(payload.get("mode") or "").strip() or None
+def transcribe_voice(payload: Dict[str, Any]) -> Dict[str, Any]:
     audio_data_uri = payload.get("audio_data_uri")
     if not isinstance(audio_data_uri, str) or not audio_data_uri.strip():
         raise ValueError("缺少语音录音数据。")
-    context = payload.get("context") if isinstance(payload.get("context"), dict) else stored_context
     raw_text = transcribe_qwen_asr(audio_data_uri.strip())
-    command = correct_voice_command(raw_text, context or {}, mode)
     return {
         "raw_text": raw_text,
-        "text": command,
+        "text": raw_text,
         "speech": {
             "provider": "qwen_asr",
             "model": QWEN_ASR_MODEL,
+        },
+    }
+
+
+def correct_transcribed_voice(payload: Dict[str, Any], stored_context: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    mode = str(payload.get("mode") or "").strip() or None
+    raw_text = payload.get("text") if isinstance(payload.get("text"), str) else payload.get("raw_text")
+    if not isinstance(raw_text, str) or not raw_text.strip():
+        raise ValueError("缺少需要校验的语音文本。")
+    context = payload.get("context") if isinstance(payload.get("context"), dict) else stored_context
+    command = correct_voice_command(raw_text, context or {}, mode)
+    return {
+        "raw_text": raw_text.strip(),
+        "text": command,
+        "speech": {
+            "correction": "manual",
+            "mode": mode or "",
         },
     }
 
