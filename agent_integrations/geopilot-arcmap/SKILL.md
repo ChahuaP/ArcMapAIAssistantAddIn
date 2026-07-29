@@ -1,14 +1,14 @@
 ---
 name: geopilot-arcmap
 version: 1.0.0
-description: "Use when Codex needs to inspect or operate ArcMap through the local GeoPilot gateway without calling GeoPilot's own model API: read ArcMap context, run agent diagnostics, read operation capabilities, draft GeoPilot workflow JSON, validate it locally, submit or execute it through ArcMap Bridge, or help with ArcMap GIS tasks such as opening layers, selecting features, analysis, export, geometry creation/editing, data management, layout export, and custom tool drafts."
+description: "Use when Codex needs to run reproducible GeoPilot ArcMap experiments or inspect their results."
 ---
 
 # GeoPilot ArcMap
 
 ## Workflow
 
-Use the local GeoPilot gateway and `ArcMapBridge.exe` as the ArcMap safety and execution bridge. Do not call GeoPilot `/plan`; the active agent does the planning.
+Use the local GeoPilot gateway and `ArcMapBridge.exe` as the ArcMap safety and execution bridge. Use the four experiment modes through the single run interface.
 
 1. Run `scripts/geopilot_cli.py health`.
 2. On first run or when something looks wrong, run `scripts/geopilot_cli.py doctor`.
@@ -22,21 +22,16 @@ Use the local GeoPilot gateway and `ArcMapBridge.exe` as the ArcMap safety and e
    - Bridge-triggered sync/execute is silent in ArcMap. A manual toolbar click on `启动控制台` opens the Web console and reads the current map context.
    - If a detected bridge port is occupied but does not respond, read `%LOCALAPPDATA%\ArcMapAIAssistant\logs\arcmap_bridge.log`.
 5. Run `scripts/geopilot_cli.py arcmap-sync` to make the selected ArcMap read the current context.
-6. Run `scripts/geopilot_cli.py capabilities` to inspect the operation summary and choose only registered operations.
-   - For exact argument schemas, run `scripts/geopilot_cli.py capabilities --detail` before drafting the workflow.
-7. Draft a workflow JSON locally. For non-trivial planning, read `references/planning-contract.md` and `references/workflow-format.md`.
-8. Validate with `scripts/geopilot_cli.py validate --workflow workflow.json`.
-9. If validation fails, fix the workflow and validate again.
-10. If the user confirmed this run, execute with `scripts/geopilot_cli.py arcmap-execute-workflow --confirmed --command "<user request>" --workflow workflow.json`.
-11. If the user enabled full auto, first run `scripts/geopilot_cli.py arcmap-permission --auto-execute`, then execute without asking again.
+6. Create a run with `scripts/geopilot_cli.py run --mode context_single --command "<user request>"`.
+7. Run automatically with `scripts/geopilot_cli.py run --mode multi_agent --command "<request>" --execute --confirmed`; direct edits additionally require `--allow-edits`.
+8. Query the terminal result with `run-status <run_id>` or export reproducibility data with `run-report`.
 
-Use `propose`, `approve-latest`, and `arcmap-execute-approved` only when the user explicitly wants queue review before execution.
+The `run` command is the sole planning and controlled-execution entry point.
 
 ## Hard Rules
 
 - Never execute ArcPy directly from Codex, Claude, WorkBuddy, shell, or this skill.
 - Never invent operations. Use only operation ids returned by `capabilities`.
-- Never call `/plan`; that would make GeoPilot call another model API.
 - Never pass `output_path` in workflow arguments. GeoPilot creates it during ArcMap execution.
 - Never write raw SQL where clauses. Attribute filters must use structured `where` objects.
 - Every execute step must include `id`, `operation`, `arguments`, and `reason`.
@@ -54,6 +49,5 @@ Use `propose`, `approve-latest`, and `arcmap-execute-approved` only when the use
 
 ## References
 
-- Read `references/planning-contract.md` when choosing operations, resolving layer/field intent, handling output locations, or designing custom tools.
 - Read `references/workflow-format.md` when writing workflow JSON, structured `where`, output arguments, or custom tool specs.
 - Read `references/workflow-examples.md` when you need a known-good workflow pattern for common ArcMap requests.

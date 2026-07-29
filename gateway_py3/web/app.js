@@ -6,7 +6,7 @@
     let eventRefreshTimer = 0;
     let pendingEventTypes = new Set();
     let capabilitiesLoaded = false;
-    let currentMode = 'semi_agent';
+    let currentMode = 'context_single';
     let modeInitialized = false;
     let latestArcgisContext = null;
     let arcmapBridges = [];
@@ -357,7 +357,7 @@
     function loadStoredMode() {
       try {
         const mode = localStorage.getItem(MODE_STORAGE_KEY);
-        return (mode === 'semi_agent' || mode === 'full_agent') ? mode : '';
+        return ['direct_single', 'context_single', 'constrained_single', 'multi_agent'].includes(mode) ? mode : '';
       } catch (err) {
         return '';
       }
@@ -377,17 +377,16 @@
     }
 
     async function saveConfig() {
-      const semiModel = parseModelChoice(document.getElementById('semiProvider').value);
-      const fullModel = parseModelChoice(document.getElementById('fullProvider').value);
+      const primaryModel = parseModelChoice(document.getElementById('primaryProvider').value);
+      const reviewerModel = parseModelChoice(document.getElementById('reviewerProvider').value);
       const data = await api('/config', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({
-          default_mode: currentMode,
-          semi_agent_provider: semiModel.provider,
-          semi_agent_model: semiModel.model,
-          full_agent_provider: fullModel.provider,
-          full_agent_model: fullModel.model,
+          primary_provider: primaryModel.provider,
+          primary_model: primaryModel.model,
+          reviewer_provider: reviewerModel.provider,
+          reviewer_model: reviewerModel.model,
           providers: collectProviderConfig()
         })
       });
@@ -404,7 +403,7 @@
       const keyStates = providerKeyStates(providers);
       const ok = keyStates.some(item => item.ok);
       if (!modeInitialized) {
-        currentMode = loadStoredMode() || config.default_mode || currentMode;
+        currentMode = loadStoredMode() || currentMode;
         modeInitialized = true;
       }
       updateModeUI();
@@ -421,8 +420,8 @@
     function renderModelConfig(config) {
       providerOptions = providerList(config);
       modelOptions = Array.isArray(config.model_options) ? config.model_options : [];
-      renderModelSelect('semiProvider', config.semi_agent_provider, config.semi_agent_model);
-      renderModelSelect('fullProvider', config.full_agent_provider, config.full_agent_model);
+      renderModelSelect('primaryProvider', config.primary_provider, config.primary_model);
+      renderModelSelect('reviewerProvider', config.reviewer_provider, config.reviewer_model);
       renderProviderKeyFields(config.providers || {});
       renderCurrentModelHint(config);
     }
@@ -430,10 +429,9 @@
     function renderCurrentModelHint(config) {
       const node = document.getElementById('activeModelHint');
       if (!node || !config) return;
-      const provider = currentMode === 'full_agent' ? config.full_agent_provider : config.semi_agent_provider;
-      const model = currentMode === 'full_agent' ? config.full_agent_model : config.semi_agent_model;
-      const modeLabel = currentMode === 'full_agent' ? '全代理' : '半代理';
-      node.textContent = `${modeLabel}当前使用：${modelOptionLabel(provider, model)}`.trim();
+      const primary = modelOptionLabel(config.primary_provider, config.primary_model);
+      const reviewer = modelOptionLabel(config.reviewer_provider, config.reviewer_model);
+      node.textContent = currentMode === 'multi_agent' ? `G3 规划：${primary}；审计：${reviewer}` : `当前模型：${primary}`;
     }
 
     function renderSpeechConfigHint(config) {
@@ -663,18 +661,16 @@
     }
 
     async function setMode(mode) {
-      if (mode !== 'semi_agent' && mode !== 'full_agent') return;
+      if (!['direct_single', 'context_single', 'constrained_single', 'multi_agent'].includes(mode)) return;
       currentMode = mode;
       storeMode(mode);
       updateModeUI();
-      setStatus(mode === 'full_agent' ? '已切换到全代理模式。' : '已切换到半代理模式。');
+      setStatus(mode === 'multi_agent' ? '已切换到多 Agent 模式。' : '已切换到上下文单模型模式。');
       await refreshWorkflows();
     }
 
     function updateModeUI() {
-      const fullMode = currentMode === 'full_agent';
-      document.getElementById('semiModeButton').classList.toggle('active', !fullMode);
-      document.getElementById('fullModeButton').classList.toggle('active', fullMode);
+      document.querySelectorAll('[data-mode]').forEach((button) => button.classList.toggle('active', button.dataset.mode === currentMode));
       document.getElementById('taskPanelHint').textContent = taskScopeText();
       updateModeStatus();
       renderCurrentModelHint(appState.config);
@@ -770,11 +766,11 @@
     }
 
     function updateModeStatus() {
-      setTile('restartState', 'ok', currentMode === 'full_agent' ? '全代理模式' : '半代理模式');
+      setTile('restartState', 'ok', currentMode);
     }
 
     function taskScopeLabel() {
-      return currentMode === 'full_agent' ? '全代理模式' : '半代理模式';
+      return currentMode;
     }
 
     function taskScopeText() {
@@ -854,7 +850,7 @@
       const requestId = `plan-${Date.now()}-${Math.random().toString(16).slice(2)}`;
       startModelWait('模型正在思考');
       activePlanRequestId = requestId;
-      if (currentMode === 'full_agent') {
+      if (currentMode === 'multi_agent') {
         renderConversation(cachedWorkflows);
       } else {
         selectedWorkflowId = '';
@@ -862,15 +858,15 @@
       }
       try {
         setStatus('正在生成任务...');
-        const data = await api('/plan', {
+        const data = await api('/runs', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({command, mode: currentMode, request_id: requestId})
+          body: JSON.stringify({command, mode: currentMode})
         });
         transientUserMessage = '';
         transientAssistantMessage = '';
-        selectedWorkflowId = data.workflow.id;
-        await refreshWorkflows();
+        selectedWorkflowId = data.run.id;
+        await waitForRun(data.run.id);
       } catch (err) {
         stopModelWait();
         transientAssistantMessage = err.message;
@@ -881,9 +877,23 @@
       }
     }
 
+    async function waitForRun(id) {
+      const terminal = new Set(['planned', 'clarify', 'reject', 'failed', 'cancelled', 'succeeded']);
+      for (let attempt = 0; attempt < 40; attempt += 1) {
+        const data = await api(`/runs/${id}`);
+        if (terminal.has(data.run.status)) {
+          await refreshWorkflows();
+          setStatus(`运行状态：${data.run.status}`);
+          return data.run;
+        }
+        await new Promise((resolve) => setTimeout(resolve, Math.min(250 * (attempt + 1), 2000)));
+      }
+      throw new Error('运行状态轮询超时。');
+    }
+
     async function approve(id) {
       await api(`/workflows/${id}/approve`, {method: 'POST', body: '{}'});
-      await api('/arcmap/execute-approved', {method: 'POST', body: JSON.stringify({confirmed: true, allow_edits: true})});
+      await api('/arcmap/execute-approved', {method: 'POST', body: JSON.stringify({confirmed: true, allow_edits: false})});
       selectedWorkflowId = id;
       setStatus('已发送到 ArcMap 并自动执行。');
       await refreshWorkflows();
@@ -898,7 +908,7 @@
       selectedWorkflowId = '';
       transientUserMessage = '';
       transientAssistantMessage = '';
-      setStatus(currentMode === 'full_agent' ? '已清空全代理会话上下文。' : '已清空。');
+      setStatus(currentMode === 'multi_agent' ? '已清空多 Agent 会话。' : '已清空。');
       await refreshWorkflows();
     }
 

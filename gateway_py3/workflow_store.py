@@ -17,6 +17,13 @@ from .workflow_store_schema import (
 
 
 DB_PATH = data_dir() / "workflows.sqlite"
+RUN_TRANSITIONS = {
+    "running": {"planned", "failed", "cancelled", "clarify", "reject"},
+    "planned": {"approved", "cancelled", "failed"},
+    "approved": {"executing", "cancelled", "failed"},
+    "executing": {"succeeded", "failed", "cancelled"},
+    "succeeded": set(), "failed": set(), "cancelled": set(), "clarify": set(), "reject": set(),
+}
 
 
 class WorkflowStore:
@@ -46,7 +53,7 @@ class WorkflowStore:
         context_hash: str,
         workflow: Dict[str, Any],
         agent_trace: List[Dict[str, Any]],
-        mode: str = "semi_agent"
+        mode: str = "context_single"
     ) -> Dict[str, Any]:
         workflow_id = str(uuid.uuid4())
         now = time.time()
@@ -71,10 +78,153 @@ class WorkflowStore:
             )
         return self.get(workflow_id)
 
+    def create_run(self, command: str, mode: str, context_digest: str) -> Dict[str, Any]:
+        """Create the durable run before any model or ArcMap stage begins."""
+        trace = {
+            "contract": "geopilot-run/v2",
+            "mode": mode,
+            "context_hash": context_digest,
+            "started_at": time.time(),
+            "turns": [],
+            "task_semantics": None,
+            "workflow_versions": [],
+            "audits": [],
+            "validations": [],
+            "usage": [],
+            "stages": [],
+            "counts": {"revisions": 0},
+        }
+        return self._insert(command, mode, context_digest, {}, trace, "running")
+
+    def _insert(self, command, mode, context_digest, workflow, trace, status):
+        workflow_id = str(uuid.uuid4())
+        now = time.time()
+        with self._connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO workflows
+                (id, status, mode, command, context_hash, workflow_json,
+                 agent_trace_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    workflow_id,
+                    status,
+                    mode,
+                    command,
+                    context_digest,
+                    json.dumps(workflow, ensure_ascii=False, sort_keys=True),
+                    json.dumps(
+                        [{"type": "run", "run": trace}],
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    ),
+                    now,
+                    now,
+                ),
+            )
+        return self.get(workflow_id)
+
+    def run_trace(self, run_id: str) -> Dict[str, Any]:
+        trace = self.get(run_id).get("agent_trace") or []
+        if len(trace) != 1 or trace[0].get("type") != "run":
+            raise ValueError("not a run.")
+        return trace[0]["run"]
+
+    def update_run(
+        self,
+        run_id: str,
+        status: str,
+        workflow: Dict[str, Any] | None = None,
+        trace: Dict[str, Any] | None = None,
+        result: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
+        valid_statuses = {
+            "running",
+            "planned",
+            "approved",
+            "executing",
+            "succeeded",
+            "failed",
+            "cancelled",
+            "clarify",
+            "reject",
+        }
+        if status not in valid_statuses:
+            raise ValueError(status)
+        row = self.get(run_id)
+        current = self.run_trace(run_id)
+        if (
+            status != row["status"]
+            and status not in RUN_TRANSITIONS.get(row["status"], set())
+        ):
+            raise ValueError("invalid run transition: %s -> %s" % (row["status"], status))
+        trace = trace or current
+        payload = workflow if workflow is not None else row["workflow"]
+        stored_result = result
+        if stored_result is None:
+            stored_result = row["result"]
+        with self._connection() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE workflows
+                SET status = ?, workflow_json = ?, agent_trace_json = ?,
+                    result_json = ?, updated_at = ?
+                WHERE id = ? AND status = ?
+                """,
+                (
+                    status,
+                    json.dumps(payload, ensure_ascii=False, sort_keys=True),
+                    json.dumps(
+                        [{"type": "run", "run": trace}],
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    ),
+                    (
+                        json.dumps(stored_result, ensure_ascii=False, sort_keys=True)
+                        if stored_result is not None
+                        else None
+                    ),
+                    time.time(),
+                    run_id,
+                    row["status"],
+                ),
+            )
+        if cursor.rowcount != 1:
+            raise ValueError("concurrent run transition rejected.")
+        return self.get(run_id)
+
+    def fail_run(
+        self,
+        run_id: str,
+        stage: str,
+        exc: Exception,
+        trace: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        trace["failure"] = {
+            "stage": stage,
+            "type": type(exc).__name__,
+            "summary": "stage failed",
+        }
+        return self.update_run(
+            run_id,
+            "failed",
+            trace=trace,
+            result={"error": trace["failure"]},
+        )
+
+    def is_cancel_requested(self, run_id: str) -> bool:
+        return self.get(run_id)["status"] == "cancelled"
+
     def get(self, workflow_id: str) -> Dict[str, Any]:
         with self._connection() as conn:
             row = conn.execute(
-                "SELECT id, status, mode, command, context_hash, workflow_json, agent_trace_json, created_at, updated_at, result_json FROM workflows WHERE id = ?",
+                """
+                SELECT id, status, mode, command, context_hash, workflow_json,
+                       agent_trace_json, created_at, updated_at, result_json
+                FROM workflows
+                WHERE id = ?
+                """,
                 (workflow_id,)
             ).fetchone()
         if row is None:
@@ -137,6 +287,9 @@ class WorkflowStore:
         return {"ok": True}
 
     def approve(self, workflow_id: str) -> Dict[str, Any]:
+        row = self.get(workflow_id)
+        if (row.get("agent_trace") or [{}])[0].get("type") == "run":
+            return self._set_status(workflow_id, "approved")
         return self._set_status(workflow_id, "approved_for_arcmap")
 
     def pending(self) -> Optional[Dict[str, Any]]:
@@ -145,7 +298,7 @@ class WorkflowStore:
                 """
                 SELECT id, status, mode, command, context_hash, workflow_json, agent_trace_json, created_at, updated_at, result_json
                 FROM workflows
-                WHERE status = 'approved_for_arcmap'
+                WHERE status IN ('approved_for_arcmap', 'approved')
                 ORDER BY updated_at DESC
                 LIMIT 1
                 """
@@ -167,6 +320,22 @@ class WorkflowStore:
                 (status, json.dumps(result, ensure_ascii=False, sort_keys=True), time.time(), workflow_id)
             )
         return self.get(workflow_id)
+
+    def cancel(self, workflow_id: str) -> Dict[str, Any]:
+        row = self.get(workflow_id)
+        if row["status"] not in ("running", "planned", "approved", "executing"):
+            raise ValueError("run is already terminal.")
+        if (row.get("agent_trace") or [{}])[0].get("type") == "run":
+            return self.update_run(workflow_id, "cancelled")
+        return self._set_status(workflow_id, "cancelled")
+
+    def export_runs(self, mode: str | None = None) -> Dict[str, Any]:
+        runs = []
+        for row in self.list_recent(limit=200, mode=mode, include_trace=True):
+            trace = row.get("agent_trace") or []
+            if len(trace) == 1 and trace[0].get("type") == "run":
+                runs.append({"id": row["id"], "status": row["status"], "mode": row["mode"], "command": row["command"], "context_hash": row["context_hash"], "trace": trace[0]["run"], "result": row["result"]})
+        return {"contract": "geopilot-report/v1", "runs": runs}
 
     def set_state(self, key: str, value: Dict[str, Any]) -> Dict[str, Any]:
         now = time.time()

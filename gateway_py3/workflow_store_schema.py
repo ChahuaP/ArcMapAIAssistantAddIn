@@ -18,7 +18,7 @@ WORKFLOW_COLUMNS = {
 }
 WORKFLOW_COLUMN_DEFINITIONS = {
     "status": "TEXT NOT NULL DEFAULT 'draft'",
-    "mode": "TEXT NOT NULL DEFAULT 'semi_agent'",
+    "mode": "TEXT NOT NULL DEFAULT 'context_single'",
     "command": "TEXT NOT NULL DEFAULT ''",
     "context_hash": "TEXT NOT NULL DEFAULT ''",
     "workflow_json": "TEXT NOT NULL DEFAULT '{}'",

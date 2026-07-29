@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import os
+import uuid
 
 from gateway_py3 import arcmap_bridge_client
 from gateway_py3.diagnostics import collect_agent_diagnostics, collect_diagnostics
 from gateway_py3.folder_dialog import select_folder
 from gateway_py3.llm_providers import public_config, save_config
 from gateway_py3.paths import config_path, log_dir
-from gateway_py3.routes import common, external_agent, arcmap, planner, tools, voice
+from gateway_py3.routes import common, runs, arcmap, tools, voice
 from gateway_py3.routes.event_topics import publish_mutation_events
 
 
@@ -46,6 +47,10 @@ def handle_get(state, path, app_version, query=None):
         return collect_diagnostics(app_version, len(state.catalog.operations))
     if path == "/agent/diagnostics":
         return collect_agent_diagnostics(app_version, len(state.catalog.operations), state)
+    if path == "/runs/report":
+        return runs.report(state, common.optional_query(query, "mode"))
+    if path.startswith("/runs/") and path.count("/") == 2:
+        return {"run": state.store.get(_run_id(path.rsplit("/", 1)[1]))}
     if path == "/pending":
         return {"workflow": state.store.pending()}
     if path == "/arcmap/health":
@@ -82,16 +87,14 @@ def handle_post(state, path, payload):
 
 
 def _handle_post(state, path, payload):
-    if path == "/plan":
-        return planner.plan_request(state, payload)
     if path == "/voice/transcribe":
         return voice.transcribe(state, payload)
     if path == "/voice/correct":
         return voice.correct(state, payload)
-    if path == "/agent/workflows/validate":
-        return external_agent.validate_workflow(state, payload)
-    if path == "/agent/workflows/propose":
-        return external_agent.propose_workflow(state, payload)
+    if path == "/runs":
+        return runs.create(state, payload)
+    if path.startswith("/runs/") and path.endswith("/cancel") and path.count("/") == 3:
+        return runs.cancel(state, _run_id(path.split("/")[2]))
     if path == "/arcmap/sync":
         return arcmap.sync_context(state)
     if path == "/arcmap/register":
@@ -102,8 +105,6 @@ def _handle_post(state, path, payload):
         return arcmap.set_permission(state, payload)
     if path == "/arcmap/execute-approved":
         return arcmap.execute_approved(state, payload)
-    if path == "/arcmap/execute-workflow":
-        return arcmap.execute_workflow(state, payload)
     if path == "/config":
         return {"config": save_config(common.config_payload(payload))}
     if path == "/dialog/select-folder":
@@ -133,8 +134,6 @@ def _handle_post(state, path, payload):
         return {"workflow": state.store.finish(payload["workflow_id"], payload["status"], payload.get("result", {}))}
     if path == "/workflows/clear":
         return state.store.clear_workflows(payload.get("mode"))
-    if path.startswith("/workflows/") and path.endswith("/repair-custom-tool"):
-        return planner.repair_custom_tool_workflow(state, path.split("/")[2], payload)
     if path.startswith("/workflows/") and path.endswith("/delete"):
         return state.store.delete(path.split("/")[2])
     if path.startswith("/tools/") and path.endswith("/enable"):
@@ -144,3 +143,10 @@ def _handle_post(state, path, payload):
     if path.startswith("/tools/") and path.endswith("/delete"):
         return tools.delete_pending_tool(state, path.split("/")[2])
     return None
+
+
+def _run_id(value):
+    parsed = uuid.UUID(value)
+    if str(parsed) != value:
+        raise ValueError("run id must be a canonical UUID.")
+    return value

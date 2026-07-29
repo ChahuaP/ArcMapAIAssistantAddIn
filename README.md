@@ -74,20 +74,13 @@ GeoPilot 由四个核心模块组成，各司其职：
 用户输入指令
     │
     ▼
-Web 控制台 ──POST /plan──▶ Gateway
+Web 控制台 ──POST /runs──▶ Gateway
     │                         │
     │                    读取 ArcMap 上下文
-    │                    调用 LLM 规划工作流
-    │                    校验工作流（操作目录）
+│                    按 G0–G3 消融模式生成或接收工作流
+│                    校验工作流（操作目录）并受控执行
     │                         │
-    │◀── 返回工作流 ──────────┘
-    │
-    ▼
-用户在 Web 控制台审核工作流
-    │
-    │  确认执行
-    ▼
-Web 控制台 ──POST /workflows/:id/approve──▶ Gateway
+│◀── 返回运行状态与工作流 ─┘
     │                                         │
     │                                    转发到 ArcMap Runtime
     │                                         │
@@ -480,7 +473,8 @@ geopilot/
 ├── gateway_py3/                本地 Python 3 网关
 │   ├── app.py                  HTTP 服务器入口
 │   ├── __main__.py             命令行启动入口
-│   ├── planner.py              LLM 工作流规划器
+│   ├── experiments.py          G0–G3 实验规划与审计链
+│   ├── run_controller.py       运行生命周期与受控执行器
 │   ├── llm_providers.py        多供应商 LLM 适配层
 │   ├── catalog_loader.py       操作目录加载器
 │   ├── validators.py           工作流校验器
@@ -491,10 +485,9 @@ geopilot/
 │   ├── event_bus.py            SSE 事件流服务
 │   ├── arcmap_bridge_client.py ArcMap Bridge 通信客户端
 │   ├── routes/                 API 路由
-│   │   ├── planner.py          /plan 路由
+│   │   ├── runs.py             /runs 运行路由
 │   │   ├── arcmap.py           /arcmap/* 路由
 │   │   ├── common.py           /health, /config 等公共路由
-│   │   └── external_agent.py   /agent/* 外部代理路由
 │   └── web/                    Web 控制台前端
 │       ├── index.html          主页面（三栏布局）
 │       ├── tokens.css          设计令牌（颜色、字体、间距）
@@ -606,14 +599,13 @@ def execute_near_analysis(params, context):
 
 ## 外部 Agent 集成
 
-GeoPilot 提供了 `/agent/*` 系列 API，支持外部 AI Agent（如 Qoder CLI）直接调用：
+外部编排器通过同一组 `/runs` API 提交任务或严格的结构化产物；所有提交都经过相同的审计、校验、权限与执行链：
 
 ```text
-GET  /agent/diagnostics      检查网关状态和配置
-POST /agent/plan             提交任务规划
-POST /agent/execute          执行已审批的工作流
-GET  /agent/arcmap-list      列出所有 ArcMap 窗口
-POST /agent/arcmap-select    选择目标 ArcMap 窗口
+POST /runs                   创建运行（可选自动执行）
+GET  /runs/{id}              查询运行状态与结果
+POST /runs/{id}/cancel       协作式取消运行
+GET  /runs/report            导出可复现实验报告（可按 mode 筛选）
 ```
 
 Agent 集成配置文件位于 `agent_integrations/geopilot-arcmap/SKILL.md`，定义了 Agent 可以调用的能力和参数。

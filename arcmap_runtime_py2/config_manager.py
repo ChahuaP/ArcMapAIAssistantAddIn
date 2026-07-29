@@ -34,11 +34,10 @@ def save_deepseek_key(api_key):
     for key in ("deepseek_api_key", "model", "base_url"):
         if key in config:
             del config[key]
-    config.setdefault("default_mode", "semi_agent")
-    config.setdefault("semi_agent_provider", "deepseek")
-    config.setdefault("semi_agent_model", "deepseek-v4-flash-thinking")
-    config.setdefault("full_agent_provider", "minimax")
-    config.setdefault("full_agent_model", "MiniMax-M3")
+    config.setdefault("primary_provider", "deepseek")
+    config.setdefault("primary_model", "deepseek-v4-flash-thinking")
+    config.setdefault("reviewer_provider", "minimax")
+    config.setdefault("reviewer_model", "MiniMax-M3")
     providers = config.setdefault("providers", {})
     providers["deepseek"] = {
         "api_key": api_key,

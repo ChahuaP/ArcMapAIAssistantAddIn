@@ -88,13 +88,15 @@
           <h2 class="mode-heading">选择代理强度</h2>
         </div>
         <div class="mode-tabs">
-          <button id="semiModeButton" class="mode-tab active" type="button" onclick="setMode('semi_agent')">
-            <strong>半代理</strong>
-            <span>单次任务，短上下文</span>
+          <button class="mode-tab" data-mode="direct_single" type="button" onclick="setMode('direct_single')"><strong>G0 直接单模型</strong><span>无 ArcMap 上下文输入</span></button>
+          <button class="mode-tab active" data-mode="context_single" type="button" onclick="setMode('context_single')">
+            <strong>G1 上下文单模型</strong>
+            <span>提供规范化当前上下文</span>
           </button>
-          <button id="fullModeButton" class="mode-tab" type="button" onclick="setMode('full_agent')">
-            <strong>全代理</strong>
-            <span>持续会话，长上下文</span>
+          <button class="mode-tab" data-mode="constrained_single" type="button" onclick="setMode('constrained_single')"><strong>G2 约束单模型</strong><span>语义、工作流与校验修订</span></button>
+          <button class="mode-tab" data-mode="multi_agent" type="button" onclick="setMode('multi_agent')">
+            <strong>G3 多 Agent</strong>
+            <span>语义、规划、独立审计</span>
           </button>
         </div>
       </div>
@@ -258,10 +260,10 @@
           </div>
           <p class="form-hint" id="activeModelHint">当前模式使用的模型检查中。</p>
           <form onsubmit="event.preventDefault(); saveConfig();">
-            <label for="semiProvider">半代理模型</label>
-            <select id="semiProvider"></select>
-            <label for="fullProvider">全代理模型</label>
-            <select id="fullProvider"></select>
+            <label for="primaryProvider">规划模型</label>
+            <select id="primaryProvider"></select>
+            <label for="reviewerProvider">审计模型</label>
+            <select id="reviewerProvider"></select>
             <div id="providerKeyFields" class="provider-grid"></div>
             <div class="form-actions">
               <button type="submit" class="btn btn-primary btn-sm">保存</button>

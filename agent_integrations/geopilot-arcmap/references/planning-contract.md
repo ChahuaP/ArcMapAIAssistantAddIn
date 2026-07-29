@@ -1,6 +1,6 @@
 # GeoPilot Planning Contract
 
-GeoPilot is the execution bridge for ArcMap. The external agent is the planner.
+GeoPilot owns structured planning, validation, and controlled ArcMap execution.
 
 ## Core planning rules
 

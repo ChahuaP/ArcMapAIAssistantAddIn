@@ -11,12 +11,9 @@ from gateway_py3.gateway_state import GatewayState
 from gateway_py3.llm_providers import ProviderError
 from gateway_py3.logs import write_event
 from gateway_py3.paths import WEB_ROOT
-from gateway_py3.planner import PlannerError
 from gateway_py3.routes import arcmap as arcmap_routes
 from gateway_py3.routes import common as route_common
-from gateway_py3.routes import external_agent as external_agent_routes
 from gateway_py3.routes import handle_get, handle_post
-from gateway_py3.routes import planner as planner_routes
 from gateway_py3.static_server import is_static_path, serve_static
 from gateway_py3.tool_builder import ToolBuilderError
 from gateway_py3.validators import ValidationError
@@ -29,7 +26,6 @@ STATE = GatewayState()
 REJECTED_ERRORS = (
     KeyError,
     FolderDialogError,
-    PlannerError,
     ProviderError,
     ToolBuilderError,
     ValidationError,
@@ -119,18 +115,6 @@ def main():
     server.serve_forever()
 
 
-def _plan_request(payload):
-    return planner_routes.plan_request(STATE, payload, port_checker=_is_local_port_open)
-
-
-def _external_agent_validate(payload):
-    return external_agent_routes.validate_workflow(STATE, payload)
-
-
-def _external_agent_propose(payload):
-    return external_agent_routes.propose_workflow(STATE, payload)
-
-
 def _arcmap_sync():
     return arcmap_routes.sync_context(STATE, port_checker=_is_local_port_open)
 
@@ -153,10 +137,6 @@ def _arcmap_set_permission(payload):
 
 def _arcmap_execute_approved(payload):
     return arcmap_routes.execute_approved(STATE, payload, port_checker=_is_local_port_open)
-
-
-def _arcmap_execute_workflow(payload):
-    return arcmap_routes.execute_workflow(STATE, payload, port_checker=_is_local_port_open)
 
 
 def _arcmap_bridges():

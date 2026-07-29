@@ -18,8 +18,6 @@ MINIMAX_PROVIDER = "minimax"
 ZHIPU_PROVIDER = "zhipu"
 QWEN_PROVIDER = "qwen"
 SUPPORTED_PROVIDERS = (DEEPSEEK_PROVIDER, MINIMAX_PROVIDER, ZHIPU_PROVIDER, QWEN_PROVIDER)
-SEMI_AGENT_MODE = "semi_agent"
-FULL_AGENT_MODE = "full_agent"
 MINIMAX_TOKEN_PLAN_BASE_URL = "https://api.minimaxi.com/v1"
 MINIMAX_MODEL = "MiniMax-M3"
 ZHIPU_BASE_URL = "https://open.bigmodel.cn/api/paas/v4"
@@ -76,11 +74,10 @@ THINKING_MODELS = {
 }
 
 DEFAULT_CONFIG = {
-    "default_mode": SEMI_AGENT_MODE,
-    "semi_agent_provider": DEEPSEEK_PROVIDER,
-    "semi_agent_model": "deepseek-v4-flash-thinking",
-    "full_agent_provider": MINIMAX_PROVIDER,
-    "full_agent_model": MINIMAX_MODEL,
+    "primary_provider": DEEPSEEK_PROVIDER,
+    "primary_model": "deepseek-v4-flash-thinking",
+    "reviewer_provider": MINIMAX_PROVIDER,
+    "reviewer_model": MINIMAX_MODEL,
     "providers": {
         DEEPSEEK_PROVIDER: {
             "model": "deepseek-v4-flash-thinking",
@@ -320,10 +317,22 @@ class QwenProvider(ChatProvider):
     provider_id = QWEN_PROVIDER
 
 
-def create_provider(mode: str | None = None, provider_id: str | None = None) -> ChatProvider:
+def create_provider(
+    mode: str | None = None,
+    provider_id: str | None = None,
+    model_id: str | None = None,
+) -> ChatProvider:
     config = load_config()
-    selected = provider_id or provider_for_mode(mode or config["default_mode"], config)
-    model = provider_settings(selected, config)["model"] if provider_id else model_for_mode(mode or config["default_mode"], config)
+    selected = provider_id or provider_for_mode(mode or "context_single", config)
+    if selected not in SUPPORTED_PROVIDERS:
+        raise ProviderError("未知模型供应商：%s。" % selected)
+    if model_id is not None:
+        model = str(model_id).strip()
+        _validate_provider_model(selected, model)
+    elif provider_id:
+        model = provider_settings(selected, config)["model"]
+    else:
+        model = model_for_mode(mode or "context_single", config)
     base_url = provider_settings(selected, config)["base_url"]
     if selected == DEEPSEEK_PROVIDER:
         return DeepSeekProvider(model=model, base_url=base_url)
@@ -350,7 +359,7 @@ def save_config(config: Dict[str, Any]) -> Dict[str, Any]:
     try:
         existing = load_config()
     except ProviderError:
-        existing = _normalized_config(_read_existing_config_payload(), validate=False)
+        existing = _recoverable_config(_read_existing_config_payload())
         validate_existing = False
     merged = _merge_config(existing, config, validate_existing=validate_existing)
     with path.open("w", encoding="utf-8-sig") as f:
@@ -364,7 +373,7 @@ def public_config(config: Dict[str, Any] | None = None) -> Dict[str, Any]:
         try:
             config = load_config()
         except ProviderError as exc:
-            config = _normalized_config(_read_existing_config_payload(), validate=False)
+            config = _recoverable_config(_read_existing_config_payload())
             config_error = str(exc)
     status = config_status(config)
     providers = {}
@@ -380,11 +389,10 @@ def public_config(config: Dict[str, Any] | None = None) -> Dict[str, Any]:
             "api_key_source": provider_api_key_source(provider_id, config),
         }
     return {
-        "default_mode": config["default_mode"],
-        "semi_agent_provider": config["semi_agent_provider"],
-        "semi_agent_model": config["semi_agent_model"],
-        "full_agent_provider": config["full_agent_provider"],
-        "full_agent_model": config["full_agent_model"],
+        "primary_provider": config["primary_provider"],
+        "primary_model": config["primary_model"],
+        "reviewer_provider": config["reviewer_provider"],
+        "reviewer_model": config["reviewer_model"],
         "providers": providers,
         "provider_options": [dict(item) for item in PROVIDER_OPTIONS],
         "model_options": [dict(item) for item in MODEL_OPTIONS],
@@ -425,16 +433,12 @@ def speech_settings(config: Dict[str, Any] | None = None) -> Dict[str, str]:
 
 def provider_for_mode(mode: str | None, config: Dict[str, Any] | None = None) -> str:
     config = config or load_config()
-    if mode == FULL_AGENT_MODE:
-        return config["full_agent_provider"]
-    return config["semi_agent_provider"]
+    return config["reviewer_provider"] if mode == "multi_agent" else config["primary_provider"]
 
 
 def model_for_mode(mode: str | None, config: Dict[str, Any] | None = None) -> str:
     config = config or load_config()
-    if mode == FULL_AGENT_MODE:
-        return config["full_agent_model"]
-    return config["semi_agent_model"]
+    return config["reviewer_model"] if mode == "multi_agent" else config["primary_model"]
 
 
 def provider_settings(provider_id: str, config: Dict[str, Any] | None = None) -> Dict[str, str]:
@@ -730,27 +734,66 @@ def _extract_http_error_message(detail: str) -> str:
 
 
 def _normalized_config(config: Dict[str, Any], validate: bool = True) -> Dict[str, Any]:
+    allowed_top_level = {
+        "primary_provider",
+        "primary_model",
+        "reviewer_provider",
+        "reviewer_model",
+        "providers",
+        "speech",
+    }
+    unknown_top_level = set(config) - allowed_top_level
+    if unknown_top_level:
+        raise ProviderError(
+            "配置文件包含未知字段：%s。请在网页右上角重新保存配置。"
+            % "、".join(sorted(unknown_top_level))
+        )
+
     normalized = json.loads(json.dumps(DEFAULT_CONFIG))
-    providers = config.get("providers") if isinstance(config.get("providers"), dict) else {}
+    if "providers" in config and not isinstance(config["providers"], dict):
+        raise ProviderError("providers must be an object.")
+    providers = config.get("providers") or {}
+    unknown_providers = set(providers) - set(SUPPORTED_PROVIDERS)
+    if unknown_providers:
+        raise ProviderError(
+            "配置文件包含未知供应商：%s。"
+            % "、".join(sorted(unknown_providers))
+        )
     for provider_id in SUPPORTED_PROVIDERS:
-        normalized["providers"][provider_id].update(providers.get(provider_id) or {})
+        provider_config = providers.get(provider_id) or {}
+        allowed_provider_fields = {
+            "model",
+            "base_url",
+            *PROVIDER_SECRET_FIELDS[provider_id],
+        }
+        unknown_provider_fields = set(provider_config) - allowed_provider_fields
+        if unknown_provider_fields:
+            raise ProviderError(
+                "供应商 %s 配置包含未知字段：%s。"
+                % (provider_id, "、".join(sorted(unknown_provider_fields)))
+            )
+        normalized["providers"][provider_id].update(provider_config)
         normalized["providers"][provider_id]["model"] = _normalize_model_id(normalized["providers"][provider_id]["model"])
 
-    obsolete_keys = [key for key in ("deepseek_api_key", "model", "base_url") if key in config]
-    if obsolete_keys:
-        raise ProviderError("配置文件使用旧字段：%s。请在网页右上角重新保存 API Key。" % "、".join(obsolete_keys))
-
-    for key in ("default_mode", "semi_agent_provider", "full_agent_provider"):
+    for key in ("primary_provider", "reviewer_provider"):
         if config.get(key):
             normalized[key] = config[key]
-    for key in ("semi_agent_model", "full_agent_model"):
+    for key in ("primary_model", "reviewer_model"):
         if config.get(key):
             normalized[key] = _normalize_model_id(config[key])
-    for model_key, provider_key in (("semi_agent_model", "semi_agent_provider"), ("full_agent_model", "full_agent_provider")):
+    for model_key, provider_key in (("primary_model", "primary_provider"), ("reviewer_model", "reviewer_provider")):
         if not config.get(model_key):
-            normalized[model_key] = _default_model_for_provider(normalized[provider_key])
+            normalized[model_key] = _fallback_model_for_provider(normalized[provider_key])
+    if "speech" in config and not isinstance(config["speech"], dict):
+        raise ProviderError("speech must be an object.")
     if isinstance(config.get("speech"), dict):
         speech = config["speech"]
+        unknown_speech_fields = set(speech) - {"provider", "model"}
+        if unknown_speech_fields:
+            raise ProviderError(
+                "语音配置包含未知字段：%s。"
+                % "、".join(sorted(unknown_speech_fields))
+            )
         for key in ("provider", "model"):
             if isinstance(speech.get(key), str) and speech[key].strip():
                 normalized["speech"][key] = speech[key].strip()
@@ -759,12 +802,52 @@ def _normalized_config(config: Dict[str, Any], validate: bool = True) -> Dict[st
     return normalized
 
 
+def _recoverable_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Keep safe current fields visible while an invalid saved config is repaired."""
+    accepted = {}
+    for key in (
+        "primary_provider",
+        "primary_model",
+        "reviewer_provider",
+        "reviewer_model",
+    ):
+        if key in config:
+            accepted[key] = config[key]
+
+    providers = config.get("providers")
+    if isinstance(providers, dict):
+        accepted["providers"] = {}
+        for provider_id in SUPPORTED_PROVIDERS:
+            provider_config = providers.get(provider_id)
+            if not isinstance(provider_config, dict):
+                continue
+            allowed_fields = {
+                "model",
+                "base_url",
+                *PROVIDER_SECRET_FIELDS[provider_id],
+            }
+            accepted["providers"][provider_id] = {
+                key: value
+                for key, value in provider_config.items()
+                if key in allowed_fields
+            }
+
+    speech = config.get("speech")
+    if isinstance(speech, dict):
+        accepted["speech"] = {
+            key: value
+            for key, value in speech.items()
+            if key in {"provider", "model"}
+        }
+    return _normalized_config(accepted, validate=False)
+
+
 def _merge_config(existing: Dict[str, Any], patch: Dict[str, Any], validate_existing: bool = True) -> Dict[str, Any]:
     merged = _normalized_config(existing, validate=validate_existing)
-    for key in ("default_mode", "semi_agent_provider", "full_agent_provider"):
+    for key in ("primary_provider", "reviewer_provider"):
         if patch.get(key):
             merged[key] = str(patch[key]).strip()
-    for key in ("semi_agent_model", "full_agent_model"):
+    for key in ("primary_model", "reviewer_model"):
         if patch.get(key):
             merged[key] = str(patch[key]).strip()
     providers = patch.get("providers") if isinstance(patch.get("providers"), dict) else {}
@@ -792,16 +875,13 @@ def _merge_config(existing: Dict[str, Any], patch: Dict[str, Any], validate_exis
 
 
 def _validate_config(config: Dict[str, Any]) -> None:
-    for mode_key in ("default_mode",):
-        if config[mode_key] not in (SEMI_AGENT_MODE, FULL_AGENT_MODE):
-            raise ProviderError("未知工作模式：%s。" % config[mode_key])
-    for key in ("semi_agent_provider", "full_agent_provider"):
+    for key in ("primary_provider", "reviewer_provider"):
         if config[key] not in SUPPORTED_PROVIDERS:
             raise ProviderError("未知模型供应商：%s。" % config[key])
     for provider_id in SUPPORTED_PROVIDERS:
         _validate_provider_model(provider_id, config["providers"][provider_id]["model"])
-    _validate_mode_model(config, "semi_agent_provider", "semi_agent_model")
-    _validate_mode_model(config, "full_agent_provider", "full_agent_model")
+    _validate_mode_model(config, "primary_provider", "primary_model")
+    _validate_mode_model(config, "reviewer_provider", "reviewer_model")
     speech = speech_settings(config)
     if speech["provider"] != "qwen_asr":
         raise ProviderError("未知语音识别供应商：%s。" % speech["provider"])
@@ -824,7 +904,7 @@ def _normalize_model_id(model: str) -> str:
     return str(model).strip()
 
 
-def _default_model_for_provider(provider_id: str) -> str:
+def _fallback_model_for_provider(provider_id: str) -> str:
     options = MODEL_OPTIONS_BY_PROVIDER.get(provider_id) or []
     if not options:
         raise ProviderError("未知模型供应商：%s。" % provider_id)

@@ -4,7 +4,6 @@ import socket
 import time
 
 from gateway_py3 import arcmap_bridge_client
-from gateway_py3.routes import external_agent
 from gateway_py3.validators import context_hash
 
 
@@ -96,25 +95,14 @@ def execute_approved(state, payload, port_checker=None):
     if not row:
         raise ValueError("没有已审批的工作流。")
     allow_edits = execution_permission(state, payload, row)
+    if (row.get("agent_trace") or [{}])[0].get("type") == "run":
+        state.store.update_run(row["id"], "executing")
     bridge = active_bridge(state, port_checker=port_checker)
     result = arcmap_bridge_client.execute_approved(allow_edits=allow_edits, port=bridge["port"], hwnd=bridge.get("hwnd"))
     result["bridge"] = bridge
+    if (row.get("agent_trace") or [{}])[0].get("type") == "run":
+        state.store.update_run(row["id"], "succeeded", result={"execution": result})
     return result
-
-
-def execute_workflow(state, payload, port_checker=None):
-    proposed = external_agent.propose_workflow(state, payload)
-    row = proposed["workflow"]
-    state.store.approve(row["id"])
-    allow_edits = execution_permission(state, payload, row)
-    bridge = active_bridge(state, port_checker=port_checker)
-    result = arcmap_bridge_client.execute_approved(allow_edits=allow_edits, port=bridge["port"], hwnd=bridge.get("hwnd"))
-    result["bridge"] = bridge
-    return {
-        "ok": True,
-        "workflow": state.store.get(row["id"]),
-        "execution": result
-    }
 
 
 def execution_permission(state, payload, row):

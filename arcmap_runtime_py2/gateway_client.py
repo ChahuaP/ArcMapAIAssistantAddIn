@@ -126,8 +126,16 @@ def start_gateway():
         raise RuntimeError(u"无法启动本地网关：%s" % exc)
 
 
-def plan(command, context):
-    return _post("/plan", {"command": command, "context": context}, timeout=PLAN_TIMEOUT_SECONDS)
+def create_run(command, context, mode="context_single"):
+    payload = {
+        "command": command,
+        "context": context,
+        "mode": mode,
+        "execute": False,
+        "confirmed": False,
+        "allow_edits": False,
+    }
+    return _post("/runs", payload, timeout=PLAN_TIMEOUT_SECONDS)
 
 
 def pending():

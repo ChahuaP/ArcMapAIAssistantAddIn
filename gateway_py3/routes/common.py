@@ -15,7 +15,7 @@ QUIET_ACCESS_PATHS = (
 
 def config_payload(payload):
     allowed = {}
-    for key in ("default_mode", "semi_agent_provider", "semi_agent_model", "full_agent_provider", "full_agent_model"):
+    for key in ("primary_provider", "primary_model", "reviewer_provider", "reviewer_model"):
         if payload.get(key):
             allowed[key] = payload[key]
     providers = payload.get("providers") if isinstance(payload.get("providers"), dict) else {}

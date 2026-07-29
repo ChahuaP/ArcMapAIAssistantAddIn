@@ -1,7 +1,7 @@
     function renderConversation(workflows) {
       const chat = document.getElementById('chatLog');
       chat.innerHTML = '';
-      if (currentMode === 'full_agent') {
+      if (currentMode === 'multi_agent') {
         const items = visibleWorkflows(workflows).slice().reverse();
         if (!items.length && !transientUserMessage) {
           renderEmptyChat();
@@ -264,7 +264,7 @@
         selectedWorkflowId = '';
         return;
       }
-      if (transientUserMessage && currentMode !== 'full_agent' && !selectedWorkflowId) return;
+      if (transientUserMessage && currentMode !== 'multi_agent' && !selectedWorkflowId) return;
       if (!visible.some(item => item.id === selectedWorkflowId)) {
         selectedWorkflowId = visible[0].id;
       }
@@ -275,7 +275,7 @@
     }
 
     function workflowMode(item) {
-      return item.mode || 'semi_agent';
+      return item.mode || 'context_single';
     }
 
     function visibleWorkflows(workflows) {

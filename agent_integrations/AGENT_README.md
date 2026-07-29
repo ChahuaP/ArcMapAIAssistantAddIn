@@ -16,7 +16,6 @@ The copied skill folder must keep this structure:
 geopilot-arcmap/
   SKILL.md
   agents/openai.yaml
-  references/planning-contract.md
   references/workflow-format.md
   scripts/geopilot_cli.py
 ```
@@ -24,11 +23,11 @@ geopilot-arcmap/
 ## How to use after installing
 
 1. Open ArcMap with the GeoPilot Python Add-in enabled.
-3. Ask the agent to use `geopilot-arcmap`.
-4. The agent should call `scripts/geopilot_cli.py` instead of GeoPilot `/plan`.
-5. The agent must call `arcmap-list` before any ArcMap sync or execution. This call starts `ArcMapBridge.exe` through the Gateway and discovers ArcMap targets.
-6. If multiple ArcMap instances are open, select one with `arcmap-select --hwnd <hwnd>`.
-7. The agent should call `arcmap-sync` and `arcmap-execute-workflow` directly for normal ArcMap operation.
+2. Ask the agent to use `geopilot-arcmap`.
+3. The agent should call `scripts/geopilot_cli.py run` for all planning and controlled execution.
+4. The agent must call `arcmap-list` before any ArcMap sync or execution. This call starts `ArcMapBridge.exe` through the Gateway and discovers ArcMap targets.
+5. If multiple ArcMap instances are open, select one with `arcmap-select --hwnd <hwnd>`.
+6. The agent should call `run --execute --confirmed` for normal controlled ArcMap operation.
 
 ## Important boundary
 
@@ -36,4 +35,3 @@ geopilot-arcmap/
 - GeoPilot validates and queues the workflow.
 - `ArcMapBridge.exe` accepts local HTTP requests, finds ArcMap through the Running Object Table, writes a silent command payload, and dispatches sync/execute through the single ArcMap Python Add-in command `openAssistantButton`. Bridge-triggered commands are silent; the manual toolbar button only starts the Web console.
 - The agent must not execute ArcPy directly.
-- The agent must not call GeoPilot `/plan`, because that would call another model API.
