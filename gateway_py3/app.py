@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -20,7 +21,7 @@ from gateway_py3.validators import ValidationError
 
 
 HOST = "127.0.0.1"
-PORT = 8765
+PORT = int(os.environ.get("GEOPILOT_GATEWAY_PORT", "8765"))
 APP_VERSION = "1.0.0"
 STATE = GatewayState()
 REJECTED_ERRORS = (
@@ -133,10 +134,6 @@ def _arcmap_set_active(payload):
 
 def _arcmap_set_permission(payload):
     return arcmap_routes.set_permission(STATE, payload)
-
-
-def _arcmap_execute_approved(payload):
-    return arcmap_routes.execute_approved(STATE, payload, port_checker=_is_local_port_open)
 
 
 def _arcmap_bridges():

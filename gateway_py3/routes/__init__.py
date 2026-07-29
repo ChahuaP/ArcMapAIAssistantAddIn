@@ -23,15 +23,13 @@ def handle_get(state, path, app_version, query=None):
         return {"config": public_config()}
     if path == "/context":
         return {"context": state.store.get_state("arcmap_context")}
-    if path == "/api/workflows":
-        return {"workflows": state.store.list_recent(
+    if path == "/api/runs":
+        return {"runs": state.store.list_recent(
             limit=common.int_query(query, "limit", 50),
             mode=common.optional_query(query, "mode"),
             since=common.float_query(query, "since"),
             include_trace=common.bool_query(query, "include_trace", False),
         )}
-    if path.startswith("/workflows/") and path.count("/") == 2:
-        return {"workflow": state.store.get(path.split("/")[2])}
     if path == "/api/workbench-state":
         return workbench_state(state, app_version)
     if path == "/tools/pending":
@@ -51,8 +49,6 @@ def handle_get(state, path, app_version, query=None):
         return runs.report(state, common.optional_query(query, "mode"))
     if path.startswith("/runs/") and path.count("/") == 2:
         return {"run": state.store.get(_run_id(path.rsplit("/", 1)[1]))}
-    if path == "/pending":
-        return {"workflow": state.store.pending()}
     if path == "/arcmap/health":
         return arcmap.health(state)
     if path == "/arcmap/bridges":
@@ -103,8 +99,11 @@ def _handle_post(state, path, payload):
         return arcmap.set_active(state, payload)
     if path == "/arcmap/permission":
         return arcmap.set_permission(state, payload)
-    if path == "/arcmap/execute-approved":
-        return arcmap.execute_approved(state, payload)
+    if path.startswith("/runs/") and path.endswith("/claim") and path.count("/") == 3:
+        return {"run": state.store.claim_for_arcmap(_run_id(path.split("/")[2]))}
+    if path.startswith("/runs/") and path.endswith("/complete") and path.count("/") == 3:
+        return {"run": state.store.finish_arcmap_run(
+            _run_id(path.split("/")[2]), payload["status"], payload.get("result", {}))}
     if path == "/config":
         return {"config": save_config(common.config_payload(payload))}
     if path == "/dialog/select-folder":
@@ -124,17 +123,9 @@ def _handle_post(state, path, payload):
         if not isinstance(context, dict):
             raise ValueError("context must be an object.")
         return {"context": state.store.set_state("arcmap_context", context)}
-    if path.startswith("/workflows/") and path.endswith("/approve"):
-        return {"workflow": state.store.approve(path.split("/")[2])}
-    if path.startswith("/workflows/") and path.endswith("/claim"):
-        return {"workflow": state.store.claim(path.split("/")[2])}
-    if path.startswith("/workflows/") and path.endswith("/executing"):
-        return {"workflow": state.store.mark_executing(path.split("/")[2])}
-    if path == "/execution-result":
-        return {"workflow": state.store.finish(payload["workflow_id"], payload["status"], payload.get("result", {}))}
-    if path == "/workflows/clear":
+    if path == "/runs/clear":
         return state.store.clear_workflows(payload.get("mode"))
-    if path.startswith("/workflows/") and path.endswith("/delete"):
+    if path.startswith("/runs/") and path.endswith("/delete"):
         return state.store.delete(path.split("/")[2])
     if path.startswith("/tools/") and path.endswith("/enable"):
         return tools.enable_pending_tool(state, path.split("/")[2])

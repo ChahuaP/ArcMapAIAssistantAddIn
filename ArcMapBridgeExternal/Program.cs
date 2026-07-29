@@ -230,18 +230,23 @@ namespace GeoPilot.ArcMapBridgeExternal
                 bool allowEdits = ExtractBool(request.Body, "allow_edits");
                 if (request.Action == "sync")
                 {
-                    ExecuteArcMapCommand(hwnd, "sync", false);
+                    ExecuteArcMapCommand(hwnd, "sync", false, null);
                     return "{\"ok\":true}";
                 }
                 if (request.Action == "execute")
                 {
-                    ExecuteArcMapCommand(hwnd, "execute", allowEdits);
+                    string runId = ExtractString(request.Body, "run_id");
+                    if (string.IsNullOrWhiteSpace(runId))
+                    {
+                        return ErrorJson("run_id is required.");
+                    }
+                    ExecuteArcMapCommand(hwnd, "execute", allowEdits, runId);
                     return "{\"ok\":true,\"result\":{\"ok\":true,\"summary\":\"ArcMap command executed.\"}}";
                 }
                 return ErrorJson("Unknown request.");
             }
 
-            private void ExecuteArcMapCommand(int hwnd, string silentAction, bool allowEdits)
+            private void ExecuteArcMapCommand(int hwnd, string silentAction, bool allowEdits, string runId)
             {
                 IApplication app = ResolveArcMap(hwnd);
                 IDocument document = app.Document;
@@ -251,7 +256,7 @@ namespace GeoPilot.ArcMapBridgeExternal
                 {
                     throw new InvalidOperationException("ArcMap command not found: " + BridgeCommandId);
                 }
-                WriteSilentCommand(silentAction, allowEdits);
+                WriteSilentCommand(silentAction, allowEdits, runId);
                 item.Execute();
             }
 
@@ -503,7 +508,7 @@ namespace GeoPilot.ArcMapBridgeExternal
             stream.Write(data, 0, data.Length);
         }
 
-        private static void WriteSilentCommand(string action, bool allowEdits)
+        private static void WriteSilentCommand(string action, bool allowEdits, string runId)
         {
             try
             {
@@ -516,7 +521,8 @@ namespace GeoPilot.ArcMapBridgeExternal
                 double expiresAt = (DateTime.UtcNow - new DateTime(1970, 1, 1)).TotalSeconds + 60;
                 string json = "{\"action\":\"" + JsonEscape(action) + "\",\"expires_at\":" +
                     expiresAt.ToString(System.Globalization.CultureInfo.InvariantCulture) +
-                    ",\"allow_edits\":" + (allowEdits ? "true" : "false") + "}";
+                    ",\"allow_edits\":" + (allowEdits ? "true" : "false") +
+                    (string.IsNullOrWhiteSpace(runId) ? "" : ",\"run_id\":\"" + JsonEscape(runId) + "\"") + "}";
                 File.WriteAllText(Path.Combine(dir, SilentCommandFileName), json, Encoding.UTF8);
             }
             catch (Exception ex)
@@ -593,6 +599,36 @@ namespace GeoPilot.ArcMapBridgeExternal
             }
             int value;
             return int.TryParse(json.Substring(start, pos - start), out value) ? value : 0;
+        }
+
+        private static string ExtractString(string json, string key)
+        {
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                return "";
+            }
+            string marker = "\"" + key + "\"";
+            int pos = json.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (pos < 0)
+            {
+                return "";
+            }
+            pos = json.IndexOf(':', pos);
+            if (pos < 0)
+            {
+                return "";
+            }
+            pos++;
+            while (pos < json.Length && char.IsWhiteSpace(json[pos]))
+            {
+                pos++;
+            }
+            if (pos >= json.Length || json[pos] != '\"')
+            {
+                return "";
+            }
+            int end = json.IndexOf('\"', pos + 1);
+            return end > pos ? json.Substring(pos + 1, end - pos - 1) : "";
         }
 
         private static bool ExtractBool(string json, string key)

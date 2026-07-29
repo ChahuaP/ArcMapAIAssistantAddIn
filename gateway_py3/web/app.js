@@ -17,7 +17,6 @@
     let modelWait = null;
     let modelWaitTimer = null;
     let activePlanRequestId = '';
-    let repairingWorkflowIds = new Set();
     let providerOptions = [];
     let modelOptions = [];
     let pendingProviderKeyClears = {};
@@ -861,7 +860,7 @@
         const data = await api('/runs', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({command, mode: currentMode})
+          body: JSON.stringify({command, mode: currentMode, execute: true, confirmed: true, allow_edits: false})
         });
         transientUserMessage = '';
         transientAssistantMessage = '';
@@ -891,16 +890,8 @@
       throw new Error('运行状态轮询超时。');
     }
 
-    async function approve(id) {
-      await api(`/workflows/${id}/approve`, {method: 'POST', body: '{}'});
-      await api('/arcmap/execute-approved', {method: 'POST', body: JSON.stringify({confirmed: true, allow_edits: false})});
-      selectedWorkflowId = id;
-      setStatus('已发送到 ArcMap 并自动执行。');
-      await refreshWorkflows();
-    }
-
     async function clearConversation() {
-      await api('/workflows/clear', {
+      await api('/runs/clear', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(clearScope())
@@ -913,44 +904,15 @@
     }
 
     async function deleteWorkflow(id) {
-      await api(`/workflows/${id}/delete`, {method: 'POST', body: '{}'});
+      await api(`/runs/${id}/delete`, {method: 'POST', body: '{}'});
       if (selectedWorkflowId === id) selectedWorkflowId = '';
       setStatus('已删除。');
       await refreshWorkflows();
     }
 
-    async function repairCustomTool(id) {
-      if (repairingWorkflowIds.has(id)) return;
-      repairingWorkflowIds.add(id);
-      selectedWorkflowId = id;
-      transientUserMessage = '让 AI 修这个工具';
-      transientAssistantMessage = '';
-      startModelWait('AI 正在修订工具');
-      renderTasks(cachedWorkflows);
-      renderConversation(cachedWorkflows);
-      try {
-        const data = await api(`/workflows/${id}/repair-custom-tool`, {method: 'POST', body: '{}'});
-        transientUserMessage = '';
-        transientAssistantMessage = '';
-        selectedWorkflowId = data.workflow.id;
-        setStatus('已生成工具修订，等待审核。');
-        await loadPendingTools();
-        await refreshWorkflows();
-      } catch (err) {
-        stopModelWait();
-        transientAssistantMessage = err.message;
-        setStatus(err.message);
-        renderConversation(cachedWorkflows);
-      } finally {
-        stopModelWait();
-        repairingWorkflowIds.delete(id);
-        renderTasks(cachedWorkflows);
-      }
-    }
-
     async function refreshWorkflows(renderChat = true) {
       const data = await api(workflowListPath());
-      applyWorkflows(data.workflows || [], renderChat);
+      applyWorkflows(data.runs || [], renderChat);
     }
 
     function workflowListPath() {
@@ -958,7 +920,7 @@
       params.set('limit', '50');
       params.set('mode', currentMode);
       params.set('include_trace', 'false');
-      return `/api/workflows?${params.toString()}`;
+      return `/api/runs?${params.toString()}`;
     }
 
     function applyWorkflows(workflows, renderChat = true) {

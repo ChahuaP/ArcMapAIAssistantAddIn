@@ -73,8 +73,8 @@ def collect_agent_diagnostics(app_version: str, operation_count: int, state: Any
             "arcmap-sync",
             "capabilities",
             "run --mode context_single --command <request>",
-            "approve-latest",
-            "arcmap-execute-approved"
+            "run",
+            "run-status"
         ]
     }
 

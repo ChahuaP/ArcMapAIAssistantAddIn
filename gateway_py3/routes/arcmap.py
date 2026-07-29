@@ -13,25 +13,23 @@ BRIDGE_CACHE_SECONDS = 2.0
 def sync_context(state, port_checker=None):
     bridge = active_bridge(state, port_checker=port_checker)
     before = state.store.get_state("arcmap_context")
-    before_value = before.get("value") if before else None
+    before_updated_at = float(before.get("updated_at") or 0) if before else 0.0
     result = arcmap_bridge_client.sync_context_target(port=bridge["port"], hwnd=bridge.get("hwnd"))
     context = result.get("context") if isinstance(result.get("context"), dict) else {}
     deadline = time.time() + 10
     while not context and time.time() < deadline:
         stored = state.store.get_state("arcmap_context")
-        if stored and isinstance(stored.get("value"), dict) and stored.get("value") is not before_value:
+        if stored and isinstance(stored.get("value"), dict) and float(stored.get("updated_at") or 0) > before_updated_at:
             context = stored["value"]
             break
         time.sleep(0.2)
-    if not context:
-        stored = state.store.get_state("arcmap_context")
-        context = stored.get("value") if stored and isinstance(stored.get("value"), dict) else {}
     if not context:
         raise arcmap_bridge_client.ArcMapBridgeError("ArcMap Bridge 同步后没有返回有效 context。")
     return {
         "ok": True,
         "bridge": bridge,
         "context_hash": context_hash(context),
+        "captured_at": time.time(),
         "context": context
     }
 
@@ -90,18 +88,14 @@ def set_permission(state, payload):
     return {"ok": True, "permission": permission}
 
 
-def execute_approved(state, payload, port_checker=None):
-    row = state.store.pending()
-    if not row:
-        raise ValueError("没有已审批的工作流。")
+def execute_run(state, run_id, payload, port_checker=None):
+    row = state.store.get(run_id)
+    if row["status"] != "approved":
+        raise ValueError("run is not approved for ArcMap execution.")
     allow_edits = execution_permission(state, payload, row)
-    if (row.get("agent_trace") or [{}])[0].get("type") == "run":
-        state.store.update_run(row["id"], "executing")
     bridge = active_bridge(state, port_checker=port_checker)
-    result = arcmap_bridge_client.execute_approved(allow_edits=allow_edits, port=bridge["port"], hwnd=bridge.get("hwnd"))
+    result = arcmap_bridge_client.execute_run(run_id, allow_edits=allow_edits, port=bridge["port"], hwnd=bridge.get("hwnd"))
     result["bridge"] = bridge
-    if (row.get("agent_trace") or [{}])[0].get("type") == "run":
-        state.store.update_run(row["id"], "succeeded", result={"execution": result})
     return result
 
 

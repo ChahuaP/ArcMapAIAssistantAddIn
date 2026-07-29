@@ -15,11 +15,13 @@ class RunController:
         self.permission = permission
         self.executor = executor
 
-    def run(self, run_id, request, context):
+    def run(self, run_id, request):
         request = dict(request)
         request["allow_edits"] = bool(request.get("allow_edits", False))
-
-        row = self._plan(run_id, request, context)
+        capture = self._capture_context(run_id, "before_planning")
+        if capture is None:
+            return self.store.get(run_id)
+        row = self._plan(run_id, request, capture["context"])
         if row["status"] != "planned" or not request.get("execute"):
             return row
 
@@ -35,8 +37,29 @@ class RunController:
         if self.store.is_cancel_requested(run_id):
             return self.store.get(run_id)
 
-        self.store.update_run(run_id, "executing")
         return self._execute(run_id, allow_edits)
+
+    def _capture_context(self, run_id, phase):
+        trace, stage = self._start_stage(run_id, "context_" + phase)
+        try:
+            capture = self.context_reader()
+            context = capture.get("context") if isinstance(capture, dict) else None
+            if not isinstance(context, dict):
+                raise ValueError("ArcMap context capture is invalid.")
+            record = {
+                "phase": phase,
+                "hash": digest(context),
+                "captured_at": capture.get("captured_at", time.time()),
+                "window": capture.get("bridge", {}),
+            }
+            trace.setdefault("context_captures", []).append(record)
+            self.store.update_run(run_id, self.store.get(run_id)["status"], trace=trace)
+        except Exception as exc:
+            trace = self._finish_stage(run_id, trace, stage, "failed")
+            self.store.fail_run(run_id, "context_" + phase, exc, trace)
+            return None
+        self._finish_stage(run_id, trace, stage, "succeeded")
+        return capture
 
     def _plan(self, run_id, request, context):
         trace, stage = self._start_stage(run_id, "planning")
@@ -48,6 +71,8 @@ class RunController:
                     request["mode"],
                     context,
                     artifacts,
+                    request.get("provider", ""),
+                    request.get("model", ""),
                 )
             else:
                 row = self.runner.plan(
@@ -80,7 +105,7 @@ class RunController:
     def _execute(self, run_id, allow_edits):
         trace, stage = self._start_stage(run_id, "execution")
         try:
-            result = self.executor(allow_edits)
+            result = self.executor(run_id, allow_edits)
         except Exception as exc:
             trace = self._finish_stage(run_id, trace, stage, "failed")
             return self.store.fail_run(run_id, "execution", exc, trace)
@@ -93,7 +118,10 @@ class RunController:
     def _sync_context(self, run_id, result):
         trace, stage = self._start_stage(run_id, "context_sync")
         try:
-            next_context = self.context_reader()
+            capture = self.context_reader()
+            next_context = capture.get("context") if isinstance(capture, dict) else None
+            if not isinstance(next_context, dict):
+                raise ValueError("ArcMap context capture is invalid.")
         except Exception as exc:
             trace = self._finish_stage(run_id, trace, stage, "failed")
             return self.store.fail_run(run_id, "context_sync", exc, trace)
@@ -109,7 +137,12 @@ class RunController:
             "context_next_hash": digest(next_context),
             "context_next_summary": summary,
             "context_next_summary_hash": digest(summary),
+            "context_next_captured_at": capture.get("captured_at", time.time()),
+            "context_next_window": capture.get("bridge", {}),
         }
+        row = self.store.get(run_id)
+        if row["status"] != "succeeded":
+            raise RuntimeError("ArcMap did not complete the claimed run successfully.")
         return self.store.update_run(
             run_id,
             "succeeded",

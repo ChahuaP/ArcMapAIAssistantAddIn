@@ -81,23 +81,16 @@ def _run_silent_command(command):
         _sync_current_context()
         return
     if action == "execute":
-        _execute_pending(silent=True)
+        _execute_run(command.get("run_id"), silent=True)
         return
     raise RuntimeError(u"未知 Bridge 指令：%s" % _unicode_text(action))
 
 
-def _execute_pending(silent=False):
-    pending = gateway_client.pending()
-    if not pending.get("workflow"):
-        if silent:
-            raise RuntimeError(u"没有已审批的工作流。")
-        show_message(u"没有已审批的工作流。")
-        return
-
-    row = pending["workflow"]
-    workflow_id = row["id"]
-    gateway_client.claim(workflow_id)
-    gateway_client.mark_executing(workflow_id)
+def _execute_run(run_id, silent=False):
+    if not isinstance(run_id, unicode) or not run_id:
+        raise RuntimeError(u"Bridge execute command lacks run_id.")
+    claimed = gateway_client.claim_run(run_id)
+    row = claimed["run"]
 
     try:
         context = context_reader.read_context()
@@ -108,13 +101,13 @@ def _execute_pending(silent=False):
             "error": _exception_text(exc),
             "traceback": _traceback_text()
         }
-        gateway_client.execution_result(workflow_id, "failed", result)
+        gateway_client.complete_run(run_id, "failed", result)
         raise
 
     updated_context = _sync_current_context()
     result["context_hash"] = updated_context.get("context_hash")
 
-    gateway_client.execution_result(workflow_id, "succeeded", result)
+    gateway_client.complete_run(run_id, "succeeded", result)
     if not silent:
         show_message(u"工作流执行完成：%s" % result.get("summary", "succeeded"))
 

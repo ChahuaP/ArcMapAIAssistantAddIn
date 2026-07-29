@@ -126,32 +126,12 @@ def start_gateway():
         raise RuntimeError(u"无法启动本地网关：%s" % exc)
 
 
-def create_run(command, context, mode="context_single"):
-    payload = {
-        "command": command,
-        "context": context,
-        "mode": mode,
-        "execute": False,
-        "confirmed": False,
-        "allow_edits": False,
-    }
-    return _post("/runs", payload, timeout=PLAN_TIMEOUT_SECONDS)
+def claim_run(run_id):
+    return _post("/runs/%s/claim" % run_id, {})
 
 
-def pending():
-    return _get("/pending")
-
-
-def claim(workflow_id):
-    return _post("/workflows/%s/claim" % workflow_id, {})
-
-
-def mark_executing(workflow_id):
-    return _post("/workflows/%s/executing" % workflow_id, {})
-
-
-def execution_result(workflow_id, status, result):
-    return _post("/execution-result", {"workflow_id": workflow_id, "status": status, "result": result})
+def complete_run(run_id, status, result):
+    return _post("/runs/%s/complete" % run_id, {"status": status, "result": result})
 
 
 def _gateway_command():

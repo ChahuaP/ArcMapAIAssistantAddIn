@@ -24,9 +24,8 @@ def main() -> int:
     subparsers.add_parser("context")
     capabilities_parser = subparsers.add_parser("capabilities")
     capabilities_parser.add_argument("--detail", action="store_true", help="Include full operation schemas.")
-    subparsers.add_parser("workflows")
+    subparsers.add_parser("runs")
     subparsers.add_parser("open-console")
-    subparsers.add_parser("approve-latest")
     subparsers.add_parser("arcmap-health")
     subparsers.add_parser("arcmap-list")
     subparsers.add_parser("arcmap-sync")
@@ -40,14 +39,9 @@ def main() -> int:
     permission_parser.add_argument("--auto-execute", action="store_true")
     permission_parser.add_argument("--allow-edits", action="store_true")
 
-    execute_approved_parser = subparsers.add_parser("arcmap-execute-approved")
-    execute_approved_parser.add_argument("--confirmed", action="store_true")
-    execute_approved_parser.add_argument("--allow-edits", action="store_true")
-
     run_parser = subparsers.add_parser("run")
     run_parser.add_argument("--mode", required=True, choices=("direct_single", "context_single", "constrained_single", "multi_agent"))
     run_parser.add_argument("--command", dest="user_command", required=True)
-    run_parser.add_argument("--context", help="Optional context JSON file.")
     run_parser.add_argument("--model", default="")
     run_parser.add_argument("--provider", default="")
     run_parser.add_argument("--execute", action="store_true")
@@ -63,9 +57,6 @@ def main() -> int:
     report_parser = subparsers.add_parser("run-report")
     report_parser.add_argument("--mode", choices=("direct_single", "context_single", "constrained_single", "multi_agent"))
 
-    approve_parser = subparsers.add_parser("approve")
-    approve_parser.add_argument("workflow_id")
-
     args = parser.parse_args()
     try:
         if args.command == "health":
@@ -79,17 +70,11 @@ def main() -> int:
         if args.command == "capabilities":
             path = "/api/capabilities?detail=1" if args.detail else "/api/capabilities"
             return _print(_get(args.base_url, path))
-        if args.command == "workflows":
-            return _print(_get(args.base_url, "/api/workflows"))
+        if args.command == "runs":
+            return _print(_get(args.base_url, "/api/runs"))
         if args.command == "open-console":
             webbrowser.open(args.base_url + "/")
             return 0
-        if args.command == "approve-latest":
-            workflows = _get(args.base_url, "/api/workflows").get("workflows") or []
-            workflow_id = _latest_draft_workflow_id(workflows)
-            if not workflow_id:
-                raise RuntimeError("No draft workflow is available to approve.")
-            return _print(_post(args.base_url, "/workflows/%s/approve" % workflow_id, {}))
         if args.command == "arcmap-health":
             return _print(_get(args.base_url, "/arcmap/health"))
         if args.command == "arcmap-list":
@@ -107,11 +92,6 @@ def main() -> int:
                 "auto_execute": args.auto_execute,
                 "allow_edits": args.allow_edits
             }))
-        if args.command == "arcmap-execute-approved":
-            return _print(_post(args.base_url, "/arcmap/execute-approved", {
-                "confirmed": args.confirmed,
-                "allow_edits": args.allow_edits
-            }))
         if args.command == "run":
             payload = {
                 "mode": args.mode,
@@ -124,8 +104,6 @@ def main() -> int:
                 payload["provider"] = args.provider
             if args.model:
                 payload["model"] = args.model
-            if args.context:
-                payload["context"] = _read_json_arg(args.context)
             if args.task_semantics:
                 payload["task_semantics"] = _read_json_arg(args.task_semantics)
             if args.workflow_draft:
@@ -140,8 +118,6 @@ def main() -> int:
         if args.command == "run-report":
             suffix = "?mode=%s" % args.mode if args.mode else ""
             return _print(_get(args.base_url, "/runs/report" + suffix))
-        if args.command == "approve":
-            return _print(_post(args.base_url, "/workflows/%s/approve" % args.workflow_id, {}))
     except RuntimeError as exc:
         print(str(exc), file=sys.stderr)
         return 1
@@ -182,13 +158,6 @@ def _read_json_arg(value: str):
     if value == "-":
         return json.load(sys.stdin)
     return json.loads(Path(value).read_text(encoding="utf-8-sig"))
-
-
-def _latest_draft_workflow_id(workflows) -> str:
-    for workflow in workflows:
-        if workflow.get("status") == "draft":
-            return str(workflow.get("id") or "")
-    return ""
 
 
 def _print(payload) -> int:

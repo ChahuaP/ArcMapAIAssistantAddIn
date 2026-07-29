@@ -29,8 +29,10 @@ def sync_context_target(port: int | None = None, hwnd: int | None = None) -> Dic
     return _request("POST", "/sync-context", payload, port=port)
 
 
-def execute_approved(allow_edits: bool = False, port: int | None = None, hwnd: int | None = None) -> Dict[str, Any]:
-    payload = {"allow_edits": bool(allow_edits)}
+def execute_run(run_id: str, allow_edits: bool = False, port: int | None = None, hwnd: int | None = None) -> Dict[str, Any]:
+    if not run_id:
+        raise ValueError("run_id is required.")
+    payload = {"run_id": run_id, "allow_edits": bool(allow_edits)}
     if hwnd:
         payload["hwnd"] = int(hwnd)
     return _request("POST", "/execute-approved", payload, timeout=360, port=port)

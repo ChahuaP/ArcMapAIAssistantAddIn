@@ -142,11 +142,8 @@ class ExperimentRunner:
         from .llm_providers import load_config
 
         config = load_config()
-        selected_provider = config[slot + "_provider"]
-        selected_model = config[slot + "_model"]
-        if role != "auditor":
-            selected_provider = provider or selected_provider
-            selected_model = model or selected_model
+        selected_provider = provider or config[slot + "_provider"]
+        selected_model = model or config[slot + "_model"]
         return create_provider(
             provider_id=selected_provider,
             model_id=selected_model,
@@ -190,8 +187,10 @@ class ExperimentRunner:
         trace.update({
             "provider": actual["provider"],
             "model": actual["model"],
+            "requested_model_config": {"provider": provider or actual["provider"], "model": model or actual["model"]},
             "capability_hash": digest(capabilities),
             "context_hash": context_hash(context),
+            "context_snapshot_hash": digest(context),
         })
         try:
             if mode == "direct_single":
@@ -279,7 +278,7 @@ class ExperimentRunner:
             self.store.fail_run(run_id, "planning", exc, trace)
             raise
 
-    def plan_from_artifacts(self, run_id, mode, context, artifacts):
+    def plan_from_artifacts(self, run_id, mode, context, artifacts, provider="", model=""):
         semantics = task_semantics(artifacts["task_semantics"])
         draft = workflow_draft(artifacts["workflow_draft"])
         trace = self.store.run_trace(run_id)
@@ -304,7 +303,7 @@ class ExperimentRunner:
             )
         if mode != "multi_agent":
             raise ContractError("external artifacts require constrained_single or multi_agent.")
-        client = self._client("auditor")
+        client = self._client("auditor", provider, model)
         audit_response = self._call(
             run_id,
             client,

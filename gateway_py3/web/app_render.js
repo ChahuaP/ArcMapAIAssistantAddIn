@@ -14,7 +14,7 @@
         appendTransientConversation(false);
         chat.scrollTop = chat.scrollHeight;
         const selected = selectedWorkflow(workflows);
-        if (selected && !repairingWorkflowIds.has(selected.id)) setStatus(statusText(selected));
+        if (selected) setStatus(statusText(selected));
         return;
       }
       const item = selectedWorkflow(workflows);
@@ -300,29 +300,11 @@
         <p class="task-title">${escapeHtml(workflowTitle(item.workflow))}</p>
         <div class="task-meta">${escapeHtml(shortCommand(item.command))}</div>
         ${action === 'answer' ? '<div class="task-note">这是一条普通回复，不需要发送到 ArcGIS。</div>' : ''}
-        ${item.status === 'approved_for_arcmap' ? '<div class="task-note">已发送到 ArcMap，等待自动执行。</div>' : ''}
         ${failedMessage(item)}
-        ${repairingWorkflowIds.has(item.id) ? '<div class="task-note">AI 正在读取失败信息并修订原工具...</div>' : ''}
         ${writesData(item.workflow) ? '<div class="task-note warn">这个任务会写出新数据。若当前 MXD 未保存，需要在对话中说明输出文件夹或 GDB。</div>' : ''}
       `;
       const actions = document.createElement('div');
       actions.className = 'task-actions';
-      if (item.status === 'draft' && action === 'execute') {
-        const approveButton = document.createElement('button');
-        approveButton.className = 'btn btn-success btn-sm';
-        approveButton.textContent = '发送并执行';
-        approveButton.onclick = () => approve(item.id);
-        actions.appendChild(approveButton);
-      }
-      if (item.status === 'failed' && usesCustomTool(item.workflow)) {
-        const repairButton = document.createElement('button');
-        const repairPending = repairingWorkflowIds.has(item.id);
-        repairButton.className = 'btn btn-success btn-sm';
-        repairButton.textContent = repairPending ? '修复中...' : '让 AI 修这个工具';
-        repairButton.disabled = repairPending;
-        repairButton.onclick = () => repairCustomTool(item.id);
-        actions.appendChild(repairButton);
-      }
       const deleteButton = document.createElement('button');
       deleteButton.className = 'btn btn-danger btn-sm';
       deleteButton.textContent = '删除';
@@ -331,7 +313,7 @@
       card.appendChild(actions);
 
       const steps = document.createElement('details');
-      restoreTaskDetailsState(steps, item.id, 'steps', item.status === 'draft');
+      restoreTaskDetailsState(steps, item.id, 'steps', item.status === 'planned');
       steps.innerHTML = `<summary>执行步骤</summary><ol class="task-steps">${stepItems(item.workflow)}</ol>`;
       card.appendChild(steps);
 
@@ -384,10 +366,6 @@
       ].includes(step.operation));
     }
 
-    function usesCustomTool(workflow) {
-      return (workflow.steps || []).some(step => typeof step.operation === 'string' && step.operation.startsWith('custom.'));
-    }
-
     function failedMessage(item) {
       if (item.status !== 'failed' || !item.result || !item.result.error) return '';
       return `<div class="task-note error">执行失败：${escapeHtml(item.result.error)}</div>`;
@@ -398,8 +376,7 @@
       if (action === 'clarify') return '需要补充信息。';
       if (action === 'unsupported') return '暂不支持。';
       if (action === 'answer') return '已回答。';
-      if (item.status === 'draft') return '任务已生成，待执行。';
-      if (item.status === 'approved_for_arcmap') return '已发送到 ArcMap，等待自动执行。';
+      if (item.status === 'planned') return '任务已规划，未请求执行。';
       return statusLabel(item, action);
     }
 
@@ -407,10 +384,9 @@
       if (action === 'answer') return '已回答';
       if (action === 'clarify') return '需要补充';
       if (action === 'unsupported') return '暂不支持';
-      if (item.status === 'draft') return '待执行';
-      if (item.status === 'approved_for_arcmap') return '待执行';
-      if (item.status === 'claimed_by_arcmap' || item.status === 'executing') return '执行中';
+      if (item.status === 'planned') return '已规划';
+      if (item.status === 'executing') return '执行中';
       if (item.status === 'succeeded') return '已完成';
-      if (item.status === 'failed') return usesCustomTool(item.workflow) ? '失败，可修复' : '失败';
+      if (item.status === 'failed') return '失败';
       return item.status;
     }

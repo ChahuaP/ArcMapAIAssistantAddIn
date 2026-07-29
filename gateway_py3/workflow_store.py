@@ -47,37 +47,6 @@ class WorkflowStore:
         with self._connection() as conn:
             init_database(conn)
 
-    def create_draft(
-        self,
-        command: str,
-        context_hash: str,
-        workflow: Dict[str, Any],
-        agent_trace: List[Dict[str, Any]],
-        mode: str = "context_single"
-    ) -> Dict[str, Any]:
-        workflow_id = str(uuid.uuid4())
-        now = time.time()
-        with self._connection() as conn:
-            conn.execute(
-                """
-                INSERT INTO workflows
-                (id, status, mode, command, context_hash, workflow_json, agent_trace_json, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    workflow_id,
-                    "draft",
-                    mode,
-                    command,
-                    context_hash,
-                    json.dumps(workflow, ensure_ascii=False, sort_keys=True),
-                    json.dumps(agent_trace, ensure_ascii=False, sort_keys=True),
-                    now,
-                    now
-                )
-            )
-        return self.get(workflow_id)
-
     def create_run(self, command: str, mode: str, context_digest: str) -> Dict[str, Any]:
         """Create the durable run before any model or ArcMap stage begins."""
         trace = {
@@ -286,48 +255,34 @@ class WorkflowStore:
             raise KeyError(workflow_id)
         return {"ok": True}
 
-    def approve(self, workflow_id: str) -> Dict[str, Any]:
-        row = self.get(workflow_id)
-        if (row.get("agent_trace") or [{}])[0].get("type") == "run":
-            return self._set_status(workflow_id, "approved")
-        return self._set_status(workflow_id, "approved_for_arcmap")
-
-    def pending(self) -> Optional[Dict[str, Any]]:
+    def claim_for_arcmap(self, run_id: str) -> Dict[str, Any]:
+        """Atomically bind exactly one approved run to the selected ArcMap runtime."""
         with self._connection() as conn:
-            row = conn.execute(
-                """
-                SELECT id, status, mode, command, context_hash, workflow_json, agent_trace_json, created_at, updated_at, result_json
-                FROM workflows
-                WHERE status IN ('approved_for_arcmap', 'approved')
-                ORDER BY updated_at DESC
-                LIMIT 1
-                """
-            ).fetchone()
-        return workflow_row_to_dict(row) if row else None
+            cursor = conn.execute(
+                "UPDATE workflows SET status = ?, updated_at = ? WHERE id = ? AND status = ?",
+                ("executing", time.time(), run_id, "approved"),
+            )
+        if cursor.rowcount != 1:
+            raise ValueError("run is not available for ArcMap claim.")
+        return self.get(run_id)
 
-    def claim(self, workflow_id: str) -> Dict[str, Any]:
-        return self._set_status(workflow_id, "claimed_by_arcmap")
-
-    def mark_executing(self, workflow_id: str) -> Dict[str, Any]:
-        return self._set_status(workflow_id, "executing")
-
-    def finish(self, workflow_id: str, status: str, result: Dict[str, Any]) -> Dict[str, Any]:
+    def finish_arcmap_run(self, run_id: str, status: str, result: Dict[str, Any]) -> Dict[str, Any]:
         if status not in ("succeeded", "failed"):
             raise ValueError(status)
         with self._connection() as conn:
-            conn.execute(
-                "UPDATE workflows SET status = ?, result_json = ?, updated_at = ? WHERE id = ?",
-                (status, json.dumps(result, ensure_ascii=False, sort_keys=True), time.time(), workflow_id)
+            cursor = conn.execute(
+                "UPDATE workflows SET status = ?, result_json = ?, updated_at = ? WHERE id = ? AND status = ?",
+                (status, json.dumps(result, ensure_ascii=False, sort_keys=True), time.time(), run_id, "executing")
             )
-        return self.get(workflow_id)
+        if cursor.rowcount != 1:
+            raise ValueError("run is not executing in ArcMap.")
+        return self.get(run_id)
 
     def cancel(self, workflow_id: str) -> Dict[str, Any]:
         row = self.get(workflow_id)
         if row["status"] not in ("running", "planned", "approved", "executing"):
             raise ValueError("run is already terminal.")
-        if (row.get("agent_trace") or [{}])[0].get("type") == "run":
-            return self.update_run(workflow_id, "cancelled")
-        return self._set_status(workflow_id, "cancelled")
+        return self.update_run(workflow_id, "cancelled")
 
     def export_runs(self, mode: str | None = None) -> Dict[str, Any]:
         runs = []

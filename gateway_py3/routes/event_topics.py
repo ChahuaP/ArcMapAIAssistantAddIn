@@ -7,17 +7,15 @@ def mutation_events(path: str, result: Dict[str, Any] | None) -> List[str]:
     if result is None:
         return []
     if path == "/runs" or path.startswith("/runs/"):
-        return ["workflows.changed"]
+        return ["runs.changed"]
     if path == "/arcmap/sync" or path == "/context":
         return ["context.changed"]
     if path in ("/arcmap/register", "/arcmap/active", "/arcmap/permission"):
         return ["arcmap.changed"]
     if path == "/arcmap/execute-approved":
-        return ["workflows.changed", "arcmap.changed"]
+        return ["runs.changed", "arcmap.changed"]
     if path == "/config":
         return ["config.changed"]
-    if path.startswith("/workflows/") or path == "/execution-result" or path == "/workflows/clear":
-        return ["workflows.changed"]
     if path.startswith("/tools/"):
         return ["tools.changed", "catalog.changed"]
     return []

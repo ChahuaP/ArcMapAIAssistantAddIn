@@ -30,7 +30,7 @@ WORKFLOW_COLUMN_DEFINITIONS = {
 
 
 def init_database(conn) -> None:
-    migrate_workflows_schema(conn)
+    validate_database_schema(conn)
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS workflows (
@@ -75,49 +75,16 @@ def init_database(conn) -> None:
     )
 
 
-def migrate_workflows_schema(conn) -> None:
+def validate_database_schema(conn) -> None:
     table = conn.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'workflows'").fetchone()
     if table is None:
         return
     columns = {row[1] for row in conn.execute("PRAGMA table_info(workflows)").fetchall()}
-    critical_missing = {"id"} - columns
-    if critical_missing:
-        raise RuntimeError("workflows 表结构损坏，缺少字段：%s" % "、".join(sorted(critical_missing)))
-    missing = WORKFLOW_COLUMNS - columns
-    for column in sorted(missing):
-        definition = WORKFLOW_COLUMN_DEFINITIONS.get(column)
-        if not definition:
-            raise RuntimeError("workflows 表无法迁移，缺少字段：%s" % column)
-        conn.execute("ALTER TABLE workflows ADD COLUMN %s %s" % (column, definition))
-    columns = {row[1] for row in conn.execute("PRAGMA table_info(workflows)").fetchall()}
-    if columns == WORKFLOW_COLUMNS:
-        return
-    conn.execute(
-        """
-        CREATE TABLE workflows_migrated (
-            id TEXT PRIMARY KEY,
-            status TEXT NOT NULL,
-            mode TEXT NOT NULL,
-            command TEXT NOT NULL,
-            context_hash TEXT NOT NULL,
-            workflow_json TEXT NOT NULL,
-            agent_trace_json TEXT NOT NULL,
-            created_at REAL NOT NULL,
-            updated_at REAL NOT NULL,
-            result_json TEXT
-        )
-        """
-    )
-    conn.execute(
-        """
-        INSERT INTO workflows_migrated
-        (id, status, mode, command, context_hash, workflow_json, agent_trace_json, created_at, updated_at, result_json)
-        SELECT id, status, mode, command, context_hash, workflow_json, agent_trace_json, created_at, updated_at, result_json
-        FROM workflows
-        """
-    )
-    conn.execute("DROP TABLE workflows")
-    conn.execute("ALTER TABLE workflows_migrated RENAME TO workflows")
+    if columns != WORKFLOW_COLUMNS:
+        raise RuntimeError("existing workflows.sqlite is incompatible with the GeoPilot run schema; remove it explicitly before starting GeoPilot.")
+    legacy = conn.execute("SELECT 1 FROM workflows WHERE agent_trace_json NOT LIKE '%\"contract\": \"geopilot-run/v2\"%' LIMIT 1").fetchone()
+    if legacy:
+        raise RuntimeError("existing workflows.sqlite contains a legacy workflow record; remove it explicitly before starting GeoPilot.")
 
 
 def drop_removed_tables(conn) -> None:

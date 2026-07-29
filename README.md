@@ -1,5 +1,15 @@
 # GeoPilot
 
+## Run protocol
+
+`POST /runs` is the only execution entry point. Each request captures a fresh
+snapshot from the selected ArcMap window; caller-supplied context is rejected.
+With `execute=true`, the gateway plans the run, keeps it `approved`, and sends
+its UUID to the ArcMap Bridge. ArcMap atomically claims that exact UUID
+(`approved -> executing`) before touching the plan and completes the same UUID.
+Existing SQLite files containing legacy workflow records are rejected and must
+be removed explicitly; they are never migrated or mixed with run records.
+
 GeoPilot 是一个运行在本地的 AI 工作台，专为 ArcMap（ArcGIS Desktop）设计。用户用自然语言描述 GIS 任务，系统自动生成可校验的工作流，经用户确认后在 ArcMap 内执行已注册的 ArcPy 操作。
 
 本项目面向 **ArcMap / ArcPy**，不适用于 ArcGIS Pro。

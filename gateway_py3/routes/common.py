@@ -5,7 +5,7 @@ from gateway_py3.validators import ValidationError
 
 
 QUIET_ACCESS_PATHS = (
-    "/api/workflows",
+    "/api/runs",
     "/config",
     "/context",
     "/events",
