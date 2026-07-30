@@ -8,8 +8,6 @@ def transcribe(state, payload):
 
 
 def correct(state, payload):
-    context = payload.get("context") if isinstance(payload.get("context"), dict) else None
-    if context is None:
-        stored_context = state.store.get_state("arcmap_context")
-        context = stored_context.get("value") if isinstance(stored_context, dict) else None
-    return voice_service.correct_transcribed_voice(payload, stored_context=context)
+    if "context" in payload:
+        raise ValueError("voice context is captured only inside a run.")
+    return voice_service.correct_transcribed_voice(payload)

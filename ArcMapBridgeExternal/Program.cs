@@ -9,6 +9,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
+using System.Runtime.InteropServices;
 
 namespace GeoPilot.ArcMapBridgeExternal
 {
@@ -157,11 +158,11 @@ namespace GeoPilot.ArcMapBridgeExternal
                     }
                     else if (request.Method == "POST" && request.Path == "/sync-context")
                     {
-                        WriteJson(client, EnqueueAndWait("sync", request.Body, TimeSpan.FromSeconds(120)));
+                        WriteJson(client, EnqueueAndWait("sync", request.Body));
                     }
-                    else if (request.Method == "POST" && request.Path == "/execute-approved")
+                    else if (request.Method == "POST" && IsRunExecutePath(request.Path))
                     {
-                        WriteJson(client, EnqueueAndWait("execute", request.Body, TimeSpan.FromMinutes(30)));
+                        WriteJson(client, EnqueueAndWait("execute", request.Body, RunIdFromExecutePath(request.Path)));
                     }
                     else
                     {
@@ -179,17 +180,17 @@ namespace GeoPilot.ArcMapBridgeExternal
                 }
             }
 
-            private string EnqueueAndWait(string action, string body, TimeSpan timeout)
+            private string EnqueueAndWait(string action, string body, string runId = null)
             {
-                var request = new BridgeRequest(action, body);
+                var request = new BridgeRequest(action, body, runId);
                 lock (_queueGate)
                 {
                     _queue.Enqueue(request);
                 }
                 _workAvailable.Set();
-                if (!request.Done.WaitOne(timeout))
+                if (!request.Done.WaitOne(TimeSpan.FromSeconds(30)))
                 {
-                    return ErrorJson("ArcMap command timed out.");
+                    return ErrorJson("Bridge request wait expired; ArcMap execution state must be recovered through the run lease.");
                 }
                 return request.ResponseJson;
             }
@@ -230,23 +231,38 @@ namespace GeoPilot.ArcMapBridgeExternal
                 bool allowEdits = ExtractBool(request.Body, "allow_edits");
                 if (request.Action == "sync")
                 {
-                    ExecuteArcMapCommand(hwnd, "sync", false, null);
-                    return "{\"ok\":true}";
-                }
-                if (request.Action == "execute")
-                {
                     string runId = ExtractString(request.Body, "run_id");
+                    string syncToken = ExtractString(request.Body, "sync_token");
+                    string phase = ExtractString(request.Body, "phase");
                     if (string.IsNullOrWhiteSpace(runId))
                     {
                         return ErrorJson("run_id is required.");
                     }
-                    ExecuteArcMapCommand(hwnd, "execute", allowEdits, runId);
-                    return "{\"ok\":true,\"result\":{\"ok\":true,\"summary\":\"ArcMap command executed.\"}}";
+                    if (string.IsNullOrWhiteSpace(syncToken) ||
+                        (phase != "before_planning" && phase != "after_execution"))
+                    {
+                        return ErrorJson("sync_token and phase are required.");
+                    }
+                    ExecuteArcMapCommand(hwnd, "sync", false, runId, syncToken, phase);
+                    return "{\"ok\":true}";
+                }
+                if (request.Action == "execute")
+                {
+                    string runId = request.RunId;
+                    Guid parsedRunId;
+                    if (string.IsNullOrWhiteSpace(runId) ||
+                        !Guid.TryParseExact(runId, "D", out parsedRunId) ||
+                        !string.Equals(parsedRunId.ToString("D"), runId, StringComparison.Ordinal))
+                    {
+                        return ErrorJson("canonical run_id is required.");
+                    }
+                    ExecuteArcMapCommand(hwnd, "execute", allowEdits, runId, null, null);
+                    return "{\"ok\":true,\"run_id\":\"" + JsonEscape(runId) + "\"}";
                 }
                 return ErrorJson("Unknown request.");
             }
 
-            private void ExecuteArcMapCommand(int hwnd, string silentAction, bool allowEdits, string runId)
+            private void ExecuteArcMapCommand(int hwnd, string silentAction, bool allowEdits, string runId, string syncToken, string phase)
             {
                 IApplication app = ResolveArcMap(hwnd);
                 IDocument document = app.Document;
@@ -256,7 +272,7 @@ namespace GeoPilot.ArcMapBridgeExternal
                 {
                     throw new InvalidOperationException("ArcMap command not found: " + BridgeCommandId);
                 }
-                WriteSilentCommand(silentAction, allowEdits, runId);
+                WriteSilentCommand(silentAction, allowEdits, runId, syncToken, phase, hwnd, Port, ArcMapProcessId(hwnd));
                 item.Execute();
             }
 
@@ -291,12 +307,12 @@ namespace GeoPilot.ArcMapBridgeExternal
                 var parts = new List<string>();
                 foreach (ArcMapTarget target in targets)
                 {
-                    parts.Add("{\"hwnd\":" + target.Hwnd +
+                    parts.Add("{\"arcmap_pid\":" + target.ArcMapPid + ",\"hwnd\":" + target.Hwnd +
                         ",\"title\":\"" + JsonEscape(target.Title) +
                         "\",\"name\":\"" + JsonEscape(target.Name) + "\"}");
                 }
-                return "{\"ok\":true,\"bridge\":\"arcmap-external\",\"pid\":" + CurrentProcessId() +
-                    ",\"port\":" + Port +
+                return "{\"ok\":true,\"bridge\":\"arcmap-external\",\"bridge_pid\":" + CurrentProcessId() +
+                    ",\"bridge_port\":" + Port +
                     ",\"summary\":{\"bridge\":\"external\",\"arcmap_count\":" + targets.Count +
                     ",\"targets\":[" + string.Join(",", parts.ToArray()) + "]}}";
             }
@@ -320,6 +336,7 @@ namespace GeoPilot.ArcMapBridgeExternal
                     }
                     targets.Add(new ArcMapTarget {
                         Hwnd = appRef.hWnd,
+                        ArcMapPid = ArcMapProcessId(appRef.hWnd),
                         Name = name,
                         Title = SafeString(delegate { return app.Caption; }),
                         Application = app
@@ -349,8 +366,8 @@ namespace GeoPilot.ArcMapBridgeExternal
 
             private void RegisterWithGateway()
             {
-                string payload = "{\"pid\":" + CurrentProcessId() +
-                    ",\"port\":" + Port +
+                string payload = "{\"bridge_pid\":" + CurrentProcessId() +
+                    ",\"bridge_port\":" + Port +
                     ",\"summary\":{\"bridge\":\"external\"}}";
                 PostGatewayJson("/arcmap/register", payload);
             }
@@ -359,6 +376,7 @@ namespace GeoPilot.ArcMapBridgeExternal
         private sealed class ArcMapTarget
         {
             public int Hwnd;
+            public int ArcMapPid;
             public string Name;
             public string Title;
             public IApplication Application;
@@ -368,13 +386,15 @@ namespace GeoPilot.ArcMapBridgeExternal
         {
             public readonly string Action;
             public readonly string Body;
+            public readonly string RunId;
             public readonly ManualResetEvent Done = new ManualResetEvent(false);
             public string ResponseJson = "{\"ok\":false,\"error\":\"Request did not complete.\"}";
 
-            public BridgeRequest(string action, string body)
+            public BridgeRequest(string action, string body, string runId)
             {
                 Action = action;
                 Body = body ?? "";
+                RunId = runId ?? "";
             }
         }
 
@@ -508,8 +528,9 @@ namespace GeoPilot.ArcMapBridgeExternal
             stream.Write(data, 0, data.Length);
         }
 
-        private static void WriteSilentCommand(string action, bool allowEdits, string runId)
+        private static void WriteSilentCommand(string action, bool allowEdits, string runId, string syncToken, string phase, int hwnd, int bridgePort, int arcMapPid)
         {
+            string temporaryPath = null;
             try
             {
                 string root = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
@@ -522,12 +543,32 @@ namespace GeoPilot.ArcMapBridgeExternal
                 string json = "{\"action\":\"" + JsonEscape(action) + "\",\"expires_at\":" +
                     expiresAt.ToString(System.Globalization.CultureInfo.InvariantCulture) +
                     ",\"allow_edits\":" + (allowEdits ? "true" : "false") +
-                    (string.IsNullOrWhiteSpace(runId) ? "" : ",\"run_id\":\"" + JsonEscape(runId) + "\"") + "}";
-                File.WriteAllText(Path.Combine(dir, SilentCommandFileName), json, Encoding.UTF8);
+                    (string.IsNullOrWhiteSpace(runId) ? "" : ",\"run_id\":\"" + JsonEscape(runId) + "\"") +
+                    (string.IsNullOrWhiteSpace(syncToken) ? "" : ",\"sync_token\":\"" + JsonEscape(syncToken) + "\"") +
+                    (string.IsNullOrWhiteSpace(phase) ? "" : ",\"phase\":\"" + JsonEscape(phase) + "\"") +
+                    ",\"target\":{\"bridge_pid\":" + CurrentProcessId() +
+                    ",\"bridge_port\":" + bridgePort.ToString(System.Globalization.CultureInfo.InvariantCulture) +
+                    ",\"arcmap_pid\":" + arcMapPid.ToString(System.Globalization.CultureInfo.InvariantCulture) +
+                    ",\"hwnd\":" + hwnd.ToString(System.Globalization.CultureInfo.InvariantCulture) + "}}";
+                string commandPath = Path.Combine(dir, SilentCommandFileName);
+                temporaryPath = Path.Combine(dir, SilentCommandFileName + "." + Guid.NewGuid().ToString("N") + ".tmp");
+                File.WriteAllText(temporaryPath, json, Encoding.UTF8);
+                if (File.Exists(commandPath))
+                {
+                    File.Replace(temporaryPath, commandPath, null);
+                }
+                else
+                {
+                    File.Move(temporaryPath, commandPath);
+                }
             }
-            catch (Exception ex)
+            catch
             {
-                Log("bridge.silent_marker_failed", ex.ToString());
+                if (!string.IsNullOrWhiteSpace(temporaryPath) && File.Exists(temporaryPath))
+                {
+                    try { File.Delete(temporaryPath); } catch { }
+                }
+                throw;
             }
         }
 
@@ -556,6 +597,19 @@ namespace GeoPilot.ArcMapBridgeExternal
         private static string ErrorJson(string message)
         {
             return "{\"ok\":false,\"error\":\"" + JsonEscape(message) + "\"}";
+        }
+
+        private static bool IsRunExecutePath(string path)
+        {
+            return !string.IsNullOrWhiteSpace(path) &&
+                path.StartsWith("/runs/", StringComparison.Ordinal) &&
+                path.EndsWith("/execute", StringComparison.Ordinal) &&
+                path.Length > "/runs//execute".Length;
+        }
+
+        private static string RunIdFromExecutePath(string path)
+        {
+            return path.Substring("/runs/".Length, path.Length - "/runs/".Length - "/execute".Length);
         }
 
         private static string JsonEscape(string value)
@@ -676,6 +730,20 @@ namespace GeoPilot.ArcMapBridgeExternal
         private static int CurrentProcessId()
         {
             return Process.GetCurrentProcess().Id;
+        }
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
+        private static int ArcMapProcessId(int hwnd)
+        {
+            uint processId;
+            GetWindowThreadProcessId(new IntPtr(hwnd), out processId);
+            if (processId == 0)
+            {
+                throw new InvalidOperationException("ArcMap window process identity is unavailable.");
+            }
+            return unchecked((int)processId);
         }
 
         private static void Log(string kind, string detail)

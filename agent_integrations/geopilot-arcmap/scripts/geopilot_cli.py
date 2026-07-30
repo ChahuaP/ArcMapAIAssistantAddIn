@@ -7,7 +7,6 @@ import sys
 import urllib.error
 import urllib.request
 import webbrowser
-from pathlib import Path
 
 
 BASE_URL = "http://127.0.0.1:8765"
@@ -21,14 +20,12 @@ def main() -> int:
     subparsers.add_parser("health")
     subparsers.add_parser("doctor")
     subparsers.add_parser("agent-diagnostics")
-    subparsers.add_parser("context")
     capabilities_parser = subparsers.add_parser("capabilities")
     capabilities_parser.add_argument("--detail", action="store_true", help="Include full operation schemas.")
     subparsers.add_parser("runs")
     subparsers.add_parser("open-console")
     subparsers.add_parser("arcmap-health")
     subparsers.add_parser("arcmap-list")
-    subparsers.add_parser("arcmap-sync")
 
     select_parser = subparsers.add_parser("arcmap-select")
     select_parser.add_argument("--pid", type=int, default=0)
@@ -47,9 +44,6 @@ def main() -> int:
     run_parser.add_argument("--execute", action="store_true")
     run_parser.add_argument("--confirmed", action="store_true")
     run_parser.add_argument("--allow-edits", action="store_true")
-    run_parser.add_argument("--task-semantics", help="Structured TaskSemantics JSON file.")
-    run_parser.add_argument("--workflow-draft", help="Structured WorkflowDraft JSON file.")
-    run_parser.add_argument("--source", default="")
     run_status_parser = subparsers.add_parser("run-status")
     run_status_parser.add_argument("run_id")
     cancel_parser = subparsers.add_parser("run-cancel")
@@ -65,8 +59,6 @@ def main() -> int:
             return _print(_get(args.base_url, "/agent/diagnostics"))
         if args.command == "agent-diagnostics":
             return _print(_get(args.base_url, "/agent/diagnostics"))
-        if args.command == "context":
-            return _print(_get(args.base_url, "/context"))
         if args.command == "capabilities":
             path = "/api/capabilities?detail=1" if args.detail else "/api/capabilities"
             return _print(_get(args.base_url, path))
@@ -85,8 +77,6 @@ def main() -> int:
                 "port": args.port,
                 "hwnd": args.hwnd
             }))
-        if args.command == "arcmap-sync":
-            return _print(_post(args.base_url, "/arcmap/sync", {}))
         if args.command == "arcmap-permission":
             return _print(_post(args.base_url, "/arcmap/permission", {
                 "auto_execute": args.auto_execute,
@@ -104,12 +94,6 @@ def main() -> int:
                 payload["provider"] = args.provider
             if args.model:
                 payload["model"] = args.model
-            if args.task_semantics:
-                payload["task_semantics"] = _read_json_arg(args.task_semantics)
-            if args.workflow_draft:
-                payload["workflow_draft"] = _read_json_arg(args.workflow_draft)
-            if args.source:
-                payload["source"] = args.source
             return _print(_post(args.base_url, "/runs", payload))
         if args.command == "run-status":
             return _print(_get(args.base_url, "/runs/%s" % args.run_id))
@@ -152,12 +136,6 @@ def _request(base_url: str, path: str, data):
         raise RuntimeError("GeoPilot request failed: %s" % message)
     except urllib.error.URLError as exc:
         raise RuntimeError("GeoPilot gateway is not reachable at %s: %s" % (base_url, exc.reason))
-
-
-def _read_json_arg(value: str):
-    if value == "-":
-        return json.load(sys.stdin)
-    return json.loads(Path(value).read_text(encoding="utf-8-sig"))
 
 
 def _print(payload) -> int:

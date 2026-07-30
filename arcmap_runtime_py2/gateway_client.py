@@ -23,7 +23,6 @@ BASE_URL = "http://127.0.0.1:8765"
 EXPECTED_APP_VERSION = "1.0.0"
 REPO_ROOT = path_utils.abspath(path_utils.join_path(os.path.dirname(__file__), ".."))
 CREATE_NO_WINDOW = 0x08000000
-PLAN_TIMEOUT_SECONDS = 360
 
 
 def health():
@@ -34,21 +33,23 @@ def save_config(config):
     return _post("/config", config)
 
 
-def sync_context(context):
-    return _post("/context", {"context": context})
-
-
-def register_arcmap_bridge(pid, port, summary=None):
-    return _post("/arcmap/register", {
-        "pid": int(pid),
-        "port": int(port),
-        "summary": summary if isinstance(summary, dict) else {}
+def sync_run_context(run_id, context, sync_token, phase, target):
+    if not run_id or not sync_token or phase not in ("before_planning", "after_execution") or not isinstance(target, dict):
+        raise RuntimeError(u"ArcMap context callback requires run_id, sync_token, phase and target.")
+    return _post("/runs/%s/context" % run_id, {
+        "context": context,
+        "sync_token": sync_token,
+        "phase": phase,
+        "target": target,
     })
 
 
-def current_context():
-    response = _get("/context", timeout=30)
-    return response.get("context")
+def register_arcmap_bridge(bridge_pid, bridge_port, summary=None):
+    return _post("/arcmap/register", {
+        "bridge_pid": int(bridge_pid),
+        "bridge_port": int(bridge_port),
+        "summary": summary if isinstance(summary, dict) else {}
+    })
 
 
 def ensure_running():
@@ -126,12 +127,22 @@ def start_gateway():
         raise RuntimeError(u"无法启动本地网关：%s" % exc)
 
 
-def claim_run(run_id):
-    return _post("/runs/%s/claim" % run_id, {})
+def claim_run(run_id, target, owner_id):
+    return _post("/runs/%s/claim" % run_id, {"target": target, "owner_id": owner_id})
 
 
-def complete_run(run_id, status, result):
-    return _post("/runs/%s/complete" % run_id, {"status": status, "result": result})
+def heartbeat_run(run_id, owner_id):
+    return _post("/runs/%s/heartbeat" % run_id, {"owner_id": owner_id}, timeout=10)
+
+
+def complete_run(run_id, status, result, owner_id, result_hash, target):
+    return _post("/runs/%s/complete" % run_id, {
+        "status": status,
+        "result": result,
+        "owner_id": owner_id,
+        "result_hash": result_hash,
+        "target": target,
+    }, timeout=10)
 
 
 def _gateway_command():

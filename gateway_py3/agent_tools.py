@@ -19,7 +19,7 @@ from .layer_profiles import layer_value_profile, matching_layers_exact
 from .output_folder_resolver import OutputFolderResolver
 from .tool_builder import ToolBuilderError, create_draft_tool, get_tool_package, revise_draft_tool
 from .validators import ValidationError, friendly_validation_message, prepare_workflow
-from .workflow_store import WorkflowStore
+from .run_store import RunStore
 
 
 class AgentToolError(Exception):
@@ -30,7 +30,7 @@ class AgentToolRuntime:
     def __init__(
         self,
         catalog: OperationCatalog,
-        store: WorkflowStore,
+        store: RunStore,
         context: Dict[str, Any],
         file_resolver: FileResolver | None = None,
         output_folder_resolver: OutputFolderResolver | None = None
@@ -294,7 +294,7 @@ def _tool(name: str, description: str, parameters: Dict[str, Any]) -> Dict[str, 
     }
 
 
-def _custom_tool_catalog_status(store: WorkflowStore, operation_id: str) -> Dict[str, Any] | None:
+def _custom_tool_catalog_status(store: RunStore, operation_id: str) -> Dict[str, Any] | None:
     for tool in store.list_pending_tools():
         spec = (tool.get("payload") or {}).get("operation_spec") or {}
         if spec.get("id") != operation_id:

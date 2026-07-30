@@ -21,8 +21,6 @@ def handle_get(state, path, app_version, query=None):
         }
     if path == "/config":
         return {"config": public_config()}
-    if path == "/context":
-        return {"context": state.store.get_state("arcmap_context")}
     if path == "/api/runs":
         return {"runs": state.store.list_recent(
             limit=common.int_query(query, "limit", 50),
@@ -70,8 +68,7 @@ def workbench_state(state, app_version):
             "operation_count": len(state.catalog.operations),
         },
         "config": config,
-        "context": state.store.get_state("arcmap_context"),
-        "workflows": state.store.list_recent(include_trace=False),
+        "runs": state.store.list_recent(include_trace=False),
         "arcmap": arcmap_payload,
     }
 
@@ -91,8 +88,6 @@ def _handle_post(state, path, payload):
         return runs.create(state, payload)
     if path.startswith("/runs/") and path.endswith("/cancel") and path.count("/") == 3:
         return runs.cancel(state, _run_id(path.split("/")[2]))
-    if path == "/arcmap/sync":
-        return arcmap.sync_context(state)
     if path == "/arcmap/register":
         return arcmap.register(state, payload)
     if path == "/arcmap/active":
@@ -100,10 +95,24 @@ def _handle_post(state, path, payload):
     if path == "/arcmap/permission":
         return arcmap.set_permission(state, payload)
     if path.startswith("/runs/") and path.endswith("/claim") and path.count("/") == 3:
-        return {"run": state.store.claim_for_arcmap(_run_id(path.split("/")[2]))}
+        return {"run": state.store.claim_for_execution(
+            _run_id(path.split("/")[2]), payload.get("target"), payload.get("owner_id"))}
+    if path.startswith("/runs/") and path.endswith("/heartbeat") and path.count("/") == 3:
+        return {"run": state.store.heartbeat_execution(
+            _run_id(path.split("/")[2]), payload.get("owner_id"))}
     if path.startswith("/runs/") and path.endswith("/complete") and path.count("/") == 3:
-        return {"run": state.store.finish_arcmap_run(
-            _run_id(path.split("/")[2]), payload["status"], payload.get("result", {}))}
+        run_id = _run_id(path.split("/")[2])
+        row = state.store.complete_execution(
+            run_id,
+            payload["status"],
+            payload.get("result", {}),
+            payload.get("owner_id"),
+            payload.get("result_hash"),
+            payload.get("target"),
+        )
+        if row["status"] == "executed":
+            state.schedule_executed_recovery(run_id) if hasattr(state, "schedule_executed_recovery") else None
+        return {"run": row}
     if path == "/config":
         return {"config": save_config(common.config_payload(payload))}
     if path == "/dialog/select-folder":
@@ -118,13 +127,10 @@ def _handle_post(state, path, payload):
             raise ValueError("不支持的路径类型。")
         os.startfile(str(resolved))
         return {"ok": True, "path": str(resolved)}
-    if path == "/context":
-        context = payload.get("context")
-        if not isinstance(context, dict):
-            raise ValueError("context must be an object.")
-        return {"context": state.store.set_state("arcmap_context", context)}
+    if path.startswith("/runs/") and path.endswith("/context") and path.count("/") == 3:
+        return arcmap.receive_run_context(state, _run_id(path.split("/")[2]), payload)
     if path == "/runs/clear":
-        return state.store.clear_workflows(payload.get("mode"))
+        return state.store.clear_runs(payload.get("mode"))
     if path.startswith("/runs/") and path.endswith("/delete"):
         return state.store.delete(path.split("/")[2])
     if path.startswith("/tools/") and path.endswith("/enable"):

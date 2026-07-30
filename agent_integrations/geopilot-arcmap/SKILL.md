@@ -21,10 +21,11 @@ Use the local GeoPilot gateway and `ArcMapBridge.exe` as the ArcMap safety and e
    - The Bridge uses the ArcMap Running Object Table to find ArcMap windows, writes a silent command payload, then invokes the single GeoPilot Python Add-in command `openAssistantButton` inside ArcMap.
    - Bridge-triggered sync/execute is silent in ArcMap. A manual toolbar click on `启动控制台` opens the Web console and reads the current map context.
    - If a detected bridge port is occupied but does not respond, read `%LOCALAPPDATA%\ArcMapAIAssistant\logs\arcmap_bridge.log`.
-5. Run `scripts/geopilot_cli.py arcmap-sync` to make the selected ArcMap read the current context.
+5. Context capture is performed automatically for the exact selected ArcMap target when a run is submitted.
 6. Create a run with `scripts/geopilot_cli.py run --mode context_single --command "<user request>"`.
 7. Run automatically with `scripts/geopilot_cli.py run --mode multi_agent --command "<request>" --execute --confirmed`; direct edits additionally require `--allow-edits`.
 8. Query the terminal result with `run-status <run_id>` or export reproducibility data with `run-report`.
+   - `indeterminate` is terminal and means ArcMap's authoritative result did not arrive within the recovery window. Never infer success. The episode is protected as an audit record while a new run may be submitted independently. A later result is accepted only from the original execution owner and ArcMap target and is recorded as a recovery audit; ordinary cleanup is allowed only after that recovery.
 
 The `run` command is the sole planning and controlled-execution entry point.
 
@@ -43,7 +44,7 @@ The `run` command is the sole planning and controlled-execution entry point.
 - For upper-left/lower-right rectangle or square requests, use `edit.create_rectangle_polygon` with numeric `left/top/right/bottom`.
 - Do not plan “create many shapefiles then merge” for ordinary multi-feature creation. Use `features` arrays in `edit.create_*` when one output layer should contain multiple features.
 - ArcGIS feature classes cannot mix point, line, and polygon geometry in one layer. If the requested features mix geometry types and the user asked for one shp, ask a clarification instead of forcing a merge.
-- When multiple ArcMap instances are open, do not guess. Use `arcmap-list` and select the intended instance by `hwnd` before syncing or executing.
+- When multiple ArcMap instances are open, do not guess. Use `arcmap-list` and select the intended instance by `hwnd` before executing.
 - Do not manually start `ArcMapBridge.exe`; run `arcmap-list` so the Gateway owns Bridge startup, target discovery, and shutdown.
 - Geometry creation, data management, and layout export are normal catalog operations. Read capabilities first and use `edit.*`, `data.*`, and `layout.*` only when those operation ids are present.
 

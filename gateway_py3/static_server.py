@@ -57,7 +57,7 @@ def _direct_asset(path: str) -> str | None:
             "components.css",
             "app.js",
             "app_render.js",
-            "app_mentions.js",
+            "app_events.js",
             "app_voice.js",
             "favicon.svg",
         }:

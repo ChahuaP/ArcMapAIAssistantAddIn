@@ -12,17 +12,17 @@ from .validators import ValidationError, context_hash, prepare_workflow
 MODES = ("direct_single", "context_single", "constrained_single", "multi_agent")
 TERMINAL_ACTIONS = ("clarify", "reject")
 MAX_REVISIONS = 3
-
-
-class RoleClients:
-    def __init__(self, primary, reviewer):
-        self.primary = primary
-        self.reviewer = reviewer
-
-    def for_role(self, role):
-        if role == "auditor":
-            return self.reviewer
-        return self.primary
+WORKFLOW_STEP_CONTRACT = (
+    "Every workflow_draft step MUST contain exactly four fields: id (unique string), "
+    "operation (exact registered operation id), arguments (object matching parameters_schema), "
+    "and reason (string). Use arguments, never parameters. "
+)
+WORKFLOW_DRAFT_CONTRACT = (
+    "workflow_draft MUST contain exactly action, summary, and steps. "
+    "action MUST be exactly one of execute, clarify, unsupported, or answer. "
+    "Use execute when steps is non-empty; clarify, unsupported, and answer MUST use an empty steps array. "
+    + WORKFLOW_STEP_CONTRACT
+)
 
 
 class ContractError(ValueError):
@@ -91,30 +91,32 @@ def audit_result(value):
 def _prompt(role: str) -> str:
     contracts = {
         "direct": (
-            "Output {workflow_draft:{action,summary,steps}}. "
+            "Output one workflow_draft object. "
             "Use only registered operation cards and exact parameter schemas. "
-            "Never execute ArcPy or emit code. Every execute step has id, "
-            "operation, arguments, reason."
+            "Never execute ArcPy or emit code. "
+            + WORKFLOW_DRAFT_CONTRACT
         ),
         "context": (
-            "Output {workflow_draft:{action,summary,steps}}. "
+            "Output one workflow_draft object. "
             "Use normalized ArcMap context and registered operation cards only. "
-            "Never use raw SQL; where clauses are structured."
+            "Never use raw SQL; where clauses are structured. "
+            + WORKFLOW_DRAFT_CONTRACT
         ),
         "constrained": (
             "Output {task_semantics:{goal,inputs,constraints,success_criteria},"
-            "workflow_draft:{action,summary,steps}}. Workflow steps require id, "
-            "operation, arguments, reason. Repair only from structured validation "
-            "diagnostics."
+            "workflow_draft:{action,summary,steps}}. Repair only from structured "
+            "validation diagnostics. "
+            + WORKFLOW_DRAFT_CONTRACT
         ),
         "semantic": (
             "Output {task_semantics:{goal,inputs,constraints,success_criteria}}. "
             "Do not produce a workflow or hidden reasoning."
         ),
         "planner": (
-            "Output {workflow_draft:{action,summary,steps}}. "
+            "Output one workflow_draft object. "
             "Use only TaskSemantics, context, capabilities and structured "
-            "diagnostics provided; no hidden reasoning."
+            "diagnostics provided; no hidden reasoning. "
+            + WORKFLOW_DRAFT_CONTRACT
         ),
         "auditor": (
             "Output {audit_result:{decision,issues,revision_requirements}}. "
@@ -127,33 +129,23 @@ def _prompt(role: str) -> str:
 
 class ExperimentRunner:
     """Plans one persisted run; ArcMap execution remains outside this seam."""
-    def __init__(self, catalog, store, client: ChatProvider | None = None, clients=None):
+    def __init__(self, catalog, store, client: ChatProvider | None = None):
         self.catalog = catalog
         self.store = store
         self.client = client
-        self.clients = clients
 
     def _client(self, role, provider="", model=""):
-        if self.clients:
-            return self.clients.for_role(role)
         if self.client:
             return self.client
-        slot = "reviewer" if role == "auditor" else "primary"
         from .llm_providers import load_config
 
         config = load_config()
-        selected_provider = provider or config[slot + "_provider"]
-        selected_model = model or config[slot + "_model"]
+        selected_provider = provider or config["primary_provider"]
+        selected_model = model or config["primary_model"]
         return create_provider(
             provider_id=selected_provider,
             model_id=selected_model,
         )
-
-    def run(self, command, context, mode):
-        """Synchronous test seam; production uses the persisted run controller."""
-        self._validate_request(command, context, mode)
-        run = self.store.create_run(command, mode, context_hash(context))
-        return self.plan(run["id"], command, context, mode)
 
     def plan(
         self,
@@ -189,8 +181,10 @@ class ExperimentRunner:
             "model": actual["model"],
             "requested_model_config": {"provider": provider or actual["provider"], "model": model or actual["model"]},
             "capability_hash": digest(capabilities),
+            "catalog_hash": digest(capabilities),
             "context_hash": context_hash(context),
             "context_snapshot_hash": digest(context),
+            "role_models": {role: actual for role in ("direct", "context", "constrained", "semantic", "planner", "auditor")},
         })
         try:
             if mode == "direct_single":
@@ -239,7 +233,7 @@ class ExperimentRunner:
             else:
                 semantic_response = self._call(
                     run_id,
-                    self._client("semantic", provider, model),
+                    client,
                     "semantic",
                     {
                         "request": command,
@@ -252,7 +246,7 @@ class ExperimentRunner:
                 trace["task_semantics"] = semantics
                 planner_response = self._call(
                     run_id,
-                    self._client("planner", provider, model),
+                    client,
                     "planner",
                     {
                         "task_semantics": semantics,
@@ -265,7 +259,8 @@ class ExperimentRunner:
                 version_id = self._record_workflow(trace, draft, "planner")
                 return self._multi_loop(
                     run_id,
-                    self._client("planner", provider, model),
+                    client,
+                    client,
                     semantics,
                     context,
                     index,
@@ -277,65 +272,6 @@ class ExperimentRunner:
         except Exception as exc:
             self.store.fail_run(run_id, "planning", exc, trace)
             raise
-
-    def plan_from_artifacts(self, run_id, mode, context, artifacts, provider="", model=""):
-        semantics = task_semantics(artifacts["task_semantics"])
-        draft = workflow_draft(artifacts["workflow_draft"])
-        trace = self.store.run_trace(run_id)
-        trace["source"] = artifacts["source"]
-        trace["task_semantics"] = semantics
-        trace["artifacts"] = {
-            "task_semantics_hash": digest(semantics),
-            "workflow_draft_hash": digest(draft),
-        }
-        version_id = self._record_workflow(trace, draft, "external")
-        if mode == "constrained_single":
-            result = self._validation(draft, context, trace, version_id)
-            if not result["ok"]:
-                return self._terminal(run_id, "failed", draft, trace, result["diagnostic"])
-            return self._finalize(
-                run_id,
-                result["workflow"],
-                context,
-                trace,
-                version_id,
-                already_valid=True,
-            )
-        if mode != "multi_agent":
-            raise ContractError("external artifacts require constrained_single or multi_agent.")
-        client = self._client("auditor", provider, model)
-        audit_response = self._call(
-            run_id,
-            client,
-            "auditor",
-            {
-                "task_semantics": semantics,
-                "context": context,
-                "capabilities": self._cards(),
-                "workflow_draft": draft,
-            },
-            trace,
-        )
-        audit = audit_result(audit_response["audit_result"])
-        trace["audits"].append({
-            "version_id": version_id,
-            "workflow_hash": digest(draft),
-            **audit,
-        })
-        if audit["decision"] != "pass":
-            status = "clarify" if audit["decision"] == "revise" else audit["decision"]
-            return self._terminal(run_id, status, draft, trace, audit)
-        result = self._validation(draft, context, trace, version_id)
-        if not result["ok"]:
-            return self._terminal(run_id, "failed", draft, trace, result["diagnostic"])
-        return self._finalize(
-            run_id,
-            result["workflow"],
-            context,
-            trace,
-            version_id,
-            already_valid=True,
-        )
 
     def _cards(self, operations=None):
         source = operations if operations is not None else self.catalog.all_operations()
@@ -397,6 +333,7 @@ class ExperimentRunner:
         self,
         run_id,
         client,
+        auditor_client,
         semantics,
         context,
         index,
@@ -408,7 +345,7 @@ class ExperimentRunner:
             self._check_cancel(run_id)
             audit_response = self._call(
                 run_id,
-                self._client("auditor"),
+                auditor_client,
                 "auditor",
                 {
                     "task_semantics": semantics,

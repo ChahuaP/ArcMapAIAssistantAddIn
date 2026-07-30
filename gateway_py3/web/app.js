@@ -8,45 +8,39 @@
     let capabilitiesLoaded = false;
     let currentMode = 'context_single';
     let modeInitialized = false;
-    let latestArcgisContext = null;
     let arcmapBridges = [];
-    let cachedWorkflows = [];
-    let selectedWorkflowId = '';
+    let cachedRuns = [];
+    let selectedRunId = '';
     let transientUserMessage = '';
     let transientAssistantMessage = '';
     let modelWait = null;
     let modelWaitTimer = null;
-    let activePlanRequestId = '';
     let providerOptions = [];
     let modelOptions = [];
     let pendingProviderKeyClears = {};
     const appState = {
       config: null,
       health: null,
-      context: null,
-      workflows: [],
-      arcmapBridges: [],
-      agentProgress: null
+      runs: [],
+      arcmapBridges: []
     };
     const taskDetailsState = new Map();
-    let mentionState = null;
 
     function setState(patch) {
       patch = patch || {};
       Object.assign(appState, patch);
-      if (Object.prototype.hasOwnProperty.call(patch, 'context')) latestArcgisContext = patch.context || null;
-      if (Object.prototype.hasOwnProperty.call(patch, 'workflows')) cachedWorkflows = patch.workflows || [];
+      if (Object.prototype.hasOwnProperty.call(patch, 'runs')) cachedRuns = patch.runs || [];
       if (Object.prototype.hasOwnProperty.call(patch, 'arcmapBridges')) arcmapBridges = patch.arcmapBridges || [];
       if (Object.prototype.hasOwnProperty.call(patch, 'currentMode')) currentMode = patch.currentMode || currentMode;
     }
 
     function renderApp(changedKeys) {
       const keys = new Set(changedKeys || []);
-      if (keys.has('workflows')) {
-        pruneTaskDetailsState(cachedWorkflows);
-        ensureSelectedWorkflow();
-        renderTasks(cachedWorkflows);
-        renderConversation(cachedWorkflows);
+      if (keys.has('runs')) {
+        pruneTaskDetailsState(cachedRuns);
+        ensureSelectedRun();
+        renderTasks(cachedRuns);
+        renderConversation(cachedRuns);
       }
       if (keys.has('arcmap')) renderArcMapBridgeState();
     }
@@ -250,7 +244,6 @@
         modelWaitTimer = null;
       }
       modelWait = null;
-      activePlanRequestId = '';
       const button = document.getElementById('sendButton');
       if (button) button.disabled = false;
     }
@@ -262,7 +255,7 @@
       if (bubble) {
         bubble.innerHTML = renderModelWait();
       } else if (transientUserMessage) {
-        renderConversation(cachedWorkflows);
+        renderConversation(cachedRuns);
       }
     }
 
@@ -278,7 +271,7 @@
 
     function modelWaitStageIndex() {
       const order = ['sync_arcmap', 'read_capabilities', 'analyze', 'read_fields', 'generate_workflow', 'validate', 'execute_arcmap', 'complete', 'failed'];
-      const stage = (modelWait && modelWait.stage) || (appState.agentProgress && appState.agentProgress.stage) || '';
+      const stage = (modelWait && modelWait.stage) || '';
       const index = order.indexOf(stage);
       if (index >= 0) return Math.min(7, index);
       return modelWait && modelWait.completedStageIndex >= 0 ? modelWait.completedStageIndex : Math.min(7, Math.floor(modelWaitElapsed() / 12));
@@ -348,8 +341,7 @@
       applyHealthData(data.health || {}, true);
       applyConfig(data.config || {});
       applyArcMapBridges((data.arcmap && data.arcmap.bridges) || [], (data.arcmap && data.arcmap.error) || '');
-      applyContextRecord(data.context || null);
-      applyWorkflows(data.workflows || [], true);
+      applyRuns(data.runs || [], true);
       setStatus(`网关已连接，版本 ${(data.health && data.health.app_version) || EXPECTED_GATEWAY_VERSION}。`);
     }
 
@@ -665,7 +657,7 @@
       storeMode(mode);
       updateModeUI();
       setStatus(mode === 'multi_agent' ? '已切换到多 Agent 模式。' : '已切换到上下文单模型模式。');
-      await refreshWorkflows();
+      await refreshRuns();
     }
 
     function updateModeUI() {
@@ -674,45 +666,8 @@
       updateModeStatus();
       renderCurrentModelHint(appState.config);
       ensureSelectedWorkflow();
-      renderTasks(cachedWorkflows);
-      renderConversation(cachedWorkflows);
-    }
-
-    async function loadContext() {
-      const data = await api('/context');
-      applyContextRecord(data.context);
-    }
-
-    function applyContextRecord(item) {
-      if (!item || !item.value) {
-        setState({context: null});
-        renderArcMapBridgeState();
-        document.getElementById('layerCount').textContent = '0';
-        document.getElementById('mxdState').textContent = '未知';
-        document.getElementById('srState').textContent = '未知';
-        document.getElementById('layerTable').innerHTML = '<tr><td colspan="3">发送任务或刷新工作台时会读取 ArcMap 上下文。</td></tr>';
-        return;
-      }
-      const ctx = item.value;
-      setState({context: ctx});
-      const layers = ctx.layers || [];
-      const target = activeArcMapBridge();
-      const bridgeText = target ? ` · ${arcmapBridgeLabel(target, arcmapBridges.length)}` : '';
-      setTile('arcgisState', 'ok', `已同步，${layers.length} 个图层${bridgeText}`);
-      document.getElementById('layerCount').textContent = layers.length;
-      document.getElementById('mxdState').textContent = ctx.is_saved ? '已保存' : '未保存';
-      document.getElementById('srState').textContent = (ctx.spatial_reference && ctx.spatial_reference.name) || '未知';
-      const table = document.getElementById('layerTable');
-      table.innerHTML = '';
-      if (!layers.length) {
-        table.innerHTML = '<tr><td colspan="3">当前地图没有可读图层。</td></tr>';
-        return;
-      }
-      layers.forEach(layer => {
-        const row = document.createElement('tr');
-        row.innerHTML = `<td>${escapeHtml(layer.name || '')}</td><td>${escapeHtml(layer.geometry_type || '')}</td><td>${layer.selected_count || 0}</td>`;
-        table.appendChild(row);
-      });
+      renderTasks(cachedRuns);
+      renderConversation(cachedRuns);
     }
 
     async function loadArcMapBridges() {
@@ -730,13 +685,6 @@
     }
 
     function renderArcMapBridgeState(error) {
-      if (latestArcgisContext) {
-        const layers = latestArcgisContext.layers || [];
-        const target = activeArcMapBridge();
-        const bridgeText = target ? ` · ${arcmapBridgeLabel(target, arcmapBridges.length)}` : '';
-        setTile('arcgisState', 'ok', `已同步，${layers.length} 个图层${bridgeText}`);
-        return;
-      }
       if (error) {
         setTile('arcgisState', 'bad', '未连接');
         return;
@@ -846,14 +794,12 @@
       input.value = '';
       transientUserMessage = command;
       transientAssistantMessage = '';
-      const requestId = `plan-${Date.now()}-${Math.random().toString(16).slice(2)}`;
       startModelWait('模型正在思考');
-      activePlanRequestId = requestId;
       if (currentMode === 'multi_agent') {
-        renderConversation(cachedWorkflows);
+        renderConversation(cachedRuns);
       } else {
-        selectedWorkflowId = '';
-        renderConversation(cachedWorkflows);
+        selectedRunId = '';
+        renderConversation(cachedRuns);
       }
       try {
         setStatus('正在生成任务...');
@@ -864,12 +810,12 @@
         });
         transientUserMessage = '';
         transientAssistantMessage = '';
-        selectedWorkflowId = data.run.id;
+        selectedRunId = data.run.id;
         await waitForRun(data.run.id);
       } catch (err) {
         stopModelWait();
         transientAssistantMessage = err.message;
-        renderConversation(cachedWorkflows);
+        renderConversation(cachedRuns);
         setStatus(err.message);
       } finally {
         stopModelWait();
@@ -877,17 +823,18 @@
     }
 
     async function waitForRun(id) {
-      const terminal = new Set(['planned', 'clarify', 'reject', 'failed', 'cancelled', 'succeeded']);
-      for (let attempt = 0; attempt < 40; attempt += 1) {
+      const terminal = new Set(['planned', 'clarify', 'reject', 'failed', 'context_failed', 'cancelled', 'succeeded', 'indeterminate']);
+      let attempt = 0;
+      while (true) {
         const data = await api(`/runs/${id}`);
         if (terminal.has(data.run.status)) {
-          await refreshWorkflows();
+          await refreshRuns();
           setStatus(`运行状态：${data.run.status}`);
           return data.run;
         }
         await new Promise((resolve) => setTimeout(resolve, Math.min(250 * (attempt + 1), 2000)));
+        attempt += 1;
       }
-      throw new Error('运行状态轮询超时。');
     }
 
     async function clearConversation() {
@@ -896,26 +843,26 @@
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(clearScope())
       });
-      selectedWorkflowId = '';
+      selectedRunId = '';
       transientUserMessage = '';
       transientAssistantMessage = '';
       setStatus(currentMode === 'multi_agent' ? '已清空多 Agent 会话。' : '已清空。');
-      await refreshWorkflows();
+      await refreshRuns();
     }
 
-    async function deleteWorkflow(id) {
+    async function deleteRun(id) {
       await api(`/runs/${id}/delete`, {method: 'POST', body: '{}'});
-      if (selectedWorkflowId === id) selectedWorkflowId = '';
+      if (selectedRunId === id) selectedRunId = '';
       setStatus('已删除。');
-      await refreshWorkflows();
+      await refreshRuns();
     }
 
-    async function refreshWorkflows(renderChat = true) {
-      const data = await api(workflowListPath());
-      applyWorkflows(data.runs || [], renderChat);
+    async function refreshRuns(renderChat = true) {
+      const data = await api(runListPath());
+      applyRuns(data.runs || [], renderChat);
     }
 
-    function workflowListPath() {
+    function runListPath() {
       const params = new URLSearchParams();
       params.set('limit', '50');
       params.set('mode', currentMode);
@@ -923,10 +870,10 @@
       return `/api/runs?${params.toString()}`;
     }
 
-    function applyWorkflows(workflows, renderChat = true) {
-      setState({workflows: workflows || []});
-      pruneTaskDetailsState(cachedWorkflows);
-      ensureSelectedWorkflow();
-      renderTasks(cachedWorkflows);
-      if (renderChat) renderConversation(cachedWorkflows);
+    function applyRuns(runs, renderChat = true) {
+      setState({runs: runs || []});
+      pruneTaskDetailsState(cachedRuns);
+      ensureSelectedRun();
+      renderTasks(cachedRuns);
+      if (renderChat) renderConversation(cachedRuns);
     }

@@ -1,30 +1,30 @@
-    function renderConversation(workflows) {
+    function renderConversation(runs) {
       const chat = document.getElementById('chatLog');
       chat.innerHTML = '';
       if (currentMode === 'multi_agent') {
-        const items = visibleWorkflows(workflows).slice().reverse();
+        const items = visibleRuns(runs).slice().reverse();
         if (!items.length && !transientUserMessage) {
           renderEmptyChat();
           return;
         }
         items.forEach(item => {
           appendBubble('user', item.command, false);
-          appendAssistantForWorkflow(item, false, false);
+          appendAssistantForRun(item, false, false);
         });
         appendTransientConversation(false);
         chat.scrollTop = chat.scrollHeight;
-        const selected = selectedWorkflow(workflows);
+        const selected = selectedRun(runs);
         if (selected) setStatus(statusText(selected));
         return;
       }
-      const item = selectedWorkflow(workflows);
+      const item = selectedRun(runs);
       if (!item && !transientUserMessage) {
         renderEmptyChat();
         return;
       }
       if (item) {
         appendBubble('user', item.command, false);
-        appendAssistantForWorkflow(item, false);
+        appendAssistantForRun(item, false);
       }
       appendTransientConversation(false);
       chat.scrollTop = chat.scrollHeight;
@@ -50,13 +50,13 @@
       if (empty) empty.remove();
     }
 
-    function appendAssistantForWorkflow(item, scroll = true, updateStatus = true) {
+    function appendAssistantForRun(item, scroll = true, updateStatus = true) {
       const wf = item.workflow;
       const action = wf.action || 'execute';
       let text = wf.summary;
       if (action === 'execute') {
-        text += item.status === 'draft'
-          ? '\n\n已生成任务，等待执行确认。'
+        text += item.status === 'planned'
+          ? '\n\n任务已规划，未请求执行。'
           : '\n\n任务已发送到 ArcMap。';
       } else if (action === 'clarify') {
         text += '\n\n信息不够，当前不会执行任何操作。';
@@ -243,10 +243,10 @@
         .replace(/\s+/g, ' ');
     }
 
-    function renderTasks(workflows) {
+    function renderTasks(runs) {
       const box = document.getElementById('tasks');
       box.innerHTML = '';
-      const items = visibleWorkflows(workflows);
+      const items = visibleRuns(runs);
       if (!items.length) {
         const text = `${taskScopeLabel()}暂无任务。`;
         box.innerHTML = `<div class="empty-state-card">${text}</div>`;
@@ -258,29 +258,29 @@
       box.appendChild(list);
     }
 
-    function ensureSelectedWorkflow() {
-      const visible = visibleWorkflows(cachedWorkflows);
+    function ensureSelectedRun() {
+      const visible = visibleRuns(cachedRuns);
       if (!visible.length) {
-        selectedWorkflowId = '';
+        selectedRunId = '';
         return;
       }
-      if (transientUserMessage && currentMode !== 'multi_agent' && !selectedWorkflowId) return;
-      if (!visible.some(item => item.id === selectedWorkflowId)) {
-        selectedWorkflowId = visible[0].id;
+      if (transientUserMessage && currentMode !== 'multi_agent' && !selectedRunId) return;
+      if (!visible.some(item => item.id === selectedRunId)) {
+        selectedRunId = visible[0].id;
       }
     }
 
-    function selectedWorkflow(workflows) {
-      return visibleWorkflows(workflows).find(item => item.id === selectedWorkflowId) || null;
+    function selectedRun(runs) {
+      return visibleRuns(runs).find(item => item.id === selectedRunId) || null;
     }
 
-    function workflowMode(item) {
+    function runMode(item) {
       return item.mode || 'context_single';
     }
 
-    function visibleWorkflows(workflows) {
-      return (workflows || []).filter(item => {
-        return workflowMode(item) === currentMode;
+    function visibleRuns(runs) {
+      return (runs || []).filter(item => {
+        return runMode(item) === currentMode;
       });
     }
 
@@ -291,11 +291,11 @@
     function taskCard(item) {
       const action = item.workflow.action || 'execute';
       const card = document.createElement('div');
-      card.className = `task-card${item.id === selectedWorkflowId ? ' active' : ''}`;
+      card.className = `task-card${item.id === selectedRunId ? ' active' : ''}`;
       card.innerHTML = `
         <div class="task-top">
           <span class="tag ${tagClass(item, action)}">${statusLabel(item, action)}</span>
-          ${item.id === selectedWorkflowId ? '<span class="task-current">当前</span>' : ''}
+          ${item.id === selectedRunId ? '<span class="task-current">当前</span>' : ''}
         </div>
         <p class="task-title">${escapeHtml(workflowTitle(item.workflow))}</p>
         <div class="task-meta">${escapeHtml(shortCommand(item.command))}</div>
@@ -305,11 +305,14 @@
       `;
       const actions = document.createElement('div');
       actions.className = 'task-actions';
-      const deleteButton = document.createElement('button');
-      deleteButton.className = 'btn btn-danger btn-sm';
-      deleteButton.textContent = '删除';
-      deleteButton.onclick = () => deleteWorkflow(item.id);
-      actions.appendChild(deleteButton);
+      const undeletableStatuses = new Set(['running', 'planned', 'approved', 'executing', 'executed', 'recovery_required', 'indeterminate']);
+      if (!undeletableStatuses.has(item.status)) {
+        const deleteButton = document.createElement('button');
+        deleteButton.className = 'btn btn-danger btn-sm';
+        deleteButton.textContent = '删除';
+        deleteButton.onclick = () => deleteRun(item.id);
+        actions.appendChild(deleteButton);
+      }
       card.appendChild(actions);
 
       const steps = document.createElement('details');
@@ -324,20 +327,20 @@
       return card;
     }
 
-    function restoreTaskDetailsState(details, workflowId, panel, defaultOpen) {
-      const saved = taskDetailsState.get(workflowId);
+    function restoreTaskDetailsState(details, runId, panel, defaultOpen) {
+      const saved = taskDetailsState.get(runId);
       details.open = saved && Object.prototype.hasOwnProperty.call(saved, panel)
         ? saved[panel]
         : defaultOpen;
       details.addEventListener('toggle', () => {
-        const state = taskDetailsState.get(workflowId) || {};
+        const state = taskDetailsState.get(runId) || {};
         state[panel] = details.open;
-        taskDetailsState.set(workflowId, state);
+        taskDetailsState.set(runId, state);
       });
     }
 
-    function pruneTaskDetailsState(workflows) {
-      const ids = new Set((workflows || []).map(item => item.id));
+    function pruneTaskDetailsState(runs) {
+      const ids = new Set((runs || []).map(item => item.id));
       Array.from(taskDetailsState.keys()).forEach(id => {
         if (!ids.has(id)) taskDetailsState.delete(id);
       });
@@ -367,6 +370,8 @@
     }
 
     function failedMessage(item) {
+      if (item.status === 'indeterminate') return '<div class="task-note error">ArcMap 执行后的权威结果无法判定；该审计记录不可删除，但可以重新运行此任务。</div>';
+      if (item.status === 'context_failed') return '<div class="task-note error">ArcPy 执行已完成，但更新执行后地图上下文失败。</div>';
       if (item.status !== 'failed' || !item.result || !item.result.error) return '';
       return `<div class="task-note error">执行失败：${escapeHtml(item.result.error)}</div>`;
     }
@@ -385,8 +390,11 @@
       if (action === 'clarify') return '需要补充';
       if (action === 'unsupported') return '暂不支持';
       if (item.status === 'planned') return '已规划';
-      if (item.status === 'executing') return '执行中';
+      if (item.status === 'executing') return 'ArcMap 执行中';
+      if (item.status === 'executed') return '正在更新地图上下文';
+      if (item.status === 'recovery_required') return '执行状态待恢复';
+      if (item.status === 'indeterminate') return '结果无法判定';
       if (item.status === 'succeeded') return '已完成';
-      if (item.status === 'failed') return '失败';
+      if (item.status === 'failed' || item.status === 'context_failed') return '失败';
       return item.status;
     }

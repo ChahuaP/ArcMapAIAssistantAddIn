@@ -7,7 +7,6 @@ from gateway_py3.validators import ValidationError
 QUIET_ACCESS_PATHS = (
     "/api/runs",
     "/config",
-    "/context",
     "/events",
     "/health",
 )

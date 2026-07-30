@@ -12,6 +12,10 @@ from urllib.error import HTTPError, URLError
 from .paths import appdata_dir
 
 BASE_URL = "http://127.0.0.1:8766"
+# ArcMap execution is synchronous and has no cancellation protocol.  A client
+# must therefore wait for the runtime's terminal callback instead of timing out
+# and falsely changing the durable run state while GIS is still running.
+ARCMAP_EXECUTION_TIMEOUT_SECONDS = None
 
 
 class ArcMapBridgeError(Exception):
@@ -22,20 +26,20 @@ def health(port: int | None = None) -> Dict[str, Any]:
     return _request("GET", "/health", port=port, timeout=0.6)
 
 
-def sync_context_target(port: int | None = None, hwnd: int | None = None) -> Dict[str, Any]:
-    payload = {}
-    if hwnd:
-        payload["hwnd"] = int(hwnd)
+def sync_context_target(run_id: str, sync_token: str, phase: str, port: int | None = None, hwnd: int | None = None) -> Dict[str, Any]:
+    if not run_id or not sync_token or not hwnd or phase not in ("before_planning", "after_execution"):
+        raise ValueError("run_id, sync_token, phase and hwnd are required for ArcMap context sync.")
+    payload = {"run_id": run_id, "sync_token": sync_token, "phase": phase, "hwnd": int(hwnd)}
     return _request("POST", "/sync-context", payload, port=port)
 
 
 def execute_run(run_id: str, allow_edits: bool = False, port: int | None = None, hwnd: int | None = None) -> Dict[str, Any]:
     if not run_id:
         raise ValueError("run_id is required.")
-    payload = {"run_id": run_id, "allow_edits": bool(allow_edits)}
+    payload = {"allow_edits": bool(allow_edits)}
     if hwnd:
         payload["hwnd"] = int(hwnd)
-    return _request("POST", "/execute-approved", payload, timeout=360, port=port)
+    return _request("POST", "/runs/%s/execute" % run_id, payload, timeout=ARCMAP_EXECUTION_TIMEOUT_SECONDS, port=port)
 
 
 def ensure_running() -> None:
@@ -82,7 +86,7 @@ def _request(
     method: str,
     path: str,
     payload: Dict[str, Any] | None = None,
-    timeout: float = 30,
+    timeout: float | None = 30,
     port: int | None = None
 ) -> Dict[str, Any]:
     data = None

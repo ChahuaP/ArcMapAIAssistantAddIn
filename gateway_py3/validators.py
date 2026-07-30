@@ -86,7 +86,7 @@ def validate_workflow(workflow: Dict[str, Any], catalog: OperationCatalog) -> No
     if action == "execute" and not steps:
         raise ValidationError("Executable workflow must contain at least one step.")
     if action in ("clarify", "unsupported", "answer") and steps:
-        raise ValidationError("Clarify, unsupported, and answer workflows must not contain executable steps.")
+        raise ValidationError("Clarify, unsupported, and answer workflow objects must not contain executable steps.")
 
     seen_step_ids = set()
     for step in steps:

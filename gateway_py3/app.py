@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -21,7 +20,7 @@ from gateway_py3.validators import ValidationError
 
 
 HOST = "127.0.0.1"
-PORT = int(os.environ.get("GEOPILOT_GATEWAY_PORT", "8765"))
+PORT = 8765
 APP_VERSION = "1.0.0"
 STATE = GatewayState()
 REJECTED_ERRORS = (
@@ -112,48 +111,15 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     WEB_ROOT.mkdir(parents=True, exist_ok=True)
     server = ThreadingHTTPServer((HOST, PORT), Handler)
+    STATE.start_recovery_resolver()
+    STATE.resume_interrupted_runs(
+        lambda run_id, target, phase, fence: arcmap_routes.sync_context(
+            STATE, run_id, phase, bridge=target, finalizer=fence
+        ),
+        lambda target, args: __import__("threading").Thread(target=target, args=args, daemon=True).start(),
+    )
     print("ArcMap AI Assistant Gateway listening on http://%s:%s" % (HOST, PORT))
     server.serve_forever()
-
-
-def _arcmap_sync():
-    return arcmap_routes.sync_context(STATE, port_checker=_is_local_port_open)
-
-
-def _arcmap_health():
-    return arcmap_routes.health(STATE, port_checker=_is_local_port_open)
-
-
-def _arcmap_register(payload):
-    return arcmap_routes.register(STATE, payload)
-
-
-def _arcmap_set_active(payload):
-    return arcmap_routes.set_active(STATE, payload, port_checker=_is_local_port_open)
-
-
-def _arcmap_set_permission(payload):
-    return arcmap_routes.set_permission(STATE, payload)
-
-
-def _arcmap_bridges():
-    return arcmap_routes.bridges(STATE, port_checker=_is_local_port_open)
-
-
-def _active_arcmap_bridge():
-    return arcmap_routes.active_bridge(STATE, port_checker=_is_local_port_open)
-
-
-def _is_local_port_open(port):
-    return arcmap_routes.is_local_port_open(port)
-
-
-def _public_operation(operation):
-    return route_common.public_operation(operation, detail=True)
-
-
-def _public_error(exc):
-    return route_common.public_error(exc)
 
 
 if __name__ == "__main__":

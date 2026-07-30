@@ -9,7 +9,8 @@ __pycache__/
 config.json
 *secrets*.json
 *api_keys*.json
-tests/
+tests/**/__pycache__/
+tests/**/*.pyc
 .claude/
 *.local.json
 CONTEXT.md

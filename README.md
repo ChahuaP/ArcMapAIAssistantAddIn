@@ -7,7 +7,7 @@ snapshot from the selected ArcMap window; caller-supplied context is rejected.
 With `execute=true`, the gateway plans the run, keeps it `approved`, and sends
 its UUID to the ArcMap Bridge. ArcMap atomically claims that exact UUID
 (`approved -> executing`) before touching the plan and completes the same UUID.
-Existing SQLite files containing legacy workflow records are rejected and must
+Existing SQLite files containing pre-run records are rejected and must
 be removed explicitly; they are never migrated or mixed with run records.
 
 GeoPilot 是一个运行在本地的 AI 工作台，专为 ArcMap（ArcGIS Desktop）设计。用户用自然语言描述 GIS 任务，系统自动生成可校验的工作流，经用户确认后在 ArcMap 内执行已注册的 ArcPy 操作。
@@ -102,6 +102,8 @@ Web 控制台 ──POST /runs──▶ Gateway
 Web 控制台显示执行结果
 ```
 
+ArcMap Runtime 在执行期间持续发送心跳，并先把权威结果写入本地 outbox，再提交给 Gateway。心跳中断后，运行进入 `recovery_required`，保留 5 分钟恢复窗口；窗口内同一执行 owner/target 的心跳或带哈希权威结果仍可恢复。窗口到期且仍无权威结果时，运行终止为 `indeterminate`（结果无法判定），停止轮询并不计入成功率分母。该 target 会被隔离，新的同 target run 会立即拒绝且不创建记录；该 episode 不可删除，批量清理也会保留。若之后收到同一 owner/target 的权威结果，Gateway 允许纠正为 `executed` 或 `failed`，并记录 `recovered_after_indeterminate` 审计信息；`executed` 在 C_t+1 最终化后释放 target，`failed` 立即释放 target。
+
 ---
 
 ## 安全模型
@@ -188,7 +190,7 @@ GeoPilot 的安全设计遵循 **"模型不直接执行"** 原则：
 
 ### 第三步：输入任务
 
-在输入框中用自然语言描述 GIS 任务，按 **Enter** 发送。可以使用 `@` 引用图层名、`#` 引用字段名来获得自动补全。
+在输入框中用自然语言描述 GIS 任务，按 **Enter** 发送。
 
 ### 第四步：审核并执行
 
@@ -488,7 +490,7 @@ geopilot/
 │   ├── llm_providers.py        多供应商 LLM 适配层
 │   ├── catalog_loader.py       操作目录加载器
 │   ├── validators.py           工作流校验器
-│   ├── workflow_store.py       工作流持久化存储
+│   ├── run_store.py            运行记录持久化存储
 │   ├── tool_builder.py         自定义工具构建器
 │   ├── voice.py                语音识别与文本校验
 │   ├── diagnostics.py          系统诊断检查

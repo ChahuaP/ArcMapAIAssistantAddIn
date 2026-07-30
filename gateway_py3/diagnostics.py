@@ -70,7 +70,6 @@ def collect_agent_diagnostics(app_version: str, operation_count: int, state: Any
             "health",
             "arcmap-list",
             "多开 ArcMap 时只保留一个窗口，或用外部 agent 指定 hwnd",
-            "arcmap-sync",
             "capabilities",
             "run --mode context_single --command <request>",
             "run",
@@ -146,13 +145,13 @@ def _check_agent_context(context: Any) -> Dict[str, Any]:
     if isinstance(context, dict) and context:
         layer_count = len(context.get("layers") or [])
         return _item("agent_context", "ArcMap 上下文", "ok", "已同步，上下文含 %s 个图层。" % layer_count)
-    return _item("agent_context", "ArcMap 上下文", "warn", "还没有同步上下文；先运行 arcmap-list，再运行 arcmap-sync。")
+    return _item("agent_context", "ArcMap 上下文", "warn", "还没有运行上下文；先运行 arcmap-list 选择目标，再提交 run。")
 
 
 def _check_agent_bridge(active_bridge: Any) -> Dict[str, Any]:
-    if isinstance(active_bridge, dict) and active_bridge.get("port"):
+    if isinstance(active_bridge, dict) and active_bridge.get("bridge_port"):
         title = ((active_bridge.get("summary") or {}).get("title") or "").strip()
-        detail = "已连接 ArcMap Bridge，port=%s。" % active_bridge.get("port")
+        detail = "已连接 ArcMap Bridge，bridge_port=%s。" % active_bridge.get("bridge_port")
         if title:
             detail = detail[:-1] + "，当前窗口=%s。" % title
         return _item("agent_bridge", "地图窗口", "ok", detail)

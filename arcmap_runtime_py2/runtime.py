@@ -4,24 +4,29 @@ from __future__ import absolute_import
 import json
 import os
 import subprocess
+import threading
 import time
 import traceback
+import uuid
 
 import pythonaddins
 
 try:
     import context_reader
+    import execution_outbox
     import gateway_client
     import path_utils
     import workflow_executor
 except ImportError:
     from . import context_reader
+    from . import execution_outbox
     from . import gateway_client
     from . import path_utils
     from . import workflow_executor
 
 
 reload(context_reader)
+reload(execution_outbox)
 reload(gateway_client)
 reload(workflow_executor)
 
@@ -42,6 +47,13 @@ SILENT_COMMAND_FILE = path_utils.join_path(
 )
 _LAST_COMMAND_WAS_SILENT = False
 _LAST_SILENT_COMMAND = {}
+_DELIVERY_WORKERS = {}
+_DELIVERY_LOCK = threading.Lock()
+EXECUTION_OUTBOX = execution_outbox.ExecutionOutbox(path_utils.join_path(
+    os.environ.get("LOCALAPPDATA", os.path.expanduser("~")),
+    "ArcMapAIAssistant",
+    "execution_outbox",
+))
 
 
 def show_message(text):
@@ -67,6 +79,7 @@ def open_or_handle_bridge_command():
 def open_assistant():
     _clear_silent_state()
     gateway_client.ensure_running()
+    _drain_execution_outbox()
     _sync_current_context()
     open_web()
 
@@ -76,21 +89,30 @@ def _run_silent_command(command):
     _LAST_SILENT_COMMAND = command
     _LAST_COMMAND_WAS_SILENT = True
     gateway_client.ensure_running()
+    _drain_execution_outbox()
     action = command.get("action")
     if action == "sync":
-        _sync_current_context()
+        _sync_current_context(
+            command.get("run_id"),
+            command.get("sync_token"),
+            command.get("phase"),
+            command.get("target"),
+        )
         return
     if action == "execute":
-        _execute_run(command.get("run_id"), silent=True)
+        _execute_run(command.get("run_id"), command.get("target"), silent=True)
         return
     raise RuntimeError(u"未知 Bridge 指令：%s" % _unicode_text(action))
 
 
-def _execute_run(run_id, silent=False):
+def _execute_run(run_id, target=None, silent=False):
     if not isinstance(run_id, unicode) or not run_id:
         raise RuntimeError(u"Bridge execute command lacks run_id.")
-    claimed = gateway_client.claim_run(run_id)
+    owner_id = unicode(uuid.uuid4())
+    claimed = gateway_client.claim_run(run_id, target, owner_id)
     row = claimed["run"]
+    heartbeat = _ExecutionHeartbeat(run_id, owner_id)
+    heartbeat.start()
 
     try:
         context = context_reader.read_context()
@@ -101,20 +123,119 @@ def _execute_run(run_id, silent=False):
             "error": _exception_text(exc),
             "traceback": _traceback_text()
         }
-        gateway_client.complete_run(run_id, "failed", result)
+        _persist_and_deliver(run_id, owner_id, "failed", result, target, heartbeat)
         raise
 
-    updated_context = _sync_current_context()
-    result["context_hash"] = updated_context.get("context_hash")
-
-    gateway_client.complete_run(run_id, "succeeded", result)
+    acknowledged = _persist_and_deliver(run_id, owner_id, "executed", result, target, heartbeat)
     if not silent:
-        show_message(u"工作流执行完成：%s" % result.get("summary", "succeeded"))
+        if acknowledged:
+            show_message(u"工作流执行完成：%s" % result.get("summary", "succeeded"))
+        else:
+            show_message(u"工作流已执行完成，权威结果正在重试提交到本地网关。")
 
 
-def _sync_current_context():
+def _persist_and_deliver(run_id, owner_id, status, result, target, heartbeat):
+    try:
+        entry = EXECUTION_OUTBOX.enqueue(run_id, owner_id, status, result, target)
+    except Exception as exc:
+        heartbeat.stop()
+        _log_event(u"execution.outbox_persist_failed", _exception_text(exc))
+        raise
+    try:
+        acknowledged = EXECUTION_OUTBOX.deliver(entry, gateway_client)
+    except Exception as exc:
+        _log_event(u"execution.delivery_failed", _exception_text(exc))
+        _start_delivery_retry(entry, heartbeat)
+        return False
+    if not acknowledged:
+        _start_delivery_retry(entry, heartbeat)
+        return False
+    heartbeat.stop()
+    return True
+
+
+def _drain_execution_outbox():
+    try:
+        entries = EXECUTION_OUTBOX.pending()
+    except Exception as exc:
+        _log_event(u"execution.outbox_read_failed", _exception_text(exc))
+        raise
+    for entry in entries:
+        _start_delivery_retry(entry)
+
+
+def _start_delivery_retry(entry, heartbeat=None):
+    run_id = entry["run_id"]
+    with _DELIVERY_LOCK:
+        if run_id in _DELIVERY_WORKERS:
+            return
+        if heartbeat is None:
+            heartbeat = _ExecutionHeartbeat(run_id, entry["owner"])
+            heartbeat.start()
+        worker = _ExecutionDeliveryWorker(entry, heartbeat)
+        _DELIVERY_WORKERS[run_id] = worker
+        worker.start()
+
+
+class _ExecutionDeliveryWorker(object):
+    def __init__(self, entry, heartbeat, interval=2.0):
+        self.entry = entry
+        self.heartbeat = heartbeat
+        self.interval = interval
+        self.thread = threading.Thread(target=self._run)
+        self.thread.daemon = True
+
+    def start(self):
+        self.thread.start()
+
+    def _run(self):
+        run_id = self.entry["run_id"]
+        try:
+            while True:
+                try:
+                    acknowledged = EXECUTION_OUTBOX.deliver(self.entry, gateway_client)
+                    if not acknowledged:
+                        time.sleep(min(self.interval, 0.5))
+                        continue
+                    self.heartbeat.stop()
+                    _log_event(u"execution.delivery_acknowledged", run_id)
+                    return
+                except Exception as exc:
+                    _log_event(u"execution.delivery_retry_failed", _exception_text(exc))
+                    time.sleep(self.interval)
+        finally:
+            with _DELIVERY_LOCK:
+                _DELIVERY_WORKERS.pop(run_id, None)
+
+
+class _ExecutionHeartbeat(object):
+    def __init__(self, run_id, owner_id, interval=5.0):
+        self.run_id = run_id
+        self.owner_id = owner_id
+        self.interval = interval
+        self.stopped = threading.Event()
+        self.thread = threading.Thread(target=self._run)
+        self.thread.daemon = True
+
+    def start(self):
+        self.thread.start()
+
+    def stop(self):
+        self.stopped.set()
+        self.thread.join(10.0)
+
+    def _run(self):
+        while not self.stopped.wait(self.interval):
+            try:
+                gateway_client.heartbeat_run(self.run_id, self.owner_id)
+            except Exception as exc:
+                _log_event(u"execution.heartbeat_failed", _exception_text(exc))
+
+
+def _sync_current_context(run_id=None, sync_token=None, phase=None, target=None):
     context = context_reader.read_context()
-    gateway_client.sync_context(context)
+    if run_id:
+        gateway_client.sync_run_context(run_id, context, sync_token, phase, target)
     return context
 
 
@@ -207,3 +328,9 @@ def _confirm_direct_edit(message):
         return result
     value = _unicode_text(result).lower()
     return value in (u"yes", u"y", u"true", u"1", u"6", u"是", u"确定")
+
+
+try:
+    _drain_execution_outbox()
+except Exception as exc:
+    _log_event(u"execution.startup_drain_failed", _exception_text(exc))

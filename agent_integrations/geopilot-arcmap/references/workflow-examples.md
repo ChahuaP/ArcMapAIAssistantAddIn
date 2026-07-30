@@ -295,7 +295,7 @@ scripts/geopilot_cli.py health
 scripts/geopilot_cli.py doctor
 scripts/geopilot_cli.py arcmap-list
 scripts/geopilot_cli.py arcmap-select --hwnd <hwnd>   # only when multiple ArcMap windows exist
-scripts/geopilot_cli.py arcmap-sync
+Context is captured automatically when the run is submitted.
 scripts/geopilot_cli.py capabilities
 scripts/geopilot_cli.py capabilities --detail   # when exact argument schemas are needed
 ```

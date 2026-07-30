@@ -106,7 +106,6 @@
           body: JSON.stringify({
             text,
             mode: currentMode,
-            context: latestArcgisContext || {}
           })
         });
         const raw = String(data.raw_text || text).trim();
@@ -130,7 +129,6 @@
       input.value = String(text || '').trim();
       input.focus();
       input.setSelectionRange(input.value.length, input.value.length);
-      updateMentionMenu();
     }
 
     function renderVoiceComparison(rawText, correctedText) {
