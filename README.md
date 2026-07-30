@@ -14,7 +14,7 @@ GeoPilot 是一个运行在本地的 AI 工作台，专为 ArcMap（ArcGIS Deskt
 
 本项目面向 **ArcMap / ArcPy**，不适用于 ArcGIS Pro。
 
-当前版本：**1.0.0**
+当前版本：**1.0.1**
 
 ---
 
@@ -138,7 +138,7 @@ GeoPilot 的安全设计遵循 **"模型不直接执行"** 原则：
 | GIS 软件 | ArcGIS Desktop / ArcMap（10.1 及以上） |
 | 模型供应商 | 至少一个：DeepSeek、MiniMax、智谱、阿里百炼 |
 | 浏览器 | Chrome / Edge / Firefox 最新版 |
-| 安装方式 | 运行 `GeoPilotSetup-1.0.0.exe` |
+| 安装方式 | 运行 `GeoPilotSetup-1.0.1.exe` |
 
 ### 开发者
 
@@ -157,7 +157,7 @@ GeoPilot 的安全设计遵循 **"模型不直接执行"** 原则：
 
 ### 从安装包安装（推荐）
 
-1. 从 GitHub Releases 下载 `GeoPilotSetup-1.0.0.exe`。
+1. 从 GitHub Releases 下载 `GeoPilotSetup-1.0.1.exe`。
 2. 双击运行安装程序，按提示完成安装。安装程序会在需要时请求管理员权限。
 3. 默认安装到 `C:\Program Files\GeoPilot`。
 4. 打开 ArcMap，启用工具栏：
@@ -444,7 +444,7 @@ pwsh.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\packaging\build_rele
 
 ```text
 release\
-  GeoPilotSetup-1.0.0.exe        ← Windows 安装程序
+  GeoPilotSetup-1.0.1.exe        ← Windows 安装程序
   geopilot-arcmap\                ← Agent 集成包（SKILL.md 等）
 ```
 

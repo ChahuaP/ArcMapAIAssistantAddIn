@@ -43,11 +43,53 @@ class ExperimentTests(unittest.TestCase):
         self.assertIn("context role", runner.client.calls[0][0]["content"])
 
     def test_g2_repairs_in_same_role(self):
-        invalid = dict(WORKFLOW, steps=[])
+        invalid = dict(WORKFLOW, steps=[{
+            "id": "s1",
+            "operation": "missing.operation",
+            "arguments": {},
+            "reason": "invalid",
+        }])
         runner = self.runner([{"task_semantics": SEMANTICS, "workflow_draft": invalid}, {"workflow_draft": WORKFLOW}])
         row = plan_bound(runner, "refresh", CONTEXT, "constrained_single")
         self.assertEqual(row["agent_trace"][0]["run"]["counts"]["revisions"], 1)
         self.assertTrue(all("constrained role" in call[0]["content"] for call in runner.client.calls))
+
+    def test_g2_repairs_invalid_response_contract_before_workflow_validation(self):
+        invalid = {
+            "task_semantics": SEMANTICS,
+            "workflow_draft": dict(WORKFLOW, unexpected="model noise"),
+        }
+        runner = self.runner([
+            invalid,
+            {"task_semantics": SEMANTICS, "workflow_draft": WORKFLOW},
+        ])
+
+        row = plan_bound(runner, "refresh", CONTEXT, "constrained_single")
+
+        trace = row["agent_trace"][0]["run"]
+        self.assertEqual(row["status"], "planned")
+        self.assertEqual(trace["counts"]["contract_revisions"], 1)
+        self.assertEqual(trace["counts"]["revisions"], 0)
+        repair_request = json.loads(runner.client.calls[1][1]["content"])
+        self.assertEqual(repair_request["response_contract_repair"]["kind"], "response_contract")
+        self.assertIn("workflow_draft", repair_request["response_contract_repair"]["message"])
+
+    def test_response_contract_stops_after_the_bounded_revision_limit(self):
+        invalid = {
+            "task_semantics": SEMANTICS,
+            "workflow_draft": dict(WORKFLOW, unexpected="model noise"),
+        }
+        runner = self.runner([invalid, invalid, invalid])
+
+        with self.assertRaisesRegex(ContractError, "failed after 3 attempts"):
+            plan_bound(runner, "refresh", CONTEXT, "constrained_single")
+
+        row = runner.store.list_recent(limit=1, include_trace=True)[0]
+        trace = row["agent_trace"][0]["run"]
+        self.assertEqual(row["status"], "failed")
+        self.assertEqual(trace["counts"]["contract_revisions"], 2)
+        self.assertEqual(len(trace["contract_diagnostics"]), 3)
+        self.assertTrue(all(stage["status"] == "contract_rejected" for stage in trace["stages"]))
 
     def test_g3_isolates_roles_and_requires_audit_pass(self):
         revise = {"decision": "revise", "issues": ["x"], "revision_requirements": ["fix"]}

@@ -1,6 +1,6 @@
 ---
 name: geopilot-arcmap
-version: 1.0.0
+version: 1.0.1
 description: "Use when Codex needs to run reproducible GeoPilot ArcMap experiments or inspect their results."
 ---
 

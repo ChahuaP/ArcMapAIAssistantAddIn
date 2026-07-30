@@ -47,6 +47,9 @@ def find_layer(context, layer_value, step_outputs=None):
     if raw.startswith(u"layer_ref:"):
         raw = raw[len(u"layer_ref:"):]
     if raw.startswith(u"layer:"):
+        snapshot_layer = _context_layer_by_ref(context, raw)
+        if snapshot_layer is not None:
+            return _find_live_snapshot_layer(snapshot_layer)
         return _find_layer_by_ref(raw)
     if raw.startswith(u"from_step:"):
         return _find_layer_from_step(raw[len(u"from_step:"):], step_outputs or {})
@@ -72,7 +75,30 @@ def find_layer(context, layer_value, step_outputs=None):
         if live_match is not None:
             return live_match
         raise OperationError(u"Layer metadata is not executable: %s" % raw)
-    return _find_layer_by_ref(layer_ref)
+    return _find_live_snapshot_layer(matches[0])
+
+
+def _context_layer_by_ref(context, layer_ref):
+    matches = [
+        layer for layer in context.get("layers", [])
+        if layer.get("layer_ref") == layer_ref
+    ]
+    if len(matches) > 1:
+        raise OperationError(u"Layer reference is ambiguous: %s" % layer_ref)
+    return matches[0] if matches else None
+
+
+def _find_live_snapshot_layer(snapshot_layer):
+    for identity in (
+        snapshot_layer.get("dataSource"),
+        snapshot_layer.get("longName"),
+        snapshot_layer.get("name"),
+    ):
+        if identity:
+            layer = _find_live_layer_exact(identity)
+            if layer is not None:
+                return layer
+    raise OperationError(u"Layer no longer exists: %s" % snapshot_layer.get("layer_ref", ""))
 
 
 def _find_layer_by_ref(layer_ref):

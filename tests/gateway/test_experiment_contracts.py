@@ -4,7 +4,7 @@ from pathlib import Path
 from unittest import mock
 
 from gateway_py3.catalog_loader import OperationCatalog
-from gateway_py3.experiments import ExperimentRunner, _prompt
+from gateway_py3.experiments import ContractError, ExperimentRunner, _prompt
 from gateway_py3.run_store import RunStore
 from gateway_py3.validators import context_hash
 
@@ -45,8 +45,20 @@ class PromptContractTests(unittest.TestCase):
             self.assertIn("operation (exact registered operation id)", prompt)
             self.assertIn("arguments (object matching parameters_schema)", prompt)
             self.assertIn("Use arguments, never parameters", prompt)
-            self.assertIn("action MUST be exactly one of execute, clarify, unsupported, or answer", prompt)
-            self.assertIn("Use execute when steps is non-empty", prompt)
+            self.assertIn("action MUST be exactly execute and steps MUST be a non-empty array", prompt)
+
+    def test_role_prompts_require_the_wrapped_response_root(self):
+        expected = {
+            "direct": "one key: workflow_draft",
+            "context": "one key: workflow_draft",
+            "constrained": "exactly two keys: task_semantics and workflow_draft",
+            "semantic": "one key: task_semantics",
+            "planner": "one key: workflow_draft",
+            "auditor": "one key: audit_result",
+        }
+        for role, marker in expected.items():
+            with self.subTest(role=role):
+                self.assertIn(marker, _prompt(role))
 
 
 class ExperimentContractTests(unittest.TestCase):
@@ -67,6 +79,7 @@ class ExperimentContractTests(unittest.TestCase):
         payload = client.calls[0][1]["content"]
         self.assertNotIn('"context"', payload)
         self.assertNotIn('context.list_layers', payload)
+        self.assertIn('Allowed where ops', payload)
 
     def test_g2_validates_once_when_valid(self):
         client = FakeClient([{
@@ -123,7 +136,42 @@ class ExperimentContractTests(unittest.TestCase):
         trace = row["agent_trace"][0]["run"]
         self.assertEqual(trace["workflow_versions"][0]["source_role"], "planner")
         self.assertEqual(trace["audits"][0]["version_id"], "w1")
+
+    def test_g3_repairs_a_flat_audit_response(self):
+        semantic = {
+            "task_semantics": {
+                "goal": "x",
+                "inputs": [],
+                "constraints": [],
+                "success_criteria": [],
+            }
+        }
+        flat_audit = {"decision": "pass", "issues": [], "revision_requirements": []}
+        wrapped_audit = {"audit_result": flat_audit}
+        client = FakeClient([semantic, {"workflow_draft": WORKFLOW}, flat_audit, wrapped_audit])
+
+        row = plan_bound(ExperimentRunner(
+            OperationCatalog(),
+            self.store,
+            client,
+        ), "x", {"layers": []}, "multi_agent")
+
+        trace = row["agent_trace"][0]["run"]
+        self.assertEqual(row["status"], "planned")
+        self.assertEqual(trace["counts"]["contract_revisions"], 1)
+        self.assertEqual(trace["audits"][-1]["decision"], "pass")
         self.assertEqual(trace["validations"][0]["version_id"], "w1")
+
+    def test_terminal_workflow_is_rejected_before_execution(self):
+        terminal = {"workflow_draft": {"action": "answer", "summary": "no-op", "steps": []}}
+        client = FakeClient([terminal, terminal, terminal])
+
+        with self.assertRaisesRegex(ContractError, "failed after 3 attempts"):
+            plan_bound(ExperimentRunner(
+                OperationCatalog(),
+                self.store,
+                client,
+            ), "x", {"layers": []}, "direct_single")
 
     def test_run_starts_running_before_planning(self):
         row = self.store.create_run("x", "context_single")

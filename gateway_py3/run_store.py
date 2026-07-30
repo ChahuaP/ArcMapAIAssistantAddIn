@@ -97,9 +97,10 @@ class RunStore:
             "workflow_versions": [],
             "audits": [],
             "validations": [],
+            "contract_diagnostics": [],
             "usage": [],
             "stages": [],
-            "counts": {"revisions": 0},
+            "counts": {"revisions": 0, "contract_revisions": 0},
         }
         run_id = str(uuid.uuid4())
         now = time.time()

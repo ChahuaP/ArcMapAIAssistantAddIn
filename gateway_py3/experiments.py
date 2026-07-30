@@ -12,6 +12,7 @@ from .validators import ValidationError, context_hash, prepare_workflow
 MODES = ("direct_single", "context_single", "constrained_single", "multi_agent")
 TERMINAL_ACTIONS = ("clarify", "reject")
 MAX_REVISIONS = 3
+MAX_RESPONSE_CONTRACT_REVISIONS = 2
 WORKFLOW_STEP_CONTRACT = (
     "Every workflow_draft step MUST contain exactly four fields: id (unique string), "
     "operation (exact registered operation id), arguments (object matching parameters_schema), "
@@ -19,9 +20,16 @@ WORKFLOW_STEP_CONTRACT = (
 )
 WORKFLOW_DRAFT_CONTRACT = (
     "workflow_draft MUST contain exactly action, summary, and steps. "
-    "action MUST be exactly one of execute, clarify, unsupported, or answer. "
-    "Use execute when steps is non-empty; clarify, unsupported, and answer MUST use an empty steps array. "
+    "action MUST be exactly execute and steps MUST be a non-empty array. "
     + WORKFLOW_STEP_CONTRACT
+)
+TASK_SEMANTICS_CONTRACT = (
+    "task_semantics MUST contain exactly four fields: goal (non-empty string), "
+    "inputs (array), constraints (array), and success_criteria (array). "
+)
+AUDIT_RESULT_CONTRACT = (
+    "audit_result MUST contain exactly three fields: decision (exactly pass, revise, clarify, or reject), "
+    "issues (array of strings), and revision_requirements (array of strings). "
 )
 
 
@@ -45,36 +53,68 @@ def _object(value, name):
     return value
 
 
+def _exact_keys(value, name, keys):
+    value = _object(value, name)
+    expected = set(keys)
+    actual = set(value)
+    if actual != expected:
+        missing = sorted(expected - actual)
+        unexpected = sorted(actual - expected)
+        details = []
+        if missing:
+            details.append("missing fields: %s" % ", ".join(missing))
+        if unexpected:
+            details.append("unexpected fields: %s" % ", ".join(unexpected))
+        raise ContractError("%s has invalid fields (%s)." % (name, "; ".join(details)))
+    return value
+
+
 def task_semantics(value):
-    value = _object(value, "task_semantics")
+    value = _exact_keys(
+        value,
+        "task_semantics",
+        ("goal", "inputs", "constraints", "success_criteria"),
+    )
     required = ("goal", "inputs", "constraints", "success_criteria")
-    has_required_keys = set(value) == set(required)
     has_goal = isinstance(value.get("goal"), str) and bool(value["goal"].strip())
     has_lists = all(isinstance(value.get(key), list) for key in required[1:])
-    if not has_required_keys or not has_goal or not has_lists:
-        raise ContractError("task_semantics requires only goal, inputs, constraints, success_criteria.")
+    if not has_goal or not has_lists:
+        raise ContractError("task_semantics requires a non-empty goal and array inputs, constraints, success_criteria.")
     return value
 
 
 def workflow_draft(value):
-    value = _object(value, "workflow_draft")
-    valid_keys = set(value) == {"action", "summary", "steps"}
-    valid_action = value.get("action") in (
-        "execute",
-        "clarify",
-        "unsupported",
-        "answer",
-    )
+    value = _exact_keys(value, "workflow_draft", ("action", "summary", "steps"))
+    valid_action = value.get("action") == "execute"
     valid_summary = isinstance(value.get("summary"), str)
-    valid_steps = isinstance(value.get("steps"), list)
-    if not valid_keys or not valid_action or not valid_summary or not valid_steps:
+    valid_steps = isinstance(value.get("steps"), list) and bool(value["steps"])
+    if not valid_action or not valid_summary or not valid_steps:
         raise ContractError("workflow_draft is invalid.")
+    step_ids = set()
+    for index, step in enumerate(value["steps"]):
+        name = "workflow_draft.steps[%d]" % index
+        step = _exact_keys(step, name, ("id", "operation", "arguments", "reason"))
+        step_id = step.get("id")
+        if not isinstance(step_id, str) or not step_id.strip():
+            raise ContractError("%s.id must be a non-empty string." % name)
+        if step_id in step_ids:
+            raise ContractError("%s.id must be unique." % name)
+        step_ids.add(step_id)
+        if not isinstance(step.get("operation"), str) or not step["operation"].strip():
+            raise ContractError("%s.operation must be a non-empty string." % name)
+        if not isinstance(step.get("arguments"), dict):
+            raise ContractError("%s.arguments must be an object." % name)
+        if not isinstance(step.get("reason"), str):
+            raise ContractError("%s.reason must be a string." % name)
     return value
 
 
 def audit_result(value):
-    value = _object(value, "audit_result")
-    valid_keys = set(value) == {"decision", "issues", "revision_requirements"}
+    value = _exact_keys(
+        value,
+        "audit_result",
+        ("decision", "issues", "revision_requirements"),
+    )
     valid_decision = value.get("decision") in (
         "pass",
         "revise",
@@ -83,48 +123,80 @@ def audit_result(value):
     )
     valid_issues = isinstance(value.get("issues"), list)
     valid_requirements = isinstance(value.get("revision_requirements"), list)
-    if not valid_keys or not valid_decision or not valid_issues or not valid_requirements:
+    if not valid_decision or not valid_issues or not valid_requirements:
         raise ContractError("audit_result is invalid.")
     return value
 
 
-def _prompt(role: str) -> str:
+def response_contract(value, contract_name):
+    contracts = {
+        "workflow": (("workflow_draft",), {"workflow_draft": workflow_draft}),
+        "constrained": (
+            ("task_semantics", "workflow_draft"),
+            {"task_semantics": task_semantics, "workflow_draft": workflow_draft},
+        ),
+        "semantics": (("task_semantics",), {"task_semantics": task_semantics}),
+        "audit": (("audit_result",), {"audit_result": audit_result}),
+    }
+    if contract_name not in contracts:
+        raise RuntimeError("unknown response contract: %s" % contract_name)
+    keys, validators = contracts[contract_name]
+    value = _exact_keys(value, "model response", keys)
+    return {key: validators[key](value[key]) for key in keys}
+
+
+def _prompt(role: str, contract_name: str | None = None) -> str:
     contracts = {
         "direct": (
-            "Output one workflow_draft object. "
+            "Return exactly one root JSON object with one key: workflow_draft. "
+            "Never return action, summary, or steps at the root. "
             "Use only registered operation cards and exact parameter schemas. "
             "Never execute ArcPy or emit code. "
             + WORKFLOW_DRAFT_CONTRACT
         ),
         "context": (
-            "Output one workflow_draft object. "
+            "Return exactly one root JSON object with one key: workflow_draft. "
+            "Never return action, summary, or steps at the root. "
             "Use normalized ArcMap context and registered operation cards only. "
             "Never use raw SQL; where clauses are structured. "
             + WORKFLOW_DRAFT_CONTRACT
         ),
         "constrained": (
-            "Output {task_semantics:{goal,inputs,constraints,success_criteria},"
-            "workflow_draft:{action,summary,steps}}. Repair only from structured "
-            "validation diagnostics. "
+            "Return exactly one root JSON object with exactly two keys: task_semantics and workflow_draft. "
+            "Never flatten either object into the root. Repair only from structured validation diagnostics. "
+            + TASK_SEMANTICS_CONTRACT
             + WORKFLOW_DRAFT_CONTRACT
         ),
         "semantic": (
-            "Output {task_semantics:{goal,inputs,constraints,success_criteria}}. "
-            "Do not produce a workflow or hidden reasoning."
+            "Return exactly one root JSON object with one key: task_semantics. "
+            "Never flatten goal, inputs, constraints, or success_criteria into the root. "
+            + TASK_SEMANTICS_CONTRACT
+            + "Do not produce a workflow or hidden reasoning."
         ),
         "planner": (
-            "Output one workflow_draft object. "
+            "Return exactly one root JSON object with one key: workflow_draft. "
+            "Never return action, summary, or steps at the root. "
             "Use only TaskSemantics, context, capabilities and structured "
             "diagnostics provided; no hidden reasoning. "
             + WORKFLOW_DRAFT_CONTRACT
         ),
         "auditor": (
-            "Output {audit_result:{decision,issues,revision_requirements}}. "
-            "Independently judge only TaskSemantics, context, capabilities and "
+            "Return exactly one root JSON object with one key: audit_result. "
+            "Never flatten decision, issues, or revision_requirements into the root. "
+            + AUDIT_RESULT_CONTRACT
+            + "Independently judge only TaskSemantics, context, capabilities and "
             "workflow draft; do not plan."
         ),
     }
-    return "You are the GeoPilot %s role. Return JSON only. %s" % (role, contracts[role])
+    if role == "constrained" and contract_name == "workflow":
+        contract = (
+            "Return exactly one root JSON object with one key: workflow_draft repaired from the structured validation diagnostic. "
+            "Never return action, summary, or steps at the root. "
+            + WORKFLOW_DRAFT_CONTRACT
+        )
+    else:
+        contract = contracts[role]
+    return "You are the GeoPilot %s role. Return JSON only. %s" % (role, contract)
 
 
 class ExperimentRunner:
@@ -188,8 +260,10 @@ class ExperimentRunner:
         })
         try:
             if mode == "direct_single":
-                response = self._call(run_id, client, "direct", {"request": command, "capabilities": index}, trace)
-                draft = workflow_draft(response["workflow_draft"])
+                response = self._call(
+                    run_id, client, "direct", {"request": command, "capabilities": index}, trace, "workflow"
+                )
+                draft = response["workflow_draft"]
                 version_id = self._record_workflow(trace, draft, "direct")
             elif mode == "context_single":
                 response = self._call(
@@ -202,8 +276,9 @@ class ExperimentRunner:
                         "capabilities": index,
                     },
                     trace,
+                    "workflow",
                 )
-                draft = workflow_draft(response["workflow_draft"])
+                draft = response["workflow_draft"]
                 version_id = self._record_workflow(trace, draft, "context")
             elif mode == "constrained_single":
                 reply = self._call(
@@ -216,9 +291,10 @@ class ExperimentRunner:
                         "capabilities": index,
                     },
                     trace,
+                    "constrained",
                 )
-                trace["task_semantics"] = task_semantics(reply["task_semantics"])
-                draft = workflow_draft(reply["workflow_draft"])
+                trace["task_semantics"] = reply["task_semantics"]
+                draft = reply["workflow_draft"]
                 version_id = self._record_workflow(trace, draft, "constrained")
                 return self._single_loop(
                     run_id,
@@ -241,8 +317,9 @@ class ExperimentRunner:
                         "capabilities": index,
                     },
                     trace,
+                    "semantics",
                 )
-                semantics = task_semantics(semantic_response["task_semantics"])
+                semantics = semantic_response["task_semantics"]
                 trace["task_semantics"] = semantics
                 planner_response = self._call(
                     run_id,
@@ -254,8 +331,9 @@ class ExperimentRunner:
                         "capabilities": index,
                     },
                     trace,
+                    "workflow",
                 )
-                draft = workflow_draft(planner_response["workflow_draft"])
+                draft = planner_response["workflow_draft"]
                 version_id = self._record_workflow(trace, draft, "planner")
                 return self._multi_loop(
                     run_id,
@@ -279,6 +357,7 @@ class ExperimentRunner:
             {
                 "id": item["id"],
                 "summary": item.get("summary", ""),
+                "model_card": item.get("model_card", ""),
                 "parameters_schema": item.get("parameters_schema", {}),
                 "context_requirements": item.get("context_requirements", {}),
                 "side_effects": item.get("side_effects", ""),
@@ -325,8 +404,9 @@ class ExperimentRunner:
                     "validation": result["diagnostic"],
                 },
                 trace,
+                "workflow",
             )
-            draft = workflow_draft(reply["workflow_draft"])
+            draft = reply["workflow_draft"]
             version_id = self._record_workflow(trace, draft, "constrained")
 
     def _multi_loop(
@@ -354,8 +434,9 @@ class ExperimentRunner:
                     "workflow_draft": draft,
                 },
                 trace,
+                "audit",
             )
-            audit = audit_result(audit_response["audit_result"])
+            audit = audit_response["audit_result"]
             trace["audits"].append({
                 "version_id": version_id,
                 "workflow_hash": digest(draft),
@@ -391,13 +472,54 @@ class ExperimentRunner:
                     "diagnostic": diagnostic,
                 },
                 trace,
+                "workflow",
             )
-            draft = workflow_draft(planner_response["workflow_draft"])
+            draft = planner_response["workflow_draft"]
             version_id = self._record_workflow(trace, draft, "planner")
 
-    def _call(self, run_id, client, role, payload, trace):
+    def _call(self, run_id, client, role, payload, trace, contract_name):
+        repair = None
+        for attempt in range(MAX_RESPONSE_CONTRACT_REVISIONS + 1):
+            request_payload = dict(payload)
+            if repair:
+                request_payload["response_contract_repair"] = repair
+            response = self._model_call(
+                run_id,
+                client,
+                role,
+                request_payload,
+                trace,
+                contract_name,
+            )
+            try:
+                return response_contract(response, contract_name)
+            except ContractError as exc:
+                diagnostic = {
+                    "kind": "response_contract",
+                    "role": role,
+                    "contract": contract_name,
+                    "message": str(exc),
+                    "invalid_response_hash": digest(response),
+                }
+                trace["contract_diagnostics"].append(diagnostic)
+                trace["turns"][-1]["contract_error"] = {
+                    "type": type(exc).__name__,
+                    "hash": digest(diagnostic),
+                }
+                trace["stages"][-1]["status"] = "contract_rejected"
+                self.store.update_run(run_id, "running", trace=trace)
+                if attempt >= MAX_RESPONSE_CONTRACT_REVISIONS:
+                    raise ContractError(
+                        "%s response contract failed after %d attempts: %s"
+                        % (role, attempt + 1, exc)
+                    )
+                trace["counts"]["contract_revisions"] += 1
+                repair = diagnostic
+        raise RuntimeError("unreachable response contract loop")
+
+    def _model_call(self, run_id, client, role, payload, trace, contract_name):
         self._check_cancel(run_id)
-        system = _prompt(role)
+        system = _prompt(role, contract_name)
         stage = {"name": role, "started_at": time.time(), "status": "running"}
         trace["stages"].append(stage)
         turn = {
@@ -406,21 +528,23 @@ class ExperimentRunner:
             "prompt_hash": digest(system),
             "provider": getattr(client, "provider_id", ""),
             "model": getattr(client, "model_id", ""),
+            "response_contract": contract_name,
             "started_at": stage["started_at"],
         }
         trace["turns"].append(turn)
         try:
-            response = _object(
-                client.chat_json([
-                    {"role": "system", "content": system},
-                    {
-                        "role": "user",
-                        "content": json.dumps(payload, ensure_ascii=False, sort_keys=True),
-                    },
-                ]),
-                "model response",
-            )
-            usage = response.pop("_usage", None)
+            response = client.chat_json([
+                {"role": "system", "content": system},
+                {
+                    "role": "user",
+                    "content": json.dumps(payload, ensure_ascii=False, sort_keys=True),
+                },
+            ])
+            if isinstance(response, dict):
+                response = dict(response)
+                usage = response.pop("_usage", None)
+            else:
+                usage = None
             turn["output_hash"] = digest(response)
             if usage:
                 trace["usage"].append(usage)
