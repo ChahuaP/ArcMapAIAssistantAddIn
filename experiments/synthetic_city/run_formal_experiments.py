@@ -23,7 +23,16 @@ import geopandas as gpd
 
 
 MODES = ("direct_single", "context_single", "constrained_single", "multi_agent")
-TERMINAL_STATUSES = {"succeeded", "failed", "context_failed", "recovery_required", "cancelled"}
+TERMINAL_STATUSES = {
+    "succeeded",
+    "failed",
+    "context_failed",
+    "recovery_required",
+    "indeterminate",
+    "cancelled",
+    "clarify",
+    "reject",
+}
 DEFAULT_GATEWAY = "http://127.0.0.1:8765"
 OUTPUT_TRUTH_KEYS = {
     "flood_high": "flood_high", "affected_comm": "flood_affected_comm",
@@ -126,8 +135,9 @@ def task_command(round_spec: dict[str, Any], output_dir: Path, mode: str, static
         "这是连续业务任务的第 %s 轮。所有矢量成果必须以 Shapefile 写入 %s，"
         "表格和地图成果也必须写入该目录。必须生成：%s。"
         "保留前序轮次成果；源数据只读；必须执行实际 GIS 操作，不得用文字回答替代。"
-        "写数据操作会自动将成果加入地图：禁止对本轮已生成的输出再调用 layer.add_layer；"
-        "后续步骤必须使用 from_step:<步骤 id> 引用该输出。"
+        "矢量或栅格写出成果会自动加入地图：禁止对本轮已生成的地图成果再调用 layer.add_layer；"
+        "后续步骤引用这类地图成果时必须使用 from_step:<步骤 id>。"
+        "CSV、PNG属于文件成果，不是地图图层，不得使用 from_step 引用。"
         % (static_clause, round_spec["prompt"], round_spec["round"], output_dir, "、".join(artifact_rules))
     )
 

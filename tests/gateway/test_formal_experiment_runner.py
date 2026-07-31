@@ -81,6 +81,12 @@ class FormalExperimentRunnerTests(unittest.TestCase):
         self.assertIn("context.list_layers", command)
         self.assertEqual(len(runner.source_layer_names(self.load_order)), 14)
 
+    def test_wait_recognizes_every_terminal_run_status(self):
+        client = runner.GatewayClient("http://127.0.0.1:8765")
+        for status in ("clarify", "reject", "indeterminate"):
+            client.get = lambda _path, value=status: {"run": {"status": value}}
+            self.assertEqual(client.wait("run-id", 1)["status"], status)
+
     def test_task_command_makes_outputs_and_g0_boundary_explicit(self):
         round_spec = self.cases["cases"][2]["rounds"][0]
         catalog = runner.direct_static_catalog(self.dataset)
@@ -90,6 +96,8 @@ class FormalExperimentRunnerTests(unittest.TestCase):
         self.assertIn("construction(建设项目)", command)
         self.assertIn("不得调用 context.*", command)
         self.assertIn("from_step:<步骤 id>", command)
+        self.assertIn("CSV、PNG属于文件成果", command)
+        self.assertIn("不得使用 from_step 引用", command)
 
     def test_land_continuous_outputs_score_against_truth_exactly(self):
         outputs = ROOT / "out" / "experiment-preflight" / "multi_agent" / "land_continuous"
