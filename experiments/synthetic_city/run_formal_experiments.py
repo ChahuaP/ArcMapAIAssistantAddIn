@@ -27,12 +27,11 @@ TERMINAL_STATUSES = {
     "succeeded",
     "failed",
     "context_failed",
-    "recovery_required",
-    "indeterminate",
     "cancelled",
     "clarify",
     "reject",
 }
+INFRASTRUCTURE_STOP_STATUSES = {"recovery_required", "indeterminate"}
 DEFAULT_GATEWAY = "http://127.0.0.1:8765"
 OUTPUT_TRUTH_KEYS = {
     "flood_high": "flood_high", "affected_comm": "flood_affected_comm",
@@ -49,6 +48,15 @@ INTERMEDIATE_VECTOR_OUTPUTS = {
 
 class ExperimentError(RuntimeError):
     pass
+
+
+class InfrastructureStop(ExperimentError):
+    def __init__(self, run_id: str, status: str):
+        self.run_id = run_id
+        self.status = status
+        super().__init__(
+            "ArcMap authoritative execution is unresolved (%s): %s" % (status, run_id)
+        )
 
 
 class GatewayClient:
@@ -93,6 +101,8 @@ class GatewayClient:
             row = self.get("/runs/" + run_id).get("run")
             if not isinstance(row, dict):
                 raise ExperimentError("Gateway returned an invalid run record: %s" % run_id)
+            if row.get("status") in INFRASTRUCTURE_STOP_STATUSES:
+                raise InfrastructureStop(run_id, row["status"])
             if row.get("status") in TERMINAL_STATUSES:
                 return row
             time.sleep(0.5)
@@ -379,6 +389,22 @@ def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
         writer.writerows(rows)
 
 
+def write_infrastructure_stop(output_root: Path, exc: InfrastructureStop) -> None:
+    (output_root / "infrastructure_stop.json").write_text(
+        json.dumps(
+            {
+                "run_id": exc.run_id,
+                "status": exc.status,
+                "stopped_at": time.time(),
+                "excluded_from_method_statistics": True,
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+
 def validate_dataset(dataset: Path) -> tuple[list[str], dict[str, Any], dict[str, list[str]]]:
     validation = json.loads((dataset / "validation.json").read_text(encoding="utf-8"))
     if validation.get("ok") is not True:
@@ -434,6 +460,7 @@ def build_manifest(
         "dataset": str(dataset),
         "modes": args.modes,
         "repetitions": args.repetitions,
+        "timeout_seconds": args.timeout,
         "gateway": args.gateway,
         "gateway_app_version": gateway_app_version,
         "created_at": time.time() if created_at is None else created_at,
@@ -545,6 +572,8 @@ def execute(args: argparse.Namespace) -> int:
                                     "artifacts": [],
                                 }
                             )
+                        except InfrastructureStop:
+                            raise
                         except Exception as exc:
                             runner_error = "%s: %s" % (type(exc).__name__, exc)
                             score = {
@@ -601,6 +630,9 @@ def execute(args: argparse.Namespace) -> int:
                             if runner_error:
                                 raise ExperimentError(runner_error)
                             break
+    except InfrastructureStop as exc:
+        write_infrastructure_stop(output_root, exc)
+        raise
     finally:
         write_reports(output_root, records)
     return 0

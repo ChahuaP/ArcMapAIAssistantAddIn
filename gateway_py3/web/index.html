@@ -74,7 +74,7 @@
           <button class="btn btn-ghost btn-sm" type="button" onclick="openConfigFile()">打开配置</button>
         </div>
         <span class="footer-label">版本</span>
-        <strong class="footer-val footer-link" id="versionInfo" onclick="openChangelog()">1.0.2</strong>
+        <strong class="footer-val footer-link" id="versionInfo" onclick="openChangelog()">1.0.3</strong>
       </footer>
     </nav>
 
@@ -288,6 +288,18 @@
       </div>
       <div class="overlay-body">
         <div class="changelog-list">
+
+          <section class="changelog-version">
+            <div class="changelog-version-header">
+              <strong class="changelog-tag">1.0.3</strong>
+              <span class="changelog-date">2026-07-31</span>
+            </div>
+            <ul>
+              <li>工作流计算与 ArcMap 图层发布分离，移除逐步骤界面刷新</li>
+              <li>成果发布计划持久化，同一 ArcMap 目标内可幂等恢复并严格隔离其他窗口</li>
+              <li>同轮地图导出使用隔离 MXD，连续业务成果完整保留</li>
+            </ul>
+          </section>
 
           <section class="changelog-version">
             <div class="changelog-version-header">

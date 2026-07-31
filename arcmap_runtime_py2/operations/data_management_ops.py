@@ -9,18 +9,14 @@ from operations import common
 def copy_features(context, arguments, step_outputs):
     layer = common.find_layer(context, arguments["input_layer"], step_outputs)
     output = _output(context, arguments)
-    with common.auto_add_outputs_disabled():
-        arcpy.CopyFeatures_management(layer, output)
-    common.add_output_layer(output)
+    arcpy.CopyFeatures_management(layer, output)
     return {"output": output, "feature_count": _feature_count(output)}
 
 
 def multipart_to_singlepart(context, arguments, step_outputs):
     layer = common.find_layer(context, arguments["input_layer"], step_outputs)
     output = _output(context, arguments)
-    with common.auto_add_outputs_disabled():
-        arcpy.MultipartToSinglepart_management(layer, output)
-    common.add_output_layer(output)
+    arcpy.MultipartToSinglepart_management(layer, output)
     return {"output": output, "feature_count": _feature_count(output)}
 
 
@@ -28,7 +24,6 @@ def repair_geometry(context, arguments, step_outputs):
     layer = common.find_layer(context, arguments["layer"], step_outputs)
     delete_null = arguments.get("delete_null") or "DELETE_NULL"
     arcpy.RepairGeometry_management(layer, delete_null)
-    common.refresh()
     return {"layer": getattr(layer, "name", common._text(arguments["layer"])), "delete_null": delete_null}
 
 
@@ -41,7 +36,6 @@ def define_projection(context, arguments, step_outputs):
     layer = common.find_layer(context, arguments["layer"], step_outputs)
     spatial_reference = arcpy.SpatialReference(int(arguments["wkid"]))
     arcpy.DefineProjection_management(layer, spatial_reference)
-    common.refresh()
     return {
         "layer": getattr(layer, "name", common._text(arguments["layer"])),
         "wkid": int(arguments["wkid"]),
@@ -57,7 +51,6 @@ def estimate_define_projection(context, arguments, step_outputs):
 def add_xy(context, arguments, step_outputs):
     layer = common.find_layer(context, arguments["layer"], step_outputs)
     arcpy.AddXY_management(layer)
-    common.refresh()
     return {"layer": getattr(layer, "name", common._text(arguments["layer"]))}
 
 

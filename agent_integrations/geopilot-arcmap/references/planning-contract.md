@@ -5,7 +5,7 @@ GeoPilot owns structured planning, validation, and controlled ArcMap execution.
 ## Core planning rules
 
 - Use local facts before drafting: current ArcMap context, capability catalog, layer fields, sampled values when available, and explicit user paths.
-- Prefer composing existing atomic operations. Common chains are add layer, inspect fields, select by attribute or location, export selected features, split by field, export KML/KMZ, create simple geometry, copy/repair/manage data, update existing layout text, export layout, clear selection, zoom, and refresh.
+- Prefer composing existing atomic operations. Common chains are add layer, inspect fields, select by attribute or location, export selected features, split by field, export KML/KMZ, create simple geometry, copy/repair/manage data, update existing layout text, export layout, clear selection, and zoom.
 - Do not create a custom tool when an existing operation or operation chain can express the task.
 - Use custom tools only for reusable GIS algorithms or processing primitives that cannot be expressed by the catalog.
 - If an enabled `custom.*` operation already matches the goal, use it directly. Do not create a duplicate draft.
@@ -44,6 +44,7 @@ GeoPilot owns structured planning, validation, and controlled ArcMap execution.
 ## Layer, field, and attribute intent
 
 - Use current ArcMap layers from context. Prefer `layer_ref` such as `layer:0` when names are ambiguous.
+- Run-scoped outputs remain detached until authoritative execution is recorded. `layer.remove_layer` and `layer.move_layer` only accept live map layers, and `layer.clear_layers` must precede every run-scoped output.
 - Treat UI mentions like `@图层名` and `#字段名` as markers; remove `@` and `#` in workflow arguments.
 - Inspect fields and sampled values before translating vague natural-language attribute intent.
 - Do not split Chinese natural language into conditions by simple keyword rules.

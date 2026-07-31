@@ -23,7 +23,7 @@ WORKFLOW = {
     "steps": [
         {
             "id": "s1",
-            "operation": "view.refresh_view",
+            "operation": "context.list_layers",
             "arguments": {},
             "reason": "refresh",
         }
@@ -73,6 +73,9 @@ class Catalog:
             "make.collection": self._writer("file_collection"),
             "use.layer": self._reader(),
             "layer.add_layer": self._add(),
+            "layer.remove_layer": self._map_layer_operation("layer.remove_layer", ["layer"]),
+            "layer.move_layer": self._map_layer_operation("layer.move_layer", ["layer"]),
+            "layer.clear_layers": self._map_layer_operation("layer.clear_layers", []),
         }
 
     def _writer(self, output_type):
@@ -127,6 +130,24 @@ class Catalog:
                 "properties": {
                     "path": {"type": "string"},
                 },
+                "additionalProperties": False,
+            },
+            "context_requirements": {},
+            "side_effects": "changes_map",
+            "output_policy": {},
+        }
+
+    @staticmethod
+    def _map_layer_operation(operation_id, names):
+        return {
+            "id": operation_id,
+            "parameters_schema": {
+                "type": "object",
+                "required": list(names),
+                "properties": dict(
+                    (name, {"type": "string", "x-geopilot-kind": "layer"})
+                    for name in names
+                ),
                 "additionalProperties": False,
             },
             "context_requirements": {},
@@ -279,6 +300,62 @@ class G3ValidationFirstTests(unittest.TestCase):
         workflow["steps"][0]["operation"] = "make.file"
         with self.assertRaisesRegex(ValidationError, "file 输出"):
             prepare_workflow(workflow, catalog, self._context())
+
+    def test_detached_outputs_cannot_be_moved_removed_or_cleared_after_creation(self):
+        catalog = Catalog()
+        for operation in ("layer.remove_layer", "layer.move_layer"):
+            workflow = self._workflow("make.vector")
+            workflow["steps"][1]["operation"] = operation
+            with self.assertRaisesRegex(ValidationError, "只能操作当前地图中已加载的图层"):
+                prepare_workflow(workflow, catalog, self._context())
+
+        workflow = self._workflow("make.vector")
+        workflow["steps"][1] = {
+            "id": "s2",
+            "operation": "layer.clear_layers",
+            "arguments": {},
+            "reason": "clear",
+        }
+        with self.assertRaisesRegex(ValidationError, "必须在生成运行期成果之前执行"):
+            prepare_workflow(workflow, catalog, self._context())
+
+    def test_clear_before_output_and_remove_added_live_layer_are_valid(self):
+        catalog = Catalog()
+        clear_first = self._workflow("make.vector")
+        clear_first["steps"].insert(0, {
+            "id": "clear",
+            "operation": "layer.clear_layers",
+            "arguments": {},
+            "reason": "reset",
+        })
+        prepare_workflow(clear_first, catalog, self._context())
+
+        live = {
+            "action": "execute",
+            "summary": "live",
+            "steps": [
+                {"id": "add", "operation": "layer.add_layer", "arguments": {"path": "roads"}, "reason": "add"},
+                {"id": "remove", "operation": "layer.remove_layer", "arguments": {"layer": "from_step:add"}, "reason": "remove"},
+            ],
+        }
+        prepare_workflow(live, catalog, self._context())
+
+    def test_removed_and_cleared_layers_leave_the_semantic_index(self):
+        catalog = Catalog()
+        for first_step in (
+            {"id": "clear", "operation": "layer.clear_layers", "arguments": {}, "reason": "clear"},
+            {"id": "remove", "operation": "layer.remove_layer", "arguments": {"layer": "roads"}, "reason": "remove"},
+        ):
+            workflow = {
+                "action": "execute",
+                "summary": "stale",
+                "steps": [
+                    first_step,
+                    {"id": "use", "operation": "use.layer", "arguments": {"layer": "roads"}, "reason": "use"},
+                ],
+            }
+            with self.assertRaisesRegex(ValidationError, "当前地图里没有"):
+                prepare_workflow(workflow, catalog, self._context())
 
     def test_in_value_is_repaired_before_audit(self):
         events = []

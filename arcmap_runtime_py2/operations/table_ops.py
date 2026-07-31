@@ -27,7 +27,6 @@ def add_field(context, arguments, step_outputs):
     field_type = _field_type(arguments.get("field_type", "TEXT"))
     field_length = arguments.get("field_length")
     arcpy.AddField_management(layer, field_name, field_type, "", "", field_length or "")
-    common.refresh()
     return {"layer": layer.name, "field_name": field_name, "field_type": field_type}
 
 
@@ -36,7 +35,6 @@ def delete_field(context, arguments, step_outputs):
     field_name = arguments["field_name"]
     condition_utils.require_field(layer, field_name)
     arcpy.DeleteField_management(layer, field_name)
-    common.refresh()
     return {"layer": layer.name, "deleted_field": field_name}
 
 
@@ -54,7 +52,6 @@ def update_rows(context, arguments, step_outputs):
                 row[index] = assignments[field]
             cursor.updateRow(row)
             count += 1
-    common.refresh()
     return {"layer": layer.name, "updated": count, "fields": list(fields)}
 
 
@@ -67,7 +64,6 @@ def delete_rows(context, arguments, step_outputs):
         for _row in cursor:
             cursor.deleteRow()
             count += 1
-    common.refresh()
     return {"layer": layer.name, "deleted": count}
 
 

@@ -13,21 +13,30 @@ import pythonaddins
 
 try:
     import context_reader
+    import execution_session
     import execution_outbox
     import gateway_client
+    import map_exporter
+    import output_publisher
     import path_utils
     import workflow_executor
 except ImportError:
     from . import context_reader
+    from . import execution_session
     from . import execution_outbox
     from . import gateway_client
+    from . import map_exporter
+    from . import output_publisher
     from . import path_utils
     from . import workflow_executor
 
 
 reload(context_reader)
+reload(execution_session)
 reload(execution_outbox)
 reload(gateway_client)
+reload(map_exporter)
+reload(output_publisher)
 reload(workflow_executor)
 
 
@@ -79,7 +88,8 @@ def open_or_handle_bridge_command():
 def open_assistant():
     _clear_silent_state()
     gateway_client.ensure_running()
-    _drain_execution_outbox()
+    map_exporter.cleanup_stale()
+    _drain_execution_outbox(gateway_client.current_target())
     _sync_current_context()
     open_web()
 
@@ -89,7 +99,8 @@ def _run_silent_command(command):
     _LAST_SILENT_COMMAND = command
     _LAST_COMMAND_WAS_SILENT = True
     gateway_client.ensure_running()
-    _drain_execution_outbox()
+    map_exporter.cleanup_stale()
+    _drain_execution_outbox(command.get("target"))
     action = command.get("action")
     if action == "sync":
         _sync_current_context(
@@ -116,17 +127,23 @@ def _execute_run(run_id, target=None, silent=False):
 
     try:
         context = context_reader.read_context()
-        result = workflow_executor.execute(row, context, confirm_callback=_confirm_direct_edit)
+        outcome = workflow_executor.execute(row, context, confirm_callback=_confirm_direct_edit)
+        result = outcome.result
     except Exception as exc:
         result = {
             "ok": False,
             "error": _exception_text(exc),
             "traceback": _traceback_text()
         }
-        _persist_and_deliver(run_id, owner_id, "failed", result, target, heartbeat)
+        _persist_publish_and_deliver(
+            run_id, owner_id, "failed", result, target, heartbeat,
+            execution_session.PublicationPlan([]),
+        )
         raise
 
-    acknowledged = _persist_and_deliver(run_id, owner_id, "executed", result, target, heartbeat)
+    acknowledged = _persist_publish_and_deliver(
+        run_id, owner_id, "executed", result, target, heartbeat, outcome.publication_plan,
+    )
     if not silent:
         if acknowledged:
             show_message(u"工作流执行完成：%s" % result.get("summary", "succeeded"))
@@ -134,13 +151,26 @@ def _execute_run(run_id, target=None, silent=False):
             show_message(u"工作流已执行完成，权威结果正在重试提交到本地网关。")
 
 
-def _persist_and_deliver(run_id, owner_id, status, result, target, heartbeat):
+def _persist_publish_and_deliver(run_id, owner_id, status, result, target, heartbeat, publication_plan):
     try:
-        entry = EXECUTION_OUTBOX.enqueue(run_id, owner_id, status, result, target)
+        entry = EXECUTION_OUTBOX.enqueue(
+            run_id, owner_id, status, result, target, publication_plan.records,
+        )
     except Exception as exc:
         heartbeat.stop()
         _log_event(u"execution.outbox_persist_failed", _exception_text(exc))
         raise
+    if not entry["publication_complete"]:
+        try:
+            with EXECUTION_OUTBOX.publication_lease(entry) as acquired:
+                if not acquired:
+                    raise RuntimeError("execution output publication is already active.")
+                output_publisher.publish(publication_plan)
+                entry = EXECUTION_OUTBOX.mark_publication_complete(entry)
+        except Exception as exc:
+            heartbeat.stop()
+            _log_event(u"execution.output_publication_failed", _exception_text(exc))
+            raise
     try:
         acknowledged = EXECUTION_OUTBOX.deliver(entry, gateway_client)
     except Exception as exc:
@@ -154,14 +184,44 @@ def _persist_and_deliver(run_id, owner_id, status, result, target, heartbeat):
     return True
 
 
-def _drain_execution_outbox():
+def _drain_execution_outbox(target=None):
     try:
         entries = EXECUTION_OUTBOX.pending()
     except Exception as exc:
         _log_event(u"execution.outbox_read_failed", _exception_text(exc))
         raise
     for entry in entries:
-        _start_delivery_retry(entry)
+        if not _same_target(entry["target"], target):
+            continue
+        try:
+            plan = execution_session.PublicationPlan.from_records(entry["publication_items"])
+            with EXECUTION_OUTBOX.publication_lease(entry) as acquired:
+                if not acquired:
+                    continue
+                output_publisher.publish(plan)
+                if not entry["publication_complete"]:
+                    entry = EXECUTION_OUTBOX.mark_publication_complete(entry)
+        except Exception as exc:
+            _log_event(u"execution.output_publication_retry_failed", _exception_text(exc))
+            continue
+        try:
+            acknowledged = EXECUTION_OUTBOX.deliver(entry, gateway_client)
+        except Exception as exc:
+            _log_event(u"execution.delivery_retry_failed", _exception_text(exc))
+            _start_delivery_retry(entry)
+            continue
+        if not acknowledged:
+            _start_delivery_retry(entry)
+
+
+def _same_target(left, right):
+    if not isinstance(left, dict) or not isinstance(right, dict):
+        return False
+    names = ("bridge_pid", "bridge_port", "arcmap_pid", "hwnd")
+    try:
+        return all(int(left.get(name) or 0) == int(right.get(name) or 0) for name in names)
+    except (TypeError, ValueError):
+        return False
 
 
 def _start_delivery_retry(entry, heartbeat=None):

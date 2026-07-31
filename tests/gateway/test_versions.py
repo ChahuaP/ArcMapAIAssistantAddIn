@@ -12,9 +12,13 @@ class VersionTests(unittest.TestCase):
         opener_version = _find(ROOT / "gateway_py3" / "open_web.py", r'EXPECTED_APP_VERSION = "([^"]+)"')
         web_version = _find(ROOT / "gateway_py3" / "web" / "app.js", r"EXPECTED_GATEWAY_VERSION = '([^']+)'")
         runtime_version = _find(ROOT / "arcmap_runtime_py2" / "gateway_client.py", r'EXPECTED_APP_VERSION = "([^"]+)"')
+        installer_version = _find(ROOT / "packaging" / "GeoPilotSetup.iss", r'#define MyAppVersion "([^"]+)"')
+        addin_version = _find(ROOT / "ArcMapAIAssistantAddIn" / "config.xml", r'<Version>([^<]+)</Version>')
         self.assertEqual(app_version, opener_version)
         self.assertEqual(app_version, web_version)
         self.assertEqual(app_version, runtime_version)
+        self.assertEqual(app_version, installer_version)
+        self.assertEqual(app_version, addin_version)
 
     def test_web_opener_uses_clean_local_url(self):
         opener = (ROOT / "gateway_py3" / "open_web.py").read_text(encoding="utf-8")

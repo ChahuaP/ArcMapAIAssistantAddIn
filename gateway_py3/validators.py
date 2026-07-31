@@ -151,7 +151,8 @@ def validate_workflow_semantics(workflow: Dict[str, Any], catalog: OperationCata
         operation = catalog.get(step["operation"])
         arguments = step["arguments"]
 
-        _validate_layer_references(operation, arguments, context, available_layers, seen_step_ids)
+        _validate_layer_references(step, operation, arguments, context, available_layers, seen_step_ids)
+        _validate_clear_layers_order(step, available_layers)
         _validate_condition_arguments(operation, arguments)
         _validate_field_references(operation, arguments, context, available_layers)
         _validate_condition_value_types(operation, arguments, available_layers)
@@ -159,8 +160,23 @@ def validate_workflow_semantics(workflow: Dict[str, Any], catalog: OperationCata
         _validate_output_name(arguments)
         _validate_layer_add_path(step, arguments, available_layers)
 
+        _apply_map_layer_effect(step, available_layers)
         seen_step_ids.add(step_id)
         _register_step_output(step, operation, available_layers)
+
+
+def _apply_map_layer_effect(step: Dict[str, Any], available_layers: List[Dict[str, Any]]) -> None:
+    operation_id = step.get("operation")
+    if operation_id == "layer.clear_layers":
+        available_layers[:] = []
+        return
+    if operation_id != "layer.remove_layer":
+        return
+    layer_ref = (step.get("arguments") or {}).get("layer")
+    available_layers[:] = [
+        layer for layer in available_layers
+        if layer.get("layer_ref") != layer_ref
+    ]
 
 
 def friendly_validation_message(error: Exception) -> str:
@@ -288,6 +304,7 @@ def _validate_type(step_id: str, name: str, value: Any, schema: Dict[str, Any]) 
 
 
 def _validate_layer_references(
+    step: Dict[str, Any],
     operation: Dict[str, Any],
     arguments: Dict[str, Any],
     context: Dict[str, Any],
@@ -304,6 +321,43 @@ def _validate_layer_references(
             ]
         else:
             arguments[name] = _validate_and_normalize_layer_reference(arguments[name], available_layers, seen_step_ids)
+    _validate_live_map_layer_requirement(step, operation, arguments, available_layers)
+
+
+def _validate_live_map_layer_requirement(
+    step: Dict[str, Any],
+    operation: Dict[str, Any],
+    arguments: Dict[str, Any],
+    available_layers: List[Dict[str, Any]],
+) -> None:
+    if step.get("operation") not in ("layer.remove_layer", "layer.move_layer"):
+        return
+    for name in _layer_argument_names(operation):
+        value = arguments.get(name)
+        values = value if isinstance(value, list) else [value]
+        for item in values:
+            if not isinstance(item, str) or not item.startswith("from_step:"):
+                continue
+            matched = [layer for layer in available_layers if layer.get("layer_ref") == item]
+            if matched and matched[0].get("map_state") == "detached":
+                raise ValidationError(
+                    "%s 只能操作当前地图中已加载的图层；运行期成果 %s 尚未发布到地图。"
+                    % (step.get("operation"), item)
+                )
+
+
+def _validate_clear_layers_order(step: Dict[str, Any], available_layers: List[Dict[str, Any]]) -> None:
+    if step.get("operation") != "layer.clear_layers":
+        return
+    pending = [
+        layer.get("layer_ref") for layer in available_layers
+        if layer.get("map_state") == "detached"
+    ]
+    if pending:
+        raise ValidationError(
+            "layer.clear_layers 必须在生成运行期成果之前执行；待发布成果为：%s。"
+            % "、".join(pending)
+        )
 
 
 def _validate_and_normalize_layer_reference(
@@ -615,7 +669,7 @@ def _register_step_output(
     arguments = step.get("arguments") or {}
     names = []
     if step.get("operation") == "layer.add_layer" and arguments.get("path"):
-        names.append(Path(arguments["path"]).stem)
+        names.append((Path(arguments["path"]).stem, "live"))
     policy = canonical_output_policy(
         operation.get("output_policy"),
         operation.get("side_effects", ""),
@@ -626,8 +680,8 @@ def _register_step_output(
         and output_policy_type(policy) in ("feature_class", "raster")
         and policy.get("add_to_map") is True
     ):
-        names.append(arguments["output_name"])
-    for name in names:
+        names.append((arguments["output_name"], "detached"))
+    for name, map_state in names:
         available_layers.append(
             {
                 "layer_ref": "from_step:%s" % step["id"],
@@ -635,6 +689,7 @@ def _register_step_output(
                 "longName": str(name),
                 "fields": [],
                 "fields_unknown": True,
+                "map_state": map_state,
             }
         )
 
@@ -648,7 +703,8 @@ def _initial_layer_index(context: Dict[str, Any]) -> List[Dict[str, Any]]:
             "longName": layer.get("longName"),
             "dataSource": layer.get("dataSource"),
             "fields": layer.get("fields", []),
-            "fields_unknown": layer.get("fields_unknown", False)
+            "fields_unknown": layer.get("fields_unknown", False),
+            "map_state": "live",
         })
     return layers
 

@@ -15,7 +15,7 @@ WORKFLOW = {
     "steps": [
         {
             "id": "s",
-            "operation": "view.refresh_view",
+            "operation": "context.list_layers",
             "arguments": {},
             "reason": "refresh",
         }

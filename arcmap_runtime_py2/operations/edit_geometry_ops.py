@@ -18,7 +18,6 @@ def create_empty_feature_layer(context, arguments, step_outputs):
     geometry_type = _feature_class_geometry_type(arguments["geometry_type"])
     output = _create_feature_class(context, arguments, geometry_type, spatial_reference)
     _add_name_field(output)
-    common.add_output_layer(output)
     return {"output": output, "feature_count": 0, "geometry_type": _geometry_type_label(geometry_type)}
 
 
@@ -28,7 +27,6 @@ def create_point_features(context, arguments, step_outputs):
     _add_name_field(output)
     rows = _point_rows(arguments["points"], spatial_reference)
     names_written = _insert_rows(output, rows)
-    common.add_output_layer(output)
     return {"output": output, "feature_count": len(rows), "geometry_type": "Point", "names_written": names_written}
 
 
@@ -36,7 +34,6 @@ def append_point_features(context, arguments, step_outputs):
     target, spatial_reference = _target_layer(context, arguments, step_outputs, "Point")
     rows = _point_rows(arguments["points"], spatial_reference)
     names_written = _insert_rows(target, rows)
-    common.refresh()
     return {
         "target_layer": _layer_name(target),
         "feature_count": len(rows),
@@ -51,7 +48,6 @@ def create_polyline_feature(context, arguments, step_outputs):
     _add_name_field(output)
     rows = _polyline_rows(arguments, spatial_reference)
     names_written = _insert_rows(output, rows)
-    common.add_output_layer(output)
     return {"output": output, "feature_count": len(rows), "geometry_type": "Polyline", "names_written": names_written}
 
 
@@ -59,7 +55,6 @@ def append_polyline_features(context, arguments, step_outputs):
     target, spatial_reference = _target_layer(context, arguments, step_outputs, "Polyline")
     rows = _polyline_rows(arguments, spatial_reference)
     names_written = _insert_rows(target, rows)
-    common.refresh()
     return {
         "target_layer": _layer_name(target),
         "feature_count": len(rows),
@@ -84,7 +79,6 @@ def append_polygon_features(context, arguments, step_outputs):
     target, spatial_reference = _target_layer(context, arguments, step_outputs, "Polygon")
     rows = _polygon_rows(arguments, spatial_reference)
     names_written = _insert_rows(target, rows)
-    common.refresh()
     return {
         "target_layer": _layer_name(target),
         "feature_count": len(rows),
@@ -103,7 +97,6 @@ def append_regular_polygons(context, arguments, step_outputs):
     target, spatial_reference = _target_layer(context, arguments, step_outputs, "Polygon")
     rows = _regular_polygon_rows(arguments, spatial_reference)
     names_written = _insert_rows(target, rows)
-    common.refresh()
     return {
         "target_layer": _layer_name(target),
         "feature_count": len(rows),
@@ -140,7 +133,6 @@ def append_star_polygons(context, arguments, step_outputs):
     target, spatial_reference = _target_layer(context, arguments, step_outputs, "Polygon")
     rows = _star_polygon_rows(arguments, spatial_reference)
     names_written = _insert_rows(target, rows)
-    common.refresh()
     return {
         "target_layer": _layer_name(target),
         "feature_count": len(rows),
@@ -181,7 +173,6 @@ def _create_polygon_output(context, arguments, spatial_reference, rows):
     output = _create_feature_class(context, arguments, "POLYGON", spatial_reference)
     _add_name_field(output)
     names_written = _insert_rows(output, rows)
-    common.add_output_layer(output)
     return {"output": output, "feature_count": len(rows), "geometry_type": "Polygon", "names_written": names_written}
 
 

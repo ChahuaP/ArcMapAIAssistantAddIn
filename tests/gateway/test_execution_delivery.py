@@ -49,7 +49,7 @@ class ExecutionDeliveryTests(unittest.TestCase):
     def test_failed_first_delivery_survives_restart_and_replays_authoritatively(self):
         result = {"ok": True, "summary": "authoritative"}
         outbox = ExecutionOutbox(str(self.outbox_path))
-        entry = outbox.enqueue(self.run_id, "runtime-owner", "executed", result, TARGET)
+        entry = outbox.enqueue(self.run_id, "runtime-owner", "executed", result, TARGET, [])
         self.assertEqual(entry["run_id"], self.run_id)
         self.assertEqual(entry["owner"], "runtime-owner")
         self.assertEqual(entry["target"], TARGET)
@@ -65,6 +65,20 @@ class ExecutionDeliveryTests(unittest.TestCase):
         row = self.store.get(self.run_id)
         self.assertEqual(row["status"], "executed")
         self.assertEqual(row["result"], result)
+        self.assertEqual(list(self.outbox_path.glob("*.guard")), [])
+
+    def test_startup_prunes_orphan_guard_files(self):
+        self.outbox_path.mkdir(parents=True)
+        run_id = str(uuid.uuid4())
+        orphan = self.outbox_path / (run_id + ".lease.guard")
+        orphan_lease = self.outbox_path / (run_id + ".lease")
+        orphan.write_bytes(b"0")
+        orphan_lease.write_text("{}", encoding="ascii")
+
+        ExecutionOutbox(str(self.outbox_path))
+
+        self.assertFalse(orphan.exists())
+        self.assertFalse(orphan_lease.exists())
 
     def test_two_reloaded_outbox_instances_have_one_delivery_owner_for_20_rounds(self):
         for round_index in range(20):
@@ -72,7 +86,7 @@ class ExecutionDeliveryTests(unittest.TestCase):
             first = ExecutionOutbox(str(directory))
             second = ExecutionOutbox(str(directory))
             entry = first.enqueue(
-                str(uuid.uuid4()), "runtime-owner", "executed", {"ok": True}, TARGET
+                str(uuid.uuid4()), "runtime-owner", "executed", {"ok": True}, TARGET, []
             )
             client = BlockingClient()
             outcomes = []
@@ -101,7 +115,7 @@ class ExecutionDeliveryTests(unittest.TestCase):
 
     def test_missing_acknowledged_entry_is_success_not_retry(self):
         outbox = ExecutionOutbox(str(self.outbox_path / "ack-race"))
-        entry = outbox.enqueue(str(uuid.uuid4()), "runtime-owner", "executed", {"ok": True}, TARGET)
+        entry = outbox.enqueue(str(uuid.uuid4()), "runtime-owner", "executed", {"ok": True}, TARGET, [])
         self.assertTrue(outbox.deliver(entry, StorelessClient()))
         self.assertTrue(outbox.deliver(entry, StorelessClient()))
 
@@ -174,13 +188,25 @@ class ExecutionDeliveryTests(unittest.TestCase):
 
         outbox = ExecutionOutbox(str(self.outbox_path / "late-authoritative"))
         result = {"ok": True, "summary": "late authoritative"}
-        entry = outbox.enqueue(self.run_id, "runtime-owner", "executed", result, TARGET)
+        entry = outbox.enqueue(self.run_id, "runtime-owner", "executed", result, TARGET, [])
         client = StoreClient(self.store)
         self.assertTrue(outbox.deliver(entry, client))
         self.assertEqual(outbox.pending(), [])
         self.assertTrue(outbox.deliver(entry, client))
         self.assertEqual(client.calls, 1)
         self.assertEqual(self.store.get(self.run_id)["status"], "executed")
+
+    def test_delivery_waits_for_durable_publication_acknowledgement(self):
+        outbox = ExecutionOutbox(str(self.outbox_path / "publication"))
+        entry = outbox.enqueue(
+            str(uuid.uuid4()), "runtime-owner", "executed", {"ok": True}, TARGET,
+            [{"path": r"D:\out\final.shp", "visible": True, "selection_oids": None}],
+        )
+        with self.assertRaisesRegex(ValueError, "have not been published"):
+            outbox.deliver(entry, StorelessClient())
+        completed = outbox.mark_publication_complete(entry)
+        self.assertTrue(completed["publication_complete"])
+        self.assertTrue(outbox.deliver(completed, StorelessClient()))
 
 
 class BlockingClient:

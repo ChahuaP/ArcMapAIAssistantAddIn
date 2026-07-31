@@ -45,7 +45,7 @@ class ExecutionOutboxPython27Tests(unittest.TestCase):
         owner_id = str(uuid.uuid4())
         entry = outbox.enqueue(run_id, owner_id, "failed", {
             "ok": False, "traceback": "ArcPy traceback",
-        }, TARGET)
+        }, TARGET, [])
         self.assertTrue(isinstance(entry["run_id"], unicode))
         self.assertTrue(isinstance(entry["owner"], unicode))
         client = _Client()
@@ -66,6 +66,28 @@ class ExecutionOutboxPython27Tests(unittest.TestCase):
         self.assertFalse(outbox._acquire_delivery_lease(run_id, owner_c, now=31))
         self.assertEqual(outbox._read_lease(outbox._lease_path(run_id))["owner"], owner_b)
         outbox._release_delivery_lease(run_id, owner_b)
+
+    def test_publication_plan_is_durable_before_execution_delivery(self):
+        outbox = ExecutionOutbox(self.directory)
+        entry = outbox.enqueue(
+            str(uuid.uuid4()), str(uuid.uuid4()), "executed", {"ok": True}, TARGET,
+            [{"path": u"D:\\成果\\最终图层.shp", "visible": False, "selection_oids": [3, 1]}],
+        )
+        self.assertFalse(entry["publication_complete"])
+        self.assertEqual(entry["publication_items"][0]["selection_oids"], [1, 3])
+        completed = outbox.mark_publication_complete(entry)
+        self.assertTrue(completed["publication_complete"])
+
+    def test_publication_lease_has_one_owner(self):
+        outbox = ExecutionOutbox(self.directory)
+        entry = outbox.enqueue(
+            str(uuid.uuid4()), str(uuid.uuid4()), "executed", {"ok": True}, TARGET,
+            [{"path": u"D:\\成果\\最终图层.shp", "visible": True, "selection_oids": None}],
+        )
+        with outbox.publication_lease(entry) as first:
+            with outbox.publication_lease(entry) as second:
+                self.assertTrue(first)
+                self.assertFalse(second)
 
 
 if __name__ == "__main__":

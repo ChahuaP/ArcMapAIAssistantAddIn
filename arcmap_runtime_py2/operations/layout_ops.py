@@ -5,6 +5,11 @@ import arcpy
 
 from operations import common
 
+try:
+    import map_exporter
+except ImportError:
+    from .. import map_exporter
+
 
 ELEMENT_TYPES = (
     "TEXT_ELEMENT",
@@ -32,7 +37,6 @@ def set_text(context, arguments, step_outputs):
     element = _find_text_element(mxd, arguments["element_name"], arguments.get("match") or "EXACT")
     old_text = common._text(getattr(element, "text", ""))
     element.text = common._text(arguments["text"])
-    common.refresh()
     return {
         "element_name": common._text(getattr(element, "name", arguments["element_name"])),
         "old_text": old_text,
@@ -50,25 +54,22 @@ def set_active_view(context, arguments, step_outputs):
         mxd.activeView = df.name
     else:
         raise common.OperationError(u"Unsupported view_mode: %s" % view_mode)
-    common.refresh()
     return {"active_view": view_mode}
 
 
 def export_pdf(context, arguments, step_outputs):
-    mxd = common.current_mxd()
     output = common.output_file(context, arguments["output_name"], ".pdf", arguments.get("output_folder"))
     resolution = int(arguments.get("resolution", 300))
     image_quality = arguments.get("image_quality") or "BEST"
-    arcpy.mapping.ExportToPDF(mxd, output, resolution=resolution, image_quality=image_quality)
+    map_exporter.export_pdf(output, resolution=resolution, image_quality=image_quality)
     return {"output": output, "resolution": resolution, "image_quality": image_quality}
 
 
 def export_png(context, arguments, step_outputs):
-    mxd = common.current_mxd()
     output = common.output_file(context, arguments["output_name"], ".png", arguments.get("output_folder"))
     resolution = int(arguments.get("resolution", 300))
     world_file = bool(arguments.get("world_file", False))
-    arcpy.mapping.ExportToPNG(mxd, output, resolution=resolution, world_file=world_file)
+    map_exporter.export_png(output, resolution=resolution, world_file=world_file)
     return {"output": output, "resolution": resolution, "world_file": world_file}
 
 

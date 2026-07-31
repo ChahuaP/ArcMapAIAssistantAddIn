@@ -141,6 +141,19 @@ class CatalogTests(unittest.TestCase):
         self.assertNotIn("common._safe_data_source(layer) or layer", export_ops)
         self.assertNotIn("class _read_layer", export_ops)
 
+    def test_workflow_operations_do_not_publish_or_refresh_arcmap_ui(self):
+        forbidden = (
+            "add_output_layer",
+            "auto_add_outputs_disabled",
+            "RefreshTOC",
+            "RefreshActiveView",
+            "common.refresh",
+        )
+        for path in (RUNTIME_ROOT / "operations").glob("*.py"):
+            source = path.read_text(encoding="utf-8")
+            for text in forbidden:
+                self.assertNotIn(text, source, "%s still uses %s" % (path, text))
+
     def test_runtime_operations_route_paths_through_path_utils(self):
         operation_files = [
             RUNTIME_ROOT / "operations" / "common.py",

@@ -24,8 +24,7 @@ def add_layer(context, arguments, step_outputs):
     layer, needs_add = _layer_for_path(path, mxd, df)
     if needs_add:
         arcpy.mapping.AddLayer(df, layer, "TOP")
-    common.refresh()
-    return {"added_layer": path, "layer_name": getattr(layer, "name", path_utils.splitext(path_utils.basename(path))[0])}
+    return {"layer_path": path, "layer_name": getattr(layer, "name", path_utils.splitext(path_utils.basename(path))[0])}
 
 
 def _layer_for_path(path, mxd, df):
@@ -41,8 +40,7 @@ def _layer_for_path(path, mxd, df):
 
 
 def _make_raster_layer(path, layer_name):
-    with common.auto_add_outputs_disabled():
-        return arcpy.MakeRasterLayer_management(path, layer_name, "", "", RGB_BAND_INDEX)
+    return arcpy.MakeRasterLayer_management(path, layer_name, "", "", RGB_BAND_INDEX)
 
 
 def _is_rgb_raster_path(path):
@@ -95,7 +93,6 @@ def _matches_layer(item, path, layer):
 def set_layer_visibility(context, arguments, step_outputs):
     layer = common.find_layer(context, arguments["layer"], step_outputs)
     layer.visible = bool(arguments["visible"])
-    common.refresh()
     return {"layer": layer.name, "visible": bool(layer.visible)}
 
 
@@ -105,7 +102,6 @@ def remove_layer(context, arguments, step_outputs):
     df = common.active_data_frame(mxd)
     name = layer.name
     arcpy.mapping.RemoveLayer(df, layer)
-    common.refresh()
     return {"removed_layer": name}
 
 
@@ -115,7 +111,6 @@ def clear_layers(context, arguments, step_outputs):
     layers = list(arcpy.mapping.ListLayers(mxd, "", df))
     for layer in layers:
         arcpy.mapping.RemoveLayer(df, layer)
-    common.refresh()
     return {"removed_count": len(layers)}
 
 
@@ -137,13 +132,11 @@ def move_layer(context, arguments, step_outputs):
         insert_position = "AFTER"
     elif position == "UP":
         if index == 0:
-            common.refresh()
             return {"layer": layer.name, "position": position, "moved": False}
         reference = layers[index - 1]
         insert_position = "BEFORE"
     elif position == "DOWN":
         if index == len(layers) - 1:
-            common.refresh()
             return {"layer": layer.name, "position": position, "moved": False}
         reference = layers[index + 1]
         insert_position = "AFTER"
@@ -154,10 +147,8 @@ def move_layer(context, arguments, step_outputs):
         raise common.OperationError(u"Unsupported layer move position: %s" % position)
 
     if reference is layer:
-        common.refresh()
         return {"layer": layer.name, "position": position, "moved": False}
     arcpy.mapping.MoveLayer(df, reference, layer, insert_position)
-    common.refresh()
     return {"layer": layer.name, "position": position, "moved": True}
 
 
@@ -166,7 +157,6 @@ def zoom_to_layer(context, arguments, step_outputs):
     mxd = common.current_mxd()
     df = common.active_data_frame(mxd)
     df.extent = layer.getExtent()
-    common.refresh()
     return {"zoomed_to": layer.name}
 
 
@@ -175,10 +165,4 @@ def zoom_to_selection(context, arguments, step_outputs):
     mxd = common.current_mxd()
     df = common.active_data_frame(mxd)
     df.extent = layer.getSelectedExtent()
-    common.refresh()
     return {"zoomed_to_selection": layer.name}
-
-
-def refresh_view(context, arguments, step_outputs):
-    common.refresh()
-    return {"refreshed": True}

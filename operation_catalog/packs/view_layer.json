@@ -135,20 +135,6 @@
       "output_policy": {"writes_output": false},
       "executor": "operations.layer_ops.zoom_to_selection",
       "examples": [{"user": "缩放到 roads 选中的要素", "arguments": {"layer": "roads"}}]
-    },
-    {
-      "id": "view.refresh_view",
-      "version": "1.0",
-      "category": "view_layer",
-      "summary": "刷新地图视图和目录。",
-      "keywords": ["refresh", "刷新"],
-      "model_card": "Use view.refresh_view to refresh active view and TOC. No arguments.",
-      "parameters_schema": {"type": "object", "properties": {}, "additionalProperties": false},
-      "context_requirements": {"requires_layers": false},
-      "side_effects": "changes_map",
-      "output_policy": {"writes_output": false},
-      "executor": "operations.layer_ops.refresh_view",
-      "examples": [{"user": "刷新地图", "arguments": {}}]
     }
   ]
 }

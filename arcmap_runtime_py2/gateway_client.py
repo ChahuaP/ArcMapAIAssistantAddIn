@@ -20,7 +20,7 @@ except NameError:
 
 
 BASE_URL = "http://127.0.0.1:8765"
-EXPECTED_APP_VERSION = "1.0.2"
+EXPECTED_APP_VERSION = "1.0.3"
 REPO_ROOT = path_utils.abspath(path_utils.join_path(os.path.dirname(__file__), ".."))
 CREATE_NO_WINDOW = 0x08000000
 
@@ -143,6 +143,23 @@ def complete_run(run_id, status, result, owner_id, result_hash, target):
         "result_hash": result_hash,
         "target": target,
     }, timeout=10)
+
+
+def current_target():
+    payload = _get("/arcmap/bridges", timeout=10)
+    bridges = payload.get("bridges") if isinstance(payload, dict) else None
+    if not isinstance(bridges, list):
+        raise RuntimeError(u"本地网关没有返回 ArcMap 目标列表。")
+    matches = [
+        bridge for bridge in bridges
+        if isinstance(bridge, dict) and int(bridge.get("arcmap_pid") or 0) == os.getpid()
+    ]
+    if len(matches) != 1:
+        raise RuntimeError(u"当前 ArcMap 必须且只能对应一个 Bridge 目标。")
+    return dict(
+        (name, int(matches[0].get(name) or 0))
+        for name in ("bridge_pid", "bridge_port", "arcmap_pid", "hwnd")
+    )
 
 
 def _gateway_command():

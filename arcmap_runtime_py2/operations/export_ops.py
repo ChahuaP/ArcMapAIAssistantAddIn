@@ -11,24 +11,24 @@ from operations import common
 from operations import condition_utils
 
 try:
+    import map_exporter
     import path_utils
 except ImportError:
+    from .. import map_exporter
     from .. import path_utils
 
 
 def export_map_png(context, arguments, step_outputs):
-    mxd = common.current_mxd()
     output = common.output_file(context, arguments["output_name"], ".png", arguments.get("output_folder"))
     resolution = int(arguments.get("resolution", 150))
-    arcpy.mapping.ExportToPNG(mxd, output, resolution=resolution)
+    map_exporter.export_png(output, resolution=resolution)
     return {"output": output}
 
 
 def export_map_pdf(context, arguments, step_outputs):
-    mxd = common.current_mxd()
     output = common.output_file(context, arguments["output_name"], ".pdf", arguments.get("output_folder"))
     resolution = int(arguments.get("resolution", 150))
-    arcpy.mapping.ExportToPDF(mxd, output, resolution=resolution)
+    map_exporter.export_pdf(output, resolution=resolution)
     return {"output": output}
 
 
@@ -96,13 +96,10 @@ def split_by_field(context, arguments, step_outputs):
             outputs.append(output)
             output_items.append({"value": common._text(value), "output": output, "feature_count": feature_count})
         else:
-            with common.auto_add_outputs_disabled():
-                with common.read_layer(layer, selected_only, where_clause) as source:
-                    arcpy.CopyFeatures_management(source, output)
+            with common.read_layer(layer, selected_only, where_clause) as source:
+                arcpy.CopyFeatures_management(source, output)
             outputs.append(output)
             output_items.append({"value": common._text(value), "output": output})
-
-    common.refresh()
     return {"outputs": outputs, "output_items": output_items, "count": len(outputs), "output_format": output_format}
 
 

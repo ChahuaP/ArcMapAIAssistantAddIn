@@ -9,8 +9,10 @@ import arcpy
 
 try:
     import path_utils
+    import execution_session
 except ImportError:
     from .. import path_utils
+    from .. import execution_session
 
 
 try:
@@ -68,8 +70,6 @@ def find_layer(context, layer_value, step_outputs=None):
         raise OperationError(u"Layer is ambiguous: %s" % raw)
 
     layer_ref = matches[0].get("layer_ref", "")
-    if layer_ref.startswith("from_step:"):
-        return _find_layer_from_step(layer_ref[len("from_step:"):], step_outputs or {})
     if not layer_ref.startswith("layer:"):
         live_match = _find_live_layer_exact(raw)
         if live_match is not None:
@@ -278,44 +278,6 @@ def _normalize_extension(extension):
     return text.lower()
 
 
-def add_output_layer(path):
-    path = _path_text(path)
-    mxd = current_mxd()
-    df = active_data_frame(mxd)
-    if _layer_source_exists(mxd, df, path):
-        refresh()
-        return {"already_visible": True}
-    layer = arcpy.mapping.Layer(path)
-    arcpy.mapping.AddLayer(df, layer, "TOP")
-    refresh()
-    return {"added": True}
-
-
-def refresh():
-    arcpy.RefreshTOC()
-    arcpy.RefreshActiveView()
-
-
-class auto_add_outputs_disabled(object):
-    def __init__(self):
-        self._env = None
-        self._original = None
-        self._enabled = False
-
-    def __enter__(self):
-        self._env = getattr(arcpy, "env", None)
-        if self._env is not None and hasattr(self._env, "addOutputsToMap"):
-            self._original = self._env.addOutputsToMap
-            self._env.addOutputsToMap = False
-            self._enabled = True
-        return self
-
-    def __exit__(self, exc_type, exc, tb):
-        if self._enabled:
-            self._env.addOutputsToMap = self._original
-        return False
-
-
 def export_table_to_csv(layer, path, selected_only):
     fields = [f.name for f in arcpy.ListFields(layer) if f.type not in ("Geometry", "Raster", "Blob")]
     with path_utils.open_binary(path, "wb") as f:
@@ -402,49 +364,24 @@ def _resolve_output_workspace(context, output_workspace):
     return _path_text(output_workspace).strip()
 
 
-def _layer_source_exists(mxd, df, path):
-    expected = _normalize_path(path)
-    for layer in arcpy.mapping.ListLayers(mxd, "", df):
-        source = _safe_data_source(layer)
-        if source and _normalize_path(source) == expected:
-            return True
-    return False
-
-
 def _find_layer_from_step(step_id, step_outputs):
-    result = _step_output(step_outputs, step_id)
+    step_id = _text(step_id)
+    result = step_outputs.get(step_id)
     if not isinstance(result, dict):
         raise OperationError(u"Step output not found: %s" % step_id)
-    source = result.get("output") or result.get("added_layer")
+    layer_path = result.get("layer_path")
+    if layer_path:
+        layer = _find_live_layer_exact(_text(layer_path))
+        if layer is None:
+            raise OperationError(u"Layer added by step is no longer in the map: %s" % step_id)
+        return layer
+    source = result.get("output")
     if not source:
         raise OperationError(u"Step has no layer output: %s" % step_id)
-    mxd = current_mxd()
-    df = active_data_frame(mxd)
-    layers = arcpy.mapping.ListLayers(mxd, "", df)
-    match = _find_live_layer_exact(_text(source), layers)
-    if match is not None:
-        return match
-    name = result.get("layer_name")
-    if name:
-        match = _find_live_layer_exact(_text(name), layers)
-        if match is not None:
-            return match
-    output_name = result.get("output_name")
-    if output_name:
-        match = _find_live_layer_exact(_text(output_name), layers)
-        if match is not None:
-            return match
-    raise OperationError(u"Layer from step not found in map: %s" % step_id)
-
-
-def _step_output(step_outputs, step_id):
-    if step_id in step_outputs:
-        return step_outputs.get(step_id)
-    expected = _text(step_id)
-    for key, value in step_outputs.items():
-        if _text(key) == expected:
-            return value
-    return None
+    session = execution_session.current()
+    if session is None:
+        raise OperationError(u"from_step requires an active execution session: %s" % step_id)
+    return session.layer_for_output(step_id, source)
 
 
 def _find_live_layer_exact(raw, layers=None):

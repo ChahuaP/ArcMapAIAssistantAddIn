@@ -9,16 +9,13 @@ import sys
 
 try:
     import context_reader
+    import execution_session
     import path_utils
 except ImportError:
     from . import context_reader
+    from . import execution_session
     from . import path_utils
 
-
-try:
-    reload
-except NameError:
-    from importlib import reload
 
 try:
     basestring
@@ -56,29 +53,38 @@ def execute(workflow_row, context, confirm_callback=None):
     operations = _load_operations()
     step_outputs = {}
     results = []
+    try:
+        with execution_session.ExecutionSession() as session:
+            for step in workflow["steps"]:
+                step_id = str(step["id"])
+                operation_id = step["operation"]
+                try:
+                    if operation_id not in operations:
+                        raise WorkflowExecutionError("Unknown operation: %s" % operation_id)
+                    operation = operations[operation_id]
+                    arguments = step["arguments"]
+                    _validate_arguments(step_id, arguments, operation["parameters_schema"])
+                    _validate_write_policy(operation, context, arguments)
+                    runtime_arguments = _prepare_runtime_arguments(operation, context, arguments, step_outputs)
+                    _confirm_edit_if_needed(operation, context, runtime_arguments, step_outputs, confirm_callback)
+                    result = _call_executor(operation["executor"], context, runtime_arguments, step_outputs)
+                    result = _finalize_runtime_result(operation, context, runtime_arguments, result)
+                except WorkflowExecutionError:
+                    raise
+                except Exception as exc:
+                    raise WorkflowExecutionError(u"步骤 %s（%s）执行失败：%s" % (step_id, operation_id, _exception_text(exc)))
+                step_outputs[step_id] = result
+                results.append({"step_id": step_id, "operation": operation_id, "result": result})
+                if _result_adds_to_map(operation, result):
+                    session.register_output(step_id, result["output"])
+            publication_plan = session.publication_plan()
+    except WorkflowExecutionError:
+        raise
+    except Exception as exc:
+        raise WorkflowExecutionError(u"工作流执行会话失败：%s" % _exception_text(exc))
 
-    for step in workflow["steps"]:
-        step_id = str(step["id"])
-        operation_id = step["operation"]
-        try:
-            if operation_id not in operations:
-                raise WorkflowExecutionError("Unknown operation: %s" % operation_id)
-            operation = operations[operation_id]
-            arguments = step["arguments"]
-            _validate_arguments(step_id, arguments, operation["parameters_schema"])
-            _validate_write_policy(operation, context, arguments)
-            runtime_arguments = _prepare_runtime_arguments(operation, context, arguments, step_outputs)
-            _confirm_edit_if_needed(operation, context, runtime_arguments, step_outputs, confirm_callback)
-            result = _call_executor(operation["executor"], context, runtime_arguments, step_outputs)
-            result = _finalize_runtime_result(operation, context, runtime_arguments, result)
-        except WorkflowExecutionError:
-            raise
-        except Exception as exc:
-            raise WorkflowExecutionError(u"步骤 %s（%s）执行失败：%s" % (step_id, operation_id, _exception_text(exc)))
-        step_outputs[step_id] = result
-        results.append({"step_id": step_id, "operation": operation_id, "result": result})
-
-    return {"ok": True, "summary": workflow["summary"], "steps": results}
+    result = {"ok": True, "summary": workflow["summary"], "steps": results}
+    return execution_session.ExecutionOutcome(result, publication_plan)
 
 
 def _load_operations():
@@ -254,13 +260,7 @@ def _call_executor(executor_path, context, arguments, step_outputs):
     if executor_path.startswith("custom_tool:"):
         return _call_custom_executor(executor_path, context, arguments, step_outputs)
     module_name, function_name = executor_path.rsplit(".", 1)
-    if module_name.startswith("operations."):
-        common = importlib.import_module("operations.common")
-        reload(common)
-        condition_utils = importlib.import_module("operations.condition_utils")
-        reload(condition_utils)
     module = importlib.import_module(module_name)
-    module = reload(module)
     function = getattr(module, function_name)
     return function(context, arguments, step_outputs)
 
@@ -294,11 +294,8 @@ def _finalize_runtime_result(operation, context, arguments, result):
     output_path = arguments.get("output_path")
     if not output_path:
         return result
-    common = _operations_common()
     result.setdefault("output", output_path)
     _validate_custom_output_artifact(operation.get("output_policy") or {}, output_path)
-    if _output_adds_to_map(operation.get("output_policy") or {}):
-        result["layer"] = common.add_output_layer(output_path)
     return result
 
 
@@ -310,6 +307,15 @@ def _output_adds_to_map(policy):
     if policy.get("add_to_map") is False:
         return False
     return _output_policy_type(policy) in ("feature_class", "raster")
+
+
+def _result_adds_to_map(operation, result):
+    return (
+        operation.get("side_effects") == "writes_data"
+        and isinstance(result, dict)
+        and bool(result.get("output"))
+        and _output_adds_to_map(operation.get("output_policy") or {})
+    )
 
 
 def _validate_custom_output_artifact(policy, output_path):
@@ -370,8 +376,7 @@ def _resolve_layer_argument(common, context, value, step_outputs):
 
 
 def _operations_common():
-    common = importlib.import_module("operations.common")
-    return reload(common)
+    return importlib.import_module("operations.common")
 
 
 def _exception_text(exc):
@@ -401,7 +406,6 @@ def _call_estimator(executor_path, context, arguments, step_outputs):
         return estimator(context, arguments, step_outputs)
     module_name, function_name = executor_path.rsplit(".", 1)
     module = importlib.import_module(module_name)
-    module = reload(module)
     estimator = getattr(module, "estimate_" + function_name, None)
     if estimator is None:
         return {"summary": u"该任务会直接修改原始数据。是否继续？"}

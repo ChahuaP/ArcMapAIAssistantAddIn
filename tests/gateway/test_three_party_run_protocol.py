@@ -1,5 +1,6 @@
 import sys
 import builtins
+from contextlib import nullcontext
 import importlib
 import tempfile
 import types
@@ -28,6 +29,15 @@ from gateway_py3.validators import context_hash
 from gateway_py3.run_store import RunStore
 
 
+TARGET = {"bridge_pid": 7, "bridge_port": 8766, "arcmap_pid": 70, "hwnd": 9}
+
+
+def _plan(path):
+    return runtime.execution_session.PublicationPlan.from_records([
+        {"path": path, "visible": True, "selection_oids": None},
+    ])
+
+
 class _Runner:
     def __init__(self, store):
         self.store = store
@@ -44,6 +54,101 @@ class ThreePartyRunProtocolTests(unittest.TestCase):
 
     def tearDown(self):
         self.temp.cleanup()
+
+    def test_runtime_persists_plan_then_publishes_then_delivers_authoritative_result(self):
+        events = []
+        plan = _plan(r"D:\out\final.shp")
+        heartbeat = SimpleNamespace(stop=lambda: events.append("stop"))
+        incomplete = {"publication_complete": False}
+        complete = {"publication_complete": True}
+        outbox = SimpleNamespace(
+            enqueue=lambda *args: events.append("persist") or incomplete,
+            publication_lease=lambda entry: nullcontext(True),
+            mark_publication_complete=lambda entry: events.append("publication_ack") or complete,
+            deliver=lambda entry, client: events.append("deliver") or True,
+        )
+
+        with patch.object(runtime, "EXECUTION_OUTBOX", outbox), \
+                patch.object(runtime.output_publisher, "publish", side_effect=lambda value: events.append("publish")):
+            acknowledged = runtime._persist_publish_and_deliver(
+                "00000000-0000-0000-0000-000000000001", "owner", "executed",
+                {"ok": True}, {}, heartbeat, plan,
+            )
+
+        self.assertTrue(acknowledged)
+        self.assertEqual(events, ["persist", "publish", "publication_ack", "deliver", "stop"])
+
+    def test_runtime_does_not_deliver_success_when_output_publication_fails(self):
+        events = []
+        plan = _plan(r"D:\out\final.shp")
+        heartbeat = SimpleNamespace(stop=lambda: events.append("stop"))
+        outbox = SimpleNamespace(
+            enqueue=lambda *args: events.append("persist") or {"publication_complete": False},
+            publication_lease=lambda entry: nullcontext(True),
+            mark_publication_complete=lambda entry: events.append("publication_ack"),
+            deliver=lambda entry, client: events.append("deliver"),
+        )
+
+        with patch.object(runtime, "EXECUTION_OUTBOX", outbox), \
+                patch.object(runtime.output_publisher, "publish", side_effect=RuntimeError("publish failed")), \
+                patch.object(runtime, "_log_event"):
+            with self.assertRaisesRegex(RuntimeError, "publish failed"):
+                runtime._persist_publish_and_deliver(
+                    "00000000-0000-0000-0000-000000000001", "owner", "executed",
+                    {"ok": True}, {}, heartbeat, plan,
+                )
+
+        self.assertEqual(events, ["persist", "stop"])
+
+    def test_runtime_replays_durable_publication_before_delivering_after_restart(self):
+        events = []
+        incomplete = {
+            "run_id": "00000000-0000-0000-0000-000000000001",
+            "owner": "owner",
+            "target": TARGET,
+            "publication_items": [{
+                "path": r"D:\out\final.shp", "visible": False, "selection_oids": [1, 3],
+            }],
+            "publication_complete": False,
+        }
+        complete = dict(incomplete, publication_complete=True)
+        outbox = SimpleNamespace(
+            pending=lambda: [incomplete],
+            publication_lease=lambda entry: nullcontext(True),
+            mark_publication_complete=lambda entry: events.append("publication_ack") or complete,
+            deliver=lambda entry, client: events.append("deliver") or True,
+        )
+
+        with patch.object(runtime, "EXECUTION_OUTBOX", outbox), \
+                patch.object(runtime.output_publisher, "publish", side_effect=lambda plan: events.append("publish")):
+            runtime._drain_execution_outbox(TARGET)
+
+        self.assertEqual(events, ["publish", "publication_ack", "deliver"])
+
+    def test_runtime_revalidates_completed_publication_and_ignores_other_arcmap_target(self):
+        events = []
+        complete = {
+            "run_id": "00000000-0000-0000-0000-000000000001",
+            "owner": "owner",
+            "target": TARGET,
+            "publication_items": [{
+                "path": r"D:\out\final.shp", "visible": True, "selection_oids": None,
+            }],
+            "publication_complete": True,
+        }
+        outbox = SimpleNamespace(
+            pending=lambda: [complete],
+            publication_lease=lambda entry: nullcontext(True),
+            mark_publication_complete=lambda entry: events.append("unexpected_ack"),
+            deliver=lambda entry, client: events.append("deliver") or True,
+        )
+        with patch.object(runtime, "EXECUTION_OUTBOX", outbox), \
+                patch.object(runtime.output_publisher, "publish", side_effect=lambda plan: events.append("publish")):
+            runtime._drain_execution_outbox(dict(TARGET, hwnd=999))
+            self.assertEqual(events, [])
+            runtime._drain_execution_outbox(TARGET)
+
+        self.assertEqual(events, ["publish", "deliver"])
 
     def test_bound_hash_is_the_runtime_execution_fingerprint(self):
         context = {
@@ -72,7 +177,7 @@ class ThreePartyRunProtocolTests(unittest.TestCase):
         row = self.store.get(run["id"])
 
         self.assertEqual(row["context_hash"], context_hash(context))
-        self.assertTrue(workflow_executor.execute(row, context)["ok"])
+        self.assertTrue(workflow_executor.execute(row, context).result["ok"])
 
     def test_runtime_claim_rejects_a_different_arcmap_target(self):
         context = _context("before.mxd")

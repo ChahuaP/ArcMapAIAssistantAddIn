@@ -97,7 +97,7 @@ def _workflow(operation):
 
 def _planned(store, command, mode):
     row = store.create_run(command, mode)
-    return store.update_run(row["id"], "planned", workflow=_workflow("view.refresh_view"))
+    return store.update_run(row["id"], "planned", workflow=_workflow("context.list_layers"))
 
 
 if __name__ == "__main__":

@@ -9,9 +9,9 @@
   "steps": [
     {
       "id": "step_1",
-      "operation": "view.refresh_view",
+      "operation": "context.list_layers",
       "arguments": {},
-      "reason": "刷新当前地图视图。"
+      "reason": "列出当前地图中的图层。"
     }
   ]
 }
@@ -30,9 +30,11 @@
 - `operation` must be a registered operation id from `/api/capabilities`.
 - `arguments` must match the operation schema exactly. Unknown arguments are rejected.
 - Current map layers must use `layer_ref` or an exact current-map layer name.
-- Every later reference to an earlier generated layer must use `from_step:<step_id>`. The referenced step must be earlier and must have produced a feature-class or raster output with `add_to_map=true`.
+- A layer introduced by an earlier `layer.add_layer` step must be referenced with `from_step:<step_id>`.
+- Every later reference to an earlier generated layer must use `from_step:<step_id>`. The referenced step must be earlier and must have produced a run-scoped feature-class or raster output with `add_to_map=true`; it does not need to be visible in the map during computation.
 - File outputs are never layers. CSV, PNG, PDF and JSON outputs must never be referenced with `from_step`.
-- Writes-data feature-class and raster operations with `add_to_map=true` add their output layer to ArcMap automatically; do not add a separate `layer.add_layer` for generated outputs.
+- After authoritative execution is recorded, writes-data feature-class and raster operations with `add_to_map=true` publish their outputs to ArcMap automatically so later business rounds can reuse them; do not add a separate `layer.add_layer` for generated outputs.
+- Run-scoped outputs remain detached during computation. `layer.remove_layer` and `layer.move_layer` only accept live map layers; `layer.clear_layers` must appear before every run-scoped output.
 
 ## Structured where
 

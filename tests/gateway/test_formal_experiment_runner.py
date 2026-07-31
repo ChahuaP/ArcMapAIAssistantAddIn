@@ -83,9 +83,31 @@ class FormalExperimentRunnerTests(unittest.TestCase):
 
     def test_wait_recognizes_every_terminal_run_status(self):
         client = runner.GatewayClient("http://127.0.0.1:8765")
-        for status in ("clarify", "reject", "indeterminate"):
+        for status in ("clarify", "reject"):
             client.get = lambda _path, value=status: {"run": {"status": value}}
             self.assertEqual(client.wait("run-id", 1)["status"], status)
+
+    def test_wait_stops_immediately_on_unresolved_arcmap_execution(self):
+        client = runner.GatewayClient("http://127.0.0.1:8765")
+        for status in ("recovery_required", "indeterminate"):
+            client.get = lambda _path, value=status: {"run": {"status": value}}
+            with self.assertRaisesRegex(runner.InfrastructureStop, "authoritative execution is unresolved") as raised:
+                client.wait("run-id", 1)
+            self.assertEqual(raised.exception.run_id, "run-id")
+            self.assertEqual(raised.exception.status, status)
+
+    def test_infrastructure_stop_is_written_outside_method_statistics(self):
+        with tempfile.TemporaryDirectory() as temp:
+            output = pathlib.Path(temp)
+            runner.write_infrastructure_stop(
+                output,
+                runner.InfrastructureStop("run-id", "recovery_required"),
+            )
+            payload = json.loads((output / "infrastructure_stop.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(payload["run_id"], "run-id")
+        self.assertEqual(payload["status"], "recovery_required")
+        self.assertTrue(payload["excluded_from_method_statistics"])
 
     def test_task_command_makes_outputs_and_g0_boundary_explicit(self):
         round_spec = self.cases["cases"][2]["rounds"][0]
@@ -267,6 +289,7 @@ class FormalExperimentRunnerTests(unittest.TestCase):
         args = Namespace(
             modes=["multi_agent"],
             repetitions=2,
+            timeout=600,
             gateway="http://gateway",
         )
         policy = {
@@ -298,6 +321,7 @@ class FormalExperimentRunnerTests(unittest.TestCase):
         self.assertEqual(manifest["catalog_hash"], "catalog")
         self.assertEqual(manifest["protocol_hash"], "protocol")
         self.assertEqual(manifest["gateway_app_version"], "1.0.2")
+        self.assertEqual(manifest["timeout_seconds"], 600)
         self.assertEqual(manifest["primary"], {"provider": "p", "model": "pm"})
         self.assertEqual(
             manifest["planning_policy"]["workflow_protocol"]["version"],
