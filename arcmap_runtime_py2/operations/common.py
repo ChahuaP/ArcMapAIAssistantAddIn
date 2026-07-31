@@ -281,14 +281,21 @@ def _normalize_extension(extension):
 
 
 def export_table_to_csv(layer, path, selected_only):
-    fields = [f.name for f in arcpy.ListFields(layer) if f.type not in ("Geometry", "Raster", "Blob")]
-    with path_utils.open_binary(path, "wb") as f:
-        writer = csv.writer(f)
-        writer.writerow([field.encode("utf-8") for field in fields])
-        with read_layer(layer, selected_only) as cursor_layer:
-            with arcpy.da.SearchCursor(cursor_layer, fields) as cursor:
-                for row in cursor:
-                    writer.writerow([_csv_value(value) for value in row])
+    temporary = path_utils.temporary_sibling(path)
+    try:
+        with path_utils.open_binary(temporary, "wb") as f:
+            writer = csv.writer(f)
+            with read_layer(layer, selected_only) as cursor_layer:
+                fields = [f.name for f in arcpy.ListFields(cursor_layer) if f.type not in ("Geometry", "Raster", "Blob")]
+                writer.writerow([field.encode("utf-8") for field in fields])
+                with arcpy.da.SearchCursor(cursor_layer, fields) as cursor:
+                    for row in cursor:
+                        writer.writerow([_csv_value(value) for value in row])
+        path_utils.publish_new_file(temporary, path)
+    except Exception:
+        if path_utils.exists(temporary):
+            path_utils.remove(temporary)
+        raise
 
 
 def read_layer(layer, selected_only=False, where_clause=None):

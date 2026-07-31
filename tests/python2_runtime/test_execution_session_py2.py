@@ -205,6 +205,8 @@ class ExecutionSessionPython27Tests(unittest.TestCase):
         output_folder = tempfile.mkdtemp(prefix="arcmap_csv_repro_")
         temp_layers = {}
         make_sources = []
+        field_sources = []
+        cursor_sources = []
         detached_layer = None
         original_describe = FAKE_ARCPY.Describe
         original_list_fields = getattr(FAKE_ARCPY, "ListFields", None)
@@ -215,6 +217,7 @@ class ExecutionSessionPython27Tests(unittest.TestCase):
 
         class _Cursor(object):
             def __init__(self, source, fields):
+                cursor_sources.append(source)
                 self.rows = [(u"实验学校",)]
 
             def __enter__(self):
@@ -237,6 +240,12 @@ class ExecutionSessionPython27Tests(unittest.TestCase):
             temp_layers[name] = source
             make_sources.append(source)
 
+        def list_fields(layer):
+            field_sources.append(layer)
+            if not (isinstance(layer, basestring) and layer in temp_layers):
+                raise IOError(u"“final_sites”不存在")
+            return [type("Field", (object,), {"name": u"学校名称", "type": "String"})()]
+
         def select(layer, selection_type, where_clause=None):
             source_layer = temp_layers.get(layer, layer)
             if isinstance(source_layer, basestring):
@@ -245,8 +254,7 @@ class ExecutionSessionPython27Tests(unittest.TestCase):
 
         try:
             FAKE_ARCPY.Describe = describe
-            FAKE_ARCPY.ListFields = lambda layer: [
-                type("Field", (object,), {"name": u"学校名称", "type": "String"})()]
+            FAKE_ARCPY.ListFields = list_fields
             FAKE_ARCPY.MakeFeatureLayer_management = make_feature_layer
             FAKE_ARCPY.SelectLayerByAttribute_management = select
             FAKE_ARCPY.Delete_management = lambda layer: temp_layers.pop(layer, None)
@@ -265,6 +273,71 @@ class ExecutionSessionPython27Tests(unittest.TestCase):
             self.assertIs(make_sources[0], live_layer)
             self.assertEqual(make_sources[1], source)
             self.assertTrue(isinstance(make_sources[1], unicode))
+            self.assertEqual(field_sources, cursor_sources)
+            self.assertEqual(len(field_sources), 2)
+        finally:
+            FAKE_ARCPY.Describe = original_describe
+            if original_list_fields is None:
+                delattr(FAKE_ARCPY, "ListFields")
+            else:
+                FAKE_ARCPY.ListFields = original_list_fields
+            if original_make_layer is None:
+                delattr(FAKE_ARCPY, "MakeFeatureLayer_management")
+            else:
+                FAKE_ARCPY.MakeFeatureLayer_management = original_make_layer
+            FAKE_ARCPY.SelectLayerByAttribute_management = original_select
+            if original_delete is None:
+                delattr(FAKE_ARCPY, "Delete_management")
+            else:
+                FAKE_ARCPY.Delete_management = original_delete
+            if original_da is None:
+                delattr(FAKE_ARCPY, "da")
+            else:
+                FAKE_ARCPY.da = original_da
+            shutil.rmtree(output_folder)
+
+    def test_csv_cursor_failure_leaves_no_final_or_temporary_file(self):
+        output_folder = tempfile.mkdtemp(prefix="arcmap_csv_atomic_")
+        target = os.path.join(output_folder, "final.csv")
+        temporary_layers = {}
+        original_describe = FAKE_ARCPY.Describe
+        original_list_fields = getattr(FAKE_ARCPY, "ListFields", None)
+        original_make_layer = getattr(FAKE_ARCPY, "MakeFeatureLayer_management", None)
+        original_select = FAKE_ARCPY.SelectLayerByAttribute_management
+        original_delete = getattr(FAKE_ARCPY, "Delete_management", None)
+        original_da = getattr(FAKE_ARCPY, "da", None)
+
+        class _FailingCursor(object):
+            def __init__(self, source, fields):
+                self.rows = iter([(u"first",)])
+
+            def __enter__(self):
+                return self
+
+            def __iter__(self):
+                return self
+
+            def next(self):
+                try:
+                    return self.rows.next()
+                except StopIteration:
+                    raise RuntimeError("cursor failed")
+
+            __next__ = next
+
+            def __exit__(self, *args):
+                return False
+
+        try:
+            FAKE_ARCPY.MakeFeatureLayer_management = lambda source, name, where=None: temporary_layers.update({name: source})
+            FAKE_ARCPY.Describe = lambda value: type("Description", (object,), {"FIDSet": "", "OIDFieldName": "OBJECTID", "catalogPath": u"D:\\data.shp"})()
+            FAKE_ARCPY.ListFields = lambda value: [type("Field", (object,), {"name": u"名称", "type": "String"})()]
+            FAKE_ARCPY.SelectLayerByAttribute_management = lambda *args: None
+            FAKE_ARCPY.Delete_management = lambda value: temporary_layers.pop(value, None)
+            FAKE_ARCPY.da = type("DataAccess", (object,), {"SearchCursor": _FailingCursor})()
+            self.assertRaises(RuntimeError, runtime_common.export_table_to_csv, _Layer(u"D:\\data.shp"), target, False)
+            self.assertFalse(os.path.exists(target))
+            self.assertEqual(os.listdir(output_folder), [])
         finally:
             FAKE_ARCPY.Describe = original_describe
             if original_list_fields is None:

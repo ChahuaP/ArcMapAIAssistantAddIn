@@ -3,6 +3,7 @@ from __future__ import absolute_import
 
 import os
 import sys
+import tempfile
 
 
 try:
@@ -131,6 +132,21 @@ def open_binary(path, mode="rb"):
     if "b" not in mode:
         mode += "b"
     return open(to_unicode_path(path), mode)
+
+
+def temporary_sibling(path):
+    target = to_unicode_path(path)
+    handle, temporary = tempfile.mkstemp(prefix=basename(target) + u".", suffix=u".tmp", dir=dirname(target))
+    os.close(handle)
+    return to_unicode_path(temporary)
+
+
+def publish_new_file(temporary_path, target_path):
+    temporary = to_unicode_path(temporary_path)
+    target = to_unicode_path(target_path)
+    if exists(target):
+        raise IOError(u"目标文件已存在：%s" % target)
+    os.rename(temporary, target)
 
 
 def _path_decoding_order():
