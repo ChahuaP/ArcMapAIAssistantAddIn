@@ -3,8 +3,12 @@ from __future__ import absolute_import
 
 import arcpy
 
-from operations import common
-from operations import condition_utils
+try:
+    from operations import common
+    from operations import condition_utils
+except ImportError:
+    from . import common
+    from . import condition_utils
 
 
 def select_by_attribute(context, arguments, step_outputs):
@@ -26,7 +30,7 @@ def select_by_location(context, arguments, step_outputs):
 
 def clear_selection(context, arguments, step_outputs):
     layer = common.find_layer(context, arguments["layer"], step_outputs)
-    arcpy.SelectLayerByAttribute_management(layer, "CLEAR_SELECTION")
+    common.clear_layer_selection(layer)
     return {"layer": layer.name, "cleared": True}
 
 

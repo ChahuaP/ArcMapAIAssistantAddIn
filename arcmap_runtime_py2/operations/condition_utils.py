@@ -3,8 +3,12 @@ from __future__ import absolute_import
 
 import arcpy
 
-import condition_protocol
-from operations import common
+try:
+    import condition_protocol
+    from operations import common
+except ImportError:
+    from .. import condition_protocol
+    from . import common
 
 
 try:

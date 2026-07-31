@@ -10,9 +10,11 @@ import arcpy
 try:
     import path_utils
     import execution_session
+    import arcmap_desktop_selection
 except ImportError:
     from .. import path_utils
     from .. import execution_session
+    from .. import arcmap_desktop_selection
 
 
 try:
@@ -322,19 +324,15 @@ class _ReadLayer(object):
 
 def require_selection(layer):
     try:
-        desc = arcpy.Describe(layer)
-        fid_set = getattr(desc, "FIDSet", None)
+        selected = arcmap_desktop_selection.has_selection(layer)
     except (ARCPY_EXECUTE_ERROR, RuntimeError, AttributeError, TypeError) as exc:
         raise OperationError(u"无法读取当前图层选择集：%s" % _text(exc))
-    if fid_set is not None and not _text(fid_set).strip():
+    if not selected:
         raise OperationError(u"当前图层没有已选要素。")
 
 
 def clear_layer_selection(layer):
-    try:
-        arcpy.SelectLayerByAttribute_management(layer, "CLEAR_SELECTION")
-    except (ARCPY_EXECUTE_ERROR, RuntimeError):
-        pass
+    arcmap_desktop_selection.restore_oids(layer, [])
 
 
 def delete_layer(layer):

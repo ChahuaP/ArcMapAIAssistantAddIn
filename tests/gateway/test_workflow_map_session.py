@@ -1,6 +1,7 @@
 import sys
 import types
 import unittest
+import re
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -11,7 +12,24 @@ from arcmap_runtime_py2 import workflow_executor
 from arcmap_runtime_py2 import execution_session
 from arcmap_runtime_py2 import map_exporter
 from arcmap_runtime_py2 import output_publisher
+from arcmap_runtime_py2 import arcmap_desktop_selection
+from arcmap_runtime_py2 import context_reader
 from arcmap_runtime_py2.operations import common
+from arcmap_runtime_py2.operations import selection_ops
+
+
+class _Layer:
+    def __init__(self, path):
+        self.name = path
+        self.longName = path
+        self.dataSource = path
+        self.visible = True
+        self.isFeatureLayer = True
+        self.selection = set()
+        self.catalogPath = path
+
+    def supports(self, capability):
+        return capability == "DATASOURCE"
 
 
 class _Mapping:
@@ -29,19 +47,10 @@ class _Mapping:
         return list(self.layers)
 
     def Layer(self, path):
-        return SimpleNamespace(
-            name=path,
-            longName=path,
-            dataSource=path,
-            supports=lambda capability: capability == "DATASOURCE",
-            visible=True,
-            isFeatureLayer=True,
-            getSelectionSet=lambda: set(),
-            setSelectionSet=lambda method, values: None,
-        )
+        return _Layer(path)
 
     def AddLayer(self, data_frame, layer, position):
-        self.layers.append(layer)
+        self.layers.append(_Layer(layer.dataSource))
         self.added.append((data_frame, layer.dataSource, position))
 
 
@@ -52,21 +61,59 @@ class ExecutionSessionTests(unittest.TestCase):
             ExecuteError=RuntimeError,
             env=SimpleNamespace(addOutputsToMap=True),
             mapping=self.mapping,
+            Describe=self._describe,
+            AddFieldDelimiters=self._field_delimiters,
+            SelectLayerByAttribute_management=self._select,
+            ListFields=lambda layer: [],
         )
+        self.delimiter_calls = []
         self.arcpy_patch = patch.object(common, "arcpy", self.arcpy)
         self.arcpy_patch.start()
         self.session_arcpy_patch = patch.object(execution_session, "arcpy", self.arcpy)
         self.session_arcpy_patch.start()
         self.publisher_arcpy_patch = patch.object(output_publisher, "arcpy", self.arcpy)
         self.publisher_arcpy_patch.start()
+        self.selection_arcpy_patch = patch.object(arcmap_desktop_selection, "arcpy", self.arcpy)
+        self.selection_arcpy_patch.start()
+        self.context_arcpy_patch = patch.object(context_reader, "arcpy", self.arcpy)
+        self.context_arcpy_patch.start()
         self.exporter_arcpy_patch = patch.object(map_exporter, "arcpy", self.arcpy)
         self.exporter_arcpy_patch.start()
 
     def tearDown(self):
         self.exporter_arcpy_patch.stop()
         self.publisher_arcpy_patch.stop()
+        self.context_arcpy_patch.stop()
+        self.selection_arcpy_patch.stop()
         self.session_arcpy_patch.stop()
         self.arcpy_patch.stop()
+
+    @staticmethod
+    def _describe(layer):
+        return SimpleNamespace(
+            FIDSet="; ".join(str(oid) for oid in sorted(layer.selection)),
+            OIDFieldName="OBJECTID",
+            catalogPath=layer.catalogPath,
+        )
+
+    def _field_delimiters(self, data_source, field):
+        if not isinstance(data_source, str) or not data_source:
+            raise RuntimeError("data source must be a non-empty string")
+        self.delimiter_calls.append((data_source, field))
+        return field
+
+    @staticmethod
+    def _select(layer, selection_type, where_clause=None):
+        if selection_type == "CLEAR_SELECTION":
+            layer.selection = set()
+            return
+        values = set(int(value) for value in re.search(r"\((.*)\)", where_clause).group(1).split(","))
+        if selection_type == "NEW_SELECTION":
+            layer.selection = values
+        elif selection_type == "ADD_TO_SELECTION":
+            layer.selection.update(values)
+        else:
+            raise RuntimeError("unexpected selection type: %s" % selection_type)
 
     def test_outputs_are_resolved_without_map_publication_and_published_after_execution(self):
         output = r"D:\out\result.shp"
@@ -81,7 +128,7 @@ class ExecutionSessionTests(unittest.TestCase):
         self.assertIs(first, second)
         self.assertEqual(self.mapping.added, [])
         output_publisher.publish(session.publication_plan())
-        self.assertIs(self.mapping.layers[0], first)
+        self.assertIsNot(self.mapping.layers[0], first)
         self.assertEqual(self.mapping.added, [("df", output, "TOP")])
 
     def test_failed_workflow_does_not_publish_partial_outputs(self):
@@ -116,9 +163,122 @@ class ExecutionSessionTests(unittest.TestCase):
         with execution_session.ExecutionSession() as session:
             session.register_output("s1", r"D:\out\result.shp")
             layer = session.layer_for_output("s1", r"D:\out\result.shp")
-            layer.getSelectionSet = lambda: (_ for _ in ()).throw(RuntimeError("selection unavailable"))
+            self.arcpy.Describe = lambda value: (_ for _ in ()).throw(RuntimeError("selection unavailable"))
             with self.assertRaisesRegex(RuntimeError, "selection unavailable"):
                 session.publication_plan()
+
+    def test_empty_selection_is_cleared_and_verified(self):
+        layer = self.mapping.Layer(r"D:\out\empty.shp")
+        layer.selection = set([7])
+        output_publisher._apply_state(
+            layer, execution_session.PublicationItem(layer.dataSource, visible=True, selection_oids=[]))
+        self.assertEqual(layer.selection, set())
+
+    def test_spaced_fid_set_is_captured_strictly(self):
+        layer = self.mapping.Layer(r"D:\out\spaced.shp")
+        layer.selection = set([1, 2, 3])
+        item = execution_session.PublicationItem.capture(layer.dataSource, layer)
+        self.assertEqual(item.selection_oids, [1, 2, 3])
+
+    def test_fid_set_rejects_empty_noncanonical_and_duplicate_tokens(self):
+        for fid_set in ("1; ;3", "1;01", "1;-2", "1;1", "1;invalid"):
+            with self.subTest(fid_set=fid_set):
+                with self.assertRaises(RuntimeError):
+                    arcmap_desktop_selection._parse_fid_set(fid_set)
+
+    def test_restore_passes_catalog_path_string_to_add_field_delimiters(self):
+        layer = self.mapping.Layer(r"D:\out\source.shp")
+        output_publisher._apply_state(
+            layer, execution_session.PublicationItem(layer.dataSource, selection_oids=[1]))
+        self.assertEqual(self.delimiter_calls, [(r"D:\out\source.shp", "OBJECTID")])
+
+    def test_selection_restore_is_batched_and_exact(self):
+        layer = self.mapping.Layer(r"D:\out\many.shp")
+        expected = list(range(arcmap_desktop_selection.OID_BATCH_SIZE + 1))
+        calls = []
+        original_select = self.arcpy.SelectLayerByAttribute_management
+
+        def recording_select(*args):
+            calls.append(args[1])
+            return original_select(*args)
+
+        self.arcpy.SelectLayerByAttribute_management = recording_select
+        output_publisher._apply_state(
+            layer, execution_session.PublicationItem(layer.dataSource, selection_oids=expected))
+        self.assertEqual(calls, ["NEW_SELECTION", "ADD_TO_SELECTION"])
+        self.assertEqual(layer.selection, set(expected))
+
+    def test_selection_restore_verification_failure_aborts(self):
+        layer = self.mapping.Layer(r"D:\out\incorrect.shp")
+        self.arcpy.SelectLayerByAttribute_management = lambda *args: None
+        with self.assertRaisesRegex(RuntimeError, "verification failed"):
+            output_publisher._apply_state(
+                layer, execution_session.PublicationItem(layer.dataSource, selection_oids=[1]))
+
+    def test_context_selection_read_failure_is_not_downgraded_to_warning(self):
+        layer = self.mapping.Layer(r"D:\out\context.shp")
+        self.arcpy.Describe = lambda value: (_ for _ in ()).throw(RuntimeError("FIDSet unavailable"))
+        with self.assertRaisesRegex(RuntimeError, "FIDSet unavailable"):
+            context_reader._layer_info(layer, 0)
+
+    def test_context_uses_one_description_for_geometry_and_selection(self):
+        layer = self.mapping.Layer(r"D:\out\one_describe.shp")
+        calls = []
+
+        def describe(value):
+            calls.append(value)
+            return SimpleNamespace(
+                FIDSet="1; 2",
+                OIDFieldName="OBJECTID",
+                catalogPath=layer.catalogPath,
+                shapeType="Polygon",
+            )
+
+        self.arcpy.Describe = describe
+        info = context_reader._layer_info(layer, 0)
+        self.assertEqual(calls, [layer])
+        self.assertEqual(info["geometry_type"], "Polygon")
+        self.assertEqual(info["selected_count"], 2)
+
+    def test_clear_selection_failure_is_not_swallowed(self):
+        layer = self.mapping.Layer(r"D:\out\clear.shp")
+        self.arcpy.SelectLayerByAttribute_management = lambda *args: (_ for _ in ()).throw(RuntimeError("clear failed"))
+        with self.assertRaisesRegex(RuntimeError, "clear failed"):
+            common.clear_layer_selection(layer)
+
+    def test_clear_selection_operation_returns_success_only_after_verified_clear(self):
+        layer = self.mapping.Layer(r"D:\out\operation_clear.shp")
+        layer.selection = set([9])
+        with patch.object(selection_ops.common, "find_layer", return_value=layer), \
+                patch.object(selection_ops.common, "clear_layer_selection", side_effect=common.clear_layer_selection):
+            result = selection_ops.clear_selection({}, {"layer": "roads"}, {})
+        self.assertEqual(result, {"layer": layer.name, "cleared": True})
+        self.assertEqual(layer.selection, set())
+
+    def test_clear_selection_operation_does_not_claim_success_after_failure(self):
+        layer = self.mapping.Layer(r"D:\out\operation_clear_failure.shp")
+        with patch.object(selection_ops.common, "find_layer", return_value=layer), \
+                patch.object(selection_ops.common, "clear_layer_selection", side_effect=RuntimeError("clear failed")):
+            with self.assertRaisesRegex(RuntimeError, "clear failed"):
+                selection_ops.clear_selection({}, {"layer": "roads"}, {})
+
+    def test_new_layer_state_is_applied_to_added_live_layer(self):
+        detached = self.mapping.Layer(r"D:\out\live.shp")
+        detached.visible = False
+        detached.selection = set([2])
+        plan = execution_session.PublicationPlan([
+            execution_session.PublicationItem.capture(detached.dataSource, detached)])
+        output_publisher.publish(plan)
+        self.assertEqual(self.mapping.layers[0].selection, set([2]))
+        self.assertFalse(self.mapping.layers[0].visible)
+
+    def test_publication_replay_is_idempotent(self):
+        item = execution_session.PublicationItem(r"D:\out\replay.shp", visible=False, selection_oids=[2])
+        plan = execution_session.PublicationPlan([item])
+        self.assertEqual(output_publisher.publish(plan)["published"], 1)
+        self.assertEqual(output_publisher.publish(plan), {"published": 0, "already_visible": 1})
+        self.assertEqual(len(self.mapping.layers), 1)
+        self.assertEqual(self.mapping.layers[0].selection, set([2]))
 
     def test_map_export_uses_isolated_mxd_with_same_run_outputs(self):
         events = []

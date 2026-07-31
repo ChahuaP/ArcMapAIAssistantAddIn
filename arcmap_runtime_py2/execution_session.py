@@ -5,8 +5,10 @@ import arcpy
 
 try:
     import path_utils
+    import arcmap_desktop_selection
 except ImportError:
     from . import path_utils
+    from . import arcmap_desktop_selection
 
 
 try:
@@ -89,10 +91,7 @@ class PublicationItem(object):
         visible = bool(getattr(layer, "visible", True))
         selection_oids = None
         if bool(getattr(layer, "isFeatureLayer", False)):
-            getter = getattr(layer, "getSelectionSet", None)
-            if not callable(getter):
-                raise RuntimeError("Feature layer selection state cannot be captured: %s" % path)
-            selection_oids = sorted(int(value) for value in getter())
+            selection_oids = arcmap_desktop_selection.capture_oids(layer)
         return cls(path, layer, visible, selection_oids)
 
     def record(self):

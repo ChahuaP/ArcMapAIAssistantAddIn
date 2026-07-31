@@ -13,6 +13,11 @@ try:
 except ImportError:
     from . import path_utils
 
+try:
+    import arcmap_desktop_selection
+except ImportError:
+    from . import arcmap_desktop_selection
+
 
 try:
     unicode
@@ -109,14 +114,12 @@ def _layer_info(layer, index):
         "geometry_type": None
     }
     if info["isFeatureLayer"]:
-        try:
-            desc = arcpy.Describe(layer)
-            info["geometry_type"] = getattr(desc, "shapeType", None)
-            fid_set = getattr(desc, "FIDSet", "") or ""
-            info["selected_count"] = len([item for item in fid_set.split(";") if item])
-            info["selection_hash"] = context_fingerprint.selection_hash(fid_set)
-        except (ARCPY_EXECUTE_ERROR, RuntimeError, AttributeError, TypeError) as exc:
-            _layer_warning(info, u"describe_failed: %s" % _sample_text(exc))
+        desc = arcpy.Describe(layer)
+        info["geometry_type"] = getattr(desc, "shapeType", None)
+        selection_oids = arcmap_desktop_selection.capture_oids(layer, desc)
+        info["selected_count"] = len(selection_oids)
+        info["selection_hash"] = context_fingerprint.selection_hash(
+            u";".join(unicode(oid) for oid in selection_oids))
         try:
             fields = arcpy.ListFields(layer)
             for field in fields:
