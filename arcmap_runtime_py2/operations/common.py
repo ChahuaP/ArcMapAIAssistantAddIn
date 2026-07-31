@@ -312,7 +312,10 @@ class _ReadLayer(object):
             return self.temp_layer
 
         self.temp_layer = "arcmap_ai_read_%s" % uuid.uuid4().hex
-        arcpy.MakeFeatureLayer_management(self.layer, self.temp_layer, self.where_clause)
+        session = execution_session.current()
+        detached_path = session.registered_path_for_detached_layer(self.layer) if session is not None else None
+        source = detached_path if detached_path is not None else self.layer
+        arcpy.MakeFeatureLayer_management(source, self.temp_layer, self.where_clause)
         clear_layer_selection(self.temp_layer)
         return self.temp_layer
 

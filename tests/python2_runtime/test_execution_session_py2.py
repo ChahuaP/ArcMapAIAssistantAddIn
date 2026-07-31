@@ -3,7 +3,9 @@ from __future__ import absolute_import
 
 import os
 import re
+import shutil
 import sys
+import tempfile
 import types
 import unittest
 
@@ -90,8 +92,19 @@ PY2 = sys.version_info[0] == 2
 if PY2:
     sys.modules["arcpy"] = FAKE_ARCPY
     from arcmap_runtime_py2 import execution_session
+    from arcmap_runtime_py2 import exception_text
     from arcmap_runtime_py2 import output_publisher
+    from arcmap_runtime_py2 import workflow_executor
     from arcmap_runtime_py2 import arcmap_desktop_selection
+    from arcmap_runtime_py2.operations import common as runtime_common
+
+    _OPERATIONS = types.ModuleType("operations")
+    _OPERATIONS.common = runtime_common
+    _OPERATIONS.condition_utils = types.ModuleType("condition_utils")
+    sys.modules["operations"] = _OPERATIONS
+    sys.modules["operations.common"] = runtime_common
+    sys.modules["operations.condition_utils"] = _OPERATIONS.condition_utils
+    from arcmap_runtime_py2.operations import export_ops
 
 
 @unittest.skipUnless(PY2, "ArcMap Python 2.7 runtime test")
@@ -160,6 +173,118 @@ class ExecutionSessionPython27Tests(unittest.TestCase):
         self.assertEqual(output_publisher.publish(plan)["published"], 1)
         self.assertEqual(output_publisher.publish(plan), {"published": 0, "already_visible": 1})
         self.assertEqual(len(FAKE_ARCPY.mapping.layers), 1)
+
+    def test_registered_path_query_uses_only_runtime_layer_identity(self):
+        source = u"D:\\成果\\final_sites.shp"
+        with execution_session.ExecutionSession() as session:
+            session.register_output("final_sites", source)
+            detached = session.layer_for_output("final_sites", source)
+            self.assertEqual(session.registered_path_for_detached_layer(detached), source)
+            self.assertIsNone(session.registered_path_for_detached_layer(_Layer(source)))
+
+    def test_exception_text_preserves_unicode_utf8_bytes_and_selection_cause(self):
+        class _Unprintable(object):
+            def __unicode__(self):
+                raise UnicodeEncodeError("ascii", u"学校", 0, 1, "boom")
+
+            def __str__(self):
+                raise UnicodeEncodeError("ascii", u"学校", 0, 1, "boom")
+
+        rendered = exception_text.exception_text(
+            RuntimeError(u"选择集失败", u"学校".encode("utf-8"), _Unprintable()))
+        self.assertIn(u"RuntimeError:", rendered)
+        self.assertIn(u"选择集失败", rendered)
+        self.assertIn(u"学校", rendered)
+        self.assertIn(u"<unprintable _Unprintable>", rendered)
+        cause = RuntimeError(u"ArcMap Desktop feature layer does not expose FIDSet.")
+        wrapped = workflow_executor.WorkflowExecutionError(
+            u"步骤 export_final_sites_csv 执行失败：%s" % exception_text.exception_text(cause))
+        self.assertIn(u"FIDSet", workflow_executor._exception_text(wrapped))
+
+    def test_from_step_detached_layer_exports_csv_from_registered_unicode_path(self):
+        output_folder = tempfile.mkdtemp(prefix="arcmap_csv_repro_")
+        temp_layers = {}
+        make_sources = []
+        detached_layer = None
+        original_describe = FAKE_ARCPY.Describe
+        original_list_fields = getattr(FAKE_ARCPY, "ListFields", None)
+        original_make_layer = getattr(FAKE_ARCPY, "MakeFeatureLayer_management", None)
+        original_select = FAKE_ARCPY.SelectLayerByAttribute_management
+        original_delete = getattr(FAKE_ARCPY, "Delete_management", None)
+        original_da = getattr(FAKE_ARCPY, "da", None)
+
+        class _Cursor(object):
+            def __init__(self, source, fields):
+                self.rows = [(u"实验学校",)]
+
+            def __enter__(self):
+                return iter(self.rows)
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        def describe(value):
+            if isinstance(value, basestring) and value in temp_layers:
+                source = temp_layers[value]
+                return type("TemporaryDescription", (object,), {
+                    "FIDSet": None if source is detached_layer else "",
+                    "OIDFieldName": "OBJECTID",
+                    "catalogPath": source if isinstance(source, unicode) else source.dataSource,
+                })()
+            return original_describe(value)
+
+        def make_feature_layer(source, name, where_clause=None):
+            temp_layers[name] = source
+            make_sources.append(source)
+
+        def select(layer, selection_type, where_clause=None):
+            source_layer = temp_layers.get(layer, layer)
+            if isinstance(source_layer, basestring):
+                return None
+            return original_select(source_layer, selection_type, where_clause)
+
+        try:
+            FAKE_ARCPY.Describe = describe
+            FAKE_ARCPY.ListFields = lambda layer: [
+                type("Field", (object,), {"name": u"学校名称", "type": "String"})()]
+            FAKE_ARCPY.MakeFeatureLayer_management = make_feature_layer
+            FAKE_ARCPY.SelectLayerByAttribute_management = select
+            FAKE_ARCPY.Delete_management = lambda layer: temp_layers.pop(layer, None)
+            FAKE_ARCPY.da = type("DataAccess", (object,), {"SearchCursor": _Cursor})()
+            source = u"D:\\成果\\final_sites.shp"
+            live_layer = _Layer(source)
+            runtime_common.export_table_to_csv(live_layer, os.path.join(output_folder, "live.csv"), False)
+            with execution_session.ExecutionSession() as session:
+                session.register_output("export_final_sites", source)
+                detached_layer = session.layer_for_output("export_final_sites", source)
+                result = export_ops.export_table_csv(
+                    {},
+                    {"layer": "from_step:export_final_sites", "output_name": "final_sites", "output_folder": output_folder},
+                    {"export_final_sites": {"output": source}})
+            self.assertTrue(os.path.exists(result["output"]))
+            self.assertIs(make_sources[0], live_layer)
+            self.assertEqual(make_sources[1], source)
+            self.assertTrue(isinstance(make_sources[1], unicode))
+        finally:
+            FAKE_ARCPY.Describe = original_describe
+            if original_list_fields is None:
+                delattr(FAKE_ARCPY, "ListFields")
+            else:
+                FAKE_ARCPY.ListFields = original_list_fields
+            if original_make_layer is None:
+                delattr(FAKE_ARCPY, "MakeFeatureLayer_management")
+            else:
+                FAKE_ARCPY.MakeFeatureLayer_management = original_make_layer
+            FAKE_ARCPY.SelectLayerByAttribute_management = original_select
+            if original_delete is None:
+                delattr(FAKE_ARCPY, "Delete_management")
+            else:
+                FAKE_ARCPY.Delete_management = original_delete
+            if original_da is None:
+                delattr(FAKE_ARCPY, "da")
+            else:
+                FAKE_ARCPY.da = original_da
+            shutil.rmtree(output_folder)
 
 
 if __name__ == "__main__":

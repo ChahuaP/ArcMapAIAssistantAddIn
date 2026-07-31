@@ -70,6 +70,13 @@ class ExecutionSession(object):
             self._runtime_layers[step_id] = layer
         return layer
 
+    def registered_path_for_detached_layer(self, layer):
+        """Return the registered path only when *layer* is this session's object."""
+        for step_id, runtime_layer in self._runtime_layers.items():
+            if layer is runtime_layer:
+                return self._output_by_step[step_id]
+        return None
+
     def publication_plan(self):
         items = []
         for step_id, path in self._outputs:

@@ -15,6 +15,7 @@ try:
     import context_reader
     import execution_session
     import execution_outbox
+    import exception_text
     import gateway_client
     import map_exporter
     import output_publisher
@@ -24,6 +25,7 @@ except ImportError:
     from . import context_reader
     from . import execution_session
     from . import execution_outbox
+    from . import exception_text
     from . import gateway_client
     from . import map_exporter
     from . import output_publisher
@@ -34,6 +36,7 @@ except ImportError:
 reload(context_reader)
 reload(execution_session)
 reload(execution_outbox)
+reload(exception_text)
 reload(gateway_client)
 reload(map_exporter)
 reload(output_publisher)
@@ -347,10 +350,7 @@ def _log_event(kind, detail=None):
 
 
 def _exception_text(exc):
-    if getattr(exc, "args", None):
-        parts = [_unicode_text(arg) for arg in exc.args]
-        return u" ".join([part for part in parts if part]) or _unicode_text(exc.__class__.__name__)
-    return _unicode_text(exc)
+    return exception_text.exception_text(exc)
 
 
 def _traceback_text():
@@ -361,22 +361,7 @@ def _traceback_text():
 
 
 def _unicode_text(value):
-    try:
-        unicode
-    except NameError:
-        return str(value)
-
-    if isinstance(value, unicode):
-        return value
-    if isinstance(value, str):
-        return value.decode("utf-8", "replace")
-    try:
-        return unicode(value)
-    except (UnicodeDecodeError, UnicodeEncodeError, TypeError, ValueError):
-        try:
-            return str(value).decode("utf-8", "replace")
-        except (UnicodeDecodeError, UnicodeEncodeError, TypeError, AttributeError):
-            return u"<unprintable>"
+    return exception_text.to_unicode(value)
 
 
 def _confirm_direct_edit(message):

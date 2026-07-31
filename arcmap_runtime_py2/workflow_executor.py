@@ -10,10 +10,12 @@ import sys
 try:
     import context_reader
     import execution_session
+    import exception_text
     import path_utils
 except ImportError:
     from . import context_reader
     from . import execution_session
+    from . import exception_text
     from . import path_utils
 
 
@@ -380,13 +382,7 @@ def _operations_common():
 
 
 def _exception_text(exc):
-    try:
-        return unicode(exc)
-    except (UnicodeDecodeError, UnicodeEncodeError, TypeError, ValueError):
-        try:
-            return str(exc).decode("utf-8", "replace")
-        except (UnicodeDecodeError, UnicodeEncodeError, TypeError, AttributeError):
-            return u"<unprintable exception>"
+    return exception_text.exception_text(exc)
 
 
 def _call_custom_executor(executor_path, context, arguments, step_outputs):
