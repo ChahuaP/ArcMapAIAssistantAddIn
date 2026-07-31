@@ -6,6 +6,7 @@ from typing import Any, Dict, Iterable, List
 
 from .paths import CATALOG_ROOT
 from .tool_builder import enabled_operation_specs
+from .output_policy import canonical_output_policy
 
 
 class CatalogError(Exception):
@@ -54,12 +55,12 @@ class OperationCatalog:
             "id": operation["id"],
             "summary": operation["summary"],
             "model_card": operation["model_card"],
-            "parameters": {
-                "required": schema.get("required", []),
-                "properties": schema.get("properties", {})
-            },
+            "parameters_schema": schema,
             "context_requirements": operation.get("context_requirements", {}),
             "side_effects": operation["side_effects"],
-            "output_policy": operation.get("output_policy", {}),
-            "examples": operation.get("examples", [])[:2]
+            "output_policy": canonical_output_policy(
+                operation.get("output_policy"),
+                operation.get("side_effects", ""),
+            ),
+            "examples": operation.get("examples", [])[:2],
         }

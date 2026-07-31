@@ -100,7 +100,7 @@ class RunStore:
             "contract_diagnostics": [],
             "usage": [],
             "stages": [],
-            "counts": {"revisions": 0, "contract_revisions": 0},
+            "counts": {"validation_revisions": 0, "audit_revisions": 0, "contract_revisions": 0, "stalls": 0, "cycles": 0},
         }
         run_id = str(uuid.uuid4())
         now = time.time()

@@ -1,4 +1,4 @@
-    const EXPECTED_GATEWAY_VERSION = '1.0.1';
+    const EXPECTED_GATEWAY_VERSION = '1.0.2';
     const API_ORIGIN = window.location.protocol === 'file:' ? 'http://127.0.0.1:8765' : '';
     const MODE_STORAGE_KEY = 'geopilot.currentMode';
     let eventSource = null;

@@ -74,7 +74,7 @@
           <button class="btn btn-ghost btn-sm" type="button" onclick="openConfigFile()">打开配置</button>
         </div>
         <span class="footer-label">版本</span>
-        <strong class="footer-val footer-link" id="versionInfo" onclick="openChangelog()">1.0.1</strong>
+        <strong class="footer-val footer-link" id="versionInfo" onclick="openChangelog()">1.0.2</strong>
       </footer>
     </nav>
 
@@ -288,6 +288,18 @@
       </div>
       <div class="overlay-body">
         <div class="changelog-list">
+
+          <section class="changelog-version">
+            <div class="changelog-version-header">
+              <strong class="changelog-tag">1.0.2</strong>
+              <span class="changelog-date">2026-07-31</span>
+            </div>
+            <ul>
+              <li>G3 改为确定性校验优先，并分离校验与审计修订预算</li>
+              <li>规划与审计使用独立模型，增加循环停滞检测</li>
+              <li>统一成果引用协议，区分地图图层与 CSV、PNG 等文件输出</li>
+            </ul>
+          </section>
 
           <section class="changelog-version">
             <div class="changelog-version-header">

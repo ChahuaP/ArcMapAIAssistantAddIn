@@ -166,9 +166,15 @@ def _write_package_files(tool_id: str, package: Dict[str, Any]) -> Dict[str, str
         "executor": str(draft_dir / "executor.py"),
         "tests": str(draft_dir / "tests.json"),
     }
-    _write_text(Path(files["operation_spec"]), json.dumps(package["spec"], ensure_ascii=False, indent=2, sort_keys=True))
+    _write_text(
+        Path(files["operation_spec"]),
+        json.dumps(package["spec"], ensure_ascii=False, indent=2, sort_keys=True),
+    )
     _write_text(Path(files["executor"]), package["executor_code"])
-    _write_text(Path(files["tests"]), json.dumps(package["tests"], ensure_ascii=False, indent=2, sort_keys=True))
+    _write_text(
+        Path(files["tests"]),
+        json.dumps(package["tests"], ensure_ascii=False, indent=2, sort_keys=True),
+    )
     return files
 
 
@@ -270,7 +276,10 @@ def canonicalize_operation_spec(spec: Dict[str, Any], source: Path | None = None
     except ToolBuilderError as exc:
         label = "：%s" % source if source else ""
         raise ToolBuilderError("operation_spec 参数定义不合法%s：%s" % (label, exc))
-    result["output_policy"] = canonical_output_policy(result.get("output_policy"), str(result.get("side_effects") or ""))
+    result["output_policy"] = canonical_output_policy(
+        result.get("output_policy"),
+        str(result.get("side_effects") or ""),
+    )
     _ensure_managed_output_parameters(result)
     if not isinstance(result.get("context_requirements"), dict):
         result["context_requirements"] = {}
@@ -384,12 +393,20 @@ def _validate_spec_shape(spec: Dict[str, Any]) -> None:
         raise ToolBuilderError("context_requirements 必须是对象。")
     if not isinstance(spec.get("output_policy"), dict):
         raise ToolBuilderError("output_policy 必须是对象。")
+    _reject_file_collection_output_policy(spec["output_policy"])
     try:
         validate_output_policy(spec.get("output_policy") or {}, side_effects)
     except OutputPolicyError as exc:
         raise ToolBuilderError(str(exc))
     if not isinstance(spec.get("examples"), list) or not spec.get("examples"):
         raise ToolBuilderError("operation_spec.examples 必须至少提供 1 个真实调用示例。")
+
+
+def _reject_file_collection_output_policy(policy: Dict[str, Any]) -> None:
+    if policy.get("type") == "file_collection":
+        raise ToolBuilderError(
+            "file_collection 仅限内置批量导出 operation，不能用于自定义工具。"
+        )
 
 
 def _validate_tool_files(source_dir: Path, tool_id: str) -> None:

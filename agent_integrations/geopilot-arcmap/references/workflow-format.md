@@ -29,8 +29,10 @@
 - Every execute step requires `id`, `operation`, `arguments`, and `reason`.
 - `operation` must be a registered operation id from `/api/capabilities`.
 - `arguments` must match the operation schema exactly. Unknown arguments are rejected.
-- Later steps may reference earlier outputs as `from_step:step_id` when the produced layer name is not enough.
-- Writes-data operations add their output layer to ArcMap automatically; do not add a separate `layer.add_layer` for generated outputs.
+- Current map layers must use `layer_ref` or an exact current-map layer name.
+- Every later reference to an earlier generated layer must use `from_step:<step_id>`. The referenced step must be earlier and must have produced a feature-class or raster output with `add_to_map=true`.
+- File outputs are never layers. CSV, PNG, PDF and JSON outputs must never be referenced with `from_step`.
+- Writes-data feature-class and raster operations with `add_to_map=true` add their output layer to ArcMap automatically; do not add a separate `layer.add_layer` for generated outputs.
 
 ## Structured where
 

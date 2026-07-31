@@ -1,10 +1,26 @@
 import unittest
 
+from gateway_py3.tool_builder import canonicalize_operation_spec
 from gateway_py3.tool_builder_errors import ToolBuilderError
 from gateway_py3.tool_builder_executor import validate_executor_contract
 
 
 class ToolBuilderExecutorPathTests(unittest.TestCase):
+    def test_canonicalize_custom_file_spec_preserves_examples(self):
+        spec = canonicalize_operation_spec(_file_spec())
+
+        self.assertEqual(spec["examples"], [{"output_name": "demo"}])
+
+    def test_canonicalize_rejects_custom_file_collection_spec(self):
+        spec = _file_spec()
+        spec["output_policy"] = {
+            "type": "file_collection",
+            "formats": ["csv"],
+        }
+
+        with self.assertRaisesRegex(ToolBuilderError, "file_collection"):
+            canonicalize_operation_spec(spec)
+
     def test_rejects_decode_path_workaround(self):
         with self.assertRaisesRegex(ToolBuilderError, "encode/decode"):
             validate_executor_contract(_file_spec(), """# -*- coding: utf-8 -*-

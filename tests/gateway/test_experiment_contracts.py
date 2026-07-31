@@ -12,12 +12,14 @@ from gateway_py3.validators import context_hash
 WORKFLOW = {
     "action": "execute",
     "summary": "refresh",
-    "steps": [{
-        "id": "s",
-        "operation": "view.refresh_view",
-        "arguments": {},
-        "reason": "refresh",
-    }],
+    "steps": [
+        {
+            "id": "s",
+            "operation": "view.refresh_view",
+            "arguments": {},
+            "reason": "refresh",
+        }
+    ],
 }
 
 
@@ -29,12 +31,23 @@ class FakeClient:
         self.responses = list(responses)
         self.calls = []
 
+    def __call__(self, provider, model):
+        return _ClientView(self, provider, model)
+
     def chat_json(self, messages):
         self.calls.append(messages)
         response = self.responses.pop(0)
         if isinstance(response, Exception):
             raise response
         return response
+
+
+class _ClientView:
+    def __init__(self, owner, provider, model):
+        self.owner, self.provider_id, self.model_id = owner, provider, model
+
+    def chat_json(self, messages):
+        return self.owner.chat_json(messages)
 
 
 class PromptContractTests(unittest.TestCase):
@@ -65,8 +78,15 @@ class ExperimentContractTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.store = RunStore(Path(self.temp.name) / "runs.sqlite")
+        self.model_config = _fixture_model_config()
+        self.config_patcher = mock.patch(
+            "gateway_py3.llm_providers.load_config",
+            return_value=self.model_config,
+        )
+        self.config_patcher.start()
 
     def tearDown(self):
+        self.config_patcher.stop()
         self.temp.cleanup()
 
     def test_g0_hides_context_cards(self):
@@ -105,7 +125,10 @@ class ExperimentContractTests(unittest.TestCase):
             self.store,
             client,
         ), "x", {"layers": []}, "direct_single")
-        self.assertEqual(row["agent_trace"][0]["run"]["turns"][0]["provider"], "primary")
+        self.assertEqual(
+            row["agent_trace"][0]["run"]["turns"][0]["provider"],
+            self.model_config["primary_provider"],
+        )
 
     def test_invalid_request_does_not_persist(self):
         runner = ExperimentRunner(OperationCatalog(), self.store, FakeClient([]))
@@ -234,33 +257,30 @@ class ExperimentContractTests(unittest.TestCase):
 
     def test_primary_slot_model_overrides_provider_default_in_trace(self):
         client = FakeClient([{"workflow_draft": WORKFLOW}])
-        client.provider_id = "deepseek"
-        client.model_id = "deepseek-v4-pro-thinking"
-        config = _slot_config()
+        client.provider_id = self.model_config["primary_provider"]
+        client.model_id = self.model_config["primary_model"]
 
         with mock.patch(
-            "gateway_py3.llm_providers.load_config",
-            return_value=config,
-        ):
-            with mock.patch(
-                "gateway_py3.experiments.create_provider",
-                return_value=client,
-            ) as factory:
-                row = plan_bound(ExperimentRunner(
-                    OperationCatalog(),
-                    self.store,
-                ), "x", {"layers": []}, "direct_single")
+            "gateway_py3.experiments.create_provider",
+            return_value=client,
+        ) as factory:
+            row = plan_bound(
+                ExperimentRunner(OperationCatalog(), self.store),
+                "x",
+                {"layers": []},
+                "direct_single",
+            )
 
         factory.assert_called_once_with(
-            provider_id="deepseek",
-            model_id="deepseek-v4-pro-thinking",
+            provider_id=self.model_config["primary_provider"],
+            model_id=self.model_config["primary_model"],
         )
         self.assertEqual(
             row["agent_trace"][0]["run"]["turns"][0]["model"],
-            "deepseek-v4-pro-thinking",
+            self.model_config["primary_model"],
         )
 
-    def test_multi_agent_binds_auditor_to_the_run_model(self):
+    def test_multi_agent_uses_configured_independent_reviewer(self):
         primary = FakeClient([
             {
                 "task_semantics": {
@@ -272,30 +292,55 @@ class ExperimentContractTests(unittest.TestCase):
             },
             {"workflow_draft": WORKFLOW},
         ])
-        primary.provider_id = "deepseek"
-        primary.model_id = "deepseek-v4-pro-thinking"
-        primary.responses.append({"audit_result": {"decision": "pass", "issues": [], "revision_requirements": []}})
+        primary.provider_id = self.model_config["primary_provider"]
+        primary.model_id = self.model_config["primary_model"]
+        reviewer = FakeClient(
+            [
+                {
+                    "audit_result": {
+                        "decision": "pass",
+                        "issues": [],
+                        "revision_requirements": [],
+                    }
+                }
+            ]
+        )
+        reviewer.provider_id = self.model_config["reviewer_provider"]
+        reviewer.model_id = self.model_config["reviewer_model"]
 
         with mock.patch(
-            "gateway_py3.llm_providers.load_config",
-            return_value=_slot_config(),
-        ):
-            with mock.patch(
             "gateway_py3.experiments.create_provider",
-                return_value=primary,
-            ) as factory:
-                row = plan_bound(ExperimentRunner(
-                    OperationCatalog(),
-                    self.store,
-                ), "x", {"layers": []}, "multi_agent")
+            side_effect=[primary, reviewer],
+        ) as factory:
+            row = plan_bound(
+                ExperimentRunner(OperationCatalog(), self.store),
+                "x",
+                {"layers": []},
+                "multi_agent",
+            )
 
-        factory.assert_called_once_with(provider_id="deepseek", model_id="deepseek-v4-pro-thinking")
+        self.assertEqual(
+            factory.call_args_list,
+            [
+                mock.call(
+                    provider_id=self.model_config["primary_provider"],
+                    model_id=self.model_config["primary_model"],
+                ),
+                mock.call(
+                    provider_id=self.model_config["reviewer_provider"],
+                    model_id=self.model_config["reviewer_model"],
+                ),
+            ],
+        )
         turns = row["agent_trace"][0]["run"]["turns"]
-        self.assertEqual([turn["model"] for turn in turns], [
-            "deepseek-v4-pro-thinking",
-            "deepseek-v4-pro-thinking",
-            "deepseek-v4-pro-thinking",
-        ])
+        self.assertEqual(
+            [turn["model"] for turn in turns],
+            [
+                self.model_config["primary_model"],
+                self.model_config["primary_model"],
+                self.model_config["reviewer_model"],
+            ],
+        )
 
 
 def plan_bound(runner, command, context, mode):
@@ -309,10 +354,10 @@ def plan_bound(runner, command, context, mode):
     return runner.plan(run["id"], command, context, mode)
 
 
-def _slot_config():
+def _fixture_model_config():
     return {
-        "primary_provider": "deepseek",
-        "primary_model": "deepseek-v4-pro-thinking",
-        "reviewer_provider": "minimax",
-        "reviewer_model": "MiniMax-M3",
+        "primary_provider": "fixture-primary",
+        "primary_model": "fixture-primary-model",
+        "reviewer_provider": "fixture-reviewer",
+        "reviewer_model": "fixture-reviewer-model",
     }

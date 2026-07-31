@@ -1,7 +1,13 @@
 import importlib.util
 import pathlib
 import unittest
+from types import SimpleNamespace
 from unittest import mock
+
+from gateway_py3.catalog_loader import OperationCatalog
+from gateway_py3.experiments import digest, planning_policy
+from gateway_py3.routes import handle_get
+from gateway_py3.workflow_protocol import WORKFLOW_PROTOCOL_VERSION, workflow_protocol
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -9,6 +15,34 @@ CLI_PATH = ROOT / "agent_integrations" / "geopilot-arcmap" / "scripts" / "geopil
 
 
 class GeoPilotCliTests(unittest.TestCase):
+    def test_capabilities_exposes_authoritative_planning_policy(self):
+        catalog = OperationCatalog()
+        payload = handle_get(
+            SimpleNamespace(catalog=catalog),
+            "/api/capabilities",
+            "test",
+            {"detail": ["1"]},
+        )
+        policy = planning_policy(catalog)
+        self.assertEqual(payload["workflow_protocol"], workflow_protocol())
+        self.assertEqual(payload["planning_policy"], policy)
+        self.assertEqual(policy["validation_revisions"], 3)
+        self.assertEqual(policy["audit_revisions"], 3)
+        self.assertEqual(policy["response_contract_revisions"], 2)
+        self.assertEqual(payload["workflow_protocol"]["version"], WORKFLOW_PROTOCOL_VERSION)
+        self.assertEqual(policy["protocol_hash"], digest(workflow_protocol()))
+
+    def test_model_card_limits_examples_but_keeps_schema_and_policy(self):
+        catalog = OperationCatalog()
+        operation = dict(catalog.get("selection.export_selected_features"))
+        operation["examples"] = [{"index": index} for index in range(3)]
+
+        card = catalog.model_card(operation)
+
+        self.assertEqual(card["examples"], [{"index": 0}, {"index": 1}])
+        self.assertEqual(card["parameters_schema"], operation["parameters_schema"])
+        self.assertIn("type", card["output_policy"])
+
     def test_cli_exposes_arcmap_selection_commands(self):
         text = CLI_PATH.read_text(encoding="utf-8")
 

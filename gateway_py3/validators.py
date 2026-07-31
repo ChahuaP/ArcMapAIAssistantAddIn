@@ -18,6 +18,7 @@ from arcmap_runtime_py2.condition_protocol import (
 from arcmap_runtime_py2.context_fingerprint import context_hash
 
 from .catalog_loader import CatalogError, OperationCatalog
+from .output_policy import OutputPolicyError, canonical_output_policy, output_policy_type, validate_output_policy
 
 
 class ValidationError(Exception):
@@ -44,6 +45,11 @@ def validate_catalog(catalog: OperationCatalog) -> None:
             raise ValidationError(f"{operation.get('id', '<unknown>')} missing fields: {missing}")
         if operation["side_effects"] not in ("read_only", "changes_map", "writes_data", "edits_data"):
             raise ValidationError(f"{operation['id']} has invalid side_effects")
+        try:
+            policy = canonical_output_policy(operation["output_policy"], operation["side_effects"])
+            validate_output_policy(policy, operation["side_effects"])
+        except OutputPolicyError as exc:
+            raise ValidationError("%s has invalid output_policy: %s" % (operation["id"], exc))
 
 
 def prepare_workflow(workflow: Dict[str, Any], catalog: OperationCatalog, context: Dict[str, Any]) -> Dict[str, Any]:
@@ -51,7 +57,6 @@ def prepare_workflow(workflow: Dict[str, Any], catalog: OperationCatalog, contex
     prepared = copy.deepcopy(workflow)
     normalize_workflow(prepared)
     normalize_workflow_arguments(prepared, catalog)
-    remove_generated_output_add_layers(prepared, catalog)
     validate_workflow(prepared, catalog)
     validate_workflow_semantics(prepared, catalog, context)
     return prepared
@@ -118,28 +123,6 @@ def normalize_workflow_arguments(workflow: Dict[str, Any], catalog: OperationCat
             arguments["where"] = normalize_condition_tree(arguments["where"])
 
 
-def remove_generated_output_add_layers(workflow: Dict[str, Any], catalog: OperationCatalog) -> None:
-    if workflow.get("action") != "execute":
-        return
-    generated_names: set[str] = set()
-    kept_steps = []
-    for step in workflow.get("steps") or []:
-        operation_id = step.get("operation")
-        arguments = step.get("arguments")
-        if (
-            operation_id == "layer.add_layer"
-            and isinstance(arguments, dict)
-            and _path_points_to_generated_output(arguments.get("path"), generated_names)
-        ):
-            continue
-        kept_steps.append(step)
-        if operation_id in catalog.operations:
-            operation = catalog.operations[operation_id]
-            if operation.get("side_effects") == "writes_data" and isinstance(arguments, dict):
-                _register_generated_output_name(arguments.get("output_name"), generated_names)
-    workflow["steps"] = kept_steps
-
-
 def _existing_directory(value: Any) -> bool:
     if not isinstance(value, str) or not value.strip():
         return False
@@ -174,10 +157,10 @@ def validate_workflow_semantics(workflow: Dict[str, Any], catalog: OperationCata
         _validate_condition_value_types(operation, arguments, available_layers)
         _validate_output_location(operation, arguments, context)
         _validate_output_name(arguments)
-        _validate_layer_add_path(step, arguments)
+        _validate_layer_add_path(step, arguments, available_layers)
 
         seen_step_ids.add(step_id)
-        _register_step_output(step, available_layers)
+        _register_step_output(step, operation, available_layers)
 
 
 def friendly_validation_message(error: Exception) -> str:
@@ -334,7 +317,18 @@ def _validate_and_normalize_layer_reference(
         ref = value[len("from_step:"):]
         if ref not in seen_step_ids:
             raise ValidationError("步骤引用“%s”还没有产生。请检查工作流顺序。" % value)
+        if not any(layer.get("layer_ref") == value for layer in available_layers):
+            raise ValidationError(
+                "步骤引用“%s”不是已加载图层的成果；file 输出不能作为图层引用。"
+                % value
+            )
         return value
+    generated = _generated_layers_matching_value(value, available_layers)
+    if len(generated) == 1:
+        raise ValidationError(
+            "“%s”是同一工作流的前序成果；必须使用 %s。"
+            % (value, generated[0]["layer_ref"])
+        )
     matches = _matching_layers_exact(value, available_layers)
     if len(matches) == 1:
         layer_ref = matches[0].get("layer_ref")
@@ -345,8 +339,28 @@ def _validate_and_normalize_layer_reference(
         raise ValidationError("“%s”匹配到多个图层。请说明要使用哪一个图层。" % value)
     candidates = _available_layer_names(available_layers)
     if candidates:
-        raise ValidationError("当前地图里没有精确匹配“%s”的图层。可用图层有：%s。请从当前图层列表中选择一个。" % (value, "、".join(candidates)))
-    raise ValidationError("当前地图里没有“%s”图层。请先添加图层，或说明要使用哪个已有图层。" % value)
+        raise ValidationError(
+            "当前地图里没有精确匹配“%s”的图层。可用图层有：%s。"
+            "请从当前图层列表中选择一个。"
+            % (value, "、".join(candidates))
+        )
+    raise ValidationError(
+        "当前地图里没有“%s”图层。请先添加图层，或说明要使用哪个已有图层。"
+        % value
+    )
+
+
+def _generated_layers_matching_value(
+    value: Any,
+    available_layers: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    target_name = Path(str(value)).stem
+    return [
+        layer
+        for layer in available_layers
+        if layer.get("layer_ref", "").startswith("from_step:")
+        and target_name == str(layer.get("name"))
+    ]
 
 
 def _validate_condition_arguments(operation: Dict[str, Any], arguments: Dict[str, Any]) -> None:
@@ -386,10 +400,14 @@ def _validate_condition_node(condition: Any) -> None:
         values = condition.get("values")
         if not isinstance(values, list) or len(values) != 2:
             raise ValidationError("between 条件必须提供两个 values。")
+        if "value" in condition:
+            raise ValidationError("between 条件必须使用 values，不能提供 value。")
     if op == "in":
         values = condition.get("values")
         if not isinstance(values, list) or not values:
             raise ValidationError("in 条件必须提供非空 values。")
+        if "value" in condition:
+            raise ValidationError("in 条件必须使用 values，不能提供 value。")
     if op in ("is_null", "is_not_null") and "value" in condition:
         raise ValidationError("%s 条件不能提供 value。" % op)
 
@@ -487,7 +505,10 @@ def _validate_condition_value_types_node(condition: Dict[str, Any], field_types:
     if not field_type:
         return
     if op == "like" and field_type not in TEXT_FIELD_TYPES:
-        raise ValidationError("like 条件只能用于文本字段，“%s”字段类型是 %s。" % (field_name, field_type))
+        raise ValidationError(
+            "like 条件只能用于文本字段，“%s”字段类型是 %s。"
+            % (field_name, field_type)
+        )
     if field_type in NUMBER_FIELD_TYPES:
         _validate_numeric_condition_values(condition, op, field_name)
 
@@ -505,26 +526,46 @@ def _validate_numeric_condition_values(condition: Dict[str, Any], op: str, field
             raise ValidationError("数值字段“%s”的条件值必须是数字。" % field_name)
 
 
-def _validate_output_location(operation: Dict[str, Any], arguments: Dict[str, Any], context: Dict[str, Any]) -> None:
+def _validate_output_location(
+    operation: Dict[str, Any],
+    arguments: Dict[str, Any],
+    context: Dict[str, Any],
+) -> None:
     if operation.get("side_effects") != "writes_data":
         return
     output_format = str(arguments.get("output_format") or "").strip().lower()
     if arguments.get("output_folder") and arguments.get("output_workspace"):
         raise ValidationError("输出位置不能同时使用 output_folder 和 output_workspace。请只保留一个。")
-    if output_format in ("shp", "shapefile") and arguments.get("output_workspace") and str(arguments["output_workspace"]).lower().endswith(".gdb"):
-        raise ValidationError("shp 输出必须使用 output_folder 指向已存在文件夹，不能输出到 GDB。")
+    if (
+        output_format in ("shp", "shapefile")
+        and arguments.get("output_workspace")
+        and str(arguments["output_workspace"]).lower().endswith(".gdb")
+    ):
+        raise ValidationError(
+            "shp 输出必须使用 output_folder 指向已存在文件夹，不能输出到 GDB。"
+        )
     if arguments.get("output_folder"):
         if not _existing_directory(arguments["output_folder"]):
-            raise ValidationError("输出文件夹不存在：%s。请使用已存在的文件夹，或在已保存 MXD 中省略输出位置使用默认输出位置。" % arguments["output_folder"])
+            raise ValidationError(
+                "输出文件夹不存在：%s。请使用已存在的文件夹，"
+                "或在已保存 MXD 中省略输出位置使用默认输出位置。"
+                % arguments["output_folder"]
+            )
         return
     if arguments.get("output_workspace"):
         if not _valid_output_workspace(arguments["output_workspace"]):
-            raise ValidationError("输出工作空间不可用：%s。请使用已存在的文件夹/GDB，或在已保存 MXD 中省略输出位置使用默认输出位置。" % arguments["output_workspace"])
+            raise ValidationError(
+                "输出工作空间不可用：%s。请使用已存在的文件夹/GDB，"
+                "或在已保存 MXD 中省略输出位置使用默认输出位置。"
+                % arguments["output_workspace"]
+            )
         return
     workspace = (operation.get("output_policy") or {}).get("workspace", "")
     if context.get("is_saved") and workspace.startswith("mxd_default"):
         return
-    raise ValidationError("这个操作会生成新数据，但当前输出位置还不明确。请告诉我输出到哪个文件夹或 GDB。")
+    raise ValidationError(
+        "这个操作会生成新数据，但当前输出位置还不明确。请告诉我输出到哪个文件夹或 GDB。"
+    )
 
 
 def _validate_output_name(arguments: Dict[str, Any]) -> None:
@@ -538,35 +579,64 @@ def _validate_output_name(arguments: Dict[str, Any]) -> None:
         or "." in text
         or re.search(r'[<>:"/\\|?*\x00-\x1f]', text)
     ):
-        raise ValidationError("输出名称“%s”不能用于输出。请只传文件名主体，不要包含扩展名、路径或系统非法字符。" % output_name)
+        raise ValidationError(
+            "输出名称“%s”不能用于输出。请只传文件名主体，不要包含扩展名、"
+            "路径或系统非法字符。"
+            % output_name
+        )
 
 
-def _validate_layer_add_path(step: Dict[str, Any], arguments: Dict[str, Any]) -> None:
+def _validate_layer_add_path(
+    step: Dict[str, Any],
+    arguments: Dict[str, Any],
+    available_layers: List[Dict[str, Any]],
+) -> None:
     if step.get("operation") != "layer.add_layer":
         return
     path = arguments.get("path")
     if not path:
         return
+    generated = _generated_layers_matching_value(path, available_layers)
+    if generated:
+        raise ValidationError(
+            "layer.add_layer 不得重复添加自动加载成果；请直接使用 %s。"
+            % generated[0]["layer_ref"]
+        )
     value = str(path).replace("/", "\\")
     if re.match(r"^[A-Za-z]:\\", value) and not Path(value).exists():
         raise ValidationError("没有找到这个文件：%s。请确认路径是否正确。" % value)
 
 
-def _register_step_output(step: Dict[str, Any], available_layers: List[Dict[str, Any]]) -> None:
+def _register_step_output(
+    step: Dict[str, Any],
+    operation: Dict[str, Any],
+    available_layers: List[Dict[str, Any]],
+) -> None:
     arguments = step.get("arguments") or {}
     names = []
     if step.get("operation") == "layer.add_layer" and arguments.get("path"):
         names.append(Path(arguments["path"]).stem)
-    if arguments.get("output_name"):
+    policy = canonical_output_policy(
+        operation.get("output_policy"),
+        operation.get("side_effects", ""),
+    )
+    if (
+        arguments.get("output_name")
+        and operation.get("side_effects") == "writes_data"
+        and output_policy_type(policy) in ("feature_class", "raster")
+        and policy.get("add_to_map") is True
+    ):
         names.append(arguments["output_name"])
     for name in names:
-        available_layers.append({
-            "layer_ref": "from_step:%s" % step["id"],
-            "name": str(name),
-            "longName": str(name),
-            "fields": [],
-            "fields_unknown": True
-        })
+        available_layers.append(
+            {
+                "layer_ref": "from_step:%s" % step["id"],
+                "name": str(name),
+                "longName": str(name),
+                "fields": [],
+                "fields_unknown": True,
+            }
+        )
 
 
 def _initial_layer_index(context: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -689,26 +759,3 @@ def _available_layer_names(layers: List[Dict[str, Any]]) -> List[str]:
         if len(names) >= 10:
             break
     return names
-
-
-def _register_generated_output_name(output_name: Any, generated_names: set[str]) -> None:
-    if not output_name:
-        return
-    text = str(output_name).lower()
-    generated_names.add(text)
-    generated_names.add(_without_timestamp_suffix(text))
-
-
-def _path_points_to_generated_output(path: Any, generated_names: set[str]) -> bool:
-    if not path or not generated_names:
-        return False
-    value = str(path).replace("/", "\\")
-    name = Path(value).stem.lower()
-    return name in generated_names or _without_timestamp_suffix(name) in generated_names
-
-
-def _without_timestamp_suffix(value: str) -> str:
-    match = re.match(r"^(.*)_\d{8}_\d{6}$", value)
-    if match:
-        return match.group(1)
-    return value

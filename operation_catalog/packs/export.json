@@ -321,7 +321,7 @@
         ],
         "workspace": "mxd_default_or_output_folder_or_output_workspace",
         "overwrite": false,
-        "add_to_map": true
+        "add_to_map": false
       },
       "executor": "operations.export_ops.split_by_field",
       "examples": [

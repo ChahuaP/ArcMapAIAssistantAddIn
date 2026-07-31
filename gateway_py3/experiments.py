@@ -4,14 +4,17 @@ from __future__ import annotations
 import hashlib
 import json
 import time
+from dataclasses import dataclass
 from typing import Any, Dict
 
-from .llm_providers import ChatProvider, create_provider
+from .llm_providers import create_provider
 from .validators import ValidationError, context_hash, prepare_workflow
+from .workflow_protocol import workflow_protocol
 
 MODES = ("direct_single", "context_single", "constrained_single", "multi_agent")
 TERMINAL_ACTIONS = ("clarify", "reject")
-MAX_REVISIONS = 3
+MAX_VALIDATION_REVISIONS = 3
+MAX_AUDIT_REVISIONS = 3
 MAX_RESPONSE_CONTRACT_REVISIONS = 2
 WORKFLOW_STEP_CONTRACT = (
     "Every workflow_draft step MUST contain exactly four fields: id (unique string), "
@@ -37,6 +40,13 @@ class ContractError(ValueError):
     pass
 
 
+@dataclass
+class _RepairResult:
+    row: Dict[str, Any] | None = None
+    draft: Dict[str, Any] | None = None
+    version_id: str = ""
+
+
 def digest(value: Any) -> str:
     serialized = json.dumps(
         value,
@@ -45,6 +55,18 @@ def digest(value: Any) -> str:
         separators=(",", ":"),
     )
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def planning_policy(catalog, protocol: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    protocol = workflow_protocol() if protocol is None else protocol
+    return {
+        "validation_revisions": MAX_VALIDATION_REVISIONS,
+        "audit_revisions": MAX_AUDIT_REVISIONS,
+        "response_contract_revisions": MAX_RESPONSE_CONTRACT_REVISIONS,
+        "workflow_protocol": protocol,
+        "protocol_hash": digest(protocol),
+        "catalog_hash": digest(list(catalog.all_operations())),
+    }
 
 
 def _object(value, name):
@@ -79,7 +101,10 @@ def task_semantics(value):
     has_goal = isinstance(value.get("goal"), str) and bool(value["goal"].strip())
     has_lists = all(isinstance(value.get(key), list) for key in required[1:])
     if not has_goal or not has_lists:
-        raise ContractError("task_semantics requires a non-empty goal and array inputs, constraints, success_criteria.")
+        raise ContractError(
+            "task_semantics requires a non-empty goal and array inputs, constraints, "
+            "success_criteria."
+        )
     return value
 
 
@@ -190,7 +215,8 @@ def _prompt(role: str, contract_name: str | None = None) -> str:
     }
     if role == "constrained" and contract_name == "workflow":
         contract = (
-            "Return exactly one root JSON object with one key: workflow_draft repaired from the structured validation diagnostic. "
+            "Return exactly one root JSON object with one key: workflow_draft repaired from "
+            "the structured validation diagnostic. "
             "Never return action, summary, or steps at the root. "
             + WORKFLOW_DRAFT_CONTRACT
         )
@@ -201,23 +227,30 @@ def _prompt(role: str, contract_name: str | None = None) -> str:
 
 class ExperimentRunner:
     """Plans one persisted run; ArcMap execution remains outside this seam."""
-    def __init__(self, catalog, store, client: ChatProvider | None = None):
+    def __init__(self, catalog, store, client_factory=None):
         self.catalog = catalog
         self.store = store
-        self.client = client
+        self.client_factory = client_factory
 
-    def _client(self, role, provider="", model=""):
-        if self.client:
-            return self.client
+    def _configured_clients(self, mode, provider, model):
         from .llm_providers import load_config
 
         config = load_config()
-        selected_provider = provider or config["primary_provider"]
-        selected_model = model or config["primary_model"]
-        return create_provider(
-            provider_id=selected_provider,
-            model_id=selected_model,
-        )
+        factory = self.client_factory or self._production_client
+        primary_provider = provider or config["primary_provider"]
+        primary_model = model or config["primary_model"]
+        primary_client = factory(primary_provider, primary_model)
+        auditor_client = None
+        if mode == "multi_agent":
+            auditor_client = factory(
+                config["reviewer_provider"],
+                config["reviewer_model"],
+            )
+        return primary_client, auditor_client
+
+    @staticmethod
+    def _production_client(provider, model):
+        return create_provider(provider_id=provider, model_id=model)
 
     def plan(
         self,
@@ -229,14 +262,26 @@ class ExperimentRunner:
         model: str = "",
     ) -> Dict[str, Any]:
         self._validate_request(command, context, mode)
-        client = self._client("planner", provider, model)
-        if model and getattr(client, "model_id", None) != model:
+        primary_client, auditor_client = self._configured_clients(mode, provider, model)
+        if model and getattr(primary_client, "model_id", None) != model:
             raise ContractError("requested model is not the configured provider model.")
         actual = {
-            "provider": getattr(client, "provider_id", ""),
-            "model": getattr(client, "model_id", ""),
+            "provider": getattr(primary_client, "provider_id", ""),
+            "model": getattr(primary_client, "model_id", ""),
         }
+        reviewer = None
+        if auditor_client:
+            reviewer = {
+                "provider": getattr(auditor_client, "provider_id", ""),
+                "model": getattr(auditor_client, "model_id", ""),
+            }
+        if auditor_client is primary_client or reviewer == actual:
+            raise ContractError(
+                "G3 reviewer must use a different provider or model from the primary planner."
+            )
         capabilities = list(self.catalog.all_operations())
+        protocol = workflow_protocol()
+        policy = planning_policy(self.catalog, protocol)
         visible = [
             item
             for item in capabilities
@@ -246,34 +291,60 @@ class ExperimentRunner:
                 and not item["id"].startswith("context.")
             )
         ]
-        index = self._cards(visible)
+        capability_cards = [
+            self.catalog.model_card(item)
+            for item in sorted(visible, key=lambda item: item["id"])
+        ]
         trace = self.store.run_trace(run_id)
-        trace.update({
-            "provider": actual["provider"],
-            "model": actual["model"],
-            "requested_model_config": {"provider": provider or actual["provider"], "model": model or actual["model"]},
-            "capability_hash": digest(capabilities),
-            "catalog_hash": digest(capabilities),
-            "context_hash": context_hash(context),
-            "context_snapshot_hash": digest(context),
-            "role_models": {role: actual for role in ("direct", "context", "constrained", "semantic", "planner", "auditor")},
-        })
+        trace.update(
+            {
+                "provider": actual["provider"],
+                "model": actual["model"],
+                "requested_model_config": {
+                    "provider": provider or actual["provider"],
+                    "model": model or actual["model"],
+                },
+                "capability_hash": policy["catalog_hash"],
+                "catalog_hash": policy["catalog_hash"],
+                "planning_policy": policy,
+                "context_hash": context_hash(context),
+                "context_snapshot_hash": digest(context),
+                "role_models": {
+                    "direct": actual,
+                    "context": actual,
+                    "constrained": actual,
+                    "semantic": actual,
+                    "planner": actual,
+                    "auditor": reviewer,
+                },
+            }
+        )
         try:
             if mode == "direct_single":
                 response = self._call(
-                    run_id, client, "direct", {"request": command, "capabilities": index}, trace, "workflow"
+                    run_id,
+                    primary_client,
+                    "direct",
+                    {
+                        "request": command,
+                        "capabilities": capability_cards,
+                        "workflow_protocol": protocol,
+                    },
+                    trace,
+                    "workflow",
                 )
                 draft = response["workflow_draft"]
                 version_id = self._record_workflow(trace, draft, "direct")
             elif mode == "context_single":
                 response = self._call(
                     run_id,
-                    client,
+                    primary_client,
                     "context",
                     {
                         "request": command,
                         "context": context,
-                        "capabilities": index,
+                        "capabilities": capability_cards,
+                        "workflow_protocol": protocol,
                     },
                     trace,
                     "workflow",
@@ -283,12 +354,13 @@ class ExperimentRunner:
             elif mode == "constrained_single":
                 reply = self._call(
                     run_id,
-                    client,
+                    primary_client,
                     "constrained",
                     {
                         "request": command,
                         "context": context,
-                        "capabilities": index,
+                        "capabilities": capability_cards,
+                        "workflow_protocol": protocol,
                     },
                     trace,
                     "constrained",
@@ -296,25 +368,30 @@ class ExperimentRunner:
                 trace["task_semantics"] = reply["task_semantics"]
                 draft = reply["workflow_draft"]
                 version_id = self._record_workflow(trace, draft, "constrained")
-                return self._single_loop(
+                return self._validation_first_loop(
                     run_id,
-                    client,
+                    primary_client,
+                    "constrained",
                     command,
+                    trace["task_semantics"],
                     context,
-                    index,
+                    capability_cards,
+                    protocol,
                     trace,
                     draft,
                     version_id,
+                    None,
                 )
             else:
                 semantic_response = self._call(
                     run_id,
-                    client,
+                    primary_client,
                     "semantic",
                     {
                         "request": command,
                         "context": context,
-                        "capabilities": index,
+                        "capabilities": capability_cards,
+                        "workflow_protocol": protocol,
                     },
                     trace,
                     "semantics",
@@ -323,159 +400,229 @@ class ExperimentRunner:
                 trace["task_semantics"] = semantics
                 planner_response = self._call(
                     run_id,
-                    client,
+                    primary_client,
                     "planner",
                     {
                         "task_semantics": semantics,
                         "context": context,
-                        "capabilities": index,
+                        "capabilities": capability_cards,
+                        "workflow_protocol": protocol,
                     },
                     trace,
                     "workflow",
                 )
                 draft = planner_response["workflow_draft"]
                 version_id = self._record_workflow(trace, draft, "planner")
-                return self._multi_loop(
+                return self._validation_first_loop(
                     run_id,
-                    client,
-                    client,
+                    primary_client,
+                    "planner",
+                    "",
                     semantics,
                     context,
-                    index,
+                    capability_cards,
+                    protocol,
                     trace,
                     draft,
                     version_id,
+                    auditor_client,
                 )
             return self._finalize(run_id, draft, context, trace, version_id)
         except Exception as exc:
             self.store.fail_run(run_id, "planning", exc, trace)
             raise
 
-    def _cards(self, operations=None):
-        source = operations if operations is not None else self.catalog.all_operations()
-        return [
-            {
-                "id": item["id"],
-                "summary": item.get("summary", ""),
-                "model_card": item.get("model_card", ""),
-                "parameters_schema": item.get("parameters_schema", {}),
-                "context_requirements": item.get("context_requirements", {}),
-                "side_effects": item.get("side_effects", ""),
-            }
-            for item in sorted(source, key=lambda item: item["id"])
-        ]
-
-    def _single_loop(
+    def _validation_first_loop(
         self,
         run_id,
-        client,
+        planner,
+        planner_role,
         command,
+        semantics,
         context,
-        index,
+        capability_cards,
+        protocol,
         trace,
         draft,
         version_id,
+        auditor,
     ):
+        """Deep planning module: validation repairs always precede optional G3 audit."""
+        seen_repairs = set()
+        seen_invalid_workflows = set()
+        seen_audited_workflows = set()
         while True:
-            result = self._validation(draft, context, trace, version_id)
-            if result["ok"]:
+            validation = self._validation(draft, context, trace, version_id)
+            if not validation["ok"]:
+                workflow_hash = digest(draft)
+                if workflow_hash in seen_invalid_workflows:
+                    trace["counts"]["cycles"] += 1
+                    detail = {
+                        "kind": "cyclic_revision",
+                        "source": "validation",
+                        "message": "Planner returned a previously invalid workflow.",
+                    }
+                    return self._terminal(run_id, "failed", draft, trace, detail)
+                seen_invalid_workflows.add(workflow_hash)
+                repair = self._repair_or_terminal(
+                    run_id,
+                    planner,
+                    planner_role,
+                    command,
+                    semantics,
+                    context,
+                    capability_cards,
+                    protocol,
+                    trace,
+                    draft,
+                    version_id,
+                    validation["diagnostic"],
+                    "validation",
+                    seen_repairs,
+                )
+                if repair.row is not None:
+                    return repair.row
+                draft, version_id = repair.draft, repair.version_id
+                continue
+            prepared = validation["workflow"]
+            if auditor is None:
                 return self._finalize(
                     run_id,
-                    result["workflow"],
+                    prepared,
                     context,
                     trace,
                     version_id,
                     already_valid=True,
                 )
-            if trace["counts"]["revisions"] >= MAX_REVISIONS:
-                return self._terminal(run_id, "failed", draft, trace, result["diagnostic"])
-            trace["counts"]["revisions"] += 1
+            prepared_hash = digest(prepared)
+            if prepared_hash in seen_audited_workflows:
+                trace["counts"]["cycles"] += 1
+                detail = {
+                    "kind": "cyclic_revision",
+                    "source": "audit",
+                    "message": "Planner returned a previously audited workflow.",
+                }
+                return self._terminal(run_id, "failed", prepared, trace, detail)
+            seen_audited_workflows.add(prepared_hash)
             self._check_cancel(run_id)
-            reply = self._call(
+            audit = self._call(
                 run_id,
-                client,
-                "constrained",
-                {
-                    "request": command,
-                    "context": context,
-                    "capabilities": index,
-                    "task_semantics": trace["task_semantics"],
-                    "workflow_draft": draft,
-                    "validation": result["diagnostic"],
-                },
-                trace,
-                "workflow",
-            )
-            draft = reply["workflow_draft"]
-            version_id = self._record_workflow(trace, draft, "constrained")
-
-    def _multi_loop(
-        self,
-        run_id,
-        client,
-        auditor_client,
-        semantics,
-        context,
-        index,
-        trace,
-        draft,
-        version_id,
-    ):
-        while True:
-            self._check_cancel(run_id)
-            audit_response = self._call(
-                run_id,
-                auditor_client,
+                auditor,
                 "auditor",
                 {
                     "task_semantics": semantics,
                     "context": context,
-                    "capabilities": index,
-                    "workflow_draft": draft,
+                    "capabilities": capability_cards,
+                    "workflow_protocol": protocol,
+                    "workflow_draft": prepared,
                 },
                 trace,
                 "audit",
+            )["audit_result"]
+            trace["audits"].append(
+                {
+                    "version_id": version_id,
+                    "workflow_hash": digest(prepared),
+                    **audit,
+                }
             )
-            audit = audit_response["audit_result"]
-            trace["audits"].append({
-                "version_id": version_id,
-                "workflow_hash": digest(draft),
-                **audit,
-            })
             if audit["decision"] in TERMINAL_ACTIONS:
-                return self._terminal(run_id, audit["decision"], draft, trace, audit)
-            if audit["decision"] == "revise":
-                diagnostic = audit
-            else:
-                diagnostic = self._validation(draft, context, trace, version_id)
-            if isinstance(diagnostic, dict) and diagnostic.get("ok"):
+                return self._terminal(run_id, audit["decision"], prepared, trace, audit)
+            if audit["decision"] == "pass":
                 return self._finalize(
                     run_id,
-                    diagnostic["workflow"],
+                    prepared,
                     context,
                     trace,
                     version_id,
                     already_valid=True,
                 )
-            if trace["counts"]["revisions"] >= MAX_REVISIONS:
-                return self._terminal(run_id, "failed", draft, trace, diagnostic)
-            trace["counts"]["revisions"] += 1
-            planner_response = self._call(
+            repair = self._repair_or_terminal(
                 run_id,
-                client,
-                "planner",
-                {
-                    "task_semantics": semantics,
-                    "context": context,
-                    "capabilities": index,
-                    "workflow_draft": draft,
-                    "diagnostic": diagnostic,
-                },
+                planner,
+                planner_role,
+                command,
+                semantics,
+                context,
+                capability_cards,
+                protocol,
                 trace,
-                "workflow",
+                prepared,
+                version_id,
+                audit,
+                "audit",
+                seen_repairs,
             )
-            draft = planner_response["workflow_draft"]
-            version_id = self._record_workflow(trace, draft, "planner")
+            if repair.row is not None:
+                return repair.row
+            draft, version_id = repair.draft, repair.version_id
+
+    def _repair_or_terminal(
+        self,
+        run_id,
+        planner,
+        planner_role,
+        command,
+        semantics,
+        context,
+        capability_cards,
+        protocol,
+        trace,
+        draft,
+        version_id,
+        diagnostic,
+        source,
+        seen_repairs,
+    ):
+        key = (digest(draft), digest(diagnostic), source)
+        if key in seen_repairs:
+            trace["counts"]["stalls"] += 1
+            detail = {
+                "kind": "stalled_revision",
+                "source": source,
+                "message": "Repeated workflow and diagnostic.",
+            }
+            return _RepairResult(
+                row=self._terminal(run_id, "failed", draft, trace, detail)
+            )
+        seen_repairs.add(key)
+        count_name = "%s_revisions" % source
+        limit = (
+            MAX_VALIDATION_REVISIONS
+            if source == "validation"
+            else MAX_AUDIT_REVISIONS
+        )
+        if trace["counts"][count_name] >= limit:
+            return _RepairResult(
+                row=self._terminal(run_id, "failed", draft, trace, diagnostic)
+            )
+        trace["counts"][count_name] += 1
+        self._check_cancel(run_id)
+        payload = {
+            "task_semantics": semantics,
+            "context": context,
+            "capabilities": capability_cards,
+            "workflow_protocol": protocol,
+            "workflow_draft": draft,
+            "diagnostic": diagnostic,
+        }
+        if planner_role == "constrained":
+            payload["request"] = command
+            payload["validation"] = diagnostic
+        reply = self._call(run_id, planner, planner_role, payload, trace, "workflow")
+        revised = reply["workflow_draft"]
+        if digest(revised) == digest(draft):
+            trace["counts"]["stalls"] += 1
+            detail = {
+                "kind": "stalled_revision",
+                "source": source,
+                "message": "Planner returned the identical workflow.",
+            }
+            return _RepairResult(
+                row=self._terminal(run_id, "failed", revised, trace, detail)
+            )
+        version_id = self._record_workflow(trace, revised, planner_role)
+        return _RepairResult(draft=revised, version_id=version_id)
 
     def _call(self, run_id, client, role, payload, trace, contract_name):
         repair = None
@@ -620,7 +767,11 @@ class ExperimentRunner:
         return self.store.get(run_id)
 
     def _terminal(self, run_id, status, draft, trace, detail):
-        trace["terminal"] = {"status": status, "detail": detail}
+        trace["terminal"] = {
+            "stage": "planning",
+            "status": status,
+            "detail": detail,
+        }
         self.store.update_run(run_id, status, workflow=draft, trace=trace, result={"terminal": detail})
         return self.store.get(run_id)
 

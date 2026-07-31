@@ -6,7 +6,7 @@ from typing import Any, Dict, List
 
 VECTOR_FORMATS = ("gdb", "shp")
 RASTER_FORMATS = ("tif", "tiff")
-OUTPUT_POLICY_TYPES = ("feature_class", "file", "raster")
+OUTPUT_POLICY_TYPES = ("feature_class", "file", "raster", "file_collection")
 
 
 class OutputPolicyError(Exception):
@@ -31,7 +31,7 @@ def canonical_output_policy(policy: Any, side_effects: str) -> Dict[str, Any]:
         result["formats"] = formats
         result.setdefault("default_format", formats[0])
         result.setdefault("add_to_map", True)
-    elif output_type == "file":
+    elif output_type in ("file", "file_collection"):
         result.setdefault("add_to_map", False)
     return result
 
@@ -86,28 +86,43 @@ def managed_output_properties(policy: Dict[str, Any]) -> Dict[str, Dict[str, Any
     if output_type == "feature_class":
         properties["output_workspace"] = {
             "type": "string",
-            "description": "Optional output folder or geodatabase for GDB output. GeoPilot creates runtime output_path from this value; workflow must not pass output_path."
+            "description": (
+                "Optional output folder or geodatabase for GDB output. GeoPilot creates "
+                "runtime output_path from this value; workflow must not pass output_path."
+            ),
         }
         properties["output_folder"] = {
             "type": "string",
-            "description": "Optional output folder for shapefile output. GeoPilot creates runtime output_path from this value; workflow must not pass output_path."
+            "description": (
+                "Optional output folder for shapefile output. GeoPilot creates runtime "
+                "output_path from this value; workflow must not pass output_path."
+            ),
         }
         formats = output_formats(policy) or list(VECTOR_FORMATS)
         if len(formats) > 1:
             properties["output_format"] = {
                 "type": "string",
                 "enum": formats,
-                "description": "Output vector format. Use gdb for file geodatabase feature class, shp for shapefile."
+                "description": (
+                    "Output vector format. Use gdb for file geodatabase feature class, "
+                    "shp for shapefile."
+                ),
             }
     elif output_type == "file":
         properties["output_folder"] = {
             "type": "string",
-            "description": "Optional output folder. GeoPilot creates runtime output_path from this value; workflow must not pass output_path."
+            "description": (
+                "Optional output folder. GeoPilot creates runtime output_path from this "
+                "value; workflow must not pass output_path."
+            ),
         }
     elif output_type == "raster":
         properties["output_folder"] = {
             "type": "string",
-            "description": "Optional output folder for raster file output. GeoPilot creates runtime output_path from this value; workflow must not pass output_path."
+            "description": (
+                "Optional output folder for raster file output. GeoPilot creates runtime "
+                "output_path from this value; workflow must not pass output_path."
+            ),
         }
         formats = output_formats(policy) or list(RASTER_FORMATS)
         if len(formats) > 1:
@@ -125,12 +140,20 @@ def validate_output_policy(policy: Dict[str, Any], side_effects: str) -> None:
     output_type = output_policy_type(policy)
     formats = output_formats(policy)
     if output_type == "feature_class":
-        invalid = [item for item in (formats or list(VECTOR_FORMATS)) if item not in VECTOR_FORMATS]
+        invalid = [
+            item
+            for item in (formats or list(VECTOR_FORMATS))
+            if item not in VECTOR_FORMATS
+        ]
         if invalid:
             raise OutputPolicyError("feature_class output_policy.formats 只支持 gdb 和 shp。")
         return
     if output_type == "raster":
-        invalid = [item for item in (formats or list(RASTER_FORMATS)) if item not in RASTER_FORMATS]
+        invalid = [
+            item
+            for item in (formats or list(RASTER_FORMATS))
+            if item not in RASTER_FORMATS
+        ]
         if invalid:
             raise OutputPolicyError("raster output_policy.formats 只支持 tif/tiff。")
         return
@@ -138,6 +161,9 @@ def validate_output_policy(policy: Dict[str, Any], side_effects: str) -> None:
         extension = policy.get("extension")
         if not isinstance(extension, str) or not _valid_extension(extension):
             raise OutputPolicyError("file output_policy 必须声明安全 extension，例如 .obj、.json、.csv。")
+    if output_type == "file_collection":
+        if not formats:
+            raise OutputPolicyError("file_collection output_policy 必须声明 formats。")
 
 
 def file_output_extension(policy: Dict[str, Any]) -> str:

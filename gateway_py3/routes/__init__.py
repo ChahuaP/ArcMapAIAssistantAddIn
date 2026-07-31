@@ -7,6 +7,8 @@ from gateway_py3 import arcmap_bridge_client
 from gateway_py3.diagnostics import collect_agent_diagnostics, collect_diagnostics
 from gateway_py3.folder_dialog import select_folder
 from gateway_py3.llm_providers import public_config, save_config
+from gateway_py3.workflow_protocol import workflow_protocol
+from gateway_py3.experiments import planning_policy
 from gateway_py3.paths import config_path, log_dir
 from gateway_py3.routes import common, runs, arcmap, tools, voice
 from gateway_py3.routes.event_topics import publish_mutation_events
@@ -34,10 +36,16 @@ def handle_get(state, path, app_version, query=None):
         return {"tools": state.store.list_pending_tools()}
     if path == "/api/capabilities":
         detail = common.bool_query(query, "detail", False)
+        protocol = workflow_protocol()
         return {
             "app_version": app_version,
             "operation_count": len(state.catalog.operations),
-            "operations": [common.public_operation(operation, detail=detail) for operation in state.catalog.all_operations()]
+            "operations": [
+                common.public_operation(operation, detail=detail)
+                for operation in state.catalog.all_operations()
+            ],
+            "workflow_protocol": protocol,
+            "planning_policy": planning_policy(state.catalog, protocol),
         }
     if path == "/api/diagnostics":
         return collect_diagnostics(app_version, len(state.catalog.operations))
