@@ -48,35 +48,35 @@ class VoiceTests(unittest.TestCase):
 
     def test_correct_transcribed_voice_uses_current_mode_provider(self):
         provider = mock.Mock()
-        provider.chat_json.return_value = {"needs_value_profile": False, "layers": []}
+        provider.chat_structured.return_value = {"needs_value_profile": False, "layers": []}
         provider.chat_text.return_value = {"text": "按 @nanjing 的 NAME 字段选择玄武区"}
 
         with mock.patch("gateway_py3.voice.create_provider", return_value=provider) as factory:
             result = voice.correct_transcribed_voice({
                 "text": "按南京的内木字段选择玄武区",
-                "mode": "multi_agent",
+                "mode": "g3_audited",
             }, stored_context={"layers": []})
 
-        factory.assert_called_once_with(mode="multi_agent")
+        factory.assert_called_once_with(mode="g3_audited")
         self.assertEqual(result["raw_text"], "按南京的内木字段选择玄武区")
         self.assertEqual(result["text"], "按 @nanjing 的 NAME 字段选择玄武区")
 
     def test_correction_uses_current_mode_provider(self):
         provider = mock.Mock()
-        provider.chat_json.return_value = {"needs_value_profile": False, "layers": []}
+        provider.chat_structured.return_value = {"needs_value_profile": False, "layers": []}
         provider.chat_text.return_value = {"text": "按 @nanjing 的 NAME 字段选择玄武区"}
 
         with mock.patch("gateway_py3.voice.create_provider", return_value=provider) as factory:
-            result = voice.correct_voice_command("按南京的内木字段选择玄武区", {"layers": []}, "multi_agent")
+            result = voice.correct_voice_command("按南京的内木字段选择玄武区", {"layers": []}, "g3_audited")
 
-        factory.assert_called_once_with(mode="multi_agent")
-        provider.chat_json.assert_called_once()
+        factory.assert_called_once_with(mode="g3_audited")
+        provider.chat_structured.assert_called_once()
         provider.chat_text.assert_called_once()
         self.assertEqual(result, "按 @nanjing 的 NAME 字段选择玄武区")
 
     def test_correction_reads_field_value_samples_when_model_requests_them(self):
         provider = mock.Mock()
-        provider.chat_json.return_value = {"needs_value_profile": True, "layers": ["layer:0"]}
+        provider.chat_structured.return_value = {"needs_value_profile": True, "layers": ["layer:0"]}
         provider.chat_text.return_value = {"text": "按 @nanjing 的 NAME 字段选择玄武区"}
         context = {
             "layers": [{
@@ -91,7 +91,7 @@ class VoiceTests(unittest.TestCase):
         }
 
         with mock.patch("gateway_py3.voice.create_provider", return_value=provider):
-            result = voice.correct_voice_command("按南京的内木字段选择宣武区", context, "multi_agent")
+            result = voice.correct_voice_command("按南京的内木字段选择宣武区", context, "g3_audited")
 
         payload = json.loads(provider.chat_text.call_args[0][0][1]["content"])
         profiles = payload["attribute_value_profiles"]
@@ -103,11 +103,11 @@ class VoiceTests(unittest.TestCase):
 
     def test_correction_requires_layer_reference_when_field_values_are_needed(self):
         provider = mock.Mock()
-        provider.chat_json.return_value = {"needs_value_profile": True, "layers": []}
+        provider.chat_structured.return_value = {"needs_value_profile": True, "layers": []}
 
         with mock.patch("gateway_py3.voice.create_provider", return_value=provider):
             with self.assertRaises(voice.ProviderError):
-                voice.correct_voice_command("选择宣武区", {"layers": []}, "multi_agent")
+                voice.correct_voice_command("选择宣武区", {"layers": []}, "g3_audited")
 
     def test_minimax_text_strips_thinking_block(self):
         provider = MiniMaxProvider(api_key="key", model="MiniMax-M3")
@@ -118,16 +118,6 @@ class VoiceTests(unittest.TestCase):
             result = provider.chat_text([])
 
         self.assertEqual(result["text"], "按 @nanjing 选择玄武区")
-
-    def test_minimax_json_strips_thinking_before_parse(self):
-        provider = MiniMaxProvider(api_key="key", model="MiniMax-M3")
-        with mock.patch.object(provider, "_post_chat_completion", return_value={
-            "choices": [{"message": {"content": '<think>内部推理</think>{"command":"打开 nanjing"}'}}],
-            "usage": {},
-        }):
-            result = provider.chat_json([])
-
-        self.assertEqual(result["command"], "打开 nanjing")
 
     def test_minimax_agent_message_strips_thinking_before_tool_parse(self):
         provider = MiniMaxProvider(api_key="key", model="MiniMax-M3")

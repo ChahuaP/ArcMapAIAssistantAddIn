@@ -8,7 +8,7 @@ Run from the repository root:
 C:\Users\user\AppData\Local\Programs\Python\Python311\python.exe experiments\synthetic_city\generate_dataset.py
 ```
 
-The default output is `out/synthetic-city-v1/`. Generation fails when the target already exists so an earlier experiment dataset cannot be overwritten silently.
+The default output is `experiments/data/synthetic-city-v1/`. Generation fails when the target already exists so an earlier experiment dataset cannot be overwritten silently.
 
 Output contents:
 
@@ -28,7 +28,7 @@ All source and truth layers use EPSG:32650, so distances and areas are evaluated
 
 ```powershell
 python experiments\synthetic_city\run_formal_experiments.py `
-  --output out\formal-experiments\run-001 `
+  --output experiments\out\formal-experiments\run-001 `
   --repetitions 3
 ```
 

@@ -1,4 +1,4 @@
-    const EXPECTED_GATEWAY_VERSION = '1.0.3';
+    const EXPECTED_GATEWAY_VERSION = '1.1.4';
     const API_ORIGIN = window.location.protocol === 'file:' ? 'http://127.0.0.1:8765' : '';
     const MODE_STORAGE_KEY = 'geopilot.currentMode';
     let eventSource = null;
@@ -6,7 +6,7 @@
     let eventRefreshTimer = 0;
     let pendingEventTypes = new Set();
     let capabilitiesLoaded = false;
-    let currentMode = 'context_single';
+    let currentMode = 'g1_context';
     let modeInitialized = false;
     let arcmapBridges = [];
     let cachedRuns = [];
@@ -348,7 +348,7 @@
     function loadStoredMode() {
       try {
         const mode = localStorage.getItem(MODE_STORAGE_KEY);
-        return ['direct_single', 'context_single', 'constrained_single', 'multi_agent'].includes(mode) ? mode : '';
+        return ['g0_direct', 'g1_context', 'g2_constrained', 'g3_audited'].includes(mode) ? mode : '';
       } catch (err) {
         return '';
       }
@@ -369,15 +369,12 @@
 
     async function saveConfig() {
       const primaryModel = parseModelChoice(document.getElementById('primaryProvider').value);
-      const reviewerModel = parseModelChoice(document.getElementById('reviewerProvider').value);
       const data = await api('/config', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({
           primary_provider: primaryModel.provider,
           primary_model: primaryModel.model,
-          reviewer_provider: reviewerModel.provider,
-          reviewer_model: reviewerModel.model,
           providers: collectProviderConfig()
         })
       });
@@ -412,7 +409,6 @@
       providerOptions = providerList(config);
       modelOptions = Array.isArray(config.model_options) ? config.model_options : [];
       renderModelSelect('primaryProvider', config.primary_provider, config.primary_model);
-      renderModelSelect('reviewerProvider', config.reviewer_provider, config.reviewer_model);
       renderProviderKeyFields(config.providers || {});
       renderCurrentModelHint(config);
     }
@@ -421,8 +417,7 @@
       const node = document.getElementById('activeModelHint');
       if (!node || !config) return;
       const primary = modelOptionLabel(config.primary_provider, config.primary_model);
-      const reviewer = modelOptionLabel(config.reviewer_provider, config.reviewer_model);
-      node.textContent = currentMode === 'multi_agent' ? `G3 规划：${primary}；审计：${reviewer}` : `当前模型：${primary}`;
+      node.textContent = currentMode === 'g3_audited' ? `G3 各角色统一使用：${primary}` : `当前模型：${primary}`;
     }
 
     function renderSpeechConfigHint(config) {
@@ -652,11 +647,11 @@
     }
 
     async function setMode(mode) {
-      if (!['direct_single', 'context_single', 'constrained_single', 'multi_agent'].includes(mode)) return;
+      if (!['g0_direct', 'g1_context', 'g2_constrained', 'g3_audited'].includes(mode)) return;
       currentMode = mode;
       storeMode(mode);
       updateModeUI();
-      setStatus(mode === 'multi_agent' ? '已切换到多 Agent 模式。' : '已切换到上下文单模型模式。');
+      setStatus(mode === 'g3_audited' ? '已切换到多 Agent 审核模式。' : '已切换到当前规划模式。');
       await refreshRuns();
     }
 
@@ -795,7 +790,7 @@
       transientUserMessage = command;
       transientAssistantMessage = '';
       startModelWait('模型正在思考');
-      if (currentMode === 'multi_agent') {
+      if (currentMode === 'g3_audited') {
         renderConversation(cachedRuns);
       } else {
         selectedRunId = '';
@@ -846,7 +841,7 @@
       selectedRunId = '';
       transientUserMessage = '';
       transientAssistantMessage = '';
-      setStatus(currentMode === 'multi_agent' ? '已清空多 Agent 会话。' : '已清空。');
+      setStatus(currentMode === 'g3_audited' ? '已清空多 Agent 会话。' : '已清空。');
       await refreshRuns();
     }
 

@@ -21,4 +21,6 @@ ArcMapBridgeExternal/bin/
 ArcMapBridgeExternal/obj/
 ArcMapAIAssistantAddIn/*.esriaddin
 .hallmark/
-out/
+experiments/data/
+experiments/out/
+/work/

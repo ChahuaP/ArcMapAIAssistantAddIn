@@ -24,6 +24,11 @@ try:
 except NameError:
     unicode = str
 
+try:
+    INTEGER_TYPES = (int, long)
+except NameError:
+    INTEGER_TYPES = (int,)
+
 
 VALUE_PROFILE_EXCLUDED_TYPES = set(["Geometry", "Raster", "Blob"])
 MAX_VALUE_PROFILE_FIELDS = 30
@@ -94,10 +99,10 @@ def _extent(data_frame):
     if extent is None:
         return None
     return {
-        "XMin": extent.XMin,
-        "YMin": extent.YMin,
-        "XMax": extent.XMax,
-        "YMax": extent.YMax
+        "XMin": context_fingerprint.canonical_coordinate(extent.XMin),
+        "YMin": context_fingerprint.canonical_coordinate(extent.YMin),
+        "XMax": context_fingerprint.canonical_coordinate(extent.XMax),
+        "YMax": context_fingerprint.canonical_coordinate(extent.YMax)
     }
 
 
@@ -111,11 +116,13 @@ def _layer_info(layer, index):
         "dataSource": _safe_support(layer, "DATASOURCE", "dataSource"),
         "fields": [],
         "selected_count": 0,
-        "geometry_type": None
+        "geometry_type": None,
+        "spatial_reference": None
     }
     if info["isFeatureLayer"]:
         desc = arcpy.Describe(layer)
         info["geometry_type"] = getattr(desc, "shapeType", None)
+        info["spatial_reference"] = _layer_spatial_reference(desc)
         selection_oids = arcmap_desktop_selection.capture_oids(layer, desc)
         info["selected_count"] = len(selection_oids)
         info["selection_hash"] = context_fingerprint.selection_hash(
@@ -128,6 +135,15 @@ def _layer_info(layer, index):
         except (ARCPY_EXECUTE_ERROR, RuntimeError, AttributeError, TypeError) as exc:
             _layer_warning(info, u"field_read_failed: %s" % _sample_text(exc))
     return info
+
+
+def _layer_spatial_reference(description):
+    spatial_reference = getattr(description, "spatialReference", None)
+    name = getattr(spatial_reference, "name", None) if spatial_reference is not None else None
+    factory_code = getattr(spatial_reference, "factoryCode", None) if spatial_reference is not None else None
+    if isinstance(factory_code, INTEGER_TYPES) and factory_code > 0:
+        return "EPSG:%d" % factory_code
+    return name if name else None
 
 
 def _attach_field_value_samples(layer, layer_info, fields):

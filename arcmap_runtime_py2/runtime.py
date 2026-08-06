@@ -12,6 +12,7 @@ import uuid
 import pythonaddins
 
 try:
+    import arcmap_ui_dispatch
     import context_reader
     import execution_session
     import execution_outbox
@@ -22,6 +23,7 @@ try:
     import path_utils
     import workflow_executor
 except ImportError:
+    from . import arcmap_ui_dispatch
     from . import context_reader
     from . import execution_session
     from . import execution_outbox
@@ -31,16 +33,6 @@ except ImportError:
     from . import output_publisher
     from . import path_utils
     from . import workflow_executor
-
-
-reload(context_reader)
-reload(execution_session)
-reload(execution_outbox)
-reload(exception_text)
-reload(gateway_client)
-reload(map_exporter)
-reload(output_publisher)
-reload(workflow_executor)
 
 
 try:
@@ -92,7 +84,6 @@ def open_assistant():
     _clear_silent_state()
     gateway_client.ensure_running()
     map_exporter.cleanup_stale()
-    _drain_execution_outbox(gateway_client.current_target())
     _sync_current_context()
     open_web()
 
@@ -114,20 +105,70 @@ def _run_silent_command(command):
         )
         return
     if action == "execute":
-        _execute_run(command.get("run_id"), command.get("target"), silent=True)
+        run_id = command.get("run_id")
+        target = command.get("target")
+        owner_id = command.get("owner_id")
+        row = _claim_run(run_id, target, owner_id)
+        heartbeat = _start_execution_heartbeat(run_id, owner_id)
+        try:
+            arcmap_ui_dispatch.defer(lambda: _run_deferred_execution(
+                run_id, target, owner_id, row, heartbeat,
+            ))
+        except Exception as exc:
+            _persist_claimed_failure(
+                run_id, owner_id, target, heartbeat, exc, u"arcmap_ui_dispatch",
+            )
+            raise
+        _log_event(u"execution.deferred_to_arcmap_ui", run_id)
         return
     raise RuntimeError(u"未知 Bridge 指令：%s" % _unicode_text(action))
 
 
-def _execute_run(run_id, target=None, silent=False):
+def _claim_run(run_id, target, owner_id):
+    _validate_execution_identity(run_id, owner_id)
+    return gateway_client.claim_run(run_id, target, owner_id)["run"]
+
+
+def _validate_execution_identity(run_id, owner_id):
     if not isinstance(run_id, unicode) or not run_id:
         raise RuntimeError(u"Bridge execute command lacks run_id.")
-    owner_id = unicode(uuid.uuid4())
-    claimed = gateway_client.claim_run(run_id, target, owner_id)
-    row = claimed["run"]
+    if not isinstance(owner_id, unicode) or not owner_id:
+        raise RuntimeError(u"Bridge execute command lacks owner_id.")
+    try:
+        parsed_run = unicode(uuid.UUID(run_id))
+        parsed_owner = unicode(uuid.UUID(owner_id))
+    except (ValueError, AttributeError, TypeError):
+        raise RuntimeError(u"Bridge execute command identity is invalid.")
+    if parsed_run != run_id:
+        raise RuntimeError(u"Bridge execute command run_id is not canonical.")
+    if parsed_owner != owner_id:
+        raise RuntimeError(u"Bridge execute command owner_id is not canonical.")
+
+
+def _start_execution_heartbeat(run_id, owner_id):
     heartbeat = _ExecutionHeartbeat(run_id, owner_id)
     heartbeat.start()
+    return heartbeat
 
+
+def _run_deferred_execution(run_id, target, owner_id, row, heartbeat):
+    try:
+        _execute_claimed_run(
+            run_id, target, owner_id, row, heartbeat, silent=True,
+        )
+    except Exception as exc:
+        _log_event(u"execution.deferred_failed", _exception_text(exc))
+
+
+def _execute_run(run_id, target, owner_id, silent=False):
+    row = _claim_run(run_id, target, owner_id)
+    heartbeat = _start_execution_heartbeat(run_id, owner_id)
+    return _execute_claimed_run(
+        run_id, target, owner_id, row, heartbeat, silent=silent,
+    )
+
+
+def _execute_claimed_run(run_id, target, owner_id, row, heartbeat, silent=False):
     try:
         context = context_reader.read_context()
         outcome = workflow_executor.execute(row, context, confirm_callback=_confirm_direct_edit)
@@ -136,7 +177,8 @@ def _execute_run(run_id, target=None, silent=False):
         result = {
             "ok": False,
             "error": _exception_text(exc),
-            "traceback": _traceback_text()
+            "traceback": _traceback_text(),
+            "postcondition_failure": _postcondition_failure(exc),
         }
         _persist_publish_and_deliver(
             run_id, owner_id, "failed", result, target, heartbeat,
@@ -154,6 +196,20 @@ def _execute_run(run_id, target=None, silent=False):
             show_message(u"工作流已执行完成，权威结果正在重试提交到本地网关。")
 
 
+def _persist_claimed_failure(run_id, owner_id, target, heartbeat, exc, phase):
+    result = {
+        "ok": False,
+        "error": _exception_text(exc),
+        "traceback": _traceback_text(),
+        "postcondition_failure": None,
+        "failure_phase": phase,
+    }
+    _persist_publish_and_deliver(
+        run_id, owner_id, "failed", result, target, heartbeat,
+        execution_session.PublicationPlan([]),
+    )
+
+
 def _persist_publish_and_deliver(run_id, owner_id, status, result, target, heartbeat, publication_plan):
     try:
         entry = EXECUTION_OUTBOX.enqueue(
@@ -169,6 +225,9 @@ def _persist_publish_and_deliver(run_id, owner_id, status, result, target, heart
                 if not acquired:
                     raise RuntimeError("execution output publication is already active.")
                 output_publisher.publish(publication_plan)
+                _mark_publication_observed(result, publication_plan)
+                if hasattr(EXECUTION_OUTBOX, "replace_result"):
+                    entry = EXECUTION_OUTBOX.replace_result(entry, result)
                 entry = EXECUTION_OUTBOX.mark_publication_complete(entry)
         except Exception as exc:
             heartbeat.stop()
@@ -203,6 +262,10 @@ def _drain_execution_outbox(target=None):
                     continue
                 output_publisher.publish(plan)
                 if not entry["publication_complete"]:
+                    if isinstance(entry.get("result"), dict):
+                        _mark_publication_observed(entry["result"], plan)
+                    if hasattr(EXECUTION_OUTBOX, "replace_result") and isinstance(entry.get("result"), dict):
+                        entry = EXECUTION_OUTBOX.replace_result(entry, entry["result"])
                     entry = EXECUTION_OUTBOX.mark_publication_complete(entry)
         except Exception as exc:
             _log_event(u"execution.output_publication_retry_failed", _exception_text(exc))
@@ -351,6 +414,39 @@ def _log_event(kind, detail=None):
 
 def _exception_text(exc):
     return exception_text.exception_text(exc)
+
+
+def _mark_publication_observed(result, publication_plan):
+    """Publication is confirmed by output_publisher before this durable update."""
+    published_paths = set(item.path for item in publication_plan.items)
+    for step in result.get("steps", []):
+        payload = step.get("result") or {}
+        observation = payload.get("observation") or {}
+        if observation.get("path") not in published_paths:
+            continue
+        observation["map_publication"] = "published"
+        contract = observation.get("contract") or {}
+        for check in contract.get("checks") or []:
+            if check.get("name") == "map_publication" and check.get("expected") == "published":
+                check["actual"] = "published"
+                check["verdict"] = "passed"
+                check.pop("proof", None)
+        if contract:
+            contract["verdict"] = "passed"
+
+
+def _postcondition_failure(exc):
+    if not isinstance(exc, workflow_executor.WorkflowExecutionError):
+        return None
+    if not exc.contract_path:
+        return None
+    return {
+        "step_id": exc.step_id,
+        "capability_id": exc.capability_id,
+        "contract_path": exc.contract_path,
+        "expected": exc.expected,
+        "actual": exc.actual,
+    }
 
 
 def _traceback_text():

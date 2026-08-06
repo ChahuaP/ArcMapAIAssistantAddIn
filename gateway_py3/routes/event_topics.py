@@ -10,6 +10,8 @@ def mutation_events(path: str, result: Dict[str, Any] | None) -> List[str]:
         return ["context.changed"]
     if path == "/runs" or path.startswith("/runs/"):
         return ["runs.changed"]
+    if path == "/experiments/reset":
+        return ["runs.changed"]
     if path in ("/arcmap/register", "/arcmap/active", "/arcmap/permission"):
         return ["arcmap.changed"]
     if path == "/config":

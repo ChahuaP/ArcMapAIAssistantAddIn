@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Dict, List
+from .capability_registry import CAPABILITY_CONTRACT_SCHEMA
 
 
 TOOLBUILDER_AGENT_TOOL_NAME = "toolbuilder_create_draft"
@@ -39,7 +40,7 @@ PLANNER_CUSTOM_TOOL_CONTRACT = """- Custom tools are for new reusable ArcPy algo
 - If the user asks to change a pending, rejected, or enabled custom tool, revise that tool in place. The revised package must wait for review again.
 - If an enabled operation already exists, normal user requests should use that operation in workflow directly. If the user reports a bug or asks to change that tool, call toolbuilder_get_draft and toolbuilder_revise_draft for the same tool_id; do not use toolbuilder_create_draft to overwrite an enabled tool.
 - The custom tool draft must include operation_spec, executor_code, and review tests. Empty tests are invalid.
-- operation_spec describes the reusable operation: custom.* id, parameters_schema, context_requirements, side_effects, output_policy, and examples.
+- operation_spec describes the reusable operation: custom.* id, parameters_schema, side_effects, output_policy, capability_contract, and examples.
 - executor_code is real ArcMap ArcPy implementation code, not pseudo-code and not a workflow that chains GeoPilot operation ids.
 - executor_code must be one ArcMap Python 2.7 module with def execute(context, arguments, step_outputs): ...
 - ArcMap uses Python 2.7. Do not use Python 3-only exception/classes or APIs such as FileNotFoundError, FileExistsError, PermissionError, ModuleNotFoundError, os.scandir, pathlib, dataclasses, keyword-only arguments, or os.makedirs(..., exist_ok=True).
@@ -123,13 +124,13 @@ OPERATION_SPEC_SCHEMA: Dict[str, Any] = {
         "version",
         "category",
         "summary",
-        "model_card",
         "parameters_schema",
         "context_requirements",
         "side_effects",
         "output_policy",
         "executor",
         "examples",
+        "capability_contract",
     ],
     "properties": {
         "id": {
@@ -139,10 +140,6 @@ OPERATION_SPEC_SCHEMA: Dict[str, Any] = {
         "version": {"type": "string"},
         "category": {"type": "string"},
         "summary": {"type": "string"},
-        "model_card": {
-            "type": "string",
-            "description": "Operational guidance for the planner, including when to use the tool and any unit contracts.",
-        },
         "parameters_schema": PARAMETERS_SCHEMA_SCHEMA,
         "context_requirements": {"type": "object"},
         "side_effects": {"type": "string", "enum": ["read_only", "changes_map", "writes_data", "edits_data"]},
@@ -156,8 +153,9 @@ OPERATION_SPEC_SCHEMA: Dict[str, Any] = {
             "minItems": 1,
             "items": {"type": "object"},
         },
+        "capability_contract": CAPABILITY_CONTRACT_SCHEMA,
     },
-    "additionalProperties": True,
+    "additionalProperties": False,
 }
 
 TOOLBUILDER_TOOL_PARAMETERS: Dict[str, Any] = {

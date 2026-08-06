@@ -6,85 +6,671 @@
       "version": "1.0",
       "category": "table",
       "summary": "向图层属性表添加字段，直接修改原始数据。",
-      "keywords": ["add field", "添加字段", "新增字段"],
-      "model_card": "Use table.add_field to add a field to a layer. This directly edits source data and requires confirmation. Arguments: layer, field_name, field_type optional, field_length optional.",
+      "keywords": [
+        "add field",
+        "添加字段",
+        "新增字段"
+      ],
       "parameters_schema": {
         "type": "object",
-        "required": ["layer", "field_name"],
+        "required": [
+          "layer",
+          "field_name"
+        ],
         "properties": {
-          "layer": {"type": "string"},
-          "field_name": {"type": "string"},
-          "field_type": {"type": "string"},
-          "field_length": {"type": "integer"}
+          "layer": {
+            "type": "string"
+          },
+          "field_name": {
+            "type": "string"
+          },
+          "field_type": {
+            "type": "string",
+            "default": "TEXT"
+          },
+          "field_length": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "default": null
+          }
         },
         "additionalProperties": false
       },
-      "context_requirements": {"requires_layers": true, "requires_confirmation": true},
+      "context_requirements": {
+        "requires_layers": true,
+        "requires_confirmation": true
+      },
       "side_effects": "edits_data",
-      "output_policy": {"writes_output": false, "edits_original": true},
+      "output_policy": {
+        "writes_output": false,
+        "edits_original": true
+      },
       "executor": "operations.table_ops.add_field",
-      "examples": [{"user": "给 roads 添加字段 k", "arguments": {"layer": "roads", "field_name": "k", "field_type": "TEXT", "field_length": 50}}]
+      "examples": [
+        {
+          "user": "给 roads 添加字段 k",
+          "arguments": {
+            "layer": "roads",
+            "field_name": "k",
+            "field_type": "TEXT",
+            "field_length": 50
+          }
+        }
+      ],
+      "capability_contract": {
+        "inputs": [
+          {
+            "parameter": "layer",
+            "cardinality": "one",
+            "data_kind": [
+              "feature_layer",
+              "raster_layer",
+              "table_view"
+            ],
+            "geometry": [
+              "point",
+              "polyline",
+              "polygon",
+              "raster",
+              "not_applicable"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          }
+        ],
+        "parameters_schema": {
+          "type": "object",
+          "required": [
+            "layer",
+            "field_name"
+          ],
+          "properties": {
+            "layer": {
+              "type": "string"
+            },
+            "field_name": {
+              "type": "string"
+            },
+            "field_type": {
+              "type": "string",
+              "default": "TEXT"
+            },
+            "field_length": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "default": null
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "kind": "none",
+          "geometry": {
+            "rule": "not_applicable",
+            "value": "not_applicable"
+          },
+          "fields": {
+            "effect": "add_parameter_field",
+            "target": "layer",
+            "static_fields": [],
+            "parameter_field": "field_name"
+          },
+          "spatial_reference": {
+            "rule": "not_applicable",
+            "input": "not_applicable"
+          },
+          "cardinality": {
+            "rule": "fixed",
+            "value": "in_place"
+          },
+          "selection_state": "selection_preserved",
+          "map_publication": "none"
+        },
+        "side_effects": "edits_data",
+        "authorization": {
+          "required": true,
+          "scope": "edit_data"
+        },
+        "postconditions": [
+          {
+            "kind": "field_added",
+            "target": "layer",
+            "expectation": {
+              "kind": {
+                "ref": "outputs.kind"
+              },
+              "geometry": {
+                "ref": "outputs.geometry"
+              },
+              "fields": {
+                "ref": "outputs.fields"
+              },
+              "spatial_reference": {
+                "ref": "outputs.spatial_reference"
+              },
+              "cardinality": {
+                "ref": "outputs.cardinality"
+              },
+              "selection_state": {
+                "ref": "outputs.selection_state"
+              },
+              "map_publication": {
+                "ref": "outputs.map_publication"
+              }
+            }
+          }
+        ],
+        "semantic_effects": [
+          {
+            "kind": "field_add",
+            "target": {
+              "parameter": "layer"
+            },
+            "field_name": {
+              "parameter": "field_name"
+            },
+            "field_type": {
+              "parameter": "field_type"
+            },
+            "field_length": {
+              "parameter": "field_length"
+            }
+          }
+        ]
+      }
     },
     {
       "id": "table.delete_field",
       "version": "1.0",
       "category": "table",
       "summary": "删除图层属性字段，直接修改原始数据。",
-      "keywords": ["delete field", "删除字段"],
-      "model_card": "Use table.delete_field to delete one existing field. This directly edits source data and requires confirmation. Arguments: layer, field_name.",
+      "keywords": [
+        "delete field",
+        "删除字段"
+      ],
       "parameters_schema": {
         "type": "object",
-        "required": ["layer", "field_name"],
-        "properties": {"layer": {"type": "string"}, "field_name": {"type": "string"}},
+        "required": [
+          "layer",
+          "field_name"
+        ],
+        "properties": {
+          "layer": {
+            "type": "string"
+          },
+          "field_name": {
+            "type": "string"
+          }
+        },
         "additionalProperties": false
       },
-      "context_requirements": {"requires_layers": true, "requires_fields": true, "field_arguments": ["field_name"], "requires_confirmation": true},
+      "context_requirements": {
+        "requires_layers": true,
+        "requires_fields": true,
+        "field_arguments": [
+          "field_name"
+        ],
+        "requires_confirmation": true
+      },
       "side_effects": "edits_data",
-      "output_policy": {"writes_output": false, "edits_original": true},
+      "output_policy": {
+        "writes_output": false,
+        "edits_original": true
+      },
       "executor": "operations.table_ops.delete_field",
-      "examples": [{"user": "删除 roads 的 STATUS_FLAG 字段", "arguments": {"layer": "roads", "field_name": "STATUS_FLAG"}}]
+      "examples": [
+        {
+          "user": "删除 roads 的 STATUS_FLAG 字段",
+          "arguments": {
+            "layer": "roads",
+            "field_name": "STATUS_FLAG"
+          }
+        }
+      ],
+      "capability_contract": {
+        "inputs": [
+          {
+            "parameter": "layer",
+            "cardinality": "one",
+            "data_kind": [
+              "feature_layer",
+              "raster_layer",
+              "table_view"
+            ],
+            "geometry": [
+              "point",
+              "polyline",
+              "polygon",
+              "raster",
+              "not_applicable"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          }
+        ],
+        "parameters_schema": {
+          "type": "object",
+          "required": [
+            "layer",
+            "field_name"
+          ],
+          "properties": {
+            "layer": {
+              "type": "string"
+            },
+            "field_name": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "kind": "none",
+          "geometry": {
+            "rule": "not_applicable",
+            "value": "not_applicable"
+          },
+          "fields": {
+            "effect": "delete_parameter_field",
+            "target": "layer",
+            "static_fields": [],
+            "parameter_field": "field_name"
+          },
+          "spatial_reference": {
+            "rule": "not_applicable",
+            "input": "not_applicable"
+          },
+          "cardinality": {
+            "rule": "fixed",
+            "value": "in_place"
+          },
+          "selection_state": "selection_preserved",
+          "map_publication": "none"
+        },
+        "side_effects": "edits_data",
+        "authorization": {
+          "required": true,
+          "scope": "edit_data"
+        },
+        "postconditions": [
+          {
+            "kind": "field_deleted",
+            "target": "layer",
+            "expectation": {
+              "kind": {
+                "ref": "outputs.kind"
+              },
+              "geometry": {
+                "ref": "outputs.geometry"
+              },
+              "fields": {
+                "ref": "outputs.fields"
+              },
+              "spatial_reference": {
+                "ref": "outputs.spatial_reference"
+              },
+              "cardinality": {
+                "ref": "outputs.cardinality"
+              },
+              "selection_state": {
+                "ref": "outputs.selection_state"
+              },
+              "map_publication": {
+                "ref": "outputs.map_publication"
+              }
+            }
+          }
+        ],
+        "semantic_effects": [
+          {
+            "kind": "field_delete",
+            "target": {
+              "parameter": "layer"
+            },
+            "field_name": {
+              "parameter": "field_name"
+            }
+          }
+        ]
+      }
     },
     {
       "id": "table.update_rows",
       "version": "1.0",
       "category": "table",
       "summary": "按条件批量修改属性值，直接修改原始数据。",
-      "keywords": ["update rows", "修改字段", "调整字段", "批量修改", "赋值"],
-      "model_card": "Use table.update_rows to update attribute values by structured where condition, not SQL text. This directly edits source data and requires confirmation. Arguments: layer, where, assignments. Allowed where ops: eq, ne, gt, gte, lt, lte, between, in, like, is_null, is_not_null, and, or, not. Boolean filters must be {\"op\":\"and\",\"conditions\":[...]} or {\"op\":\"or\",\"conditions\":[...]}; never use shorthand {\"and\":[...]}. Text contains must use op like on text fields with SQL wildcard value such as %南京%; never use op contains. assignments is an object of field names to new values.",
+      "keywords": [
+        "update rows",
+        "修改字段",
+        "调整字段",
+        "批量修改",
+        "赋值"
+      ],
       "parameters_schema": {
         "type": "object",
-        "required": ["layer", "where", "assignments"],
+        "required": [
+          "layer",
+          "where",
+          "assignments"
+        ],
         "properties": {
-          "layer": {"type": "string"},
-          "where": {"type": "object"},
-          "assignments": {"type": "object"}
+          "layer": {
+            "type": "string"
+          },
+          "where": {
+            "type": "object"
+          },
+          "assignments": {
+            "type": "object"
+          }
         },
         "additionalProperties": false
       },
-      "context_requirements": {"requires_layers": true, "requires_fields": true, "assignment_fields": true, "condition_fields": true, "requires_confirmation": true},
+      "context_requirements": {
+        "requires_layers": true,
+        "requires_fields": true,
+        "assignment_fields": true,
+        "condition_fields": true,
+        "requires_confirmation": true
+      },
       "side_effects": "edits_data",
-      "output_policy": {"writes_output": false, "edits_original": true},
+      "output_policy": {
+        "writes_output": false,
+        "edits_original": true
+      },
       "executor": "operations.table_ops.update_rows",
-      "examples": [{"user": "把字段 a 等于 c 的要素的字段 b 改成 d", "arguments": {"layer": "roads", "where": {"field": "a", "op": "eq", "value": "c"}, "assignments": {"b": "d"}}}]
+      "examples": [
+        {
+          "user": "把字段 a 等于 c 的要素的字段 b 改成 d",
+          "arguments": {
+            "layer": "roads",
+            "where": {
+              "field": "a",
+              "op": "eq",
+              "value": "c"
+            },
+            "assignments": {
+              "b": "d"
+            }
+          }
+        }
+      ],
+      "capability_contract": {
+        "inputs": [
+          {
+            "parameter": "layer",
+            "cardinality": "one",
+            "data_kind": [
+              "feature_layer",
+              "raster_layer",
+              "table_view"
+            ],
+            "geometry": [
+              "point",
+              "polyline",
+              "polygon",
+              "raster",
+              "not_applicable"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          }
+        ],
+        "parameters_schema": {
+          "type": "object",
+          "required": [
+            "layer",
+            "where",
+            "assignments"
+          ],
+          "properties": {
+            "layer": {
+              "type": "string"
+            },
+            "where": {
+              "type": "object"
+            },
+            "assignments": {
+              "type": "object"
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "kind": "none",
+          "geometry": {
+            "rule": "not_applicable",
+            "value": "not_applicable"
+          },
+          "fields": {
+            "effect": "in_place_update",
+            "target": "layer",
+            "static_fields": [],
+            "parameter_field": "not_applicable"
+          },
+          "spatial_reference": {
+            "rule": "not_applicable",
+            "input": "not_applicable"
+          },
+          "cardinality": {
+            "rule": "fixed",
+            "value": "in_place"
+          },
+          "selection_state": "selection_preserved",
+          "map_publication": "none"
+        },
+        "side_effects": "edits_data",
+        "authorization": {
+          "required": true,
+          "scope": "edit_data"
+        },
+        "postconditions": [
+          {
+            "kind": "table_edited",
+            "target": "layer",
+            "expectation": {
+              "kind": {
+                "ref": "outputs.kind"
+              },
+              "geometry": {
+                "ref": "outputs.geometry"
+              },
+              "fields": {
+                "ref": "outputs.fields"
+              },
+              "spatial_reference": {
+                "ref": "outputs.spatial_reference"
+              },
+              "cardinality": {
+                "ref": "outputs.cardinality"
+              },
+              "selection_state": {
+                "ref": "outputs.selection_state"
+              },
+              "map_publication": {
+                "ref": "outputs.map_publication"
+              }
+            }
+          }
+        ],
+        "semantic_effects": [
+          {
+            "kind": "field_update",
+            "target": {
+              "parameter": "layer"
+            },
+            "where": {
+              "parameter": "where"
+            },
+            "assignments": {
+              "parameter": "assignments"
+            }
+          }
+        ]
+      }
     },
     {
       "id": "table.delete_rows",
       "version": "1.0",
       "category": "table",
       "summary": "按条件删除要素，直接修改原始数据。",
-      "keywords": ["delete rows", "删除要素", "删除记录", "删掉"],
-      "model_card": "Use table.delete_rows to delete features by structured where condition, not SQL text. This directly edits source data and requires confirmation. Arguments: layer, where. Allowed where ops: eq, ne, gt, gte, lt, lte, between, in, like, is_null, is_not_null, and, or, not. Boolean filters must be {\"op\":\"and\",\"conditions\":[...]} or {\"op\":\"or\",\"conditions\":[...]}; never use shorthand {\"and\":[...]}. Text contains must use op like on text fields with SQL wildcard value such as %南京%; never use op contains.",
+      "keywords": [
+        "delete rows",
+        "删除要素",
+        "删除记录",
+        "删掉"
+      ],
       "parameters_schema": {
         "type": "object",
-        "required": ["layer", "where"],
-        "properties": {"layer": {"type": "string"}, "where": {"type": "object"}},
+        "required": [
+          "layer",
+          "where"
+        ],
+        "properties": {
+          "layer": {
+            "type": "string"
+          },
+          "where": {
+            "type": "object"
+          }
+        },
         "additionalProperties": false
       },
-      "context_requirements": {"requires_layers": true, "requires_fields": true, "condition_fields": true, "requires_confirmation": true},
+      "context_requirements": {
+        "requires_layers": true,
+        "requires_fields": true,
+        "condition_fields": true,
+        "requires_confirmation": true
+      },
       "side_effects": "edits_data",
-      "output_policy": {"writes_output": false, "edits_original": true},
+      "output_policy": {
+        "writes_output": false,
+        "edits_original": true
+      },
       "executor": "operations.table_ops.delete_rows",
-      "examples": [{"user": "删除字段 a 等于 c 的要素", "arguments": {"layer": "roads", "where": {"field": "a", "op": "eq", "value": "c"}}}]
+      "examples": [
+        {
+          "user": "删除字段 a 等于 c 的要素",
+          "arguments": {
+            "layer": "roads",
+            "where": {
+              "field": "a",
+              "op": "eq",
+              "value": "c"
+            }
+          }
+        }
+      ],
+      "capability_contract": {
+        "inputs": [
+          {
+            "parameter": "layer",
+            "cardinality": "one",
+            "data_kind": [
+              "feature_layer",
+              "raster_layer",
+              "table_view"
+            ],
+            "geometry": [
+              "point",
+              "polyline",
+              "polygon",
+              "raster",
+              "not_applicable"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          }
+        ],
+        "parameters_schema": {
+          "type": "object",
+          "required": [
+            "layer",
+            "where"
+          ],
+          "properties": {
+            "layer": {
+              "type": "string"
+            },
+            "where": {
+              "type": "object"
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "kind": "none",
+          "geometry": {
+            "rule": "not_applicable",
+            "value": "not_applicable"
+          },
+          "fields": {
+            "effect": "in_place_update",
+            "target": "layer",
+            "static_fields": [],
+            "parameter_field": "not_applicable"
+          },
+          "spatial_reference": {
+            "rule": "not_applicable",
+            "input": "not_applicable"
+          },
+          "cardinality": {
+            "rule": "fixed",
+            "value": "reduced"
+          },
+          "selection_state": "selection_preserved",
+          "map_publication": "none"
+        },
+        "side_effects": "edits_data",
+        "authorization": {
+          "required": true,
+          "scope": "edit_data"
+        },
+        "postconditions": [
+          {
+            "kind": "table_edited",
+            "target": "layer",
+            "expectation": {
+              "kind": {
+                "ref": "outputs.kind"
+              },
+              "geometry": {
+                "ref": "outputs.geometry"
+              },
+              "fields": {
+                "ref": "outputs.fields"
+              },
+              "spatial_reference": {
+                "ref": "outputs.spatial_reference"
+              },
+              "cardinality": {
+                "ref": "outputs.cardinality"
+              },
+              "selection_state": {
+                "ref": "outputs.selection_state"
+              },
+              "map_publication": {
+                "ref": "outputs.map_publication"
+              }
+            }
+          }
+        ],
+        "semantic_effects": [
+          {
+            "kind": "field_update",
+            "target": {
+              "parameter": "layer"
+            },
+            "where": {
+              "parameter": "where"
+            }
+          }
+        ]
+      }
     }
   ]
 }

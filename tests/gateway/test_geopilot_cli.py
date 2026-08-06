@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from gateway_py3.catalog_loader import OperationCatalog
-from gateway_py3.experiments import digest, planning_policy
+from gateway_py3.planning_engine import digest, planning_policy
 from gateway_py3.routes import handle_get
 from gateway_py3.workflow_protocol import WORKFLOW_PROTOCOL_VERSION, workflow_protocol
 
@@ -32,16 +32,24 @@ class GeoPilotCliTests(unittest.TestCase):
         self.assertEqual(payload["workflow_protocol"]["version"], WORKFLOW_PROTOCOL_VERSION)
         self.assertEqual(policy["protocol_hash"], digest(workflow_protocol()))
 
-    def test_model_card_limits_examples_but_keeps_schema_and_policy(self):
+    def test_capability_card_limits_examples_and_is_formal_contract(self):
         catalog = OperationCatalog()
         operation = dict(catalog.get("selection.export_selected_features"))
         operation["examples"] = [{"index": index} for index in range(3)]
 
-        card = catalog.model_card(operation)
+        card = catalog.planning_card(operation)
 
         self.assertEqual(card["examples"], [{"index": 0}, {"index": 1}])
         self.assertEqual(card["parameters_schema"], operation["parameters_schema"])
-        self.assertIn("type", card["output_policy"])
+        self.assertEqual(
+            card["outputs"],
+            catalog.capabilities.get(operation["id"])["outputs"],
+        )
+        self.assertEqual(
+            {"rule": "from_parameter", "parameter": "output_format", "default": "gdb"},
+            card["outputs"]["format"],
+        )
+        self.assertNotIn("legacy_card", card)
 
     def test_cli_exposes_arcmap_selection_commands(self):
         text = CLI_PATH.read_text(encoding="utf-8")
@@ -72,7 +80,7 @@ class GeoPilotCliTests(unittest.TestCase):
         with mock.patch.object(
             cli.sys,
             "argv",
-            ["geopilot_cli.py", "run", "--mode", "context_single", "--command", "refresh"],
+            ["geopilot_cli.py", "run", "--mode", "g1_context", "--command", "refresh"],
         ):
             with mock.patch.object(cli, "_post", side_effect=post):
                 with mock.patch.object(cli, "_print", return_value=0):

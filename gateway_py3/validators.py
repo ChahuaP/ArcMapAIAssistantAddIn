@@ -7,16 +7,20 @@ from typing import Any, Dict, List
 
 from arcmap_runtime_py2.condition_protocol import (
     CONDITION_OPERATOR_HELP,
+    FIELD_COMPARISON_OPERATORS,
     LEAF_CONDITION_OPERATORS,
     NUMBER_FIELD_TYPES,
     TEXT_FIELD_TYPES,
     VALUE_CONDITION_OPERATORS,
     canonical_operator,
+    field_type_family,
     is_number_value,
     normalize_condition_tree,
+    validate_condition_tree,
 )
 from arcmap_runtime_py2.context_fingerprint import context_hash
 
+from .capability_registry import CapabilityContractError
 from .catalog_loader import CatalogError, OperationCatalog
 from .output_policy import OutputPolicyError, canonical_output_policy, output_policy_type, validate_output_policy
 
@@ -31,7 +35,6 @@ def validate_catalog(catalog: OperationCatalog) -> None:
         "version",
         "category",
         "summary",
-        "model_card",
         "parameters_schema",
         "context_requirements",
         "side_effects",
@@ -43,6 +46,10 @@ def validate_catalog(catalog: OperationCatalog) -> None:
         missing = [key for key in required if key not in operation]
         if missing:
             raise ValidationError(f"{operation.get('id', '<unknown>')} missing fields: {missing}")
+        try:
+            catalog.capabilities.get(operation["id"])
+        except CapabilityContractError as exc:
+            raise ValidationError(str(exc))
         if operation["side_effects"] not in ("read_only", "changes_map", "writes_data", "edits_data"):
             raise ValidationError(f"{operation['id']} has invalid side_effects")
         try:
@@ -52,13 +59,19 @@ def validate_catalog(catalog: OperationCatalog) -> None:
             raise ValidationError("%s has invalid output_policy: %s" % (operation["id"], exc))
 
 
-def prepare_workflow(workflow: Dict[str, Any], catalog: OperationCatalog, context: Dict[str, Any]) -> Dict[str, Any]:
+def prepare_workflow(
+    workflow: Dict[str, Any], catalog: OperationCatalog, context: Dict[str, Any],
+    normalization_events: List[Dict[str, Any]] | None = None,
+) -> Dict[str, Any]:
     validate_workflow_shape(workflow)
     prepared = copy.deepcopy(workflow)
     normalize_workflow(prepared)
     normalize_workflow_arguments(prepared, catalog)
     validate_workflow(prepared, catalog)
+    events = normalize_internal_output_references(prepared, catalog)
     validate_workflow_semantics(prepared, catalog, context)
+    if normalization_events is not None:
+        normalization_events.extend(events)
     return prepared
 
 
@@ -97,6 +110,48 @@ def validate_workflow(workflow: Dict[str, Any], catalog: OperationCatalog) -> No
     for step in steps:
         _validate_step(step, catalog, seen_step_ids)
         seen_step_ids.add(step["id"])
+    _validate_unique_output_destinations(steps, catalog)
+
+
+def _validate_unique_output_destinations(
+    steps: List[Dict[str, Any]], catalog: OperationCatalog,
+) -> None:
+    destinations = {}
+    for step in steps:
+        operation = catalog.get(step["operation"])
+        arguments = step["arguments"]
+        if operation.get("side_effects") != "writes_data" or not arguments.get("output_name"):
+            continue
+        policy = canonical_output_policy(
+            operation.get("output_policy"), operation.get("side_effects", ""),
+        )
+        output_type = output_policy_type(policy)
+        output_format = str(arguments.get("output_format") or "").strip().lower().lstrip(".")
+        if output_format == "shapefile":
+            output_format = "shp"
+        if not output_format and output_type == "feature_class" and arguments.get("output_folder"):
+            output_format = "shp"
+        if not output_format:
+            output_format = str(
+                policy.get("extension") or policy.get("default_format") or output_type
+            ).strip().lower().lstrip(".")
+        container = str(
+            arguments.get("output_folder")
+            or arguments.get("output_workspace")
+            or "<default>"
+        ).strip().replace("/", "\\").rstrip("\\").casefold()
+        key = (
+            container,
+            str(arguments["output_name"]).strip().casefold(),
+            output_format,
+        )
+        prior = destinations.get(key)
+        if prior is not None:
+            raise ValidationError(
+                "workflow output destination collision: steps %s and %s both write %s (%s)."
+                % (prior, step["id"], arguments["output_name"], output_format)
+            )
+        destinations[key] = step["id"]
 
 
 def normalize_workflow(workflow: Dict[str, Any]) -> None:
@@ -109,6 +164,10 @@ def normalize_workflow(workflow: Dict[str, Any]) -> None:
 
 
 def normalize_workflow_arguments(workflow: Dict[str, Any], catalog: OperationCatalog) -> None:
+    declared_defaults = {
+        "selection.select_by_attribute": {"selection_type": "NEW_SELECTION"},
+        "selection.select_by_location": {"selection_type": "NEW_SELECTION"},
+    }
     for step in workflow.get("steps") or []:
         if not isinstance(step, dict):
             continue
@@ -118,9 +177,65 @@ def normalize_workflow_arguments(workflow: Dict[str, Any], catalog: OperationCat
         arguments = step.get("arguments")
         if not isinstance(arguments, dict):
             continue
+        for name, value in declared_defaults.get(operation_id, {}).items():
+            arguments.setdefault(name, value)
+        operation = catalog.get(operation_id)
+        policy = canonical_output_policy(
+            operation.get("output_policy"), operation.get("side_effects", ""),
+        )
+        if (
+            operation.get("side_effects") == "writes_data"
+            and output_policy_type(policy) == "feature_class"
+            and "output_format" not in arguments
+        ):
+            if arguments.get("output_folder"):
+                arguments["output_format"] = "shp"
+            elif arguments.get("output_workspace"):
+                arguments["output_format"] = "gdb"
         properties = (catalog.operations[operation_id].get("parameters_schema") or {}).get("properties") or {}
         if "where" in properties and isinstance(arguments.get("where"), dict):
             arguments["where"] = normalize_condition_tree(arguments["where"])
+
+
+def normalize_internal_output_references(
+    workflow: Dict[str, Any], catalog: OperationCatalog
+) -> List[Dict[str, Any]]:
+    """Canonicalize only unambiguous references to earlier in-workflow data outputs."""
+    events = []
+    prior = []
+    for step in workflow.get("steps") or []:
+        operation = catalog.get(step["operation"])
+        arguments = step["arguments"]
+        for name in layer_argument_names(operation):
+            value = arguments.get(name)
+            if not isinstance(value, str) or value.startswith("from_step:"):
+                continue
+            matches = [item for item in prior if item["name"] == value]
+            if len(matches) > 1:
+                raise ValidationError("Ambiguous in-workflow output reference: %s." % value)
+            if len(matches) == 1:
+                if matches[0]["output_type"] not in ("feature_class", "raster"):
+                    raise ValidationError(
+                        "Output %s is %s and cannot be used as a layer."
+                        % (value, matches[0]["output_type"])
+                    )
+                canonical = "from_step:%s" % matches[0]["step_id"]
+                arguments[name] = canonical
+                events.append({
+                    "step_id": step["id"], "argument": name,
+                    "original": value, "canonical": canonical,
+                })
+        policy = canonical_output_policy(operation.get("output_policy"), operation.get("side_effects", ""))
+        output_name = arguments.get("output_name")
+        if (
+            isinstance(output_name, str) and output_name
+            and operation.get("side_effects") == "writes_data"
+        ):
+            prior.append({
+                "step_id": step["id"], "name": output_name,
+                "output_type": output_policy_type(policy),
+            })
+    return events
 
 
 def _existing_directory(value: Any) -> bool:
@@ -161,6 +276,7 @@ def validate_workflow_semantics(workflow: Dict[str, Any], catalog: OperationCata
         _validate_layer_add_path(step, arguments, available_layers)
 
         _apply_map_layer_effect(step, available_layers)
+        _apply_in_place_field_effect(operation, arguments, available_layers)
         seen_step_ids.add(step_id)
         _register_step_output(step, operation, available_layers)
 
@@ -177,6 +293,53 @@ def _apply_map_layer_effect(step: Dict[str, Any], available_layers: List[Dict[st
         layer for layer in available_layers
         if layer.get("layer_ref") != layer_ref
     ]
+
+
+def _apply_in_place_field_effect(
+    operation: Dict[str, Any],
+    arguments: Dict[str, Any],
+    available_layers: List[Dict[str, Any]],
+) -> None:
+    """Advance the deterministic layer schema through declared in-place effects."""
+    capability = operation.get("capability_contract") or {}
+    descriptor = (capability.get("outputs") or {}).get("fields") or {}
+    effect = descriptor.get("effect")
+    if effect not in {"add_parameter_field", "delete_parameter_field", "add_static_fields"}:
+        return
+    target_value = arguments.get(descriptor.get("target"))
+    if not isinstance(target_value, str):
+        return
+    matches = _matching_layers_exact(target_value, available_layers)
+    if len(matches) != 1 or matches[0].get("fields_unknown"):
+        return
+    layer = matches[0]
+    fields = list(layer.get("fields") or [])
+    if effect == "add_parameter_field":
+        field_name = arguments.get(descriptor.get("parameter_field"))
+        if isinstance(field_name, str) and field_name:
+            known = {_field_entry_name(item).casefold() for item in fields if _field_entry_name(item)}
+            if field_name.casefold() not in known:
+                fields.append({"name": field_name, "type": arguments.get("field_type") or "String"})
+    elif effect == "delete_parameter_field":
+        field_name = arguments.get(descriptor.get("parameter_field"))
+        if isinstance(field_name, str) and field_name:
+            fields = [
+                item for item in fields
+                if _field_entry_name(item).casefold() != field_name.casefold()
+            ]
+    else:
+        known = {_field_entry_name(item).casefold() for item in fields if _field_entry_name(item)}
+        for field_name in descriptor.get("static_fields") or []:
+            if isinstance(field_name, str) and field_name and field_name.casefold() not in known:
+                fields.append({"name": field_name})
+                known.add(field_name.casefold())
+    layer["fields"] = fields
+
+
+def _field_entry_name(value: Any) -> str:
+    if isinstance(value, dict):
+        value = value.get("name")
+    return str(value) if value is not None else ""
 
 
 def friendly_validation_message(error: Exception) -> str:
@@ -279,28 +442,41 @@ def _validate_arguments(step_id: str, operation_id: str, arguments: Dict[str, An
 
 def _validate_type(step_id: str, name: str, value: Any, schema: Dict[str, Any]) -> None:
     expected = schema.get("type")
-    if expected == "string" and not isinstance(value, str):
-        raise ValidationError(f"{step_id}.{name} must be string.")
-    if expected == "boolean" and not isinstance(value, bool):
-        raise ValidationError(f"{step_id}.{name} must be boolean.")
-    if expected == "integer" and not isinstance(value, int):
-        raise ValidationError(f"{step_id}.{name} must be integer.")
-    if expected == "number" and not isinstance(value, (int, float)):
-        raise ValidationError(f"{step_id}.{name} must be number.")
-    if expected == "array":
-        if not isinstance(value, list):
-            raise ValidationError(f"{step_id}.{name} must be array.")
+    expected_types = expected if isinstance(expected, list) else [expected] if expected else []
+    if expected_types and not any(_matches_json_type(value, item) for item in expected_types):
+        if len(expected_types) == 1:
+            raise ValidationError(f"{step_id}.{name} must be {expected_types[0]}.")
+        raise ValidationError(
+            f"{step_id}.{name} must be one of types: {', '.join(expected_types)}."
+        )
+    if isinstance(value, list) and "array" in expected_types:
         min_items = schema.get("minItems")
         if min_items is not None and len(value) < min_items:
             raise ValidationError(f"{step_id}.{name} must contain at least {min_items} items.")
         item_schema = schema.get("items", {})
         for index, item in enumerate(value):
             _validate_type(step_id, f"{name}[{index}]", item, item_schema)
-    if expected == "object" and not isinstance(value, dict):
-        raise ValidationError(f"{step_id}.{name} must be object.")
     enum = schema.get("enum")
     if enum and value not in enum:
         raise ValidationError(f"{step_id}.{name} must be one of {enum}.")
+
+
+def _matches_json_type(value: Any, expected: str) -> bool:
+    if expected == "null":
+        return value is None
+    if expected == "boolean":
+        return isinstance(value, bool)
+    if expected == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if expected == "number":
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    if expected == "string":
+        return isinstance(value, str)
+    if expected == "array":
+        return isinstance(value, list)
+    if expected == "object":
+        return isinstance(value, dict)
+    raise RuntimeError("unsupported JSON schema type: " + str(expected))
 
 
 def _validate_layer_references(
@@ -311,7 +487,7 @@ def _validate_layer_references(
     available_layers: List[Dict[str, Any]],
     seen_step_ids: set[str]
 ) -> None:
-    for name in _layer_argument_names(operation):
+    for name in layer_argument_names(operation):
         if name not in arguments:
             continue
         if isinstance(arguments[name], list):
@@ -332,7 +508,7 @@ def _validate_live_map_layer_requirement(
 ) -> None:
     if step.get("operation") not in ("layer.remove_layer", "layer.move_layer"):
         return
-    for name in _layer_argument_names(operation):
+    for name in layer_argument_names(operation):
         value = arguments.get(name)
         values = value if isinstance(value, list) else [value]
         for item in values:
@@ -425,6 +601,8 @@ def _validate_condition_arguments(operation: Dict[str, Any], arguments: Dict[str
 
 
 def _validate_condition_node(condition: Any) -> None:
+    validate_condition_tree(condition, ValidationError)
+    return
     if not isinstance(condition, dict) or not condition:
         raise ValidationError("属性条件 where 必须是结构化对象。")
     op = _condition_operator(condition)
@@ -448,22 +626,29 @@ def _validate_condition_node(condition: Any) -> None:
         )
     if not condition.get("field"):
         raise ValidationError("属性条件缺少字段名。")
-    if op in VALUE_CONDITION_OPERATORS and "value" not in condition:
-        raise ValidationError("%s 条件必须提供 value。" % op)
+    if op in VALUE_CONDITION_OPERATORS:
+        has_value = "value" in condition
+        has_value_field = "value_field" in condition
+        if has_value_field and op not in FIELD_COMPARISON_OPERATORS:
+            raise ValidationError("%s 条件不能使用 value_field。" % op)
+        if has_value == has_value_field:
+            raise ValidationError("%s 条件必须且只能提供 value 或 value_field 其中一个。" % op)
     if op == "between":
         values = condition.get("values")
         if not isinstance(values, list) or len(values) != 2:
             raise ValidationError("between 条件必须提供两个 values。")
-        if "value" in condition:
-            raise ValidationError("between 条件必须使用 values，不能提供 value。")
+        if "value" in condition or "value_field" in condition:
+            raise ValidationError("between 条件必须使用 values，不能提供 value 或 value_field。")
     if op == "in":
         values = condition.get("values")
         if not isinstance(values, list) or not values:
             raise ValidationError("in 条件必须提供非空 values。")
-        if "value" in condition:
-            raise ValidationError("in 条件必须使用 values，不能提供 value。")
-    if op in ("is_null", "is_not_null") and "value" in condition:
-        raise ValidationError("%s 条件不能提供 value。" % op)
+        if "value" in condition or "value_field" in condition:
+            raise ValidationError("in 条件必须使用 values，不能提供 value 或 value_field。")
+    if op in ("is_null", "is_not_null") and (
+        "value" in condition or "value_field" in condition
+    ):
+        raise ValidationError("%s 条件不能提供 value 或 value_field。" % op)
 
 
 def _validate_field_references(
@@ -563,6 +748,18 @@ def _validate_condition_value_types_node(condition: Dict[str, Any], field_types:
             "like 条件只能用于文本字段，“%s”字段类型是 %s。"
             % (field_name, field_type)
         )
+    value_field = condition.get("value_field")
+    if value_field:
+        value_field_type = field_types.get(str(value_field).lower())
+        if value_field_type:
+            left_family = field_type_family(field_type)
+            right_family = field_type_family(value_field_type)
+            if left_family and right_family and left_family != right_family:
+                raise ValidationError(
+                    "字段比较类型不兼容：%s(%s) 与 %s(%s)。"
+                    % (field_name, field_type, value_field, value_field_type)
+                )
+        return
     if field_type in NUMBER_FIELD_TYPES:
         _validate_numeric_condition_values(condition, op, field_name)
 
@@ -588,16 +785,16 @@ def _validate_output_location(
     if operation.get("side_effects") != "writes_data":
         return
     output_format = str(arguments.get("output_format") or "").strip().lower()
+    policy = canonical_output_policy(
+        operation.get("output_policy"), operation.get("side_effects", ""),
+    )
+    if output_policy_type(policy) == "feature_class":
+        if output_format in ("shp", "shapefile") and arguments.get("output_workspace"):
+            raise ValidationError("shp 输出必须使用 output_folder，不能使用 output_workspace。")
+        if output_format == "gdb" and arguments.get("output_folder"):
+            raise ValidationError("gdb 输出必须使用 output_workspace，不能使用 output_folder。")
     if arguments.get("output_folder") and arguments.get("output_workspace"):
         raise ValidationError("输出位置不能同时使用 output_folder 和 output_workspace。请只保留一个。")
-    if (
-        output_format in ("shp", "shapefile")
-        and arguments.get("output_workspace")
-        and str(arguments["output_workspace"]).lower().endswith(".gdb")
-    ):
-        raise ValidationError(
-            "shp 输出必须使用 output_folder 指向已存在文件夹，不能输出到 GDB。"
-        )
     if arguments.get("output_folder"):
         if not _existing_directory(arguments["output_folder"]):
             raise ValidationError(
@@ -709,7 +906,7 @@ def _initial_layer_index(context: Dict[str, Any]) -> List[Dict[str, Any]]:
     return layers
 
 
-def _layer_argument_names(operation: Dict[str, Any]) -> List[str]:
+def layer_argument_names(operation: Dict[str, Any]) -> List[str]:
     properties = operation.get("parameters_schema", {}).get("properties", {})
     names = []
     for name, property_schema in properties.items():
@@ -742,7 +939,7 @@ def _primary_layer_value(operation: Dict[str, Any], arguments: Dict[str, Any]) -
     for name in ("layer", "input_layer", "target_layer"):
         if isinstance(arguments.get(name), str):
             return arguments[name]
-    names = _layer_argument_names(operation)
+    names = layer_argument_names(operation)
     if names and isinstance(arguments.get(names[0]), str):
         return arguments[names[0]]
     return None
@@ -759,8 +956,12 @@ def _condition_fields(condition: Any) -> List[str]:
         return fields
     if op == "not":
         return _condition_fields(condition.get("condition"))
-    field = condition.get("field")
-    return [str(field)] if field else []
+    fields = []
+    for name in ("field", "value_field"):
+        field = condition.get(name)
+        if field:
+            fields.append(str(field))
+    return fields
 
 
 def _normalize_field_markers(arguments: Dict[str, Any]) -> None:
@@ -793,6 +994,8 @@ def _normalize_condition_field_markers(condition: Dict[str, Any]) -> None:
         return
     if "field" in condition:
         condition["field"] = _field_name(condition["field"])
+    if "value_field" in condition:
+        condition["value_field"] = _field_name(condition["value_field"])
 
 
 def _field_name(value: Any) -> str:

@@ -1,4 +1,5 @@
 import ast
+import copy
 import json
 import pathlib
 import unittest
@@ -22,13 +23,13 @@ class CatalogTests(unittest.TestCase):
             "version",
             "category",
             "summary",
-            "model_card",
             "parameters_schema",
             "context_requirements",
             "side_effects",
             "output_policy",
             "executor",
             "examples"
+            ,"capability_contract"
         }
         for pack_path in catalog["packs"]:
             pack = _load_json(CATALOG_ROOT / pack_path)
@@ -50,6 +51,175 @@ class CatalogTests(unittest.TestCase):
                 functions = {node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)}
                 self.assertIn(function_name, functions, operation["executor"])
 
+    def test_every_operation_has_a_closed_executable_capability_contract(self):
+        from gateway_py3.catalog_loader import OperationCatalog
+
+        registry = OperationCatalog().capabilities
+        operations = list(OperationCatalog().all_operations())
+        self.assertEqual(len(operations), 61)
+        for operation in operations:
+            contract = registry.get(operation["id"])
+            self.assertEqual(contract["parameters_schema"], operation["parameters_schema"])
+            self.assertEqual(contract["side_effects"], operation["side_effects"])
+            self.assertTrue(contract["postconditions"])
+            output_type = (operation.get("output_policy") or {}).get("type", "none")
+            expected_kind = "map_state" if output_type == "none" and operation["side_effects"] in ("read_only", "changes_map") else output_type
+            self.assertEqual(contract["outputs"]["kind"], expected_kind, operation["id"])
+
+    def test_custom_operation_schema_uses_the_runtime_cardinality_descriptor(self):
+        from arcmap_runtime_py2.capability_contract_protocol import CARDINALITY_DESCRIPTOR_SCHEMA
+
+        schema = _load_json(CATALOG_ROOT / "schemas" / "operation_spec.schema.json")
+        declared = schema["$defs"]["capabilityContract"]["properties"]["outputs"]["properties"]["cardinality"]
+
+        self.assertEqual(CARDINALITY_DESCRIPTOR_SCHEMA, declared)
+
+    def test_every_executor_declares_a_semantic_effect(self):
+        from gateway_py3.catalog_loader import OperationCatalog
+
+        contracts = OperationCatalog().capabilities
+        self.assertEqual(61, sum(len(contracts.get(item["id"])["semantic_effects"]) for item in OperationCatalog().all_operations()))
+
+    def test_semantic_effect_vocabulary_covers_the_business_contract(self):
+        from gateway_py3.catalog_loader import OperationCatalog
+
+        actual = {effect["kind"] for item in OperationCatalog().all_operations() for effect in OperationCatalog().capabilities.get(item["id"])["semantic_effects"]}
+        required = {"inspect", "map_change", "attribute_filter", "spatial_filter", "buffer", "overlay", "spatial_join", "aggregate", "project", "merge", "append", "field_add", "field_delete", "field_update", "feature_create", "feature_append", "copy", "repair", "define_projection", "add_xy", "artifact_export", "layout_change"}
+        self.assertEqual(required, actual)
+
+    def test_semantic_effect_binding_rejects_non_executable_parameter(self):
+        from gateway_py3.capability_registry import CapabilityContractError, CapabilityRegistry
+        from gateway_py3.catalog_loader import OperationCatalog
+
+        operation = copy.deepcopy(OperationCatalog().get("analysis.buffer"))
+        operation["capability_contract"]["semantic_effects"][0]["distance"] = "invented"
+        with self.assertRaisesRegex(CapabilityContractError, "binding cannot be resolved"):
+            CapabilityRegistry([operation])
+
+    def test_semantic_effect_optional_parameter_requires_an_executable_default(self):
+        from gateway_py3.capability_registry import CapabilityContractError, CapabilityRegistry
+        from gateway_py3.catalog_loader import OperationCatalog
+
+        operation = copy.deepcopy(OperationCatalog().get("export.table_csv"))
+        del operation["parameters_schema"]["properties"]["selected_only"]["default"]
+        del operation["capability_contract"]["parameters_schema"]["properties"]["selected_only"]["default"]
+
+        with self.assertRaisesRegex(CapabilityContractError, "requires an executable default"):
+            CapabilityRegistry([operation])
+
+    def test_artifact_export_semantic_action_uses_the_closed_domain_vocabulary(self):
+        from gateway_py3.capability_registry import CapabilityContractError, CapabilityRegistry
+        from gateway_py3.catalog_loader import OperationCatalog
+
+        operation = copy.deepcopy(OperationCatalog().get("export.table_csv"))
+        operation["capability_contract"]["semantic_effects"][0]["action"] = {
+            "const": "export_table_csv",
+        }
+
+        with self.assertRaisesRegex(CapabilityContractError, "action.*closed vocabulary"):
+            CapabilityRegistry([operation])
+
+    def test_semantic_preservation_is_catalog_declared_and_requires_a_source_edge(self):
+        from gateway_py3.capability_registry import CapabilityContractError, CapabilityRegistry
+        from gateway_py3.catalog_loader import OperationCatalog
+
+        catalog = OperationCatalog()
+        dissolve = catalog.capabilities.get("analysis.dissolve")["semantic_effects"][0]
+        self.assertEqual(["merge"], dissolve["preserves"])
+        self.assertEqual({"parameter": "input_layer"}, dissolve["source"])
+
+        operation = copy.deepcopy(catalog.get("edit.create_point_features"))
+        operation["capability_contract"]["semantic_effects"][0]["preserves"] = ["merge"]
+        with self.assertRaisesRegex(CapabilityContractError, "requires an explicit source binding"):
+            CapabilityRegistry([operation])
+
+    def test_registry_rejects_unresolvable_output_descriptor_binding(self):
+        from gateway_py3.capability_registry import CapabilityContractError, CapabilityRegistry
+        from gateway_py3.catalog_loader import OperationCatalog
+
+        operation = copy.deepcopy(OperationCatalog().get("analysis.spatial_join"))
+        operation["capability_contract"]["outputs"]["geometry"]["value"] = "input_layers"
+        with self.assertRaisesRegex(CapabilityContractError, "geometry.value must bind"):
+            CapabilityRegistry([operation])
+
+        operation = copy.deepcopy(OperationCatalog().get("analysis.buffer"))
+        operation["capability_contract"]["outputs"]["geometry"] = {
+            "rule": "lowest_dimension",
+            "value": "input_layer",
+        }
+        with self.assertRaisesRegex(CapabilityContractError, "many-valued input parameter"):
+            CapabilityRegistry([operation])
+
+        operation = copy.deepcopy(OperationCatalog().get("analysis.identity"))
+        operation["capability_contract"]["outputs"]["fields"] = {
+            "effect": "merge_inputs",
+            "target": "input_layers",
+            "static_fields": [],
+            "parameter_field": "not_applicable",
+        }
+        with self.assertRaisesRegex(CapabilityContractError, "outputs.fields"):
+            CapabilityRegistry([operation])
+
+    def test_registry_rejects_legacy_scalar_output_cardinality(self):
+        from gateway_py3.capability_registry import CapabilityContractError, CapabilityRegistry
+        from gateway_py3.catalog_loader import OperationCatalog
+
+        operation = copy.deepcopy(OperationCatalog().get("analysis.buffer"))
+        operation["capability_contract"]["outputs"]["cardinality"] = "one_per_input_feature"
+
+        with self.assertRaisesRegex(CapabilityContractError, "closed descriptor object"):
+            CapabilityRegistry([operation])
+
+    def test_registry_rejects_legacy_or_unbound_input_selection_requirements(self):
+        from gateway_py3.capability_registry import CapabilityContractError, CapabilityRegistry
+        from gateway_py3.catalog_loader import OperationCatalog
+
+        operation = copy.deepcopy(OperationCatalog().get("selection.export_selected_features"))
+        operation["capability_contract"]["inputs"][0]["selection"] = "selected_features_only"
+        with self.assertRaisesRegex(CapabilityContractError, "selection must be an object"):
+            CapabilityRegistry([operation])
+
+        operation = copy.deepcopy(OperationCatalog().get("export.table_csv"))
+        operation["capability_contract"]["inputs"][0]["selection"]["parameter"] = "output_name"
+        with self.assertRaisesRegex(CapabilityContractError, "values must match the string parameter"):
+            CapabilityRegistry([operation])
+
+    def test_representative_executor_contract_semantics(self):
+        from gateway_py3.catalog_loader import OperationCatalog
+
+        contracts = OperationCatalog().capabilities
+        self.assertEqual(contracts.get("table.add_field")["outputs"]["fields"]["effect"], "add_parameter_field")
+        self.assertEqual(contracts.get("table.delete_field")["outputs"]["fields"]["effect"], "delete_parameter_field")
+        spatial_join = contracts.get("analysis.spatial_join")["outputs"]
+        self.assertEqual(spatial_join["geometry"], {"rule": "inherit", "value": "target_layer"})
+        self.assertEqual(
+            contracts.get("analysis.intersect")["outputs"]["geometry"],
+            {"rule": "lowest_dimension", "value": "input_layers"},
+        )
+        self.assertEqual(
+            contracts.get("analysis.identity")["outputs"]["fields"]["sources"],
+            ["input_layer", "identity_layer"],
+        )
+        self.assertIn("Join_Count", spatial_join["fields"]["static_fields"])
+        buffer_fields = contracts.get("analysis.buffer")["outputs"]["fields"]
+        self.assertEqual("add_static_fields", buffer_fields["effect"])
+        self.assertEqual(["BUFF_DIST"], buffer_fields["static_fields"])
+        self.assertEqual(contracts.get("selection.select_by_attribute")["outputs"]["selection_state"], "applied")
+
+    def test_registry_rejects_unresolvable_postcondition_target_and_stale_output_reference(self):
+        from gateway_py3.capability_registry import CapabilityContractError, CapabilityRegistry
+        from gateway_py3.catalog_loader import OperationCatalog
+
+        operation = copy.deepcopy(OperationCatalog().get("table.add_field"))
+        operation["capability_contract"]["postconditions"][0]["target"] = "missing_layer"
+        with self.assertRaisesRegex(CapabilityContractError, "cannot be resolved"):
+            CapabilityRegistry([operation])
+
+        operation = copy.deepcopy(OperationCatalog().get("analysis.spatial_join"))
+        operation["capability_contract"]["postconditions"][0]["expectation"]["geometry"] = {"ref": "outputs.fields"}
+        with self.assertRaisesRegex(CapabilityContractError, "must reference outputs.geometry"):
+            CapabilityRegistry([operation])
+
     def test_functional_operation_packs_are_registered(self):
         catalog = _load_json(CATALOG_ROOT / "catalog.json")
         self.assertIn("packs/edit_geometry.json", catalog["packs"])
@@ -61,11 +231,14 @@ class CatalogTests(unittest.TestCase):
             for operation in pack["operations"]:
                 operations[operation["id"]] = operation
 
-        self.assertEqual(operations["edit.create_star_polygon"]["output_policy"]["geometry_type"], "Polygon")
+        self.assertEqual(operations["edit.create_star_polygon"]["capability_contract"]["outputs"]["geometry"]["value"], "polygon")
         self.assertEqual(operations["edit.append_star_polygons"]["side_effects"], "edits_data")
-        self.assertEqual(operations["edit.append_star_polygons"]["output_policy"]["geometry_type"], "Polygon")
-        self.assertEqual(operations["edit.create_empty_feature_layer"]["output_policy"]["geometry_type"], "UserSelected")
-        self.assertEqual(operations["edit.create_rectangle_polygon"]["output_policy"]["geometry_type"], "Polygon")
+        self.assertEqual(
+            operations["edit.append_star_polygons"]["capability_contract"]["outputs"]["cardinality"],
+            {"rule": "fixed", "value": "in_place"},
+        )
+        self.assertEqual(operations["edit.create_empty_feature_layer"]["capability_contract"]["outputs"]["geometry"]["value"], "parameter_geometry_type")
+        self.assertEqual(operations["edit.create_rectangle_polygon"]["capability_contract"]["outputs"]["geometry"]["value"], "polygon")
         self.assertEqual(operations["data.repair_geometry"]["side_effects"], "edits_data")
         self.assertEqual(operations["layout.export_pdf"]["output_policy"]["type"], "file")
         star_properties = operations["edit.create_star_polygon"]["parameters_schema"]["properties"]

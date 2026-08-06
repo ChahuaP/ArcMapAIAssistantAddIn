@@ -14,7 +14,7 @@ QUIET_ACCESS_PATHS = (
 
 def config_payload(payload):
     allowed = {}
-    for key in ("primary_provider", "primary_model", "reviewer_provider", "reviewer_model"):
+    for key in ("primary_provider", "primary_model"):
         if payload.get(key):
             allowed[key] = payload[key]
     providers = payload.get("providers") if isinstance(payload.get("providers"), dict) else {}
@@ -50,18 +50,17 @@ def config_payload(payload):
     return allowed
 
 
-def public_operation(operation, detail: bool = False):
+def public_operation(catalog, operation, detail: bool = False):
     schema = operation.get("parameters_schema", {})
     properties = schema.get("properties", {})
     result = {
         "id": operation["id"],
         "category": operation["category"],
         "summary": operation["summary"],
-        "model_card": operation.get("model_card", ""),
         "side_effects": operation["side_effects"],
         "required": schema.get("required", []),
         "parameters": sorted(properties.keys()),
-        "context_requirements": operation.get("context_requirements", {}),
+        "capability_contract": catalog.capabilities.get(operation["id"]),
         "example": (operation.get("examples") or [{}])[0].get("user", "")
     }
     if detail:

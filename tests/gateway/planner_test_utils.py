@@ -1,7 +1,52 @@
 import contextlib
+import copy
 import json
 
 from gateway_py3 import tool_builder
+from gateway_py3.task_contract import task_contract_model_view
+
+
+def task_contract(command):
+    """Return the sole evidence-bound TaskContract fixture for *command*."""
+    return {
+        "input_entities": [],
+        "outputs": [{
+            "output_id": "o1", "kind": "map_state", "name": command,
+            "format": "map", "geometry": "not_applicable",
+            "required_fields": [], "spatial_reference": "not_applicable",
+            "destination": "not_applicable", "evidence": command,
+        }],
+        "requirements": [{
+            "requirement_id": "r1", "predicate": {"kind": "map_change", "subject": "o1", "action": "refresh"},
+            "evidence": command,
+        }],
+        "allowed_side_effects": ["read_only", "changes_map", "writes_data", "edits_data"],
+        "clarifications": [],
+    }
+
+
+def model_wire_response(response, messages):
+    """Encode canonical fixtures into the current model-wire contracts."""
+    if not isinstance(response, dict):
+        return response
+    bound = dict(response)
+    if "task_contract" in response:
+        value = response["task_contract"]
+        if value is task_contract:
+            value = task_contract(json.loads(messages[1]["content"])["request"])
+        bound["task_contract"] = task_contract_model_view(value)
+    if "workflow_draft" in response:
+        value = copy.deepcopy(response["workflow_draft"])
+        if isinstance(value, dict) and isinstance(value.get("steps"), list):
+            for step_value in value["steps"]:
+                if isinstance(step_value, dict) and "arguments" in step_value:
+                    arguments = step_value.pop("arguments")
+                    step_value["arguments_json"] = json.dumps(
+                        arguments, ensure_ascii=False, sort_keys=True,
+                        separators=(",", ":"),
+                    )
+        bound["workflow_draft"] = value
+    return bound
 
 
 class FakeAgentClient:
@@ -73,7 +118,6 @@ def custom_writes_data_spec():
         "version": "0.1.0",
         "category": "custom",
         "summary": "面转点",
-        "model_card": "把面图层转换为中心点，并保留属性。",
         "parameters_schema": {
             "type": "object",
             "required": ["input_layer", "output_name"],
@@ -101,7 +145,6 @@ def star_tool_arguments():
             "version": "0.1.0",
             "category": "custom",
             "summary": "面要素转五角星面",
-            "model_card": "将输入面图层的每个面按中心点和外接范围生成一个五角星面。",
             "parameters_schema": {
                 "type": "object",
                 "required": ["input_layer", "output_name"],

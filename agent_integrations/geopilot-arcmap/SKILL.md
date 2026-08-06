@@ -22,8 +22,8 @@ Use the local GeoPilot gateway and `ArcMapBridge.exe` as the ArcMap safety and e
    - Bridge-triggered sync/execute is silent in ArcMap. A manual toolbar click on `启动控制台` opens the Web console and reads the current map context.
    - If a detected bridge port is occupied but does not respond, read `%LOCALAPPDATA%\ArcMapAIAssistant\logs\arcmap_bridge.log`.
 5. Context capture is performed automatically for the exact selected ArcMap target when a run is submitted.
-6. Create a run with `scripts/geopilot_cli.py run --mode context_single --command "<user request>"`.
-7. Run automatically with `scripts/geopilot_cli.py run --mode multi_agent --command "<request>" --execute --confirmed`; direct edits additionally require `--allow-edits`.
+6. Create a run with `scripts/geopilot_cli.py run --mode g1_context --command "<user request>"`.
+7. Run automatically with `scripts/geopilot_cli.py run --mode g3_audited --command "<request>" --execute --confirmed`; direct edits additionally require `--allow-edits`.
 8. Query the terminal result with `run-status <run_id>` or export reproducibility data with `run-report`.
    - `indeterminate` is terminal and means ArcMap's authoritative result did not arrive within the recovery window. Never infer success. The episode is protected as an audit record while a new run may be submitted independently. A later result is accepted only from the original execution owner and ArcMap target and is recorded as a recovery audit; ordinary cleanup is allowed only after that recovery.
 

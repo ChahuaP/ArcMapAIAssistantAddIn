@@ -6,17 +6,39 @@
       "version": "1.0",
       "category": "data_management",
       "summary": "复制图层要素为新的要素类或 Shapefile。",
-      "keywords": ["copy features", "复制要素", "另存为", "导出要素"],
-      "model_card": "Use data.copy_features to copy a feature layer into a new output dataset. Arguments: input_layer, output_name, output_workspace optional for GDB output, output_folder optional for shapefile output, output_format optional: gdb or shp.",
+      "keywords": [
+        "copy features",
+        "复制要素",
+        "另存为",
+        "导出要素"
+      ],
       "parameters_schema": {
         "type": "object",
-        "required": ["input_layer", "output_name"],
+        "required": [
+          "input_layer",
+          "output_name"
+        ],
         "properties": {
-          "input_layer": {"type": "string", "x-geopilot-kind": "layer"},
-          "output_name": {"type": "string"},
-          "output_workspace": {"type": "string"},
-          "output_folder": {"type": "string"},
-          "output_format": {"type": "string", "enum": ["gdb", "shp"]}
+          "input_layer": {
+            "type": "string",
+            "x-geopilot-kind": "layer"
+          },
+          "output_name": {
+            "type": "string"
+          },
+          "output_workspace": {
+            "type": "string"
+          },
+          "output_folder": {
+            "type": "string"
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "gdb",
+              "shp"
+            ]
+          }
         },
         "additionalProperties": false
       },
@@ -28,7 +50,10 @@
       "output_policy": {
         "writes_output": true,
         "type": "feature_class",
-        "formats": ["gdb", "shp"],
+        "formats": [
+          "gdb",
+          "shp"
+        ],
         "default_format": "gdb",
         "workspace": "mxd_default_or_output_workspace_or_output_folder",
         "overwrite": false,
@@ -44,24 +69,167 @@
             "output_format": "shp"
           }
         }
-      ]
+      ],
+      "capability_contract": {
+        "inputs": [
+          {
+            "parameter": "input_layer",
+            "cardinality": "one",
+            "data_kind": [
+              "feature_layer",
+              "raster_layer",
+              "table_view"
+            ],
+            "geometry": [
+              "point",
+              "polyline",
+              "polygon",
+              "raster",
+              "not_applicable"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          }
+        ],
+        "parameters_schema": {
+          "type": "object",
+          "required": [
+            "input_layer",
+            "output_name"
+          ],
+          "properties": {
+            "input_layer": {
+              "type": "string",
+              "x-geopilot-kind": "layer"
+            },
+            "output_name": {
+              "type": "string"
+            },
+            "output_workspace": {
+              "type": "string"
+            },
+            "output_folder": {
+              "type": "string"
+            },
+            "output_format": {
+              "type": "string",
+              "enum": [
+                "gdb",
+                "shp"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "kind": "feature_class",
+          "geometry": {
+            "rule": "inherit",
+            "value": "input_layer"
+          },
+          "fields": {
+            "effect": "inherit_input",
+            "target": "input_layer",
+            "static_fields": [],
+            "parameter_field": "not_applicable"
+          },
+          "spatial_reference": {
+            "rule": "inherit",
+            "input": "input_layer"
+          },
+          "cardinality": {
+            "rule": "fixed",
+            "value": "one_or_more_per_input_feature"
+          },
+          "selection_state": "not_applicable",
+          "map_publication": "published"
+        },
+        "side_effects": "writes_data",
+        "authorization": {
+          "required": true,
+          "scope": "write_data"
+        },
+        "postconditions": [
+          {
+            "kind": "feature_class_created",
+            "target": "output_name",
+            "expectation": {
+              "kind": {
+                "ref": "outputs.kind"
+              },
+              "geometry": {
+                "ref": "outputs.geometry"
+              },
+              "fields": {
+                "ref": "outputs.fields"
+              },
+              "spatial_reference": {
+                "ref": "outputs.spatial_reference"
+              },
+              "cardinality": {
+                "ref": "outputs.cardinality"
+              },
+              "selection_state": {
+                "ref": "outputs.selection_state"
+              },
+              "map_publication": {
+                "ref": "outputs.map_publication"
+              }
+            }
+          }
+        ],
+        "semantic_effects": [
+          {
+            "kind": "copy",
+            "source": {
+              "parameter": "input_layer"
+            },
+            "result": {
+              "output": true
+            }
+          }
+        ]
+      }
     },
     {
       "id": "data.multipart_to_singlepart",
       "version": "1.0",
       "category": "data_management",
       "summary": "将多部件要素拆为单部件要素。",
-      "keywords": ["multipart", "singlepart", "多部件", "单部件", "拆分部件"],
-      "model_card": "Use data.multipart_to_singlepart to split multipart features into singlepart features. Arguments: input_layer, output_name, output location optional.",
+      "keywords": [
+        "multipart",
+        "singlepart",
+        "多部件",
+        "单部件",
+        "拆分部件"
+      ],
       "parameters_schema": {
         "type": "object",
-        "required": ["input_layer", "output_name"],
+        "required": [
+          "input_layer",
+          "output_name"
+        ],
         "properties": {
-          "input_layer": {"type": "string", "x-geopilot-kind": "layer"},
-          "output_name": {"type": "string"},
-          "output_workspace": {"type": "string"},
-          "output_folder": {"type": "string"},
-          "output_format": {"type": "string", "enum": ["gdb", "shp"]}
+          "input_layer": {
+            "type": "string",
+            "x-geopilot-kind": "layer"
+          },
+          "output_name": {
+            "type": "string"
+          },
+          "output_workspace": {
+            "type": "string"
+          },
+          "output_folder": {
+            "type": "string"
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "gdb",
+              "shp"
+            ]
+          }
         },
         "additionalProperties": false
       },
@@ -73,7 +241,10 @@
       "output_policy": {
         "writes_output": true,
         "type": "feature_class",
-        "formats": ["gdb", "shp"],
+        "formats": [
+          "gdb",
+          "shp"
+        ],
         "default_format": "gdb",
         "workspace": "mxd_default_or_output_workspace_or_output_folder",
         "overwrite": false,
@@ -88,27 +259,165 @@
             "output_name": "parcels_singlepart"
           }
         }
-      ]
+      ],
+      "capability_contract": {
+        "inputs": [
+          {
+            "parameter": "input_layer",
+            "cardinality": "one",
+            "data_kind": [
+              "feature_layer",
+              "raster_layer",
+              "table_view"
+            ],
+            "geometry": [
+              "point",
+              "polyline",
+              "polygon",
+              "raster",
+              "not_applicable"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          }
+        ],
+        "parameters_schema": {
+          "type": "object",
+          "required": [
+            "input_layer",
+            "output_name"
+          ],
+          "properties": {
+            "input_layer": {
+              "type": "string",
+              "x-geopilot-kind": "layer"
+            },
+            "output_name": {
+              "type": "string"
+            },
+            "output_workspace": {
+              "type": "string"
+            },
+            "output_folder": {
+              "type": "string"
+            },
+            "output_format": {
+              "type": "string",
+              "enum": [
+                "gdb",
+                "shp"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "kind": "feature_class",
+          "geometry": {
+            "rule": "inherit",
+            "value": "input_layer"
+          },
+          "fields": {
+            "effect": "inherit_input",
+            "target": "input_layer",
+            "static_fields": [],
+            "parameter_field": "not_applicable"
+          },
+          "spatial_reference": {
+            "rule": "inherit",
+            "input": "input_layer"
+          },
+          "cardinality": {
+            "rule": "fixed",
+            "value": "one_or_more_per_input_feature"
+          },
+          "selection_state": "not_applicable",
+          "map_publication": "published"
+        },
+        "side_effects": "writes_data",
+        "authorization": {
+          "required": true,
+          "scope": "write_data"
+        },
+        "postconditions": [
+          {
+            "kind": "feature_class_created",
+            "target": "output_name",
+            "expectation": {
+              "kind": {
+                "ref": "outputs.kind"
+              },
+              "geometry": {
+                "ref": "outputs.geometry"
+              },
+              "fields": {
+                "ref": "outputs.fields"
+              },
+              "spatial_reference": {
+                "ref": "outputs.spatial_reference"
+              },
+              "cardinality": {
+                "ref": "outputs.cardinality"
+              },
+              "selection_state": {
+                "ref": "outputs.selection_state"
+              },
+              "map_publication": {
+                "ref": "outputs.map_publication"
+              }
+            }
+          }
+        ],
+        "semantic_effects": [
+          {
+            "kind": "copy",
+            "source": {
+              "parameter": "input_layer"
+            },
+            "result": {
+              "output": true
+            }
+          }
+        ]
+      }
     },
     {
       "id": "data.repair_geometry",
       "version": "1.0",
       "category": "data_management",
       "summary": "修复输入图层的几何错误，会直接修改源数据。",
-      "keywords": ["repair geometry", "修复几何", "几何错误"],
-      "model_card": "Use data.repair_geometry only when the user explicitly wants to repair geometry in the source dataset. This edits original data and requires allow_edits. Arguments: layer, delete_null optional DELETE_NULL or KEEP_NULL.",
+      "keywords": [
+        "repair geometry",
+        "修复几何",
+        "几何错误"
+      ],
       "parameters_schema": {
         "type": "object",
-        "required": ["layer"],
+        "required": [
+          "layer"
+        ],
         "properties": {
-          "layer": {"type": "string", "x-geopilot-kind": "layer"},
-          "delete_null": {"type": "string", "enum": ["DELETE_NULL", "KEEP_NULL"]}
+          "layer": {
+            "type": "string",
+            "x-geopilot-kind": "layer"
+          },
+          "delete_null": {
+            "type": "string",
+            "enum": [
+              "DELETE_NULL",
+              "KEEP_NULL"
+            ]
+          }
         },
         "additionalProperties": false
       },
-      "context_requirements": {"requires_layers": true},
+      "context_requirements": {
+        "requires_layers": true
+      },
       "side_effects": "edits_data",
-      "output_policy": {"writes_output": false},
+      "output_policy": {
+        "writes_output": false
+      },
       "executor": "operations.data_management_ops.repair_geometry",
       "examples": [
         {
@@ -118,27 +427,149 @@
             "delete_null": "DELETE_NULL"
           }
         }
-      ]
+      ],
+      "capability_contract": {
+        "inputs": [
+          {
+            "parameter": "layer",
+            "cardinality": "one",
+            "data_kind": [
+              "feature_layer",
+              "raster_layer",
+              "table_view"
+            ],
+            "geometry": [
+              "point",
+              "polyline",
+              "polygon",
+              "raster",
+              "not_applicable"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          }
+        ],
+        "parameters_schema": {
+          "type": "object",
+          "required": [
+            "layer"
+          ],
+          "properties": {
+            "layer": {
+              "type": "string",
+              "x-geopilot-kind": "layer"
+            },
+            "delete_null": {
+              "type": "string",
+              "enum": [
+                "DELETE_NULL",
+                "KEEP_NULL"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "kind": "none",
+          "geometry": {
+            "rule": "not_applicable",
+            "value": "not_applicable"
+          },
+          "fields": {
+            "effect": "in_place_update",
+            "target": "layer",
+            "static_fields": [],
+            "parameter_field": "not_applicable"
+          },
+          "spatial_reference": {
+            "rule": "not_applicable",
+            "input": "not_applicable"
+          },
+          "cardinality": {
+            "rule": "fixed",
+            "value": "in_place"
+          },
+          "selection_state": "selection_preserved",
+          "map_publication": "none"
+        },
+        "side_effects": "edits_data",
+        "authorization": {
+          "required": true,
+          "scope": "edit_data"
+        },
+        "postconditions": [
+          {
+            "kind": "target_data_edited",
+            "target": "layer",
+            "expectation": {
+              "kind": {
+                "ref": "outputs.kind"
+              },
+              "geometry": {
+                "ref": "outputs.geometry"
+              },
+              "fields": {
+                "ref": "outputs.fields"
+              },
+              "spatial_reference": {
+                "ref": "outputs.spatial_reference"
+              },
+              "cardinality": {
+                "ref": "outputs.cardinality"
+              },
+              "selection_state": {
+                "ref": "outputs.selection_state"
+              },
+              "map_publication": {
+                "ref": "outputs.map_publication"
+              }
+            }
+          }
+        ],
+        "semantic_effects": [
+          {
+            "kind": "repair",
+            "target": {
+              "parameter": "layer"
+            }
+          }
+        ]
+      }
     },
     {
       "id": "data.define_projection",
       "version": "1.0",
       "category": "data_management",
       "summary": "为图层数据定义坐标系，会直接修改数据集元数据。",
-      "keywords": ["define projection", "定义投影", "定义坐标系"],
-      "model_card": "Use data.define_projection when the dataset has the correct coordinates but missing/wrong projection metadata. This edits dataset metadata and requires allow_edits. Arguments: layer, wkid.",
+      "keywords": [
+        "define projection",
+        "定义投影",
+        "定义坐标系"
+      ],
       "parameters_schema": {
         "type": "object",
-        "required": ["layer", "wkid"],
+        "required": [
+          "layer",
+          "wkid"
+        ],
         "properties": {
-          "layer": {"type": "string", "x-geopilot-kind": "layer"},
-          "wkid": {"type": "integer"}
+          "layer": {
+            "type": "string",
+            "x-geopilot-kind": "layer"
+          },
+          "wkid": {
+            "type": "integer"
+          }
         },
         "additionalProperties": false
       },
-      "context_requirements": {"requires_layers": true},
+      "context_requirements": {
+        "requires_layers": true
+      },
       "side_effects": "edits_data",
-      "output_policy": {"writes_output": false},
+      "output_policy": {
+        "writes_output": false
+      },
       "executor": "operations.data_management_ops.define_projection",
       "examples": [
         {
@@ -148,26 +579,146 @@
             "wkid": 4326
           }
         }
-      ]
+      ],
+      "capability_contract": {
+        "inputs": [
+          {
+            "parameter": "layer",
+            "cardinality": "one",
+            "data_kind": [
+              "feature_layer",
+              "raster_layer",
+              "table_view"
+            ],
+            "geometry": [
+              "point",
+              "polyline",
+              "polygon",
+              "raster",
+              "not_applicable"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          }
+        ],
+        "parameters_schema": {
+          "type": "object",
+          "required": [
+            "layer",
+            "wkid"
+          ],
+          "properties": {
+            "layer": {
+              "type": "string",
+              "x-geopilot-kind": "layer"
+            },
+            "wkid": {
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "kind": "none",
+          "geometry": {
+            "rule": "not_applicable",
+            "value": "not_applicable"
+          },
+          "fields": {
+            "effect": "in_place_update",
+            "target": "layer",
+            "static_fields": [],
+            "parameter_field": "not_applicable"
+          },
+          "spatial_reference": {
+            "rule": "from_parameter",
+            "input": "wkid"
+          },
+          "cardinality": {
+            "rule": "fixed",
+            "value": "in_place"
+          },
+          "selection_state": "selection_preserved",
+          "map_publication": "none"
+        },
+        "side_effects": "edits_data",
+        "authorization": {
+          "required": true,
+          "scope": "edit_data"
+        },
+        "postconditions": [
+          {
+            "kind": "target_data_edited",
+            "target": "layer",
+            "expectation": {
+              "kind": {
+                "ref": "outputs.kind"
+              },
+              "geometry": {
+                "ref": "outputs.geometry"
+              },
+              "fields": {
+                "ref": "outputs.fields"
+              },
+              "spatial_reference": {
+                "ref": "outputs.spatial_reference"
+              },
+              "cardinality": {
+                "ref": "outputs.cardinality"
+              },
+              "selection_state": {
+                "ref": "outputs.selection_state"
+              },
+              "map_publication": {
+                "ref": "outputs.map_publication"
+              }
+            }
+          }
+        ],
+        "semantic_effects": [
+          {
+            "kind": "define_projection",
+            "target": {
+              "parameter": "layer"
+            },
+            "spatial_reference": {
+              "parameter": "wkid"
+            }
+          }
+        ]
+      }
     },
     {
       "id": "data.add_xy",
       "version": "1.0",
       "category": "data_management",
       "summary": "给点图层属性表添加 POINT_X 和 POINT_Y 字段，会直接修改源数据。",
-      "keywords": ["add xy", "添加xy", "坐标字段", "POINT_X"],
-      "model_card": "Use data.add_xy for point layers when the user wants POINT_X and POINT_Y fields added to the source data. This edits original data and requires allow_edits. Arguments: layer.",
+      "keywords": [
+        "add xy",
+        "添加xy",
+        "坐标字段",
+        "POINT_X"
+      ],
       "parameters_schema": {
         "type": "object",
-        "required": ["layer"],
+        "required": [
+          "layer"
+        ],
         "properties": {
-          "layer": {"type": "string", "x-geopilot-kind": "layer"}
+          "layer": {
+            "type": "string",
+            "x-geopilot-kind": "layer"
+          }
         },
         "additionalProperties": false
       },
-      "context_requirements": {"requires_layers": true},
+      "context_requirements": {
+        "requires_layers": true
+      },
       "side_effects": "edits_data",
-      "output_policy": {"writes_output": false},
+      "output_policy": {
+        "writes_output": false
+      },
       "executor": "operations.data_management_ops.add_xy",
       "examples": [
         {
@@ -176,7 +727,110 @@
             "layer": "points"
           }
         }
-      ]
+      ],
+      "capability_contract": {
+        "inputs": [
+          {
+            "parameter": "layer",
+            "cardinality": "one",
+            "data_kind": [
+              "feature_layer",
+              "raster_layer",
+              "table_view"
+            ],
+            "geometry": [
+              "point",
+              "polyline",
+              "polygon",
+              "raster",
+              "not_applicable"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          }
+        ],
+        "parameters_schema": {
+          "type": "object",
+          "required": [
+            "layer"
+          ],
+          "properties": {
+            "layer": {
+              "type": "string",
+              "x-geopilot-kind": "layer"
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "kind": "none",
+          "geometry": {
+            "rule": "not_applicable",
+            "value": "not_applicable"
+          },
+          "fields": {
+            "effect": "add_static_fields",
+            "target": "layer",
+            "static_fields": [
+              "POINT_X",
+              "POINT_Y"
+            ],
+            "parameter_field": "not_applicable"
+          },
+          "spatial_reference": {
+            "rule": "not_applicable",
+            "input": "not_applicable"
+          },
+          "cardinality": {
+            "rule": "fixed",
+            "value": "in_place"
+          },
+          "selection_state": "selection_preserved",
+          "map_publication": "none"
+        },
+        "side_effects": "edits_data",
+        "authorization": {
+          "required": true,
+          "scope": "edit_data"
+        },
+        "postconditions": [
+          {
+            "kind": "target_data_edited",
+            "target": "layer",
+            "expectation": {
+              "kind": {
+                "ref": "outputs.kind"
+              },
+              "geometry": {
+                "ref": "outputs.geometry"
+              },
+              "fields": {
+                "ref": "outputs.fields"
+              },
+              "spatial_reference": {
+                "ref": "outputs.spatial_reference"
+              },
+              "cardinality": {
+                "ref": "outputs.cardinality"
+              },
+              "selection_state": {
+                "ref": "outputs.selection_state"
+              },
+              "map_publication": {
+                "ref": "outputs.map_publication"
+              }
+            }
+          }
+        ],
+        "semantic_effects": [
+          {
+            "kind": "add_xy",
+            "target": {
+              "parameter": "layer"
+            }
+          }
+        ]
+      }
     }
   ]
 }

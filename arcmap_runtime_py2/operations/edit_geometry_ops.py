@@ -5,7 +5,7 @@ import math
 
 import arcpy
 
-from operations import common
+from . import common
 
 try:
     import path_utils

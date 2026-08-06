@@ -3,7 +3,7 @@ from __future__ import absolute_import
 
 import arcpy
 
-from operations import common
+from . import common
 
 
 def _output(context, arguments):

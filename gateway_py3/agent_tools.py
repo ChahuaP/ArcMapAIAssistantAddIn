@@ -154,7 +154,7 @@ class AgentToolRuntime:
                 "id": operation["id"],
                 "category": operation["category"],
                 "summary": operation["summary"],
-                "model_card": operation.get("model_card", ""),
+                "capability_contract": self.catalog.capabilities.get(operation["id"]),
                 "side_effects": operation["side_effects"]
             }
             for operation in self.catalog.all_operations()

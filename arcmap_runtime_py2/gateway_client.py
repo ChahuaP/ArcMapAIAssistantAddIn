@@ -20,7 +20,7 @@ except NameError:
 
 
 BASE_URL = "http://127.0.0.1:8765"
-EXPECTED_APP_VERSION = "1.0.3"
+EXPECTED_APP_VERSION = "1.1.4"
 REPO_ROOT = path_utils.abspath(path_utils.join_path(os.path.dirname(__file__), ".."))
 CREATE_NO_WINDOW = 0x08000000
 

@@ -19,6 +19,7 @@ sys.modules.setdefault("urllib2", types.SimpleNamespace(
 builtins.reload = importlib.reload
 
 from arcmap_runtime_py2 import runtime
+from arcmap_runtime_py2 import arcmap_ui_dispatch
 from arcmap_runtime_py2.execution_outbox import ExecutionOutbox
 from arcmap_runtime_py2 import workflow_executor
 from gateway_py3.catalog_loader import OperationCatalog
@@ -30,6 +31,7 @@ from gateway_py3.run_store import RunStore
 
 
 TARGET = {"bridge_pid": 7, "bridge_port": 8766, "arcmap_pid": 70, "hwnd": 9}
+OWNER_ID = "eca7fc62-6289-48d4-aa96-993d3a341b17"
 
 
 def _plan(path):
@@ -54,6 +56,147 @@ class ThreePartyRunProtocolTests(unittest.TestCase):
 
     def tearDown(self):
         self.temp.cleanup()
+
+    def test_manual_console_launch_does_not_resolve_bridge_target_inside_arcmap_callback(self):
+        events = []
+        with patch.object(runtime.gateway_client, "ensure_running", side_effect=lambda: events.append("gateway")), \
+                patch.object(runtime.gateway_client, "current_target", side_effect=AssertionError("ArcMap callback deadlock")), \
+                patch.object(runtime.map_exporter, "cleanup_stale", side_effect=lambda: events.append("cleanup")), \
+                patch.object(runtime, "_drain_execution_outbox", side_effect=AssertionError("targetless recovery")), \
+                patch.object(runtime, "_sync_current_context", side_effect=lambda: events.append("context")), \
+                patch.object(runtime, "open_web", side_effect=lambda: events.append("web")):
+            runtime.open_assistant()
+
+        self.assertEqual(events, ["gateway", "cleanup", "context", "web"])
+
+    def test_silent_execution_claims_then_defers_arcgis_work_to_the_ui_message_loop(self):
+        run_id = "e0c1c9b0-0ae6-4d57-978b-64a1014129e3"
+        owner_id = OWNER_ID
+        events = []
+        callbacks = []
+        row = {"id": run_id}
+        heartbeat = SimpleNamespace(
+            start=lambda: events.append("heartbeat"),
+            stop=lambda: events.append("stop"),
+        )
+        outcome = SimpleNamespace(
+            result={"ok": True},
+            publication_plan=runtime.execution_session.PublicationPlan([]),
+        )
+        with patch.object(runtime.gateway_client, "ensure_running"), \
+                patch.object(runtime.map_exporter, "cleanup_stale"), \
+                patch.object(runtime, "_drain_execution_outbox"), \
+                patch.object(
+                    runtime.gateway_client,
+                    "claim_run",
+                    side_effect=lambda *args: events.append("claim") or {"run": row},
+                ), \
+                patch.object(runtime, "_ExecutionHeartbeat", return_value=heartbeat), \
+                patch.object(
+                    runtime.context_reader,
+                    "read_context",
+                    side_effect=lambda: events.append("context") or {},
+                ), \
+                patch.object(
+                    runtime.workflow_executor,
+                    "execute",
+                    side_effect=lambda *args, **kwargs: events.append("workflow") or outcome,
+                ), \
+                patch.object(
+                    runtime,
+                    "_persist_publish_and_deliver",
+                    side_effect=lambda *args: events.append("persist") or True,
+                ), \
+                patch.object(
+                    runtime,
+                    "arcmap_ui_dispatch",
+                    SimpleNamespace(
+                        defer=lambda callback: events.append("defer") or callbacks.append(callback)
+                    ),
+                    create=True,
+                ):
+            runtime._run_silent_command({
+                "action": "execute",
+                "run_id": run_id,
+                "owner_id": owner_id,
+                "target": TARGET,
+            })
+
+            self.assertEqual(events, ["claim", "heartbeat", "defer"])
+            self.assertEqual(len(callbacks), 1)
+
+            callbacks[0]()
+
+            self.assertEqual(events, [
+                "claim", "heartbeat", "defer", "context", "workflow", "persist",
+            ])
+
+    def test_deferred_execution_schedule_failure_completes_the_claimed_run_as_failed(self):
+        run_id = "e0c1c9b0-0ae6-4d57-978b-64a1014129e3"
+        events = []
+        heartbeat = SimpleNamespace(start=lambda: events.append("heartbeat"))
+
+        def persist(*args):
+            events.append((args[2], args[3]))
+            return True
+
+        with patch.object(runtime.gateway_client, "ensure_running"), \
+                patch.object(runtime.map_exporter, "cleanup_stale"), \
+                patch.object(runtime, "_drain_execution_outbox"), \
+                patch.object(
+                    runtime.gateway_client,
+                    "claim_run",
+                    side_effect=lambda *args: events.append("claim") or {"run": {"id": run_id}},
+                ), \
+                patch.object(runtime, "_ExecutionHeartbeat", return_value=heartbeat), \
+                patch.object(runtime.arcmap_ui_dispatch, "defer", side_effect=RuntimeError("timer failed")), \
+                patch.object(runtime, "_persist_publish_and_deliver", side_effect=persist), \
+                patch.object(
+                    runtime.workflow_executor,
+                    "execute",
+                    side_effect=AssertionError("ArcGIS work ran inside the COM callback"),
+                ):
+            with self.assertRaisesRegex(RuntimeError, "timer failed"):
+                runtime._run_silent_command({
+                    "action": "execute",
+                    "run_id": run_id,
+                    "owner_id": OWNER_ID,
+                    "target": TARGET,
+                })
+
+        self.assertEqual(events[:2], ["claim", "heartbeat"])
+        self.assertEqual(events[2][0], "failed")
+        self.assertFalse(events[2][1]["ok"])
+        self.assertEqual(events[2][1]["failure_phase"], "arcmap_ui_dispatch")
+
+    def test_arcmap_ui_dispatch_runs_once_after_the_current_callback_returns(self):
+        events = []
+        timer_procs = []
+
+        def set_timer(timer_proc):
+            timer_procs.append(timer_proc)
+            return 41
+
+        try:
+            with patch.object(arcmap_ui_dispatch, "_set_timer", side_effect=set_timer), \
+                    patch.object(
+                        arcmap_ui_dispatch,
+                        "_kill_timer",
+                        side_effect=lambda timer_id: events.append(("kill", timer_id)) or True,
+                    ):
+                arcmap_ui_dispatch.defer(lambda: events.append("run"))
+                self.assertEqual(events, [])
+                with self.assertRaisesRegex(RuntimeError, "already has"):
+                    arcmap_ui_dispatch.defer(lambda: None)
+
+                timer_procs[0](None, 0x0113, 41, 0)
+                self.assertEqual(events, [("kill", 41), "run"])
+
+                arcmap_ui_dispatch.defer(lambda: events.append("next"))
+                timer_procs[1](None, 0x0113, 41, 0)
+                self.assertEqual(events, [("kill", 41), "run", ("kill", 41), "next"])
+        finally:
+            arcmap_ui_dispatch._clear_pending()
 
     def test_runtime_persists_plan_then_publishes_then_delivers_authoritative_result(self):
         events = []
@@ -164,7 +307,7 @@ class ThreePartyRunProtocolTests(unittest.TestCase):
             "captured_at": 1.0,
             "bridge": {"bridge_pid": 10, "bridge_port": 8766, "arcmap_pid": 100, "hwnd": 20},
         }
-        run = self.store.create_run("noop", "context_single")
+        run = self.store.create_run("noop", "g1_context")
         controller = RunController(
             _Runner(self.store),
             self.store,
@@ -173,7 +316,7 @@ class ThreePartyRunProtocolTests(unittest.TestCase):
             lambda run_id, allow_edits, target: None,
         )
 
-        controller.run(run["id"], {"command": "noop", "mode": "context_single", "execute": False})
+        controller.run(run["id"], {"command": "noop", "mode": "g1_context", "execute": False})
         row = self.store.get(run["id"])
 
         self.assertEqual(row["context_hash"], context_hash(context))
@@ -183,7 +326,7 @@ class ThreePartyRunProtocolTests(unittest.TestCase):
         context = _context("before.mxd")
         target = {"bridge_pid": 10, "bridge_port": 8766, "arcmap_pid": 100, "hwnd": 20}
         capture = {"context": context, "context_hash": context_hash(context), "captured_at": 1.0, "bridge": target}
-        run = self.store.create_run("noop", "context_single")
+        run = self.store.create_run("noop", "g1_context")
         self.store.bind_context(run["id"], capture)
         self.store.update_run(run["id"], "planned", workflow={"action": "execute", "summary": "noop", "steps": []})
         self.store.update_run(run["id"], "approved")
@@ -203,7 +346,7 @@ class ThreePartyRunProtocolTests(unittest.TestCase):
             catalog=OperationCatalog(),
             bridge_cache={"expires_at": 0.0, "bridges": []},
         )
-        run = self.store.create_run("noop", "context_single")
+        run = self.store.create_run("noop", "g1_context")
         transitions = []
         context_by_phase = {"before_planning": before, "after_execution": after}
 
@@ -235,7 +378,7 @@ class ThreePartyRunProtocolTests(unittest.TestCase):
             return response
 
         def execute_runtime(run_id, allow_edits, bound_target):
-            runtime._execute_run(run_id, bound_target, silent=True)
+            runtime._execute_run(run_id, bound_target, OWNER_ID, silent=True)
             return {"ok": True, "run_id": run_id}
 
         controller = RunController(
@@ -254,7 +397,7 @@ class ThreePartyRunProtocolTests(unittest.TestCase):
              patch("arcmap_runtime_py2.runtime.context_reader.read_context", return_value=before):
             row = controller.run(run["id"], {
                 "command": "noop",
-                "mode": "context_single",
+                "mode": "g1_context",
                 "execute": True,
             })
 
@@ -278,7 +421,7 @@ class ThreePartyRunProtocolTests(unittest.TestCase):
             catalog=OperationCatalog(),
             bridge_cache={"expires_at": 0.0, "bridges": []},
         )
-        run = self.store.create_run("noop", "context_single")
+        run = self.store.create_run("noop", "g1_context")
 
         def bridge_sync(run_id, sync_token, phase, port=None, hwnd=None):
             if phase == "after_execution":
@@ -306,14 +449,16 @@ class ThreePartyRunProtocolTests(unittest.TestCase):
                 state, run_id, phase, bridge=bound_target or target, finalizer=fence
             ),
             lambda request, row: False,
-            lambda run_id, allow_edits, bound_target: runtime._execute_run(run_id, bound_target, silent=True),
+            lambda run_id, allow_edits, bound_target: runtime._execute_run(
+                run_id, bound_target, OWNER_ID, silent=True
+            ),
         )
         with patch("gateway_py3.routes.arcmap.arcmap_bridge_client.sync_context_target", side_effect=bridge_sync), \
              patch("arcmap_runtime_py2.runtime.gateway_client.claim_run", side_effect=runtime_claim), \
              patch("arcmap_runtime_py2.runtime.gateway_client.complete_run", side_effect=runtime_complete), \
              patch.object(runtime, "EXECUTION_OUTBOX", ExecutionOutbox(str(Path(self.temp.name) / "outbox-failure"))), \
              patch("arcmap_runtime_py2.runtime.context_reader.read_context", return_value=before):
-            row = controller.run(run["id"], {"command": "noop", "mode": "context_single", "execute": True})
+            row = controller.run(run["id"], {"command": "noop", "mode": "g1_context", "execute": True})
 
         self.assertEqual(row["status"], "context_failed")
         self.assertEqual(row["result"]["summary"], "noop")

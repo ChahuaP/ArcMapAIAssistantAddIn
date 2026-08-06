@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 import uuid
 
-from .experiments import digest
+from .planning_engine import digest
 from .validators import context_hash
 
 
@@ -65,14 +65,21 @@ class RunController:
     def _plan(self, run_id, request, context):
         trace, stage = self._start_stage(run_id, "planning")
         try:
-            row = self.runner.plan(
+            artifact = request.get("plan_artifact")
+            if artifact is not None:
+                row = self.runner.plan_with_artifact(
+                    run_id, request["command"], context, request["mode"], artifact,
+                    request.get("provider", ""), request.get("model", ""),
+                )
+            else:
+                row = self.runner.plan(
                     run_id,
                     request["command"],
                     context,
                     request["mode"],
                     request.get("provider", ""),
                     request.get("model", ""),
-            )
+                )
         except Exception as exc:
             trace = self._finish_stage(run_id, trace, stage, "failed")
             return self.store.fail_run(run_id, "planning", exc, trace)
@@ -99,25 +106,40 @@ class RunController:
             self.executor(run_id, allow_edits, bridge_target)
         except Exception as exc:
             transport_error = exc
-        row = self.store.get(run_id)
+        if transport_error is not None:
+            reason = "ArcMap Bridge transport failed before authoritative runtime result: %s: %s" % (
+                type(transport_error).__name__, str(transport_error)
+            )
+            row = self.store.reconcile_execution_dispatch_failure(
+                run_id, reason, self.error_descriptor(transport_error)
+            )
+        else:
+            row = self.store.get(run_id)
+            if row["status"] == "approved":
+                transport_error = RuntimeError(
+                    "ArcMap Bridge returned without a runtime claim or authoritative result."
+                )
+                row = self.store.reconcile_execution_dispatch_failure(
+                    run_id,
+                    str(transport_error),
+                    self.error_descriptor(transport_error),
+                )
         if row["status"] == "executing":
             row = self._wait_for_runtime_terminal(run_id)
         if row["status"] == "executed":
-            trace = self._finish_stage(run_id, trace, stage, "succeeded")
-            if transport_error is not None:
-                trace["execution_transport_warning"] = self._error_fingerprint(transport_error)
-                self.store.update_run(run_id, "executed", trace=trace)
+            self._finish_stage(run_id, trace, stage, "succeeded")
             return self._sync_context(run_id)
+        if row["status"] in ("succeeded", "context_failed"):
+            return row
         if row["status"] == "failed":
             self._finish_stage(run_id, trace, stage, "failed")
             return self.store.get(run_id)
         if row["status"] == "recovery_required":
             self._finish_stage(run_id, trace, stage, "recovery_required")
             return self.store.get(run_id)
-        if row["status"] != "executed":
-            trace = self._finish_stage(run_id, trace, stage, "failed")
-            error = transport_error or RuntimeError("ArcMap runtime did not persist an execution result.")
-            return self.store.fail_run(run_id, "execution", error, trace)
+        if row["status"] == "indeterminate":
+            return row
+        raise RuntimeError("unexpected ArcMap execution state: " + row["status"])
 
     def _sync_context(self, run_id):
         owner_id = str(uuid.uuid4())
@@ -187,10 +209,12 @@ class RunController:
             time.sleep(0.2)
 
     @staticmethod
-    def _error_fingerprint(exc):
+    def error_descriptor(exc):
+        message = str(exc) or type(exc).__name__
         return {
             "type": type(exc).__name__,
-            "hash": digest({"type": type(exc).__name__, "message": str(exc)}),
+            "message": message,
+            "hash": digest({"type": type(exc).__name__, "message": message}),
         }
 
     def _start_stage(self, run_id, name, fence=None):
@@ -208,23 +232,25 @@ class RunController:
         return trace, stage
 
     def _finish_stage(self, run_id, trace, stage, status, fence=None):
+        if fence is None:
+            return self.store.finish_stage(
+                run_id,
+                stage["name"],
+                stage["started_at"],
+                status,
+            )
         current_trace = self.store.run_trace(run_id)
-        current_stage = next(
+        current_stage = next((
             item
             for item in current_trace["stages"]
             if item["name"] == stage["name"]
             and item["started_at"] == stage["started_at"]
-        )
+        ), None)
+        if current_stage is None:
+            raise RuntimeError("run lost its fenced stage record: " + stage["name"])
         current_stage["status"] = status
         current_stage["finished_at"] = time.time()
-        if fence is None:
-            self.store.update_run(
-                run_id,
-                self.store.get(run_id)["status"],
-                trace=current_trace,
-            )
-        else:
-            self.store.update_context_finalization(run_id, fence, current_trace)
+        self.store.update_context_finalization(run_id, fence, current_trace)
         return current_trace
 
     @staticmethod

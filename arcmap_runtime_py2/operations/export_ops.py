@@ -7,8 +7,8 @@ import zipfile
 
 import arcpy
 
-from operations import common
-from operations import condition_utils
+from . import common
+from . import condition_utils
 
 try:
     import map_exporter

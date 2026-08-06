@@ -40,10 +40,16 @@ class RecoveryContractTests(unittest.TestCase):
         self.temp.cleanup()
 
     def approved_run(self):
-        run = self.store.create_run("x", "context_single")
+        run = self.store.create_run("x", "g1_context")
         self.store.bind_context(run["id"], capture())
         self.store.update_run(run["id"], "planned")
-        return self.store.update_run(run["id"], "approved")
+        trace = self.store.run_trace(run["id"])
+        trace["stages"].append({
+            "name": "execution",
+            "started_at": 11.0,
+            "status": "running",
+        })
+        return self.store.update_run(run["id"], "approved", trace=trace)
 
     def test_execution_claim_records_owner_and_heartbeat(self):
         run = self.approved_run()
@@ -55,6 +61,33 @@ class RecoveryContractTests(unittest.TestCase):
         self.store.heartbeat_execution(run["id"], "runtime-owner", now=first + 1)
         self.assertEqual(self.store.run_trace(run["id"])["execution_owner"]["heartbeat_at"], first + 1)
         self.assertEqual(claimed["status"], "executing")
+
+    def test_execution_claim_rejects_an_approved_run_without_execution_stage(self):
+        run = self.store.create_run("x", "g1_context")
+        self.store.bind_context(run["id"], capture())
+        self.store.update_run(run["id"], "planned")
+        self.store.update_run(run["id"], "approved")
+
+        with self.assertRaisesRegex(ValueError, "execution stage"):
+            self.store.claim_for_execution(run["id"], TARGET, "runtime-owner")
+
+        self.assertEqual(self.store.get(run["id"])["status"], "approved")
+
+    def test_execution_claim_rejects_duplicate_execution_stages(self):
+        run = self.approved_run()
+        trace = self.store.run_trace(run["id"])
+        trace["stages"].insert(0, {
+            "name": "execution",
+            "started_at": 1.0,
+            "finished_at": 1.5,
+            "status": "succeeded",
+        })
+        self.store.update_run(run["id"], "approved", trace=trace)
+
+        with self.assertRaisesRegex(ValueError, "exactly one running execution stage"):
+            self.store.claim_for_execution(run["id"], TARGET, "runtime-owner")
+
+        self.assertEqual(self.store.get(run["id"])["status"], "approved")
 
     def test_gateway_restart_marks_only_stale_execution_recovery_required(self):
         run = self.approved_run()
@@ -76,6 +109,123 @@ class RecoveryContractTests(unittest.TestCase):
         )
         self.assertEqual(row["status"], "executed")
         self.assertEqual(row["result"]["summary"], "authoritative")
+
+    def test_dispatch_failure_after_claim_defers_recovery_to_heartbeat_lease(self):
+        run = self.approved_run()
+        self.store.claim_for_execution(run["id"], TARGET, "runtime-owner", now=10)
+        self.store.reconcile_execution_dispatch_failure(
+            run["id"],
+            "ArcMap Bridge transport failed",
+            {"type": "RuntimeError", "message": "transport failed", "hash": "test-hash"},
+            now=20,
+            recovery_window_seconds=300,
+        )
+
+        row = self.store.heartbeat_execution(run["id"], "runtime-owner", now=21)
+
+        self.assertEqual(row["status"], "executing")
+        trace = self.store.run_trace(run["id"])
+        self.assertEqual(trace["execution_owner"]["heartbeat_at"], 21)
+        self.assertIn("ArcMap Bridge transport failed", trace["execution_transport_warning"]["reason"])
+        recovered = self.store.recover_stale_executions(now=52, lease_seconds=30)
+        self.assertEqual(recovered, [run["id"]])
+        self.assertEqual(
+            self.store.run_trace(run["id"])["recovery"]["resume_policy"],
+            "heartbeat",
+        )
+        result = {"ok": False, "error": "authoritative late failure"}
+        completed = self.store.complete_execution(
+            run["id"], "failed", result, "runtime-owner", result_hash(result), TARGET
+        )
+        self.assertEqual(completed["status"], "failed")
+
+    def test_claimed_runtime_survives_rpc_dispatch_fault_until_authoritative_result(self):
+        run = self.store.create_run("x", "g1_context")
+        self.store.bind_context(run["id"], capture())
+        self.store.update_run(run["id"], "planned")
+        self.store.update_run(run["id"], "approved")
+        dispatch_returned = threading.Event()
+
+        def execute(run_id, allow_edits, target):
+            self.store.claim_for_execution(run_id, target, "runtime-owner")
+            self.store.heartbeat_execution(run_id, "runtime-owner")
+            dispatch_returned.set()
+            raise RuntimeError("RPC_E_SERVERFAULT after ArcMap runtime claim")
+
+        controller = RunController(
+            None,
+            self.store,
+            lambda run_id, target, phase, fence: capture(),
+            None,
+            execute,
+        )
+        returned = []
+        worker = threading.Thread(
+            target=lambda: returned.append(controller._execute(run["id"], False, TARGET))
+        )
+        worker.start()
+        self.assertTrue(dispatch_returned.wait(1))
+        time.sleep(0.05)
+
+        self.assertTrue(worker.is_alive())
+        self.assertEqual(self.store.get(run["id"])["status"], "executing")
+        result = {"ok": True, "summary": "authoritative"}
+        self.store.complete_execution(
+            run["id"], "executed", result, "runtime-owner", result_hash(result), TARGET
+        )
+        worker.join(1)
+
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(returned[0]["status"], "succeeded")
+        trace = self.store.run_trace(run["id"])
+        self.assertIn("RPC_E_SERVERFAULT", trace["execution_transport_warning"]["reason"])
+
+    def test_stage_finish_and_late_authoritative_result_preserve_each_other(self):
+        for index in range(20):
+            run = self.approved_run()
+            self.store.claim_for_execution(run["id"], TARGET, "runtime-owner", now=10)
+            self.store.reconcile_execution_dispatch_failure(
+                run["id"],
+                "ArcMap Bridge transport failed",
+                {"type": "RuntimeError", "message": "transport failed", "hash": "test-hash"},
+                now=12,
+            )
+            result = {"ok": False, "error": "authoritative-%d" % index}
+            barrier = threading.Barrier(3)
+            errors = []
+
+            def finish_stage():
+                barrier.wait()
+                try:
+                    self.store.finish_stage(run["id"], "execution", 11.0, "recovery_required")
+                except Exception as exc:
+                    errors.append(exc)
+
+            def complete():
+                barrier.wait()
+                try:
+                    self.store.complete_execution(
+                        run["id"], "failed", result, "runtime-owner",
+                        result_hash(result), TARGET,
+                    )
+                except Exception as exc:
+                    errors.append(exc)
+
+            stage_worker = threading.Thread(target=finish_stage)
+            result_worker = threading.Thread(target=complete)
+            stage_worker.start(); result_worker.start(); barrier.wait()
+            stage_worker.join(1); result_worker.join(1)
+
+            self.assertEqual(errors, [])
+            row = self.store.get(run["id"])
+            final_trace = self.store.run_trace(run["id"])
+            self.assertEqual(row["status"], "failed")
+            self.assertEqual(final_trace["execution_receipt"]["result_hash"], result_hash(result))
+            execution_stage = next(
+                item for item in final_trace["stages"]
+                if item["name"] == "execution" and item["started_at"] == 11.0
+            )
+            self.assertEqual(execution_stage["status"], "failed")
 
     def test_recovery_required_is_excluded_from_report_statistics(self):
         run = self.approved_run()
@@ -333,7 +483,7 @@ class RecoveryContractTests(unittest.TestCase):
 
     def test_active_runs_cannot_be_deleted_or_cleared(self):
         active = self.approved_run()
-        terminal = self.store.create_run("bad", "context_single")
+        terminal = self.store.create_run("bad", "g1_context")
         self.store.fail_run(terminal["id"], "context_before_planning", RuntimeError("offline"), self.store.run_trace(terminal["id"]))
         with self.assertRaisesRegex(ValueError, "active runs cannot be deleted"):
             self.store.delete(active["id"])
@@ -350,7 +500,7 @@ class RecoveryContractTests(unittest.TestCase):
             now=100, lease_seconds=30, recovery_window_seconds=0
         )
         self.store.resolve_expired_recoveries(now=100)
-        terminal = self.store.create_run("bad", "context_single")
+        terminal = self.store.create_run("bad", "g1_context")
         self.store.fail_run(
             terminal["id"], "context_before_planning", RuntimeError("offline"),
             self.store.run_trace(terminal["id"]),
@@ -374,15 +524,15 @@ class RecoveryContractTests(unittest.TestCase):
         self.store.recover_stale_executions(now=100, lease_seconds=30, recovery_window_seconds=0)
         self.store.resolve_expired_recoveries(now=100)
         with self.assertRaisesRegex(ValueError, "target is quarantined"):
-            self.store.create_run_for_target("blocked", "context_single", TARGET)
+            self.store.create_run_for_target("blocked", "g1_context", TARGET)
         result = {"ok": False, "error": "late"}
         self.store.complete_execution(run["id"], "failed", result, "runtime-owner", result_hash(result), TARGET)
-        self.assertEqual(self.store.create_run_for_target("unblocked", "context_single", TARGET)["status"], "running")
+        self.assertEqual(self.store.create_run_for_target("unblocked", "g1_context", TARGET)["status"], "running")
 
     def test_report_keeps_unbound_failed_run_without_affecting_valid_run(self):
-        failed = self.store.create_run("offline", "context_single")
+        failed = self.store.create_run("offline", "g1_context")
         self.store.fail_run(failed["id"], "context_before_planning", RuntimeError("offline"), self.store.run_trace(failed["id"]))
-        valid = self.store.create_run("bound", "context_single")
+        valid = self.store.create_run("bound", "g1_context")
         self.store.bind_context(valid["id"], capture())
         self.store.update_run(valid["id"], "planned")
         self.store.update_run(valid["id"], "cancelled")
@@ -407,6 +557,51 @@ class BridgeSourceContractTests(unittest.TestCase):
         body = source.split("private string EnqueueAndWait", 1)[1].split("private static", 1)[0]
         self.assertNotIn("WaitOne()", body)
         self.assertIn("WaitOne(TimeSpan", body)
+
+    def test_execution_heartbeat_has_independent_lifetime_and_deterministic_shutdown(self):
+        source = (Path(__file__).parents[2] / "ArcMapBridgeExternal" / "Program.cs").read_text(encoding="utf-8")
+        dispatch = source.split("private void ExecuteArcMapCommand", 1)[1].split("private IApplication", 1)[0]
+        heartbeat = source.split("private sealed class GatewayExecutionHeartbeat", 1)[1].split(
+            "private sealed class HttpRequest", 1
+        )[0]
+
+        self.assertNotIn("using (var heartbeat", dispatch)
+        self.assertIn("heartbeat.Start();", dispatch)
+        self.assertNotIn("heartbeat.Cancel();", dispatch)
+        self.assertNotIn("finally", dispatch)
+        self.assertNotIn("_cancelled", heartbeat)
+        self.assertNotIn("executionDiscoveryDeadline", heartbeat)
+        self.assertIn("TryPostGatewayHeartbeat", heartbeat)
+        self.assertIn("TryReadGatewayRunState", heartbeat)
+        self.assertIn("IsTerminalRunState", heartbeat)
+        self.assertIn("HeartbeatPostResult.Accepted", heartbeat)
+        self.assertIn("HeartbeatPostResult.Terminal", heartbeat)
+
+    def test_active_execution_prevents_rot_idle_shutdown_but_stops_heartbeating_after_arcmap_exit(self):
+        source = (Path(__file__).parents[2] / "ArcMapBridgeExternal" / "Program.cs").read_text(encoding="utf-8")
+        shutdown = source.split("private void StopIfArcMapClosed", 1)[1].split(
+            "private void RegisterWithGateway", 1
+        )[0]
+        dispatch = source.split("private void ExecuteArcMapCommand", 1)[1].split(
+            "private IApplication", 1
+        )[0]
+        heartbeat = source.split("private sealed class GatewayExecutionHeartbeat", 1)[1].split(
+            "private sealed class HttpRequest", 1
+        )[0]
+
+        self.assertIn("_activeExecutionCount", shutdown)
+        self.assertIn("return;", shutdown)
+        self.assertIn("StartExecutionHeartbeat", dispatch)
+        self.assertIn("arcMapPid", dispatch)
+        self.assertIn("IsArcMapProcessAlive", heartbeat)
+        self.assertIn("_onFinished", heartbeat)
+
+    def test_bridge_fails_fast_when_binary_and_source_identity_are_not_verified(self):
+        source = (Path(__file__).parents[2] / "ArcMapBridgeExternal" / "Program.cs").read_text(encoding="utf-8")
+
+        self.assertIn("ReadAndVerifyBuildIdentity", source)
+        self.assertIn("ComputeFileSha256(executablePath)", source)
+        self.assertIn("ArcMap Bridge binary does not match its build identity", source)
 
 
 if __name__ == "__main__":

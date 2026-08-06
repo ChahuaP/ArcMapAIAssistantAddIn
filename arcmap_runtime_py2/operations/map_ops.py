@@ -6,7 +6,7 @@ try:
 except ImportError:
     from .. import context_reader
 
-from operations import common
+from . import common
 
 
 def list_layers(context, arguments, step_outputs):

@@ -51,7 +51,7 @@ def collect_agent_diagnostics(app_version: str, operation_count: int, state: Any
     categories = _catalog_categories(state)
     checks = [
         _check_gateway(app_version, operation_count),
-        _item("experiment_runner", "实验运行", "ok", "GeoPilot 通过统一 run 接口生成可复现实验工作流。"),
+        _item("planning_engine", "规划引擎", "ok", "GeoPilot 通过统一规划接口生成可复现实验工作流。"),
         _check_agent_capabilities(operation_count, categories),
         _check_agent_context(context),
         _check_agent_bridge(active_bridge),
@@ -71,7 +71,7 @@ def collect_agent_diagnostics(app_version: str, operation_count: int, state: Any
             "arcmap-list",
             "多开 ArcMap 时只保留一个窗口，或用外部 agent 指定 hwnd",
             "capabilities",
-            "run --mode context_single --command <request>",
+            "run --mode g1_context --command <request>",
             "run",
             "run-status"
         ]
@@ -106,7 +106,7 @@ def _check_gateway(app_version: str, operation_count: int) -> Dict[str, Any]:
 def _check_config(config: Dict[str, Any]) -> Dict[str, Any]:
     path = Path(config.get("config_path") or str(config_path()))
     providers = config.get("providers") or {}
-    required = sorted(set([config.get("primary_provider"), config.get("reviewer_provider")]))
+    required = [config.get("primary_provider")]
     missing = [provider for provider in required if provider and not (providers.get(provider) or {}).get("has_api_key")]
     if not missing:
         labels = "、".join((providers.get(provider) or {}).get("label", provider) for provider in required)
@@ -241,7 +241,7 @@ def _check_addin(install: Dict[str, Any]) -> Dict[str, Any]:
 def _check_provider_network(config: Dict[str, Any]) -> List[Dict[str, Any]]:
     checks = []
     providers = config.get("providers") or {}
-    required = sorted(set([config.get("primary_provider"), config.get("reviewer_provider")]))
+    required = [config.get("primary_provider")]
     for provider_id in required:
         provider = providers.get(provider_id) or {}
         if not provider.get("has_api_key"):

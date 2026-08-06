@@ -48,6 +48,23 @@ class RunStoreScaleTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "recent run limit"):
             self.store.list_recent(limit=201)
 
+    def test_run_polling_remains_readable_during_an_active_writer(self):
+        run = self.store.create_run("concurrent polling", "g0_direct")
+        writer = sqlite3.connect(str(self.store.path))
+        try:
+            writer.execute("BEGIN EXCLUSIVE")
+            writer.execute(
+                "UPDATE runs SET updated_at = updated_at WHERE id = ?",
+                (run["id"],),
+            )
+            started = time.monotonic()
+            observed = self.store.get(run["id"])
+            self.assertLess(time.monotonic() - started, 0.5)
+            self.assertEqual(observed["id"], run["id"])
+        finally:
+            writer.rollback()
+            writer.close()
+
     def test_removed_database_tables_are_rejected_not_migrated(self):
         path = Path(self.temp.name) / "removed.sqlite"
         conn = sqlite3.connect(str(path))
@@ -82,6 +99,21 @@ class RunStoreScaleTests(unittest.TestCase):
         )
         self.assertEqual(self.store.get(executed["id"])["status"], "succeeded")
 
+    def test_gateway_startup_does_not_read_every_terminal_run(self):
+        self._seed_succeeded(260, created_after=1.0)
+        original_get = self.store.get
+        get_calls = []
+
+        def counting_get(run_id):
+            get_calls.append(run_id)
+            return original_get(run_id)
+
+        self.store.get = counting_get
+
+        GatewayState(store=self.store)
+
+        self.assertEqual([], get_calls)
+
     def test_recovery_resolver_scans_all_260_rows(self):
         rows = []
         for index in range(260):
@@ -99,7 +131,7 @@ class RunStoreScaleTests(unittest.TestCase):
                 "stages": [],
             }
             rows.append((
-                run_id, "recovery_required", "context_single", "recovery-%d" % index,
+                run_id, "recovery_required", "g1_context", "recovery-%d" % index,
                 "ctx-%d" % index, "{}",
                 json.dumps([{"type": "run", "run": trace}], sort_keys=True),
                 float(index), float(index), None,
@@ -120,10 +152,14 @@ class RunStoreScaleTests(unittest.TestCase):
         self.assertEqual(report["statistics"]["indeterminate"], 260)
 
     def _approved_run(self, command):
-        run = self.store.create_run(command, "context_single")
+        run = self.store.create_run(command, "g1_context")
         self.store.bind_context(run["id"], capture())
         self.store.update_run(run["id"], "planned")
-        return self.store.update_run(run["id"], "approved")
+        trace = self.store.run_trace(run["id"])
+        trace["stages"].append({
+            "name": "execution", "started_at": 2.0, "status": "running",
+        })
+        return self.store.update_run(run["id"], "approved", trace=trace)
 
     def _seed_succeeded(self, count, created_after):
         rows = []
@@ -132,7 +168,7 @@ class RunStoreScaleTests(unittest.TestCase):
             created_at = created_after + index
             trace = {
                 "contract": "geopilot-run/v2",
-                "mode": "context_single",
+                "mode": "g1_context",
                 "context_hash": "ctx-%d" % index,
                 "started_at": created_at,
                 "turns": [],
@@ -146,7 +182,7 @@ class RunStoreScaleTests(unittest.TestCase):
             rows.append((
                 run_id,
                 "succeeded",
-                "context_single",
+                "g1_context",
                 "episode-%d" % index,
                 "ctx-%d" % index,
                 "{}",

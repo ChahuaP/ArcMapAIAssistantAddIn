@@ -28,18 +28,25 @@ class RunControllerTests(unittest.TestCase):
         context = {"layers": layers or []}
         return {"context": context, "context_hash": context_hash(context), "bridge": {"bridge_pid": 2, "bridge_port": 8766, "arcmap_pid": 20, "hwnd": 1}, "captured_at": 1}
 
+    def approve_with_execution_stage(self, run_id):
+        trace = self.store.run_trace(run_id)
+        trace["stages"].append({
+            "name": "execution", "started_at": 2.0, "status": "running",
+        })
+        return self.store.update_run(run_id, "approved", trace=trace)
+
     def test_run_uses_fresh_context_not_request_payload(self):
-        run = self.store.create_run("x", "context_single")
+        run = self.store.create_run("x", "g1_context")
         seen = []
         capture = self.capture([{"name": "fresh"}])
         controller = self.controller(lambda run_id, target, phase, fence: capture, lambda run_id, edits, target: None)
         controller.runner.plan = lambda run_id, command, context, mode, provider, model: (seen.append(context), self.store.update_run(run_id, "planned", workflow={"action": "execute", "summary": "x", "steps": []}))[1]
-        controller.run(run["id"], {"command": "x", "mode": "context_single", "execute": False})
+        controller.run(run["id"], {"command": "x", "mode": "g1_context", "execute": False})
         self.assertEqual(seen[0]["layers"][0]["name"], "fresh")
         self.assertEqual(self.store.run_trace(run["id"])["context_captures"][0]["window"]["hwnd"], 1)
 
     def test_execution_reaches_success_only_after_arcmap_claim(self):
-        run = self.store.create_run("x", "context_single")
+        run = self.store.create_run("x", "g1_context")
         def execute(run_id, edits, target):
             self.store.claim_for_execution(run_id, target, "owner")
             result = {"ok": True}
@@ -47,22 +54,24 @@ class RunControllerTests(unittest.TestCase):
             return {"ok": True}
         capture = self.capture()
         controller = self.controller(lambda run_id, target, phase, fence: capture, execute)
-        controller.run(run["id"], {"command": "x", "mode": "context_single", "execute": True})
+        controller.run(run["id"], {"command": "x", "mode": "g1_context", "execute": True})
         self.assertEqual(self.store.get(run["id"])["status"], "succeeded")
 
     def test_claim_is_atomic_and_bound_to_id(self):
-        first = self.store.create_run("a", "direct_single")
-        second = self.store.create_run("b", "direct_single")
+        first = self.store.create_run("a", "g0_direct")
+        second = self.store.create_run("b", "g0_direct")
         target = self.capture()["bridge"]
         for row in (first, second): self.store.bind_context(row["id"], self.capture())
-        for row in (first, second): self.store.update_run(row["id"], "planned"); self.store.update_run(row["id"], "approved")
+        for row in (first, second):
+            self.store.update_run(row["id"], "planned")
+            self.approve_with_execution_stage(row["id"])
         self.store.claim_for_execution(second["id"], target, "owner")
         self.assertEqual(self.store.get(first["id"])["status"], "approved")
         self.assertEqual(self.store.get(second["id"])["status"], "executing")
         with self.assertRaises(ValueError): self.store.claim_for_execution(second["id"], target, "owner-2")
 
     def test_context_bind_is_atomic_and_execution_result_is_not_overwritten(self):
-        run = self.store.create_run("x", "context_single")
+        run = self.store.create_run("x", "g1_context")
         capture = self.capture()
         def execute(run_id, edits, target):
             self.store.claim_for_execution(run_id, target, "owner")
@@ -70,23 +79,23 @@ class RunControllerTests(unittest.TestCase):
             self.store.complete_execution(run_id, "executed", result, "owner", result_hash(result), target)
             return {"ok": True, "summary": "bridge placeholder"}
         controller = self.controller(lambda run_id, target, phase, fence: capture, execute)
-        controller.run(run["id"], {"command": "x", "mode": "context_single", "execute": True})
+        controller.run(run["id"], {"command": "x", "mode": "g1_context", "execute": True})
         row = self.store.get(run["id"])
         self.assertTrue(row["context_hash"])
         self.assertEqual(row["result"]["summary"], "ArcPy authoritative")
         with self.assertRaises(ValueError): self.store.bind_context(run["id"], dict(capture, context_hash="different"))
 
     def test_executing_run_cannot_be_cancelled(self):
-        run = self.store.create_run("x", "direct_single")
+        run = self.store.create_run("x", "g0_direct")
         capture = self.capture()
         self.store.bind_context(run["id"], capture)
         self.store.update_run(run["id"], "planned")
-        self.store.update_run(run["id"], "approved")
+        self.approve_with_execution_stage(run["id"])
         self.store.claim_for_execution(run["id"], capture["bridge"], "owner")
         with self.assertRaises(ValueError): self.store.cancel(run["id"])
 
     def test_runtime_failure_result_is_preserved(self):
-        run = self.store.create_run("x", "context_single")
+        run = self.store.create_run("x", "g1_context")
         capture = self.capture()
         def execute(run_id, edits, target):
             self.store.claim_for_execution(run_id, target, "owner")
@@ -94,14 +103,14 @@ class RunControllerTests(unittest.TestCase):
             self.store.complete_execution(run_id, "failed", result, "owner", result_hash(result), target)
             raise RuntimeError("bridge reports runtime failure")
         controller = self.controller(lambda run_id, target, phase, fence: capture, execute)
-        controller.run(run["id"], {"command": "x", "mode": "context_single", "execute": True})
+        controller.run(run["id"], {"command": "x", "mode": "g1_context", "execute": True})
         row = self.store.get(run["id"])
         self.assertEqual(row["status"], "failed")
         self.assertEqual(row["result"]["traceback"], "trace")
         self.assertEqual(row["agent_trace"][0]["run"]["stages"][-1]["status"], "failed")
 
     def test_swallowed_addin_failure_uses_authoritative_runtime_failure_audit(self):
-        run = self.store.create_run("x", "context_single")
+        run = self.store.create_run("x", "g1_context")
         capture = self.capture()
 
         def addin_onclick(run_id, edits, target):
@@ -114,14 +123,14 @@ class RunControllerTests(unittest.TestCase):
                 return {"ok": True, "bridge": "Execute returned normally"}
 
         row = self.controller(lambda run_id, target, phase, fence: capture, addin_onclick).run(
-            run["id"], {"command": "x", "mode": "context_single", "execute": True}
+            run["id"], {"command": "x", "mode": "g1_context", "execute": True}
         )
         self.assertEqual(row["status"], "failed")
         self.assertEqual(row["agent_trace"][0]["run"]["stages"][-1]["status"], "failed")
         self.assertEqual(row["result"]["traceback"], "ArcPy traceback")
 
     def test_bridge_transport_error_after_executed_still_syncs_context(self):
-        run = self.store.create_run("x", "context_single")
+        run = self.store.create_run("x", "g1_context")
         capture = self.capture()
         def execute(run_id, edits, target):
             self.store.claim_for_execution(run_id, target, "owner")
@@ -129,6 +138,10 @@ class RunControllerTests(unittest.TestCase):
             self.store.complete_execution(run_id, "executed", result, "owner", result_hash(result), target)
             raise RuntimeError("bridge response was lost")
         controller = self.controller(lambda run_id, target, phase, fence: capture, execute)
-        row = controller.run(run["id"], {"command": "x", "mode": "context_single", "execute": True})
+        row = controller.run(run["id"], {"command": "x", "mode": "g1_context", "execute": True})
         self.assertEqual(row["status"], "succeeded")
         self.assertEqual(row["result"]["summary"], "ArcPy authoritative")
+        self.assertEqual(
+            row["agent_trace"][0]["run"]["execution_transport_warning"]["type"],
+            "RuntimeError",
+        )

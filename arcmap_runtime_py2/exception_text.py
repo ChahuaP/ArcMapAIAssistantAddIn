@@ -27,6 +27,9 @@ def to_unicode(value):
 
 def exception_text(exc):
     parts = [to_unicode(value) for value in (getattr(exc, "args", None) or ())]
+    teardown = getattr(exc, "runtime_teardown_error", None)
+    if teardown:
+        parts.append(u"runtime teardown: " + to_unicode(teardown))
     parts = [value for value in parts if value]
     name = _type_name(exc)
     if parts:

@@ -51,13 +51,86 @@ class ArcMapRunProtocolTests(unittest.TestCase):
         self.assertEqual(self.state.store.get(second["id"])["status"], "succeeded")
         self.assertNotEqual(first["id"], second["id"])
 
+    def test_formal_reset_uses_a_deterministic_gateway_workflow(self):
+        source_paths = []
+        for index in range(14):
+            path = Path(self.temp.name) / ("source_%02d.shp" % index)
+            path.touch()
+            source_paths.append(str(path))
+
+        class ModelRunnerMustNotBeCalled:
+            def plan(self, *args, **kwargs):
+                raise AssertionError("formal reset must not invoke a model planner")
+
+        self.state.runner = ModelRunnerMustNotBeCalled()
+        after_context = {
+            "layers": [
+                {"name": Path(path).stem, "layer_ref": "layer:%d" % index}
+                for index, path in enumerate(source_paths)
+            ]
+        }
+
+        def capture(state, run_id, phase, bridge=None, finalizer=None):
+            context = after_context if phase == "after_execution" else {"layers": []}
+            return {
+                "context": context,
+                "context_hash": context_hash(context),
+                "bridge": self.capture["bridge"],
+                "captured_at": 1,
+            }
+
+        def execute(run_id, allow_edits, port, hwnd):
+            self.state.store.claim_for_execution(
+                run_id, self.capture["bridge"], "owner-" + run_id
+            )
+            result = {"ok": True, "run_id": run_id}
+            self.state.store.complete_execution(
+                run_id,
+                "executed",
+                result,
+                "owner-" + run_id,
+                result_hash(result),
+                self.capture["bridge"],
+            )
+
+        with patch(
+            "gateway_py3.routes.runs.arcmap.active_bridge",
+            return_value=self.capture["bridge"],
+        ), patch(
+            "gateway_py3.routes.runs.arcmap.sync_context",
+            side_effect=capture,
+        ), patch(
+            "gateway_py3.routes.runs.arcmap.execution_permission",
+            return_value=False,
+        ), patch(
+            "gateway_py3.routes.runs.arcmap.arcmap_bridge_client.execute_run",
+            side_effect=execute,
+        ):
+            created = handle_post(
+                self.state,
+                "/experiments/reset",
+                {"source_paths": source_paths},
+            )["run"]
+
+        row = self.state.store.get(created["id"])
+        self.assertEqual(row["status"], "succeeded")
+        self.assertEqual(
+            [step["operation"] for step in row["workflow"]["steps"]],
+            ["layer.clear_layers"]
+            + ["layer.add_layer"] * 14
+            + ["context.list_layers"],
+        )
+        trace = row["agent_trace"][0]["run"]
+        self.assertEqual(trace["control"]["kind"], "formal_experiment_reset")
+        self.assertEqual(trace["turns"], [])
+
     def test_context_payload_is_rejected(self):
         payload = _request("x")
         payload["context"] = {"layers": [{"name": "injected"}]}
         with self.assertRaises(ValueError): handle_post(self.state, "/runs", payload)
 
     def test_context_callback_requires_the_pending_run_and_target(self):
-        run = self.state.store.create_run("x", "context_single")
+        run = self.state.store.create_run("x", "g1_context")
         token = "unpredictable-test-token"
         pending = {"run_id": run["id"], "phase": "before_planning", "bridge": self.capture["bridge"], "context": None, "consumed": False}
         self.state.store.set_state("arcmap_context_sync:" + token, pending)
@@ -68,7 +141,7 @@ class ArcMapRunProtocolTests(unittest.TestCase):
             handle_post(self.state, "/runs/%s/context" % run["id"], payload)
 
     def test_sync_token_is_consumed_atomically(self):
-        run = self.state.store.create_run("x", "context_single")
+        run = self.state.store.create_run("x", "g1_context")
         token = "atomic-test-token"
         pending = {"run_id": run["id"], "phase": "before_planning", "bridge": self.capture["bridge"], "context": None, "consumed": False}
         self.state.store.set_state("arcmap_context_sync:" + token, pending)
@@ -94,4 +167,4 @@ class ArcMapRunProtocolTests(unittest.TestCase):
 
 
 def _request(command):
-    return {"command": command, "mode": "constrained_single", "execute": True, "confirmed": True, "allow_edits": False}
+    return {"command": command, "mode": "g2_constrained", "execute": True, "confirmed": True, "allow_edits": False}

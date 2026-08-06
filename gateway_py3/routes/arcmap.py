@@ -170,45 +170,11 @@ def active_bridge(state, port_checker=None):
     if stored and isinstance(stored.get("value"), dict):
         bridge = stored["value"]
         try:
-            hwnd = int(bridge.get("hwnd") or 0)
-            if hwnd <= 0:
-                return scan_bridge(state, port_checker=port_checker)
-            health_result = arcmap_bridge_client.health(port=int(bridge["bridge_port"]))
-            refreshed = target_bridge_from_health(health_result, bridge, hwnd)
-            if refreshed:
-                state.store.set_state("arcmap_active_bridge", refreshed)
-                invalidate_bridge_cache(state)
-                return refreshed
-            state.store.delete_state("arcmap_active_bridge")
-        except (KeyError, TypeError, ValueError, arcmap_bridge_client.ArcMapBridgeError):
+            target = _target_identity(bridge)
+            return dict(bridge, **target)
+        except (KeyError, TypeError, ValueError):
             state.store.delete_state("arcmap_active_bridge")
     return scan_bridge(state, port_checker=port_checker)
-
-
-def target_bridge_from_health(health_result, stored_bridge, hwnd):
-    summary = health_result.get("summary") if isinstance(health_result.get("summary"), dict) else {}
-    targets = summary.get("targets")
-    if not isinstance(targets, list):
-        return None
-    for target in targets:
-        if not isinstance(target, dict):
-            continue
-        if int(target.get("hwnd") or 0) != hwnd:
-            continue
-        if int(target.get("arcmap_pid") or 0) != int(stored_bridge.get("arcmap_pid") or 0):
-            return None
-        return {
-            "bridge_pid": int(health_result.get("bridge_pid") or stored_bridge.get("bridge_pid") or 0),
-            "bridge_port": int(health_result.get("bridge_port") or stored_bridge["bridge_port"]),
-            "arcmap_pid": int(target.get("arcmap_pid") or 0),
-            "hwnd": hwnd,
-            "summary": {
-                "bridge": summary.get("bridge", "external"),
-                "title": target.get("title") or "",
-                "name": target.get("name") or "",
-            },
-        }
-    return None
 
 
 def bridges(state, port_checker=None, force=False):
@@ -260,6 +226,7 @@ def bridges(state, port_checker=None, force=False):
                     "hwnd": hwnd,
                     "summary": {
                         "bridge": summary.get("bridge", "external"),
+                        "source_sha256": summary.get("source_sha256", ""),
                         "title": target.get("title") or "",
                         "name": target.get("name") or "",
                     },
@@ -316,3 +283,5 @@ def mark_active_bridge(state, live_bridges):
                 and int(bridge.get("hwnd") or 0) == active_hwnd
                 and int(bridge.get("arcmap_pid") or 0) == active_arcmap_pid):
             bridge["active"] = True
+            state.store.set_state("arcmap_active_bridge", bridge)
+            return

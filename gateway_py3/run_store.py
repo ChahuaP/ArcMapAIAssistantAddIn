@@ -18,6 +18,8 @@ from .run_store_schema import (
 
 
 DB_PATH = data_dir() / "runs.sqlite"
+SQLITE_BUSY_TIMEOUT_MS = 30_000
+SQLITE_JOURNAL_MODE = "wal"
 RUN_TRANSITIONS = {
     "running": {"planned", "failed", "cancelled", "clarify", "reject"},
     "planned": {"approved", "cancelled", "failed"},
@@ -35,6 +37,8 @@ ACTIVE_RUN_STATUSES = {
 PROTECTED_RUN_STATUSES = {"indeterminate"}
 RECENT_RUN_LIMIT = 200
 RECOVERY_WINDOW_SECONDS = 300.0
+RECOVERY_RESUME_HEARTBEAT = "heartbeat"
+RUN_STAGE_TERMINAL_STATUSES = frozenset({"succeeded", "failed", "recovery_required"})
 
 
 class RunStore:
@@ -43,7 +47,13 @@ class RunStore:
         self._init()
 
     def _connect(self):
-        return sqlite3.connect(str(self.path))
+        conn = sqlite3.connect(
+            str(self.path),
+            timeout=SQLITE_BUSY_TIMEOUT_MS / 1000.0,
+        )
+        conn.execute("PRAGMA busy_timeout = %d" % SQLITE_BUSY_TIMEOUT_MS)
+        conn.execute("PRAGMA synchronous = NORMAL")
+        return conn
 
     @contextmanager
     def _connection(self):
@@ -55,8 +65,20 @@ class RunStore:
             conn.close()
 
     def _init(self) -> None:
-        with self._connection() as conn:
-            init_database(conn)
+        conn = sqlite3.connect(
+            str(self.path),
+            timeout=SQLITE_BUSY_TIMEOUT_MS / 1000.0,
+        )
+        try:
+            conn.execute("PRAGMA busy_timeout = %d" % SQLITE_BUSY_TIMEOUT_MS)
+            journal_mode = conn.execute("PRAGMA journal_mode = WAL").fetchone()[0]
+            if str(journal_mode).lower() != SQLITE_JOURNAL_MODE:
+                raise RuntimeError("runs.sqlite must use WAL journal mode.")
+            conn.execute("PRAGMA synchronous = NORMAL")
+            with conn:
+                init_database(conn)
+        finally:
+            conn.close()
 
     def create_run(self, command: str, mode: str) -> Dict[str, Any]:
         """Create the durable run before any model or ArcMap stage begins."""
@@ -93,9 +115,10 @@ class RunStore:
             "context_hash": "",
             "started_at": time.time(),
             "turns": [],
-            "task_semantics": None,
+            "task_contract": None,
             "workflow_versions": [],
             "audits": [],
+            "dominance_reports": [],
             "validations": [],
             "contract_diagnostics": [],
             "usage": [],
@@ -166,6 +189,21 @@ class RunStore:
         if row["status"] in ("running", "planned", "approved", "succeeded", "context_failed", "failed", "cancelled", "clarify", "reject"):
             self.release_target_episode(run_id)
 
+    def release_terminal_target_episodes(self) -> int:
+        """Release completed target ownership in one startup-bounded statement."""
+        terminal = (
+            "succeeded", "failed", "context_failed", "cancelled", "clarify", "reject",
+        )
+        placeholders = ",".join("?" for _ in terminal)
+        with self._connection() as conn:
+            cursor = conn.execute(
+                "UPDATE target_episodes SET state = 'released', updated_at = ? "
+                "WHERE state != 'released' AND run_id IN "
+                "(SELECT id FROM runs WHERE status IN (%s))" % placeholders,
+                (time.time(),) + terminal,
+            )
+        return cursor.rowcount
+
     def claim_target_episode(self, run_id: str) -> bool:
         now = time.time()
         with self._connection() as conn:
@@ -206,6 +244,58 @@ class RunStore:
 
     def run_trace(self, run_id: str) -> Dict[str, Any]:
         return _run_trace_from_row(self.get(run_id))
+
+    def finish_stage(
+        self,
+        run_id: str,
+        name: str,
+        started_at: float,
+        status: str,
+        now: float | None = None,
+    ) -> Dict[str, Any]:
+        if status not in RUN_STAGE_TERMINAL_STATUSES:
+            raise ValueError("invalid run stage terminal status.")
+        finished_at = time.time() if now is None else float(now)
+        with self._connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT agent_trace_json FROM runs WHERE id = ?", (run_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(run_id)
+            trace = json.loads(row[0])[0]["run"]
+            stages = [
+                item for item in trace.get("stages", [])
+                if item.get("name") == name and item.get("started_at") == started_at
+            ]
+            if len(stages) != 1:
+                raise ValueError("run stage record is missing or ambiguous: " + name)
+            stage = stages[0]
+            if stage.get("status") != "running":
+                if stage.get("status") == status and "finished_at" in stage:
+                    return trace
+                if (
+                    status == "recovery_required"
+                    and stage.get("status") in ("succeeded", "failed")
+                    and trace.get("execution_receipt")
+                ):
+                    return trace
+                raise ValueError("run stage already has a conflicting terminal status: " + name)
+            stage["status"] = status
+            stage["finished_at"] = finished_at
+            cursor = conn.execute(
+                "UPDATE runs SET agent_trace_json = ?, updated_at = ? "
+                "WHERE id = ? AND agent_trace_json = ?",
+                (
+                    json.dumps([{"type": "run", "run": trace}], ensure_ascii=False, sort_keys=True),
+                    finished_at,
+                    run_id,
+                    row[0],
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("concurrent run stage completion rejected.")
+        return trace
 
     def update_run(
         self,
@@ -285,6 +375,7 @@ class RunStore:
             "stage": stage,
             "type": type(exc).__name__,
             "summary": "stage failed",
+            "message": str(exc)[:1000],
         }
         row = self.update_run(
             run_id,
@@ -455,6 +546,7 @@ class RunStore:
             raise ValueError("execution owner_id is required.")
         claimed_at = time.time() if now is None else float(now)
         with self._connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
                 "SELECT status, agent_trace_json FROM runs WHERE id = ?",
                 (run_id,),
@@ -462,6 +554,12 @@ class RunStore:
             if row is None:
                 raise KeyError(run_id)
             trace = json.loads(row[1])[0]["run"]
+            execution_stages = [
+                stage for stage in trace.get("stages", [])
+                if stage.get("name") == "execution"
+            ]
+            if len(execution_stages) != 1 or execution_stages[0].get("status") != "running":
+                raise ValueError("runtime claim requires exactly one running execution stage.")
             expected = _target_identity(trace.get("context", {}).get("window", {}))
             if normalized != expected:
                 raise ValueError("ArcMap execution target does not match the bound planning target.")
@@ -472,8 +570,16 @@ class RunStore:
                 "heartbeat_at": claimed_at,
             }
             cursor = conn.execute(
-                "UPDATE runs SET status = ?, agent_trace_json = ?, updated_at = ? WHERE id = ? AND status = ?",
-                ("executing", json.dumps([{"type": "run", "run": trace}], ensure_ascii=False, sort_keys=True), claimed_at, run_id, "approved"),
+                "UPDATE runs SET status = ?, agent_trace_json = ?, updated_at = ? "
+                "WHERE id = ? AND status = ? AND agent_trace_json = ?",
+                (
+                    "executing",
+                    json.dumps([{"type": "run", "run": trace}], ensure_ascii=False, sort_keys=True),
+                    claimed_at,
+                    run_id,
+                    "approved",
+                    row[1],
+                ),
             )
         if cursor.rowcount != 1:
             raise ValueError("run is not approved for runtime claim.")
@@ -494,6 +600,10 @@ class RunStore:
             owner = trace.get("execution_owner") or {}
             if owner.get("owner_id") != owner_id:
                 raise ValueError("execution owner does not match.")
+            recovery = trace.get("recovery") or {}
+            resume_policy = recovery.get("resume_policy")
+            if row[0] == "recovery_required" and resume_policy != RECOVERY_RESUME_HEARTBEAT:
+                raise ValueError("execution recovery resume policy is missing or invalid.")
             if row[0] == "recovery_required" and heartbeat_at >= _recovery_deadline(trace, row[2]):
                 trace = _indeterminate_trace(trace, heartbeat_at)
                 cursor = conn.execute(
@@ -543,11 +653,13 @@ class RunStore:
                 heartbeat_at = float(owner.get("heartbeat_at") or owner.get("started_at") or 0)
                 if current - heartbeat_at <= float(lease_seconds):
                     continue
-                trace["recovery"] = {
-                    "required_at": current,
-                    "deadline_at": current + float(recovery_window_seconds),
-                    "reason": "ArcMap heartbeat lease expired before authoritative result acknowledgement",
-                }
+                _record_execution_recovery(
+                    trace,
+                    current,
+                    recovery_window_seconds,
+                    "ArcMap heartbeat lease expired before authoritative result acknowledgement",
+                    RECOVERY_RESUME_HEARTBEAT,
+                )
                 recovered_trace_json = json.dumps(
                     [{"type": "run", "run": trace}], ensure_ascii=False, sort_keys=True
                 )
@@ -562,13 +674,18 @@ class RunStore:
                     recovered.append(run_id)
         return recovered
 
-    def require_execution_recovery(
+    def reconcile_execution_dispatch_failure(
         self,
         run_id: str,
         reason: str,
+        error: Dict[str, str],
         now: float | None = None,
         recovery_window_seconds: float = RECOVERY_WINDOW_SECONDS,
     ) -> Dict[str, Any]:
+        if not isinstance(error, dict) or set(error) != {"type", "message", "hash"}:
+            raise ValueError("execution dispatch error is invalid.")
+        if not all(isinstance(error[name], str) and error[name] for name in error):
+            raise ValueError("execution dispatch error fields are required.")
         required_at = time.time() if now is None else float(now)
         with self._connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -577,28 +694,95 @@ class RunStore:
             ).fetchone()
             if row is None:
                 raise KeyError(run_id)
-            if row[0] != "executing":
-                raise ValueError("only an executing run can require recovery.")
+            status = row[0]
             trace = json.loads(row[1])[0]["run"]
-            trace["recovery"] = {
-                "required_at": required_at,
-                "deadline_at": required_at + float(recovery_window_seconds),
-                "reason": str(reason),
-            }
-            cursor = conn.execute(
-                """
-                UPDATE runs SET status = 'recovery_required', agent_trace_json = ?, updated_at = ?
-                WHERE id = ? AND status = 'executing' AND agent_trace_json = ?
-                """,
-                (
-                    json.dumps([{"type": "run", "run": trace}], ensure_ascii=False, sort_keys=True),
-                    required_at,
-                    run_id,
-                    row[1],
-                ),
-            )
-            if cursor.rowcount != 1:
-                raise ValueError("concurrent recovery transition rejected.")
+            stored_trace = row[1]
+            if status == "approved":
+                _set_execution_stage(trace, "failed", required_at, authoritative=True)
+                failure = {
+                    "stage": "execution",
+                    "type": error["type"],
+                    "summary": "execution dispatch failed before runtime claim",
+                    "message": error["message"][:1000],
+                }
+                trace["failure"] = failure
+                cursor = conn.execute(
+                    "UPDATE runs SET status = 'failed', result_json = ?, agent_trace_json = ?, updated_at = ? "
+                    "WHERE id = ? AND status = 'approved' AND agent_trace_json = ?",
+                    (
+                        json.dumps({"error": failure}, ensure_ascii=False, sort_keys=True),
+                        json.dumps([{"type": "run", "run": trace}], ensure_ascii=False, sort_keys=True),
+                        required_at,
+                        run_id,
+                        stored_trace,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise ValueError("concurrent execution dispatch failure rejected.")
+                conn.execute(
+                    "UPDATE target_episodes SET state = 'released', updated_at = ? "
+                    "WHERE run_id = ? AND state != 'released'",
+                    (required_at, run_id),
+                )
+            elif status == "executing":
+                trace["execution_transport_warning"] = {
+                    "type": error["type"],
+                    "hash": error["hash"],
+                    "reason": reason,
+                }
+                cursor = conn.execute(
+                    "UPDATE runs SET agent_trace_json = ?, updated_at = ? "
+                    "WHERE id = ? AND status = 'executing' AND agent_trace_json = ?",
+                    (
+                        json.dumps([{"type": "run", "run": trace}], ensure_ascii=False, sort_keys=True),
+                        required_at,
+                        run_id,
+                        row[1],
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise ValueError("concurrent execution transport warning rejected.")
+            elif status in ("executed", "succeeded", "context_failed"):
+                _set_execution_stage(trace, "succeeded", required_at, authoritative=True)
+                trace["execution_transport_warning"] = {
+                    "type": error["type"],
+                    "hash": error["hash"],
+                    "reason": reason,
+                }
+                cursor = conn.execute(
+                    "UPDATE runs SET agent_trace_json = ?, updated_at = ? "
+                    "WHERE id = ? AND status = ? AND agent_trace_json = ?",
+                    (
+                        json.dumps([{"type": "run", "run": trace}], ensure_ascii=False, sort_keys=True),
+                        required_at,
+                        run_id,
+                        status,
+                        stored_trace,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise ValueError("concurrent authoritative transport warning rejected.")
+            elif status == "failed" and trace.get("execution_receipt"):
+                _set_execution_stage(trace, "failed", required_at, authoritative=True)
+                trace["execution_transport_warning"] = {
+                    "type": error["type"],
+                    "hash": error["hash"],
+                    "reason": reason,
+                }
+                cursor = conn.execute(
+                    "UPDATE runs SET agent_trace_json = ?, updated_at = ? "
+                    "WHERE id = ? AND status = 'failed' AND agent_trace_json = ?",
+                    (
+                        json.dumps([{"type": "run", "run": trace}], ensure_ascii=False, sort_keys=True),
+                        required_at,
+                        run_id,
+                        stored_trace,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise ValueError("concurrent authoritative transport warning rejected.")
+            elif status not in ("failed", "recovery_required", "indeterminate"):
+                raise ValueError("execution dispatch failure cannot reconcile run status: " + status)
         return self.get(run_id)
 
     def resolve_expired_recoveries(
@@ -689,6 +873,12 @@ class RunStore:
                         "recovered_at": completed_at,
                     }
                 trace["execution_receipt"] = expected_receipt
+                _set_execution_stage(
+                    trace,
+                    "succeeded" if status == "executed" else "failed",
+                    completed_at,
+                    authoritative=True,
+                )
                 cursor = conn.execute(
                     """
                     UPDATE runs
@@ -1066,6 +1256,46 @@ def _recovery_deadline(
     if deadline > 0:
         return deadline
     return float(updated_at) + float(recovery_window_seconds)
+
+
+def _record_execution_recovery(
+    trace: Dict[str, Any],
+    required_at: float,
+    recovery_window_seconds: float,
+    reason: str,
+    resume_policy: str,
+) -> None:
+    if resume_policy != RECOVERY_RESUME_HEARTBEAT:
+        raise ValueError("invalid execution recovery resume policy.")
+    trace["recovery"] = {
+        "required_at": float(required_at),
+        "deadline_at": float(required_at) + float(recovery_window_seconds),
+        "reason": str(reason),
+        "resume_policy": resume_policy,
+    }
+
+
+def _set_execution_stage(
+    trace: Dict[str, Any],
+    status: str,
+    finished_at: float,
+    authoritative: bool = False,
+) -> None:
+    if status not in RUN_STAGE_TERMINAL_STATUSES:
+        raise ValueError("invalid execution stage terminal status.")
+    stages = [item for item in trace.get("stages", []) if item.get("name") == "execution"]
+    if len(stages) != 1:
+        raise ValueError("execution stage record is missing or ambiguous.")
+    stage = stages[0]
+    current = stage.get("status")
+    if current == status and "finished_at" in stage:
+        return
+    if current != "running" and not (
+        authoritative and current == "recovery_required" and status in ("succeeded", "failed")
+    ):
+        raise ValueError("execution stage already has a conflicting terminal status.")
+    stage["status"] = status
+    stage["finished_at"] = float(finished_at)
 
 
 def _indeterminate_trace(trace: Dict[str, Any], resolved_at: float) -> Dict[str, Any]:

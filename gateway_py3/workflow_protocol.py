@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Dict, Any
 
-WORKFLOW_PROTOCOL_VERSION = 2
+WORKFLOW_PROTOCOL_VERSION = 3
 
 
 def workflow_protocol() -> Dict[str, Any]:
@@ -31,6 +31,10 @@ def workflow_protocol() -> Dict[str, Any]:
         "where": {
             "values_operators": ["in", "between"],
             "value_operators": ["eq", "ne", "gt", "gte", "lt", "lte", "like"],
-            "rule": "in and between use values; every other single-value operator uses value.",
+            "field_comparison_operators": ["eq", "ne", "gt", "gte", "lt", "lte"],
+            "rule": (
+                "in and between use values; like uses value; comparison operators use exactly "
+                "one of value (literal) or value_field (a field on the same layer)."
+            ),
         },
     }

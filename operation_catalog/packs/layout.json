@@ -6,49 +6,174 @@
       "version": "1.0",
       "category": "layout",
       "summary": "列出当前 MXD 版面元素。",
-      "keywords": ["layout elements", "版面元素", "标题", "图例", "比例尺", "指北针"],
-      "model_card": "Use layout.list_elements to inspect existing layout elements before editing title text or exporting a map. Arguments: element_type optional ALL, TEXT_ELEMENT, LEGEND_ELEMENT, MAPSURROUND_ELEMENT, PICTURE_ELEMENT, or DATAFRAME_ELEMENT.",
+      "keywords": [
+        "layout elements",
+        "版面元素",
+        "标题",
+        "图例",
+        "比例尺",
+        "指北针"
+      ],
       "parameters_schema": {
         "type": "object",
         "properties": {
           "element_type": {
             "type": "string",
-            "enum": ["ALL", "TEXT_ELEMENT", "LEGEND_ELEMENT", "MAPSURROUND_ELEMENT", "PICTURE_ELEMENT", "DATAFRAME_ELEMENT"]
+            "enum": [
+              "ALL",
+              "TEXT_ELEMENT",
+              "LEGEND_ELEMENT",
+              "MAPSURROUND_ELEMENT",
+              "PICTURE_ELEMENT",
+              "DATAFRAME_ELEMENT"
+            ]
           }
         },
         "additionalProperties": false
       },
-      "context_requirements": {"requires_layers": false},
+      "context_requirements": {
+        "requires_layers": false
+      },
       "side_effects": "read_only",
-      "output_policy": {"writes_output": false},
+      "output_policy": {
+        "writes_output": false
+      },
       "executor": "operations.layout_ops.list_elements",
       "examples": [
         {
           "user": "当前版面有哪些标题和图例元素",
-          "arguments": {"element_type": "ALL"}
+          "arguments": {
+            "element_type": "ALL"
+          }
         }
-      ]
+      ],
+      "capability_contract": {
+        "inputs": [],
+        "parameters_schema": {
+          "type": "object",
+          "properties": {
+            "element_type": {
+              "type": "string",
+              "enum": [
+                "ALL",
+                "TEXT_ELEMENT",
+                "LEGEND_ELEMENT",
+                "MAPSURROUND_ELEMENT",
+                "PICTURE_ELEMENT",
+                "DATAFRAME_ELEMENT"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "kind": "map_state",
+          "geometry": {
+            "rule": "not_applicable",
+            "value": "not_applicable"
+          },
+          "fields": {
+            "effect": "not_applicable",
+            "target": "not_applicable",
+            "static_fields": [],
+            "parameter_field": "not_applicable"
+          },
+          "spatial_reference": {
+            "rule": "not_applicable",
+            "input": "not_applicable"
+          },
+          "cardinality": {
+            "rule": "fixed",
+            "value": "one_snapshot"
+          },
+          "selection_state": "not_applicable",
+          "map_publication": "none"
+        },
+        "side_effects": "read_only",
+        "authorization": {
+          "required": false,
+          "scope": "read_current_map"
+        },
+        "postconditions": [
+          {
+            "kind": "layout_elements_match_live_layout",
+            "target": "map",
+            "expectation": {
+              "kind": {
+                "ref": "outputs.kind"
+              },
+              "geometry": {
+                "ref": "outputs.geometry"
+              },
+              "fields": {
+                "ref": "outputs.fields"
+              },
+              "spatial_reference": {
+                "ref": "outputs.spatial_reference"
+              },
+              "cardinality": {
+                "ref": "outputs.cardinality"
+              },
+              "selection_state": {
+                "ref": "outputs.selection_state"
+              },
+              "map_publication": {
+                "ref": "outputs.map_publication"
+              }
+            }
+          }
+        ],
+        "semantic_effects": [
+          {
+            "kind": "inspect",
+            "result": {
+              "output": true
+            }
+          }
+        ]
+      }
     },
     {
       "id": "layout.set_text",
       "version": "1.0",
       "category": "layout",
       "summary": "修改现有文本版面元素的文字。",
-      "keywords": ["layout text", "修改标题", "设置标题", "版面文字"],
-      "model_card": "Use layout.set_text to change an existing TEXT_ELEMENT. First call layout.list_elements if the element name is unknown. Arguments: element_name, text, match optional EXACT or WILDCARD. This cannot create new text elements; it only updates one existing element.",
+      "keywords": [
+        "layout text",
+        "修改标题",
+        "设置标题",
+        "版面文字"
+      ],
       "parameters_schema": {
         "type": "object",
-        "required": ["element_name", "text"],
+        "required": [
+          "element_name",
+          "text"
+        ],
         "properties": {
-          "element_name": {"type": "string"},
-          "text": {"type": "string"},
-          "match": {"type": "string", "enum": ["EXACT", "WILDCARD"]}
+          "element_name": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "match": {
+            "type": "string",
+            "enum": [
+              "EXACT",
+              "WILDCARD"
+            ]
+          }
         },
         "additionalProperties": false
       },
-      "context_requirements": {"requires_layers": false},
+      "context_requirements": {
+        "requires_layers": false
+      },
       "side_effects": "changes_map",
-      "output_policy": {"writes_output": false},
+      "output_policy": {
+        "writes_output": false
+      },
       "executor": "operations.layout_ops.set_text",
       "examples": [
         {
@@ -58,53 +183,273 @@
             "text": "南京用地现状图"
           }
         }
-      ]
+      ],
+      "capability_contract": {
+        "inputs": [],
+        "parameters_schema": {
+          "type": "object",
+          "required": [
+            "element_name",
+            "text"
+          ],
+          "properties": {
+            "element_name": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "match": {
+              "type": "string",
+              "enum": [
+                "EXACT",
+                "WILDCARD"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "kind": "map_state",
+          "geometry": {
+            "rule": "not_applicable",
+            "value": "not_applicable"
+          },
+          "fields": {
+            "effect": "not_applicable",
+            "target": "not_applicable",
+            "static_fields": [],
+            "parameter_field": "not_applicable"
+          },
+          "spatial_reference": {
+            "rule": "not_applicable",
+            "input": "not_applicable"
+          },
+          "cardinality": {
+            "rule": "fixed",
+            "value": "one_snapshot"
+          },
+          "selection_state": "not_applicable",
+          "map_publication": "map_state_updated"
+        },
+        "side_effects": "changes_map",
+        "authorization": {
+          "required": true,
+          "scope": "modify_map"
+        },
+        "postconditions": [
+          {
+            "kind": "layout_text_matches_request",
+            "target": "map",
+            "expectation": {
+              "kind": {
+                "ref": "outputs.kind"
+              },
+              "geometry": {
+                "ref": "outputs.geometry"
+              },
+              "fields": {
+                "ref": "outputs.fields"
+              },
+              "spatial_reference": {
+                "ref": "outputs.spatial_reference"
+              },
+              "cardinality": {
+                "ref": "outputs.cardinality"
+              },
+              "selection_state": {
+                "ref": "outputs.selection_state"
+              },
+              "map_publication": {
+                "ref": "outputs.map_publication"
+              }
+            }
+          }
+        ],
+        "semantic_effects": [
+          {
+            "kind": "layout_change",
+            "result": {
+              "output": true
+            },
+            "action": {
+              "const": "set_text"
+            }
+          }
+        ]
+      }
     },
     {
       "id": "layout.set_active_view",
       "version": "1.0",
       "category": "layout",
       "summary": "切换 ArcMap 当前视图为版面视图或数据视图。",
-      "keywords": ["page layout", "data view", "切换版面", "切换视图"],
-      "model_card": "Use layout.set_active_view to switch ArcMap between PAGE_LAYOUT and DATA_VIEW. Arguments: view_mode PAGE_LAYOUT or DATA_VIEW.",
+      "keywords": [
+        "page layout",
+        "data view",
+        "切换版面",
+        "切换视图"
+      ],
       "parameters_schema": {
         "type": "object",
-        "required": ["view_mode"],
+        "required": [
+          "view_mode"
+        ],
         "properties": {
-          "view_mode": {"type": "string", "enum": ["PAGE_LAYOUT", "DATA_VIEW"]}
+          "view_mode": {
+            "type": "string",
+            "enum": [
+              "PAGE_LAYOUT",
+              "DATA_VIEW"
+            ]
+          }
         },
         "additionalProperties": false
       },
-      "context_requirements": {"requires_layers": false},
+      "context_requirements": {
+        "requires_layers": false
+      },
       "side_effects": "changes_map",
-      "output_policy": {"writes_output": false},
+      "output_policy": {
+        "writes_output": false
+      },
       "executor": "operations.layout_ops.set_active_view",
       "examples": [
         {
           "user": "切换到版面视图",
-          "arguments": {"view_mode": "PAGE_LAYOUT"}
+          "arguments": {
+            "view_mode": "PAGE_LAYOUT"
+          }
         }
-      ]
+      ],
+      "capability_contract": {
+        "inputs": [],
+        "parameters_schema": {
+          "type": "object",
+          "required": [
+            "view_mode"
+          ],
+          "properties": {
+            "view_mode": {
+              "type": "string",
+              "enum": [
+                "PAGE_LAYOUT",
+                "DATA_VIEW"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "kind": "map_state",
+          "geometry": {
+            "rule": "not_applicable",
+            "value": "not_applicable"
+          },
+          "fields": {
+            "effect": "not_applicable",
+            "target": "not_applicable",
+            "static_fields": [],
+            "parameter_field": "not_applicable"
+          },
+          "spatial_reference": {
+            "rule": "not_applicable",
+            "input": "not_applicable"
+          },
+          "cardinality": {
+            "rule": "fixed",
+            "value": "one_snapshot"
+          },
+          "selection_state": "not_applicable",
+          "map_publication": "map_state_updated"
+        },
+        "side_effects": "changes_map",
+        "authorization": {
+          "required": true,
+          "scope": "modify_map"
+        },
+        "postconditions": [
+          {
+            "kind": "active_view_matches_request",
+            "target": "map",
+            "expectation": {
+              "kind": {
+                "ref": "outputs.kind"
+              },
+              "geometry": {
+                "ref": "outputs.geometry"
+              },
+              "fields": {
+                "ref": "outputs.fields"
+              },
+              "spatial_reference": {
+                "ref": "outputs.spatial_reference"
+              },
+              "cardinality": {
+                "ref": "outputs.cardinality"
+              },
+              "selection_state": {
+                "ref": "outputs.selection_state"
+              },
+              "map_publication": {
+                "ref": "outputs.map_publication"
+              }
+            }
+          }
+        ],
+        "semantic_effects": [
+          {
+            "kind": "layout_change",
+            "result": {
+              "output": true
+            },
+            "action": {
+              "const": "set_active_view"
+            }
+          }
+        ]
+      }
     },
     {
       "id": "layout.export_pdf",
       "version": "1.0",
       "category": "layout",
       "summary": "导出当前版面为 PDF。",
-      "keywords": ["layout pdf", "版面导出PDF", "出图PDF"],
-      "model_card": "Use layout.export_pdf to export the current map layout to a PDF file. Arguments: output_name, resolution optional, image_quality optional BEST/NORMAL/FASTER/FASTEST, output_folder optional when MXD is unsaved.",
+      "keywords": [
+        "layout pdf",
+        "版面导出PDF",
+        "出图PDF"
+      ],
       "parameters_schema": {
         "type": "object",
-        "required": ["output_name"],
+        "required": [
+          "output_name"
+        ],
         "properties": {
-          "output_name": {"type": "string"},
-          "resolution": {"type": "integer"},
-          "image_quality": {"type": "string", "enum": ["BEST", "NORMAL", "FASTER", "FASTEST"]},
-          "output_folder": {"type": "string"}
+          "output_name": {
+            "type": "string"
+          },
+          "resolution": {
+            "type": "integer"
+          },
+          "image_quality": {
+            "type": "string",
+            "enum": [
+              "BEST",
+              "NORMAL",
+              "FASTER",
+              "FASTEST"
+            ]
+          },
+          "output_folder": {
+            "type": "string"
+          }
         },
         "additionalProperties": false
       },
-      "context_requirements": {"requires_output_location_when_unsaved": true},
+      "context_requirements": {
+        "requires_output_location_when_unsaved": true
+      },
       "side_effects": "writes_data",
       "output_policy": {
         "writes_output": true,
@@ -123,27 +468,143 @@
             "resolution": 300
           }
         }
-      ]
+      ],
+      "capability_contract": {
+        "inputs": [],
+        "parameters_schema": {
+          "type": "object",
+          "required": [
+            "output_name"
+          ],
+          "properties": {
+            "output_name": {
+              "type": "string"
+            },
+            "resolution": {
+              "type": "integer"
+            },
+            "image_quality": {
+              "type": "string",
+              "enum": [
+                "BEST",
+                "NORMAL",
+                "FASTER",
+                "FASTEST"
+              ]
+            },
+            "output_folder": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "kind": "file",
+          "geometry": {
+            "rule": "not_applicable",
+            "value": "not_applicable"
+          },
+          "fields": {
+            "effect": "not_applicable",
+            "target": "not_applicable",
+            "static_fields": [],
+            "parameter_field": "not_applicable"
+          },
+          "spatial_reference": {
+            "rule": "not_applicable",
+            "input": "not_applicable"
+          },
+          "cardinality": {
+            "rule": "fixed",
+            "value": "one_snapshot"
+          },
+          "selection_state": "not_applicable",
+          "map_publication": "none"
+        },
+        "side_effects": "writes_data",
+        "authorization": {
+          "required": true,
+          "scope": "write_file"
+        },
+        "postconditions": [
+          {
+            "kind": "file_written",
+            "target": "output_name",
+            "expectation": {
+              "kind": {
+                "ref": "outputs.kind"
+              },
+              "geometry": {
+                "ref": "outputs.geometry"
+              },
+              "fields": {
+                "ref": "outputs.fields"
+              },
+              "spatial_reference": {
+                "ref": "outputs.spatial_reference"
+              },
+              "cardinality": {
+                "ref": "outputs.cardinality"
+              },
+              "selection_state": {
+                "ref": "outputs.selection_state"
+              },
+              "map_publication": {
+                "ref": "outputs.map_publication"
+              }
+            }
+          }
+        ],
+        "semantic_effects": [
+          {
+            "kind": "artifact_export",
+            "result": {
+              "output": true
+            },
+            "output_format": {
+              "const": "pdf"
+            },
+            "action": {
+              "const": "export_pdf"
+            }
+          }
+        ]
+      }
     },
     {
       "id": "layout.export_png",
       "version": "1.0",
       "category": "layout",
       "summary": "导出当前版面为 PNG 图片。",
-      "keywords": ["layout png", "版面导出PNG", "出图PNG"],
-      "model_card": "Use layout.export_png to export the current map layout to a PNG file. Arguments: output_name, resolution optional, world_file optional, output_folder optional when MXD is unsaved.",
+      "keywords": [
+        "layout png",
+        "版面导出PNG",
+        "出图PNG"
+      ],
       "parameters_schema": {
         "type": "object",
-        "required": ["output_name"],
+        "required": [
+          "output_name"
+        ],
         "properties": {
-          "output_name": {"type": "string"},
-          "resolution": {"type": "integer"},
-          "world_file": {"type": "boolean"},
-          "output_folder": {"type": "string"}
+          "output_name": {
+            "type": "string"
+          },
+          "resolution": {
+            "type": "integer"
+          },
+          "world_file": {
+            "type": "boolean"
+          },
+          "output_folder": {
+            "type": "string"
+          }
         },
         "additionalProperties": false
       },
-      "context_requirements": {"requires_output_location_when_unsaved": true},
+      "context_requirements": {
+        "requires_output_location_when_unsaved": true
+      },
       "side_effects": "writes_data",
       "output_policy": {
         "writes_output": true,
@@ -162,7 +623,102 @@
             "resolution": 300
           }
         }
-      ]
+      ],
+      "capability_contract": {
+        "inputs": [],
+        "parameters_schema": {
+          "type": "object",
+          "required": [
+            "output_name"
+          ],
+          "properties": {
+            "output_name": {
+              "type": "string"
+            },
+            "resolution": {
+              "type": "integer"
+            },
+            "world_file": {
+              "type": "boolean"
+            },
+            "output_folder": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "kind": "file",
+          "geometry": {
+            "rule": "not_applicable",
+            "value": "not_applicable"
+          },
+          "fields": {
+            "effect": "not_applicable",
+            "target": "not_applicable",
+            "static_fields": [],
+            "parameter_field": "not_applicable"
+          },
+          "spatial_reference": {
+            "rule": "not_applicable",
+            "input": "not_applicable"
+          },
+          "cardinality": {
+            "rule": "fixed",
+            "value": "one_snapshot"
+          },
+          "selection_state": "not_applicable",
+          "map_publication": "none"
+        },
+        "side_effects": "writes_data",
+        "authorization": {
+          "required": true,
+          "scope": "write_file"
+        },
+        "postconditions": [
+          {
+            "kind": "file_written",
+            "target": "output_name",
+            "expectation": {
+              "kind": {
+                "ref": "outputs.kind"
+              },
+              "geometry": {
+                "ref": "outputs.geometry"
+              },
+              "fields": {
+                "ref": "outputs.fields"
+              },
+              "spatial_reference": {
+                "ref": "outputs.spatial_reference"
+              },
+              "cardinality": {
+                "ref": "outputs.cardinality"
+              },
+              "selection_state": {
+                "ref": "outputs.selection_state"
+              },
+              "map_publication": {
+                "ref": "outputs.map_publication"
+              }
+            }
+          }
+        ],
+        "semantic_effects": [
+          {
+            "kind": "artifact_export",
+            "result": {
+              "output": true
+            },
+            "output_format": {
+              "const": "png"
+            },
+            "action": {
+              "const": "export_png"
+            }
+          }
+        ]
+      }
     }
   ]
 }

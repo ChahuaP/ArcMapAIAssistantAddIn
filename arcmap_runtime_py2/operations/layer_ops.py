@@ -3,7 +3,7 @@ from __future__ import absolute_import
 
 import arcpy
 
-from operations import common
+from . import common
 
 try:
     import path_utils
@@ -21,10 +21,15 @@ def add_layer(context, arguments, step_outputs):
         raise common.OperationError("Layer path not found: %s" % path)
     mxd = common.current_mxd()
     df = common.active_data_frame(mxd)
+    before_count = len(_source_layers(mxd, df, path))
     layer, needs_add = _layer_for_path(path, mxd, df)
     if needs_add:
         arcpy.mapping.AddLayer(df, layer, "TOP")
-    return {"layer_path": path, "layer_name": getattr(layer, "name", path_utils.splitext(path_utils.basename(path))[0])}
+    published = _source_layers(mxd, df, path)
+    if len(published) <= before_count:
+        raise common.OperationError("Added layer cannot be resolved by its exact data source: %s" % path)
+    live_layer = published[-1]
+    return {"layer_path": path, "layer_name": getattr(live_layer, "name", path_utils.splitext(path_utils.basename(path))[0])}
 
 
 def _layer_for_path(path, mxd, df):
@@ -73,6 +78,15 @@ def _last_matching_layer(mxd, df, path, layer):
     return matches[-1] if matches else None
 
 
+def _source_layers(mxd, df, path):
+    expected = common._normalize_path(path)
+    return [
+        item for item in arcpy.mapping.ListLayers(mxd, "", df)
+        if common._safe_data_source(item)
+        and common._normalize_path(common._safe_data_source(item)) == expected
+    ]
+
+
 def _matching_layers(mxd, df, path, layer):
     layers = arcpy.mapping.ListLayers(mxd, "", df)
     return [item for item in layers if _matches_layer(item, path, layer)]
@@ -109,9 +123,19 @@ def clear_layers(context, arguments, step_outputs):
     mxd = common.current_mxd()
     df = common.active_data_frame(mxd)
     layers = list(arcpy.mapping.ListLayers(mxd, "", df))
+    removed_count = len(layers)
     for layer in layers:
         arcpy.mapping.RemoveLayer(df, layer)
-    return {"removed_count": len(layers)}
+    # ArcMap's COM-backed Layer objects retain schema locks until every Python
+    # proxy is released.  The reset operation owns these handles, so close that
+    # ownership boundary before acknowledging the reset to the caller.  Do not
+    # force a process-wide collection inside ArcMap's COM callback.
+    if removed_count:
+        del layer
+    del layers
+    del df
+    del mxd
+    return {"removed_count": removed_count}
 
 
 def move_layer(context, arguments, step_outputs):

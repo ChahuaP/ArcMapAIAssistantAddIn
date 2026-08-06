@@ -37,7 +37,7 @@ def main() -> int:
     permission_parser.add_argument("--allow-edits", action="store_true")
 
     run_parser = subparsers.add_parser("run")
-    run_parser.add_argument("--mode", required=True, choices=("direct_single", "context_single", "constrained_single", "multi_agent"))
+    run_parser.add_argument("--mode", required=True, choices=("g0_direct", "g1_context", "g2_constrained", "g3_audited"))
     run_parser.add_argument("--command", dest="user_command", required=True)
     run_parser.add_argument("--model", default="")
     run_parser.add_argument("--provider", default="")
@@ -49,7 +49,7 @@ def main() -> int:
     cancel_parser = subparsers.add_parser("run-cancel")
     cancel_parser.add_argument("run_id")
     report_parser = subparsers.add_parser("run-report")
-    report_parser.add_argument("--mode", choices=("direct_single", "context_single", "constrained_single", "multi_agent"))
+    report_parser.add_argument("--mode", choices=("g0_direct", "g1_context", "g2_constrained", "g3_audited"))
 
     args = parser.parse_args()
     try:

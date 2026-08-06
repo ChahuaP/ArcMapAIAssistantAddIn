@@ -6,7 +6,7 @@ from typing import Any, Dict, Iterable, List
 
 from .paths import CATALOG_ROOT
 from .tool_builder import enabled_operation_specs
-from .output_policy import canonical_output_policy
+from .capability_registry import CapabilityRegistry
 
 
 class CatalogError(Exception):
@@ -25,6 +25,7 @@ class OperationCatalog:
         self.operations: Dict[str, Dict[str, Any]] = {}
         self.packs: List[Dict[str, Any]] = []
         self._load()
+        self.capabilities = CapabilityRegistry(self.operations.values())
 
     def _load(self) -> None:
         for rel_path in self.catalog["packs"]:
@@ -49,18 +50,5 @@ class OperationCatalog:
     def all_operations(self) -> Iterable[Dict[str, Any]]:
         return self.operations.values()
 
-    def model_card(self, operation: Dict[str, Any]) -> Dict[str, Any]:
-        schema = operation["parameters_schema"]
-        return {
-            "id": operation["id"],
-            "summary": operation["summary"],
-            "model_card": operation["model_card"],
-            "parameters_schema": schema,
-            "context_requirements": operation.get("context_requirements", {}),
-            "side_effects": operation["side_effects"],
-            "output_policy": canonical_output_policy(
-                operation.get("output_policy"),
-                operation.get("side_effects", ""),
-            ),
-            "examples": operation.get("examples", [])[:2],
-        }
+    def planning_card(self, operation: Dict[str, Any]) -> Dict[str, Any]:
+        return self.capabilities.planning_card(operation)

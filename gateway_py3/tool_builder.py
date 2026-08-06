@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 from .custom_tool_contract import CustomToolContractError, build_review_payload
+from .capability_registry import CapabilityRegistry, CapabilityContractError
 from .output_policy import (
     OutputPolicyError,
     canonical_output_policy,
@@ -285,7 +286,17 @@ def canonicalize_operation_spec(spec: Dict[str, Any], source: Path | None = None
         result["context_requirements"] = {}
     if not isinstance(result.get("output_policy"), dict):
         result["output_policy"] = {}
+    contract = result.get("capability_contract")
+    if isinstance(contract, dict):
+        contract = dict(contract)
+        contract["parameters_schema"] = result["parameters_schema"]
+        contract["side_effects"] = result.get("side_effects")
+        result["capability_contract"] = contract
     _validate_spec_shape(result)
+    try:
+        CapabilityRegistry([result])
+    except CapabilityContractError as exc:
+        raise ToolBuilderError(str(exc))
     return result
 
 
@@ -365,17 +376,20 @@ def _validate_spec_shape(spec: Dict[str, Any]) -> None:
         "version",
         "category",
         "summary",
-        "model_card",
         "parameters_schema",
         "context_requirements",
         "side_effects",
         "output_policy",
         "executor",
         "examples",
+        "capability_contract",
     }
     missing = sorted(required - set(spec))
     if missing:
         raise ToolBuilderError("operation_spec 缺少字段：%s" % "、".join(missing))
+    extra = sorted(set(spec) - required - {"keywords", "context_requirements"})
+    if extra:
+        raise ToolBuilderError("operation_spec 包含未定义字段：%s" % "、".join(extra))
     operation_id = str(spec["id"])
     if not re.match(r"^custom\.[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)?$", operation_id):
         raise ToolBuilderError("自定义工具 id 必须以 custom. 开头，并且只使用小写英文、数字和下划线。")

@@ -8,7 +8,7 @@ ROOT = Path(__file__).parents[2]
 class RunUiContractTests(unittest.TestCase):
     def test_ui_has_all_ablation_buttons(self):
         text = (ROOT / "gateway_py3/web/index.html").read_text(encoding="utf-8")
-        for mode in ("direct_single", "context_single", "constrained_single", "multi_agent"):
+        for mode in ("g0_direct", "g1_context", "g2_constrained", "g3_audited"):
             self.assertIn('data-mode="%s"' % mode, text)
 
     def test_ui_polls_runs_to_terminal_status(self):

@@ -6,19 +6,52 @@
       "version": "1.0",
       "category": "edit_geometry",
       "summary": "创建空的点、线或面要素图层。",
-      "keywords": ["create empty layer", "创建空图层", "创建面图层", "创建点图层", "创建线图层", "空要素类"],
-      "model_card": "Use edit.create_empty_feature_layer when the user asks to create a new empty point, polyline, or polygon layer/feature class, such as 创建面图层 WGS84, and does not provide feature coordinates. This creates a schema-empty feature class and adds it to ArcMap. Do not use this when the user asks to create a concrete point/line/polygon feature; use edit.create_point_features, edit.create_polyline_feature, edit.create_polygon_feature, edit.create_rectangle_polygon, edit.create_regular_polygon, or edit.create_star_polygon instead.",
+      "keywords": [
+        "create empty layer",
+        "创建空图层",
+        "创建面图层",
+        "创建点图层",
+        "创建线图层",
+        "空要素类"
+      ],
       "parameters_schema": {
         "type": "object",
-        "required": ["geometry_type", "output_name"],
+        "required": [
+          "geometry_type",
+          "output_name"
+        ],
         "properties": {
-          "geometry_type": {"type": "string", "enum": ["point", "polyline", "polygon"]},
-          "output_name": {"type": "string"},
-          "spatial_reference_layer": {"type": "string", "x-geopilot-kind": "layer"},
-          "wkid": {"type": "integer"},
-          "output_workspace": {"type": "string"},
-          "output_folder": {"type": "string"},
-          "output_format": {"type": "string", "enum": ["gdb", "shp"]}
+          "geometry_type": {
+            "type": "string",
+            "enum": [
+              "point",
+              "polyline",
+              "polygon"
+            ]
+          },
+          "output_name": {
+            "type": "string"
+          },
+          "spatial_reference_layer": {
+            "type": "string",
+            "x-geopilot-kind": "layer"
+          },
+          "wkid": {
+            "type": "integer"
+          },
+          "output_workspace": {
+            "type": "string"
+          },
+          "output_folder": {
+            "type": "string"
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "gdb",
+              "shp"
+            ]
+          }
         },
         "additionalProperties": false
       },
@@ -31,7 +64,10 @@
         "writes_output": true,
         "type": "feature_class",
         "geometry_type": "UserSelected",
-        "formats": ["gdb", "shp"],
+        "formats": [
+          "gdb",
+          "shp"
+        ],
         "default_format": "gdb",
         "workspace": "mxd_default_or_output_workspace_or_output_folder",
         "overwrite": false,
@@ -47,30 +83,183 @@
             "output_name": "polygon_layer"
           }
         }
-      ]
+      ],
+      "capability_contract": {
+        "inputs": [
+          {
+            "parameter": "spatial_reference_layer",
+            "cardinality": "one",
+            "data_kind": [
+              "feature_layer"
+            ],
+            "geometry": [
+              "point",
+              "polyline",
+              "polygon"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          }
+        ],
+        "parameters_schema": {
+          "type": "object",
+          "required": [
+            "geometry_type",
+            "output_name"
+          ],
+          "properties": {
+            "geometry_type": {
+              "type": "string",
+              "enum": [
+                "point",
+                "polyline",
+                "polygon"
+              ]
+            },
+            "output_name": {
+              "type": "string"
+            },
+            "spatial_reference_layer": {
+              "type": "string",
+              "x-geopilot-kind": "layer"
+            },
+            "wkid": {
+              "type": "integer"
+            },
+            "output_workspace": {
+              "type": "string"
+            },
+            "output_folder": {
+              "type": "string"
+            },
+            "output_format": {
+              "type": "string",
+              "enum": [
+                "gdb",
+                "shp"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "kind": "feature_class",
+          "geometry": {
+            "rule": "fixed",
+            "value": "parameter_geometry_type"
+          },
+          "fields": {
+            "effect": "static_generated",
+            "target": "not_applicable",
+            "static_fields": [],
+            "parameter_field": "not_applicable"
+          },
+          "spatial_reference": {
+            "rule": "from_parameter_or_map",
+            "input": "wkid"
+          },
+          "cardinality": {
+            "rule": "fixed",
+            "value": "one"
+          },
+          "selection_state": "not_applicable",
+          "map_publication": "published"
+        },
+        "side_effects": "writes_data",
+        "authorization": {
+          "required": true,
+          "scope": "write_data"
+        },
+        "postconditions": [
+          {
+            "kind": "feature_class_created",
+            "target": "output_name",
+            "expectation": {
+              "kind": {
+                "ref": "outputs.kind"
+              },
+              "geometry": {
+                "ref": "outputs.geometry"
+              },
+              "fields": {
+                "ref": "outputs.fields"
+              },
+              "spatial_reference": {
+                "ref": "outputs.spatial_reference"
+              },
+              "cardinality": {
+                "ref": "outputs.cardinality"
+              },
+              "selection_state": {
+                "ref": "outputs.selection_state"
+              },
+              "map_publication": {
+                "ref": "outputs.map_publication"
+              }
+            }
+          }
+        ],
+        "semantic_effects": [
+          {
+            "kind": "feature_create",
+            "result": {
+              "output": true
+            },
+            "action": {
+              "const": "create_empty_feature_layer"
+            }
+          }
+        ]
+      }
     },
     {
       "id": "edit.create_point_features",
       "version": "1.0",
       "category": "edit_geometry",
       "summary": "根据坐标创建新的点要素图层，可一次写入多个点。",
-      "keywords": ["create point", "创建点", "坐标点", "点要素"],
-      "model_card": "Use edit.create_point_features to create one new point feature class from explicit coordinates. Put all requested point features in the points array; do not create one shapefile per point unless the user explicitly asks for separate layers. Arguments: points array of {x,y,name optional}, output_name, spatial_reference_layer optional, wkid optional, output_workspace/output_folder/output_format optional. If spatial_reference_layer and wkid are omitted, ArcMap uses the active data frame spatial reference and fails when it is unknown.",
+      "keywords": [
+        "create point",
+        "创建点",
+        "坐标点",
+        "点要素"
+      ],
       "parameters_schema": {
         "type": "object",
-        "required": ["points", "output_name"],
+        "required": [
+          "points",
+          "output_name"
+        ],
         "properties": {
           "points": {
             "type": "array",
-            "items": {"type": "object"},
+            "items": {
+              "type": "object"
+            },
             "minItems": 1
           },
-          "output_name": {"type": "string"},
-          "spatial_reference_layer": {"type": "string", "x-geopilot-kind": "layer"},
-          "wkid": {"type": "integer"},
-          "output_workspace": {"type": "string"},
-          "output_folder": {"type": "string"},
-          "output_format": {"type": "string", "enum": ["gdb", "shp"]}
+          "output_name": {
+            "type": "string"
+          },
+          "spatial_reference_layer": {
+            "type": "string",
+            "x-geopilot-kind": "layer"
+          },
+          "wkid": {
+            "type": "integer"
+          },
+          "output_workspace": {
+            "type": "string"
+          },
+          "output_folder": {
+            "type": "string"
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "gdb",
+              "shp"
+            ]
+          }
         },
         "additionalProperties": false
       },
@@ -83,7 +272,10 @@
         "writes_output": true,
         "type": "feature_class",
         "geometry_type": "Point",
-        "formats": ["gdb", "shp"],
+        "formats": [
+          "gdb",
+          "shp"
+        ],
         "default_format": "gdb",
         "workspace": "mxd_default_or_output_workspace_or_output_folder",
         "overwrite": false,
@@ -94,28 +286,185 @@
         {
           "user": "在 118.78,32.04 创建一个点",
           "arguments": {
-            "points": [{"x": 118.78, "y": 32.04, "name": "point_1"}],
+            "points": [
+              {
+                "x": 118.78,
+                "y": 32.04,
+                "name": "point_1"
+              }
+            ],
             "wkid": 4326,
             "output_name": "point_1"
           }
         }
-      ]
+      ],
+      "capability_contract": {
+        "inputs": [
+          {
+            "parameter": "points",
+            "cardinality": "many",
+            "data_kind": [
+              "coordinate_sequence",
+              "feature_definition"
+            ],
+            "geometry": [
+              "not_applicable"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          },
+          {
+            "parameter": "spatial_reference_layer",
+            "cardinality": "one",
+            "data_kind": [
+              "feature_layer"
+            ],
+            "geometry": [
+              "point",
+              "polyline",
+              "polygon"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          }
+        ],
+        "parameters_schema": {
+          "type": "object",
+          "required": [
+            "points",
+            "output_name"
+          ],
+          "properties": {
+            "points": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              },
+              "minItems": 1
+            },
+            "output_name": {
+              "type": "string"
+            },
+            "spatial_reference_layer": {
+              "type": "string",
+              "x-geopilot-kind": "layer"
+            },
+            "wkid": {
+              "type": "integer"
+            },
+            "output_workspace": {
+              "type": "string"
+            },
+            "output_folder": {
+              "type": "string"
+            },
+            "output_format": {
+              "type": "string",
+              "enum": [
+                "gdb",
+                "shp"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "kind": "feature_class",
+          "geometry": {
+            "rule": "fixed",
+            "value": "point"
+          },
+          "fields": {
+            "effect": "static_generated",
+            "target": "not_applicable",
+            "static_fields": [],
+            "parameter_field": "not_applicable"
+          },
+          "spatial_reference": {
+            "rule": "from_parameter_or_map",
+            "input": "wkid"
+          },
+          "cardinality": {
+            "rule": "fixed",
+            "value": "one"
+          },
+          "selection_state": "not_applicable",
+          "map_publication": "published"
+        },
+        "side_effects": "writes_data",
+        "authorization": {
+          "required": true,
+          "scope": "write_data"
+        },
+        "postconditions": [
+          {
+            "kind": "feature_class_created",
+            "target": "output_name",
+            "expectation": {
+              "kind": {
+                "ref": "outputs.kind"
+              },
+              "geometry": {
+                "ref": "outputs.geometry"
+              },
+              "fields": {
+                "ref": "outputs.fields"
+              },
+              "spatial_reference": {
+                "ref": "outputs.spatial_reference"
+              },
+              "cardinality": {
+                "ref": "outputs.cardinality"
+              },
+              "selection_state": {
+                "ref": "outputs.selection_state"
+              },
+              "map_publication": {
+                "ref": "outputs.map_publication"
+              }
+            }
+          }
+        ],
+        "semantic_effects": [
+          {
+            "kind": "feature_create",
+            "result": {
+              "output": true
+            },
+            "action": {
+              "const": "create_point_features"
+            }
+          }
+        ]
+      }
     },
     {
       "id": "edit.append_point_features",
       "version": "1.0",
       "category": "edit_geometry",
       "summary": "向已有点图层追加点要素。",
-      "keywords": ["append point", "添加点", "追加点", "已有图层"],
-      "model_card": "Use edit.append_point_features only when the user wants to add point features into an existing point layer, such as 往某图层里继续创建点. This directly edits the target dataset and requires edit authorization. Arguments: target_layer, points array of {x,y,name optional}. Do not use this for creating a new output layer.",
+      "keywords": [
+        "append point",
+        "添加点",
+        "追加点",
+        "已有图层"
+      ],
       "parameters_schema": {
         "type": "object",
-        "required": ["target_layer", "points"],
+        "required": [
+          "target_layer",
+          "points"
+        ],
         "properties": {
-          "target_layer": {"type": "string", "x-geopilot-kind": "layer"},
+          "target_layer": {
+            "type": "string",
+            "x-geopilot-kind": "layer"
+          },
           "points": {
             "type": "array",
-            "items": {"type": "object"},
+            "items": {
+              "type": "object"
+            },
             "minItems": 1
           }
         },
@@ -136,39 +485,199 @@
           "user": "往 points 图层里添加两个点",
           "arguments": {
             "target_layer": "points",
-            "points": [{"x": 118.78, "y": 32.04, "name": "A"}, {"x": 118.79, "y": 32.05, "name": "B"}]
+            "points": [
+              {
+                "x": 118.78,
+                "y": 32.04,
+                "name": "A"
+              },
+              {
+                "x": 118.79,
+                "y": 32.05,
+                "name": "B"
+              }
+            ]
           }
         }
-      ]
+      ],
+      "capability_contract": {
+        "inputs": [
+          {
+            "parameter": "target_layer",
+            "cardinality": "one",
+            "data_kind": [
+              "feature_layer"
+            ],
+            "geometry": [
+              "point",
+              "polyline",
+              "polygon"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          },
+          {
+            "parameter": "points",
+            "cardinality": "many",
+            "data_kind": [
+              "coordinate_sequence",
+              "feature_definition"
+            ],
+            "geometry": [
+              "not_applicable"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          }
+        ],
+        "parameters_schema": {
+          "type": "object",
+          "required": [
+            "target_layer",
+            "points"
+          ],
+          "properties": {
+            "target_layer": {
+              "type": "string",
+              "x-geopilot-kind": "layer"
+            },
+            "points": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              },
+              "minItems": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "kind": "none",
+          "geometry": {
+            "rule": "not_applicable",
+            "value": "not_applicable"
+          },
+          "fields": {
+            "effect": "in_place_update",
+            "target": "target_layer",
+            "static_fields": [],
+            "parameter_field": "not_applicable"
+          },
+          "spatial_reference": {
+            "rule": "not_applicable",
+            "input": "not_applicable"
+          },
+          "cardinality": {
+            "rule": "fixed",
+            "value": "in_place"
+          },
+          "selection_state": "selection_preserved",
+          "map_publication": "none"
+        },
+        "side_effects": "edits_data",
+        "authorization": {
+          "required": true,
+          "scope": "edit_data"
+        },
+        "postconditions": [
+          {
+            "kind": "target_data_edited",
+            "target": "target_layer",
+            "expectation": {
+              "kind": {
+                "ref": "outputs.kind"
+              },
+              "geometry": {
+                "ref": "outputs.geometry"
+              },
+              "fields": {
+                "ref": "outputs.fields"
+              },
+              "spatial_reference": {
+                "ref": "outputs.spatial_reference"
+              },
+              "cardinality": {
+                "ref": "outputs.cardinality"
+              },
+              "selection_state": {
+                "ref": "outputs.selection_state"
+              },
+              "map_publication": {
+                "ref": "outputs.map_publication"
+              }
+            }
+          }
+        ],
+        "semantic_effects": [
+          {
+            "kind": "feature_append",
+            "target": {
+              "parameter": "target_layer"
+            },
+            "action": {
+              "const": "append_point_features"
+            }
+          }
+        ]
+      }
     },
     {
       "id": "edit.create_polyline_feature",
       "version": "1.0",
       "category": "edit_geometry",
       "summary": "根据坐标序列创建新的线要素图层，可一次写入多条线。",
-      "keywords": ["create line", "创建线", "折线", "线要素"],
-      "model_card": "Use edit.create_polyline_feature to create one new polyline feature class. For one line, pass coordinates and optional name. For multiple lines in the same output layer, pass features array items with coordinates and optional name. Do not create one shapefile per line unless the user explicitly asks for separate layers. Arguments: coordinates or features, output_name, spatial_reference_layer optional, wkid optional, output location optional.",
+      "keywords": [
+        "create line",
+        "创建线",
+        "折线",
+        "线要素"
+      ],
       "parameters_schema": {
         "type": "object",
-        "required": ["output_name"],
+        "required": [
+          "output_name"
+        ],
         "properties": {
           "coordinates": {
             "type": "array",
-            "items": {"type": "object"},
+            "items": {
+              "type": "object"
+            },
             "minItems": 2
           },
           "features": {
             "type": "array",
-            "items": {"type": "object"},
+            "items": {
+              "type": "object"
+            },
             "minItems": 1
           },
-          "output_name": {"type": "string"},
-          "name": {"type": "string"},
-          "spatial_reference_layer": {"type": "string", "x-geopilot-kind": "layer"},
-          "wkid": {"type": "integer"},
-          "output_workspace": {"type": "string"},
-          "output_folder": {"type": "string"},
-          "output_format": {"type": "string", "enum": ["gdb", "shp"]}
+          "output_name": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "spatial_reference_layer": {
+            "type": "string",
+            "x-geopilot-kind": "layer"
+          },
+          "wkid": {
+            "type": "integer"
+          },
+          "output_workspace": {
+            "type": "string"
+          },
+          "output_folder": {
+            "type": "string"
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "gdb",
+              "shp"
+            ]
+          }
         },
         "additionalProperties": false
       },
@@ -181,7 +690,10 @@
         "writes_output": true,
         "type": "feature_class",
         "geometry_type": "Polyline",
-        "formats": ["gdb", "shp"],
+        "formats": [
+          "gdb",
+          "shp"
+        ],
         "default_format": "gdb",
         "workspace": "mxd_default_or_output_workspace_or_output_folder",
         "overwrite": false,
@@ -192,7 +704,16 @@
         {
           "user": "用这些坐标创建一条线",
           "arguments": {
-            "coordinates": [{"x": 0, "y": 0}, {"x": 10, "y": 10}],
+            "coordinates": [
+              {
+                "x": 0,
+                "y": 0
+              },
+              {
+                "x": 10,
+                "y": 10
+              }
+            ],
             "output_name": "line_from_points"
           }
         },
@@ -200,37 +721,237 @@
           "user": "把两条道路线创建到同一个 shp",
           "arguments": {
             "features": [
-              {"name": "road_1", "coordinates": [{"x": 0, "y": 0}, {"x": 10, "y": 10}]},
-              {"name": "road_2", "coordinates": [{"x": 0, "y": 1}, {"x": 10, "y": 11}]}
+              {
+                "name": "road_1",
+                "coordinates": [
+                  {
+                    "x": 0,
+                    "y": 0
+                  },
+                  {
+                    "x": 10,
+                    "y": 10
+                  }
+                ]
+              },
+              {
+                "name": "road_2",
+                "coordinates": [
+                  {
+                    "x": 0,
+                    "y": 1
+                  },
+                  {
+                    "x": 10,
+                    "y": 11
+                  }
+                ]
+              }
             ],
             "output_name": "roads"
           }
         }
-      ]
+      ],
+      "capability_contract": {
+        "inputs": [
+          {
+            "parameter": "coordinates",
+            "cardinality": "many",
+            "data_kind": [
+              "coordinate_sequence",
+              "feature_definition"
+            ],
+            "geometry": [
+              "not_applicable"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          },
+          {
+            "parameter": "features",
+            "cardinality": "many",
+            "data_kind": [
+              "coordinate_sequence",
+              "feature_definition"
+            ],
+            "geometry": [
+              "not_applicable"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          },
+          {
+            "parameter": "spatial_reference_layer",
+            "cardinality": "one",
+            "data_kind": [
+              "feature_layer"
+            ],
+            "geometry": [
+              "point",
+              "polyline",
+              "polygon"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          }
+        ],
+        "parameters_schema": {
+          "type": "object",
+          "required": [
+            "output_name"
+          ],
+          "properties": {
+            "coordinates": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              },
+              "minItems": 2
+            },
+            "features": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              },
+              "minItems": 1
+            },
+            "output_name": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "spatial_reference_layer": {
+              "type": "string",
+              "x-geopilot-kind": "layer"
+            },
+            "wkid": {
+              "type": "integer"
+            },
+            "output_workspace": {
+              "type": "string"
+            },
+            "output_folder": {
+              "type": "string"
+            },
+            "output_format": {
+              "type": "string",
+              "enum": [
+                "gdb",
+                "shp"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "kind": "feature_class",
+          "geometry": {
+            "rule": "fixed",
+            "value": "polyline"
+          },
+          "fields": {
+            "effect": "static_generated",
+            "target": "not_applicable",
+            "static_fields": [],
+            "parameter_field": "not_applicable"
+          },
+          "spatial_reference": {
+            "rule": "from_parameter_or_map",
+            "input": "wkid"
+          },
+          "cardinality": {
+            "rule": "fixed",
+            "value": "one"
+          },
+          "selection_state": "not_applicable",
+          "map_publication": "published"
+        },
+        "side_effects": "writes_data",
+        "authorization": {
+          "required": true,
+          "scope": "write_data"
+        },
+        "postconditions": [
+          {
+            "kind": "feature_class_created",
+            "target": "output_name",
+            "expectation": {
+              "kind": {
+                "ref": "outputs.kind"
+              },
+              "geometry": {
+                "ref": "outputs.geometry"
+              },
+              "fields": {
+                "ref": "outputs.fields"
+              },
+              "spatial_reference": {
+                "ref": "outputs.spatial_reference"
+              },
+              "cardinality": {
+                "ref": "outputs.cardinality"
+              },
+              "selection_state": {
+                "ref": "outputs.selection_state"
+              },
+              "map_publication": {
+                "ref": "outputs.map_publication"
+              }
+            }
+          }
+        ],
+        "semantic_effects": [
+          {
+            "kind": "feature_create",
+            "result": {
+              "output": true
+            },
+            "action": {
+              "const": "create_polyline_feature"
+            }
+          }
+        ]
+      }
     },
     {
       "id": "edit.append_polyline_features",
       "version": "1.0",
       "category": "edit_geometry",
       "summary": "向已有线图层追加线要素。",
-      "keywords": ["append line", "添加线", "追加线", "已有图层"],
-      "model_card": "Use edit.append_polyline_features only when the user wants to add polyline features into an existing line layer. This directly edits the target dataset and requires edit authorization. For one line, pass coordinates and optional name. For multiple lines, pass features array items with coordinates and optional name.",
+      "keywords": [
+        "append line",
+        "添加线",
+        "追加线",
+        "已有图层"
+      ],
       "parameters_schema": {
         "type": "object",
-        "required": ["target_layer"],
+        "required": [
+          "target_layer"
+        ],
         "properties": {
-          "target_layer": {"type": "string", "x-geopilot-kind": "layer"},
+          "target_layer": {
+            "type": "string",
+            "x-geopilot-kind": "layer"
+          },
           "coordinates": {
             "type": "array",
-            "items": {"type": "object"},
+            "items": {
+              "type": "object"
+            },
             "minItems": 2
           },
           "features": {
             "type": "array",
-            "items": {"type": "object"},
+            "items": {
+              "type": "object"
+            },
             "minItems": 1
           },
-          "name": {"type": "string"}
+          "name": {
+            "type": "string"
+          }
         },
         "additionalProperties": false
       },
@@ -249,40 +970,220 @@
           "user": "往 roads 图层里继续添加一条线",
           "arguments": {
             "target_layer": "roads",
-            "coordinates": [{"x": 0, "y": 0}, {"x": 10, "y": 10}],
+            "coordinates": [
+              {
+                "x": 0,
+                "y": 0
+              },
+              {
+                "x": 10,
+                "y": 10
+              }
+            ],
             "name": "new_road"
           }
         }
-      ]
+      ],
+      "capability_contract": {
+        "inputs": [
+          {
+            "parameter": "target_layer",
+            "cardinality": "one",
+            "data_kind": [
+              "feature_layer"
+            ],
+            "geometry": [
+              "point",
+              "polyline",
+              "polygon"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          },
+          {
+            "parameter": "coordinates",
+            "cardinality": "many",
+            "data_kind": [
+              "coordinate_sequence",
+              "feature_definition"
+            ],
+            "geometry": [
+              "not_applicable"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          },
+          {
+            "parameter": "features",
+            "cardinality": "many",
+            "data_kind": [
+              "coordinate_sequence",
+              "feature_definition"
+            ],
+            "geometry": [
+              "not_applicable"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          }
+        ],
+        "parameters_schema": {
+          "type": "object",
+          "required": [
+            "target_layer"
+          ],
+          "properties": {
+            "target_layer": {
+              "type": "string",
+              "x-geopilot-kind": "layer"
+            },
+            "coordinates": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              },
+              "minItems": 2
+            },
+            "features": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              },
+              "minItems": 1
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "kind": "none",
+          "geometry": {
+            "rule": "not_applicable",
+            "value": "not_applicable"
+          },
+          "fields": {
+            "effect": "in_place_update",
+            "target": "target_layer",
+            "static_fields": [],
+            "parameter_field": "not_applicable"
+          },
+          "spatial_reference": {
+            "rule": "not_applicable",
+            "input": "not_applicable"
+          },
+          "cardinality": {
+            "rule": "fixed",
+            "value": "in_place"
+          },
+          "selection_state": "selection_preserved",
+          "map_publication": "none"
+        },
+        "side_effects": "edits_data",
+        "authorization": {
+          "required": true,
+          "scope": "edit_data"
+        },
+        "postconditions": [
+          {
+            "kind": "target_data_edited",
+            "target": "target_layer",
+            "expectation": {
+              "kind": {
+                "ref": "outputs.kind"
+              },
+              "geometry": {
+                "ref": "outputs.geometry"
+              },
+              "fields": {
+                "ref": "outputs.fields"
+              },
+              "spatial_reference": {
+                "ref": "outputs.spatial_reference"
+              },
+              "cardinality": {
+                "ref": "outputs.cardinality"
+              },
+              "selection_state": {
+                "ref": "outputs.selection_state"
+              },
+              "map_publication": {
+                "ref": "outputs.map_publication"
+              }
+            }
+          }
+        ],
+        "semantic_effects": [
+          {
+            "kind": "feature_append",
+            "target": {
+              "parameter": "target_layer"
+            },
+            "action": {
+              "const": "append_polyline_features"
+            }
+          }
+        ]
+      }
     },
     {
       "id": "edit.create_polygon_feature",
       "version": "1.0",
       "category": "edit_geometry",
       "summary": "根据坐标环创建新的面要素图层，可一次写入多个面。",
-      "keywords": ["create polygon", "创建面", "多边形", "面要素"],
-      "model_card": "Use edit.create_polygon_feature to create one new polygon feature class. For one polygon, pass coordinates and optional name. For multiple polygons in the same output layer, pass features array items with coordinates and optional name. Do not create one shapefile per polygon unless the user explicitly asks for separate layers. The runtime closes each ring if the last point is not equal to the first point.",
+      "keywords": [
+        "create polygon",
+        "创建面",
+        "多边形",
+        "面要素"
+      ],
       "parameters_schema": {
         "type": "object",
-        "required": ["output_name"],
+        "required": [
+          "output_name"
+        ],
         "properties": {
           "coordinates": {
             "type": "array",
-            "items": {"type": "object"},
+            "items": {
+              "type": "object"
+            },
             "minItems": 3
           },
           "features": {
             "type": "array",
-            "items": {"type": "object"},
+            "items": {
+              "type": "object"
+            },
             "minItems": 1
           },
-          "output_name": {"type": "string"},
-          "name": {"type": "string"},
-          "spatial_reference_layer": {"type": "string", "x-geopilot-kind": "layer"},
-          "wkid": {"type": "integer"},
-          "output_workspace": {"type": "string"},
-          "output_folder": {"type": "string"},
-          "output_format": {"type": "string", "enum": ["gdb", "shp"]}
+          "output_name": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "spatial_reference_layer": {
+            "type": "string",
+            "x-geopilot-kind": "layer"
+          },
+          "wkid": {
+            "type": "integer"
+          },
+          "output_workspace": {
+            "type": "string"
+          },
+          "output_folder": {
+            "type": "string"
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "gdb",
+              "shp"
+            ]
+          }
         },
         "additionalProperties": false
       },
@@ -295,7 +1196,10 @@
         "writes_output": true,
         "type": "feature_class",
         "geometry_type": "Polygon",
-        "formats": ["gdb", "shp"],
+        "formats": [
+          "gdb",
+          "shp"
+        ],
         "default_format": "gdb",
         "workspace": "mxd_default_or_output_workspace_or_output_folder",
         "overwrite": false,
@@ -306,7 +1210,24 @@
         {
           "user": "用四个角点创建一个面",
           "arguments": {
-            "coordinates": [{"x": 0, "y": 0}, {"x": 10, "y": 0}, {"x": 10, "y": 10}, {"x": 0, "y": 10}],
+            "coordinates": [
+              {
+                "x": 0,
+                "y": 0
+              },
+              {
+                "x": 10,
+                "y": 0
+              },
+              {
+                "x": 10,
+                "y": 10
+              },
+              {
+                "x": 0,
+                "y": 10
+              }
+            ],
             "output_name": "polygon_from_ring"
           }
         },
@@ -314,37 +1235,253 @@
           "user": "把两个地块创建到同一个图层",
           "arguments": {
             "features": [
-              {"name": "parcel_1", "coordinates": [{"x": 0, "y": 0}, {"x": 10, "y": 0}, {"x": 10, "y": 10}, {"x": 0, "y": 10}]},
-              {"name": "parcel_2", "coordinates": [{"x": 20, "y": 0}, {"x": 30, "y": 0}, {"x": 30, "y": 10}, {"x": 20, "y": 10}]}
+              {
+                "name": "parcel_1",
+                "coordinates": [
+                  {
+                    "x": 0,
+                    "y": 0
+                  },
+                  {
+                    "x": 10,
+                    "y": 0
+                  },
+                  {
+                    "x": 10,
+                    "y": 10
+                  },
+                  {
+                    "x": 0,
+                    "y": 10
+                  }
+                ]
+              },
+              {
+                "name": "parcel_2",
+                "coordinates": [
+                  {
+                    "x": 20,
+                    "y": 0
+                  },
+                  {
+                    "x": 30,
+                    "y": 0
+                  },
+                  {
+                    "x": 30,
+                    "y": 10
+                  },
+                  {
+                    "x": 20,
+                    "y": 10
+                  }
+                ]
+              }
             ],
             "output_name": "parcels"
           }
         }
-      ]
+      ],
+      "capability_contract": {
+        "inputs": [
+          {
+            "parameter": "coordinates",
+            "cardinality": "many",
+            "data_kind": [
+              "coordinate_sequence",
+              "feature_definition"
+            ],
+            "geometry": [
+              "not_applicable"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          },
+          {
+            "parameter": "features",
+            "cardinality": "many",
+            "data_kind": [
+              "coordinate_sequence",
+              "feature_definition"
+            ],
+            "geometry": [
+              "not_applicable"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          },
+          {
+            "parameter": "spatial_reference_layer",
+            "cardinality": "one",
+            "data_kind": [
+              "feature_layer"
+            ],
+            "geometry": [
+              "point",
+              "polyline",
+              "polygon"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          }
+        ],
+        "parameters_schema": {
+          "type": "object",
+          "required": [
+            "output_name"
+          ],
+          "properties": {
+            "coordinates": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              },
+              "minItems": 3
+            },
+            "features": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              },
+              "minItems": 1
+            },
+            "output_name": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "spatial_reference_layer": {
+              "type": "string",
+              "x-geopilot-kind": "layer"
+            },
+            "wkid": {
+              "type": "integer"
+            },
+            "output_workspace": {
+              "type": "string"
+            },
+            "output_folder": {
+              "type": "string"
+            },
+            "output_format": {
+              "type": "string",
+              "enum": [
+                "gdb",
+                "shp"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "kind": "feature_class",
+          "geometry": {
+            "rule": "fixed",
+            "value": "polygon"
+          },
+          "fields": {
+            "effect": "static_generated",
+            "target": "not_applicable",
+            "static_fields": [],
+            "parameter_field": "not_applicable"
+          },
+          "spatial_reference": {
+            "rule": "from_parameter_or_map",
+            "input": "wkid"
+          },
+          "cardinality": {
+            "rule": "fixed",
+            "value": "one"
+          },
+          "selection_state": "not_applicable",
+          "map_publication": "published"
+        },
+        "side_effects": "writes_data",
+        "authorization": {
+          "required": true,
+          "scope": "write_data"
+        },
+        "postconditions": [
+          {
+            "kind": "feature_class_created",
+            "target": "output_name",
+            "expectation": {
+              "kind": {
+                "ref": "outputs.kind"
+              },
+              "geometry": {
+                "ref": "outputs.geometry"
+              },
+              "fields": {
+                "ref": "outputs.fields"
+              },
+              "spatial_reference": {
+                "ref": "outputs.spatial_reference"
+              },
+              "cardinality": {
+                "ref": "outputs.cardinality"
+              },
+              "selection_state": {
+                "ref": "outputs.selection_state"
+              },
+              "map_publication": {
+                "ref": "outputs.map_publication"
+              }
+            }
+          }
+        ],
+        "semantic_effects": [
+          {
+            "kind": "feature_create",
+            "result": {
+              "output": true
+            },
+            "action": {
+              "const": "create_polygon_feature"
+            }
+          }
+        ]
+      }
     },
     {
       "id": "edit.append_polygon_features",
       "version": "1.0",
       "category": "edit_geometry",
       "summary": "向已有面图层追加面要素。",
-      "keywords": ["append polygon", "添加面", "追加面", "已有图层"],
-      "model_card": "Use edit.append_polygon_features only when the user wants to add polygon features into an existing polygon layer. This directly edits the target dataset and requires edit authorization. For one polygon, pass coordinates and optional name. For multiple polygons, pass features array items with coordinates and optional name.",
+      "keywords": [
+        "append polygon",
+        "添加面",
+        "追加面",
+        "已有图层"
+      ],
       "parameters_schema": {
         "type": "object",
-        "required": ["target_layer"],
+        "required": [
+          "target_layer"
+        ],
         "properties": {
-          "target_layer": {"type": "string", "x-geopilot-kind": "layer"},
+          "target_layer": {
+            "type": "string",
+            "x-geopilot-kind": "layer"
+          },
           "coordinates": {
             "type": "array",
-            "items": {"type": "object"},
+            "items": {
+              "type": "object"
+            },
             "minItems": 3
           },
           "features": {
             "type": "array",
-            "items": {"type": "object"},
+            "items": {
+              "type": "object"
+            },
             "minItems": 1
           },
-          "name": {"type": "string"}
+          "name": {
+            "type": "string"
+          }
         },
         "additionalProperties": false
       },
@@ -363,34 +1500,232 @@
           "user": "往 parcels 图层里继续添加一个面",
           "arguments": {
             "target_layer": "parcels",
-            "coordinates": [{"x": 0, "y": 0}, {"x": 10, "y": 0}, {"x": 10, "y": 10}, {"x": 0, "y": 10}],
+            "coordinates": [
+              {
+                "x": 0,
+                "y": 0
+              },
+              {
+                "x": 10,
+                "y": 0
+              },
+              {
+                "x": 10,
+                "y": 10
+              },
+              {
+                "x": 0,
+                "y": 10
+              }
+            ],
             "name": "new_parcel"
           }
         }
-      ]
+      ],
+      "capability_contract": {
+        "inputs": [
+          {
+            "parameter": "target_layer",
+            "cardinality": "one",
+            "data_kind": [
+              "feature_layer"
+            ],
+            "geometry": [
+              "point",
+              "polyline",
+              "polygon"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          },
+          {
+            "parameter": "coordinates",
+            "cardinality": "many",
+            "data_kind": [
+              "coordinate_sequence",
+              "feature_definition"
+            ],
+            "geometry": [
+              "not_applicable"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          },
+          {
+            "parameter": "features",
+            "cardinality": "many",
+            "data_kind": [
+              "coordinate_sequence",
+              "feature_definition"
+            ],
+            "geometry": [
+              "not_applicable"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          }
+        ],
+        "parameters_schema": {
+          "type": "object",
+          "required": [
+            "target_layer"
+          ],
+          "properties": {
+            "target_layer": {
+              "type": "string",
+              "x-geopilot-kind": "layer"
+            },
+            "coordinates": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              },
+              "minItems": 3
+            },
+            "features": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              },
+              "minItems": 1
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "kind": "none",
+          "geometry": {
+            "rule": "not_applicable",
+            "value": "not_applicable"
+          },
+          "fields": {
+            "effect": "in_place_update",
+            "target": "target_layer",
+            "static_fields": [],
+            "parameter_field": "not_applicable"
+          },
+          "spatial_reference": {
+            "rule": "not_applicable",
+            "input": "not_applicable"
+          },
+          "cardinality": {
+            "rule": "fixed",
+            "value": "in_place"
+          },
+          "selection_state": "selection_preserved",
+          "map_publication": "none"
+        },
+        "side_effects": "edits_data",
+        "authorization": {
+          "required": true,
+          "scope": "edit_data"
+        },
+        "postconditions": [
+          {
+            "kind": "target_data_edited",
+            "target": "target_layer",
+            "expectation": {
+              "kind": {
+                "ref": "outputs.kind"
+              },
+              "geometry": {
+                "ref": "outputs.geometry"
+              },
+              "fields": {
+                "ref": "outputs.fields"
+              },
+              "spatial_reference": {
+                "ref": "outputs.spatial_reference"
+              },
+              "cardinality": {
+                "ref": "outputs.cardinality"
+              },
+              "selection_state": {
+                "ref": "outputs.selection_state"
+              },
+              "map_publication": {
+                "ref": "outputs.map_publication"
+              }
+            }
+          }
+        ],
+        "semantic_effects": [
+          {
+            "kind": "feature_append",
+            "target": {
+              "parameter": "target_layer"
+            },
+            "action": {
+              "const": "append_polygon_features"
+            }
+          }
+        ]
+      }
     },
     {
       "id": "edit.create_rectangle_polygon",
       "version": "1.0",
       "category": "edit_geometry",
       "summary": "根据左上角和右下角创建新的矩形面要素图层。",
-      "keywords": ["rectangle polygon", "矩形", "正方形", "左上角", "右下角", "创建矩形"],
-      "model_card": "Use edit.create_rectangle_polygon when the user gives a rectangle or square by left/top/right/bottom, upper-left and lower-right, or two opposite corners. Arguments are numeric left, top, right, bottom, output_name, and optional wkid/spatial_reference_layer/output location. For WGS84 longitude/latitude rectangles, left/right are longitudes and top/bottom are latitudes; set wkid=4326 when the user says WGS84.",
+      "keywords": [
+        "rectangle polygon",
+        "矩形",
+        "正方形",
+        "左上角",
+        "右下角",
+        "创建矩形"
+      ],
       "parameters_schema": {
         "type": "object",
-        "required": ["left", "top", "right", "bottom", "output_name"],
+        "required": [
+          "left",
+          "top",
+          "right",
+          "bottom",
+          "output_name"
+        ],
         "properties": {
-          "left": {"type": "number"},
-          "top": {"type": "number"},
-          "right": {"type": "number"},
-          "bottom": {"type": "number"},
-          "output_name": {"type": "string"},
-          "name": {"type": "string"},
-          "spatial_reference_layer": {"type": "string", "x-geopilot-kind": "layer"},
-          "wkid": {"type": "integer"},
-          "output_workspace": {"type": "string"},
-          "output_folder": {"type": "string"},
-          "output_format": {"type": "string", "enum": ["gdb", "shp"]}
+          "left": {
+            "type": "number"
+          },
+          "top": {
+            "type": "number"
+          },
+          "right": {
+            "type": "number"
+          },
+          "bottom": {
+            "type": "number"
+          },
+          "output_name": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "spatial_reference_layer": {
+            "type": "string",
+            "x-geopilot-kind": "layer"
+          },
+          "wkid": {
+            "type": "integer"
+          },
+          "output_workspace": {
+            "type": "string"
+          },
+          "output_folder": {
+            "type": "string"
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "gdb",
+              "shp"
+            ]
+          }
         },
         "additionalProperties": false
       },
@@ -403,7 +1738,10 @@
         "writes_output": true,
         "type": "feature_class",
         "geometry_type": "Polygon",
-        "formats": ["gdb", "shp"],
+        "formats": [
+          "gdb",
+          "shp"
+        ],
         "default_format": "gdb",
         "workspace": "mxd_default_or_output_workspace_or_output_folder",
         "overwrite": false,
@@ -422,37 +1760,218 @@
             "output_name": "rectangle_120_30_125_20"
           }
         }
-      ]
+      ],
+      "capability_contract": {
+        "inputs": [
+          {
+            "parameter": "spatial_reference_layer",
+            "cardinality": "one",
+            "data_kind": [
+              "feature_layer"
+            ],
+            "geometry": [
+              "point",
+              "polyline",
+              "polygon"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          }
+        ],
+        "parameters_schema": {
+          "type": "object",
+          "required": [
+            "left",
+            "top",
+            "right",
+            "bottom",
+            "output_name"
+          ],
+          "properties": {
+            "left": {
+              "type": "number"
+            },
+            "top": {
+              "type": "number"
+            },
+            "right": {
+              "type": "number"
+            },
+            "bottom": {
+              "type": "number"
+            },
+            "output_name": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "spatial_reference_layer": {
+              "type": "string",
+              "x-geopilot-kind": "layer"
+            },
+            "wkid": {
+              "type": "integer"
+            },
+            "output_workspace": {
+              "type": "string"
+            },
+            "output_folder": {
+              "type": "string"
+            },
+            "output_format": {
+              "type": "string",
+              "enum": [
+                "gdb",
+                "shp"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "kind": "feature_class",
+          "geometry": {
+            "rule": "fixed",
+            "value": "polygon"
+          },
+          "fields": {
+            "effect": "static_generated",
+            "target": "not_applicable",
+            "static_fields": [],
+            "parameter_field": "not_applicable"
+          },
+          "spatial_reference": {
+            "rule": "from_parameter_or_map",
+            "input": "wkid"
+          },
+          "cardinality": {
+            "rule": "fixed",
+            "value": "one"
+          },
+          "selection_state": "not_applicable",
+          "map_publication": "published"
+        },
+        "side_effects": "writes_data",
+        "authorization": {
+          "required": true,
+          "scope": "write_data"
+        },
+        "postconditions": [
+          {
+            "kind": "feature_class_created",
+            "target": "output_name",
+            "expectation": {
+              "kind": {
+                "ref": "outputs.kind"
+              },
+              "geometry": {
+                "ref": "outputs.geometry"
+              },
+              "fields": {
+                "ref": "outputs.fields"
+              },
+              "spatial_reference": {
+                "ref": "outputs.spatial_reference"
+              },
+              "cardinality": {
+                "ref": "outputs.cardinality"
+              },
+              "selection_state": {
+                "ref": "outputs.selection_state"
+              },
+              "map_publication": {
+                "ref": "outputs.map_publication"
+              }
+            }
+          }
+        ],
+        "semantic_effects": [
+          {
+            "kind": "feature_create",
+            "result": {
+              "output": true
+            },
+            "action": {
+              "const": "create_rectangle_polygon"
+            }
+          }
+        ]
+      }
     },
     {
       "id": "edit.create_regular_polygon",
       "version": "1.0",
       "category": "edit_geometry",
       "summary": "按中心点、半径和边数创建新的正多边形图层，可一次写入多个面。",
-      "keywords": ["regular polygon", "正多边形", "五边形", "六边形"],
-      "model_card": "Use edit.create_regular_polygon to create one new polygon feature class containing regular polygon features. For one polygon, pass center_x, center_y, radius, radius_unit, sides, and output_name. For multiple regular polygons in the same output layer, pass features array items with center_x, center_y, radius, radius_unit, sides, optional name; shared values such as radius_unit or sides may stay at top level. Do not create one shapefile per polygon unless the user explicitly asks for separate layers. radius_unit must be map_units, meters, or degrees.",
+      "keywords": [
+        "regular polygon",
+        "正多边形",
+        "五边形",
+        "六边形"
+      ],
       "parameters_schema": {
         "type": "object",
-        "required": ["output_name"],
+        "required": [
+          "output_name"
+        ],
         "properties": {
-          "center_x": {"type": "number"},
-          "center_y": {"type": "number"},
-          "radius": {"type": "number"},
-          "radius_unit": {"type": "string", "enum": ["map_units", "meters", "degrees"]},
-          "sides": {"type": "integer"},
-          "start_angle_degrees": {"type": "number"},
+          "center_x": {
+            "type": "number"
+          },
+          "center_y": {
+            "type": "number"
+          },
+          "radius": {
+            "type": "number"
+          },
+          "radius_unit": {
+            "type": "string",
+            "enum": [
+              "map_units",
+              "meters",
+              "degrees"
+            ]
+          },
+          "sides": {
+            "type": "integer"
+          },
+          "start_angle_degrees": {
+            "type": "number"
+          },
           "features": {
             "type": "array",
-            "items": {"type": "object"},
+            "items": {
+              "type": "object"
+            },
             "minItems": 1
           },
-          "name": {"type": "string"},
-          "output_name": {"type": "string"},
-          "spatial_reference_layer": {"type": "string", "x-geopilot-kind": "layer"},
-          "wkid": {"type": "integer"},
-          "output_workspace": {"type": "string"},
-          "output_folder": {"type": "string"},
-          "output_format": {"type": "string", "enum": ["gdb", "shp"]}
+          "name": {
+            "type": "string"
+          },
+          "output_name": {
+            "type": "string"
+          },
+          "spatial_reference_layer": {
+            "type": "string",
+            "x-geopilot-kind": "layer"
+          },
+          "wkid": {
+            "type": "integer"
+          },
+          "output_workspace": {
+            "type": "string"
+          },
+          "output_folder": {
+            "type": "string"
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "gdb",
+              "shp"
+            ]
+          }
         },
         "additionalProperties": false
       },
@@ -465,7 +1984,10 @@
         "writes_output": true,
         "type": "feature_class",
         "geometry_type": "Polygon",
-        "formats": ["gdb", "shp"],
+        "formats": [
+          "gdb",
+          "shp"
+        ],
         "default_format": "gdb",
         "workspace": "mxd_default_or_output_workspace_or_output_folder",
         "overwrite": false,
@@ -488,9 +2010,21 @@
           "user": "创建三个正五边形到同一个图层",
           "arguments": {
             "features": [
-              {"center_x": 500000, "center_y": 3500000, "name": "pentagon_1"},
-              {"center_x": 501000, "center_y": 3500000, "name": "pentagon_2"},
-              {"center_x": 502000, "center_y": 3500000, "name": "pentagon_3"}
+              {
+                "center_x": 500000,
+                "center_y": 3500000,
+                "name": "pentagon_1"
+              },
+              {
+                "center_x": 501000,
+                "center_y": 3500000,
+                "name": "pentagon_2"
+              },
+              {
+                "center_x": 502000,
+                "center_y": 3500000,
+                "name": "pentagon_3"
+              }
             ],
             "radius": 100,
             "radius_unit": "meters",
@@ -498,32 +2032,225 @@
             "output_name": "pentagons"
           }
         }
-      ]
+      ],
+      "capability_contract": {
+        "inputs": [
+          {
+            "parameter": "features",
+            "cardinality": "many",
+            "data_kind": [
+              "coordinate_sequence",
+              "feature_definition"
+            ],
+            "geometry": [
+              "not_applicable"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          },
+          {
+            "parameter": "spatial_reference_layer",
+            "cardinality": "one",
+            "data_kind": [
+              "feature_layer"
+            ],
+            "geometry": [
+              "point",
+              "polyline",
+              "polygon"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          }
+        ],
+        "parameters_schema": {
+          "type": "object",
+          "required": [
+            "output_name"
+          ],
+          "properties": {
+            "center_x": {
+              "type": "number"
+            },
+            "center_y": {
+              "type": "number"
+            },
+            "radius": {
+              "type": "number"
+            },
+            "radius_unit": {
+              "type": "string",
+              "enum": [
+                "map_units",
+                "meters",
+                "degrees"
+              ]
+            },
+            "sides": {
+              "type": "integer"
+            },
+            "start_angle_degrees": {
+              "type": "number"
+            },
+            "features": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              },
+              "minItems": 1
+            },
+            "name": {
+              "type": "string"
+            },
+            "output_name": {
+              "type": "string"
+            },
+            "spatial_reference_layer": {
+              "type": "string",
+              "x-geopilot-kind": "layer"
+            },
+            "wkid": {
+              "type": "integer"
+            },
+            "output_workspace": {
+              "type": "string"
+            },
+            "output_folder": {
+              "type": "string"
+            },
+            "output_format": {
+              "type": "string",
+              "enum": [
+                "gdb",
+                "shp"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "kind": "feature_class",
+          "geometry": {
+            "rule": "fixed",
+            "value": "polygon"
+          },
+          "fields": {
+            "effect": "static_generated",
+            "target": "not_applicable",
+            "static_fields": [],
+            "parameter_field": "not_applicable"
+          },
+          "spatial_reference": {
+            "rule": "from_parameter_or_map",
+            "input": "wkid"
+          },
+          "cardinality": {
+            "rule": "fixed",
+            "value": "one"
+          },
+          "selection_state": "not_applicable",
+          "map_publication": "published"
+        },
+        "side_effects": "writes_data",
+        "authorization": {
+          "required": true,
+          "scope": "write_data"
+        },
+        "postconditions": [
+          {
+            "kind": "feature_class_created",
+            "target": "output_name",
+            "expectation": {
+              "kind": {
+                "ref": "outputs.kind"
+              },
+              "geometry": {
+                "ref": "outputs.geometry"
+              },
+              "fields": {
+                "ref": "outputs.fields"
+              },
+              "spatial_reference": {
+                "ref": "outputs.spatial_reference"
+              },
+              "cardinality": {
+                "ref": "outputs.cardinality"
+              },
+              "selection_state": {
+                "ref": "outputs.selection_state"
+              },
+              "map_publication": {
+                "ref": "outputs.map_publication"
+              }
+            }
+          }
+        ],
+        "semantic_effects": [
+          {
+            "kind": "feature_create",
+            "result": {
+              "output": true
+            },
+            "action": {
+              "const": "create_regular_polygon"
+            }
+          }
+        ]
+      }
     },
     {
       "id": "edit.append_regular_polygons",
       "version": "1.0",
       "category": "edit_geometry",
       "summary": "向已有面图层追加正多边形要素。",
-      "keywords": ["append regular polygon", "追加正多边形", "已有图层"],
-      "model_card": "Use edit.append_regular_polygons only when the user wants to add regular polygon features into an existing polygon layer. This directly edits the target dataset and requires edit authorization. For one polygon, pass center_x, center_y, radius, radius_unit, sides, optional name. For multiple polygons, pass features array items; shared radius_unit, radius, sides, or start_angle_degrees may stay at top level.",
+      "keywords": [
+        "append regular polygon",
+        "追加正多边形",
+        "已有图层"
+      ],
       "parameters_schema": {
         "type": "object",
-        "required": ["target_layer"],
+        "required": [
+          "target_layer"
+        ],
         "properties": {
-          "target_layer": {"type": "string", "x-geopilot-kind": "layer"},
-          "center_x": {"type": "number"},
-          "center_y": {"type": "number"},
-          "radius": {"type": "number"},
-          "radius_unit": {"type": "string", "enum": ["map_units", "meters", "degrees"]},
-          "sides": {"type": "integer"},
-          "start_angle_degrees": {"type": "number"},
+          "target_layer": {
+            "type": "string",
+            "x-geopilot-kind": "layer"
+          },
+          "center_x": {
+            "type": "number"
+          },
+          "center_y": {
+            "type": "number"
+          },
+          "radius": {
+            "type": "number"
+          },
+          "radius_unit": {
+            "type": "string",
+            "enum": [
+              "map_units",
+              "meters",
+              "degrees"
+            ]
+          },
+          "sides": {
+            "type": "integer"
+          },
+          "start_angle_degrees": {
+            "type": "number"
+          },
           "features": {
             "type": "array",
-            "items": {"type": "object"},
+            "items": {
+              "type": "object"
+            },
             "minItems": 1
           },
-          "name": {"type": "string"}
+          "name": {
+            "type": "string"
+          }
         },
         "additionalProperties": false
       },
@@ -550,39 +2277,237 @@
             "name": "new_pentagon"
           }
         }
-      ]
+      ],
+      "capability_contract": {
+        "inputs": [
+          {
+            "parameter": "target_layer",
+            "cardinality": "one",
+            "data_kind": [
+              "feature_layer"
+            ],
+            "geometry": [
+              "point",
+              "polyline",
+              "polygon"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          },
+          {
+            "parameter": "features",
+            "cardinality": "many",
+            "data_kind": [
+              "coordinate_sequence",
+              "feature_definition"
+            ],
+            "geometry": [
+              "not_applicable"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          }
+        ],
+        "parameters_schema": {
+          "type": "object",
+          "required": [
+            "target_layer"
+          ],
+          "properties": {
+            "target_layer": {
+              "type": "string",
+              "x-geopilot-kind": "layer"
+            },
+            "center_x": {
+              "type": "number"
+            },
+            "center_y": {
+              "type": "number"
+            },
+            "radius": {
+              "type": "number"
+            },
+            "radius_unit": {
+              "type": "string",
+              "enum": [
+                "map_units",
+                "meters",
+                "degrees"
+              ]
+            },
+            "sides": {
+              "type": "integer"
+            },
+            "start_angle_degrees": {
+              "type": "number"
+            },
+            "features": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              },
+              "minItems": 1
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "kind": "none",
+          "geometry": {
+            "rule": "not_applicable",
+            "value": "not_applicable"
+          },
+          "fields": {
+            "effect": "in_place_update",
+            "target": "target_layer",
+            "static_fields": [],
+            "parameter_field": "not_applicable"
+          },
+          "spatial_reference": {
+            "rule": "not_applicable",
+            "input": "not_applicable"
+          },
+          "cardinality": {
+            "rule": "fixed",
+            "value": "in_place"
+          },
+          "selection_state": "selection_preserved",
+          "map_publication": "none"
+        },
+        "side_effects": "edits_data",
+        "authorization": {
+          "required": true,
+          "scope": "edit_data"
+        },
+        "postconditions": [
+          {
+            "kind": "target_data_edited",
+            "target": "target_layer",
+            "expectation": {
+              "kind": {
+                "ref": "outputs.kind"
+              },
+              "geometry": {
+                "ref": "outputs.geometry"
+              },
+              "fields": {
+                "ref": "outputs.fields"
+              },
+              "spatial_reference": {
+                "ref": "outputs.spatial_reference"
+              },
+              "cardinality": {
+                "ref": "outputs.cardinality"
+              },
+              "selection_state": {
+                "ref": "outputs.selection_state"
+              },
+              "map_publication": {
+                "ref": "outputs.map_publication"
+              }
+            }
+          }
+        ],
+        "semantic_effects": [
+          {
+            "kind": "feature_append",
+            "target": {
+              "parameter": "target_layer"
+            },
+            "action": {
+              "const": "append_regular_polygons"
+            }
+          }
+        ]
+      }
     },
     {
       "id": "edit.create_star_polygon",
       "version": "1.0",
       "category": "edit_geometry",
       "summary": "按中心点和半径创建新的星形面图层，可一次写入多个星形要素。",
-      "keywords": ["star polygon", "五角星", "星形", "创建五角星"],
-      "model_card": "Use edit.create_star_polygon when the user asks to create star polygon features, including 五角星. For one star, pass center_x, center_y, outer_radius, outer_radius_unit, output_name, optional point_count. For multiple stars in the same output layer, pass features array items with center_x, center_y, optional name; shared outer_radius, outer_radius_unit, inner_radius, inner_radius_unit, point_count, or start_angle_degrees may stay at top level. Do not create one shapefile per star unless the user explicitly asks for separate layers.",
+      "keywords": [
+        "star polygon",
+        "五角星",
+        "星形",
+        "创建五角星"
+      ],
       "parameters_schema": {
         "type": "object",
-        "required": ["output_name"],
+        "required": [
+          "output_name"
+        ],
         "properties": {
-          "center_x": {"type": "number"},
-          "center_y": {"type": "number"},
-          "outer_radius": {"type": "number"},
-          "outer_radius_unit": {"type": "string", "enum": ["map_units", "meters", "degrees"]},
-          "inner_radius": {"type": "number"},
-          "inner_radius_unit": {"type": "string", "enum": ["map_units", "meters", "degrees"]},
-          "point_count": {"type": "integer"},
-          "start_angle_degrees": {"type": "number"},
+          "center_x": {
+            "type": "number"
+          },
+          "center_y": {
+            "type": "number"
+          },
+          "outer_radius": {
+            "type": "number"
+          },
+          "outer_radius_unit": {
+            "type": "string",
+            "enum": [
+              "map_units",
+              "meters",
+              "degrees"
+            ]
+          },
+          "inner_radius": {
+            "type": "number"
+          },
+          "inner_radius_unit": {
+            "type": "string",
+            "enum": [
+              "map_units",
+              "meters",
+              "degrees"
+            ]
+          },
+          "point_count": {
+            "type": "integer"
+          },
+          "start_angle_degrees": {
+            "type": "number"
+          },
           "features": {
             "type": "array",
-            "items": {"type": "object"},
+            "items": {
+              "type": "object"
+            },
             "minItems": 1
           },
-          "name": {"type": "string"},
-          "output_name": {"type": "string"},
-          "spatial_reference_layer": {"type": "string", "x-geopilot-kind": "layer"},
-          "wkid": {"type": "integer"},
-          "output_workspace": {"type": "string"},
-          "output_folder": {"type": "string"},
-          "output_format": {"type": "string", "enum": ["gdb", "shp"]}
+          "name": {
+            "type": "string"
+          },
+          "output_name": {
+            "type": "string"
+          },
+          "spatial_reference_layer": {
+            "type": "string",
+            "x-geopilot-kind": "layer"
+          },
+          "wkid": {
+            "type": "integer"
+          },
+          "output_workspace": {
+            "type": "string"
+          },
+          "output_folder": {
+            "type": "string"
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "gdb",
+              "shp"
+            ]
+          }
         },
         "additionalProperties": false
       },
@@ -595,7 +2520,10 @@
         "writes_output": true,
         "type": "feature_class",
         "geometry_type": "Polygon",
-        "formats": ["gdb", "shp"],
+        "formats": [
+          "gdb",
+          "shp"
+        ],
         "default_format": "gdb",
         "workspace": "mxd_default_or_output_workspace_or_output_folder",
         "overwrite": false,
@@ -619,8 +2547,16 @@
           "user": "创建多个五角星到同一个 shp",
           "arguments": {
             "features": [
-              {"center_x": 118.78, "center_y": 32.04, "name": "star_1"},
-              {"center_x": 118.79, "center_y": 32.05, "name": "star_2"}
+              {
+                "center_x": 118.78,
+                "center_y": 32.04,
+                "name": "star_1"
+              },
+              {
+                "center_x": 118.79,
+                "center_y": 32.05,
+                "name": "star_2"
+              }
             ],
             "outer_radius": 0.01,
             "outer_radius_unit": "degrees",
@@ -629,34 +2565,248 @@
             "output_name": "stars"
           }
         }
-      ]
+      ],
+      "capability_contract": {
+        "inputs": [
+          {
+            "parameter": "features",
+            "cardinality": "many",
+            "data_kind": [
+              "coordinate_sequence",
+              "feature_definition"
+            ],
+            "geometry": [
+              "not_applicable"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          },
+          {
+            "parameter": "spatial_reference_layer",
+            "cardinality": "one",
+            "data_kind": [
+              "feature_layer"
+            ],
+            "geometry": [
+              "point",
+              "polyline",
+              "polygon"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          }
+        ],
+        "parameters_schema": {
+          "type": "object",
+          "required": [
+            "output_name"
+          ],
+          "properties": {
+            "center_x": {
+              "type": "number"
+            },
+            "center_y": {
+              "type": "number"
+            },
+            "outer_radius": {
+              "type": "number"
+            },
+            "outer_radius_unit": {
+              "type": "string",
+              "enum": [
+                "map_units",
+                "meters",
+                "degrees"
+              ]
+            },
+            "inner_radius": {
+              "type": "number"
+            },
+            "inner_radius_unit": {
+              "type": "string",
+              "enum": [
+                "map_units",
+                "meters",
+                "degrees"
+              ]
+            },
+            "point_count": {
+              "type": "integer"
+            },
+            "start_angle_degrees": {
+              "type": "number"
+            },
+            "features": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              },
+              "minItems": 1
+            },
+            "name": {
+              "type": "string"
+            },
+            "output_name": {
+              "type": "string"
+            },
+            "spatial_reference_layer": {
+              "type": "string",
+              "x-geopilot-kind": "layer"
+            },
+            "wkid": {
+              "type": "integer"
+            },
+            "output_workspace": {
+              "type": "string"
+            },
+            "output_folder": {
+              "type": "string"
+            },
+            "output_format": {
+              "type": "string",
+              "enum": [
+                "gdb",
+                "shp"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "kind": "feature_class",
+          "geometry": {
+            "rule": "fixed",
+            "value": "polygon"
+          },
+          "fields": {
+            "effect": "static_generated",
+            "target": "not_applicable",
+            "static_fields": [],
+            "parameter_field": "not_applicable"
+          },
+          "spatial_reference": {
+            "rule": "from_parameter_or_map",
+            "input": "wkid"
+          },
+          "cardinality": {
+            "rule": "fixed",
+            "value": "one"
+          },
+          "selection_state": "not_applicable",
+          "map_publication": "published"
+        },
+        "side_effects": "writes_data",
+        "authorization": {
+          "required": true,
+          "scope": "write_data"
+        },
+        "postconditions": [
+          {
+            "kind": "feature_class_created",
+            "target": "output_name",
+            "expectation": {
+              "kind": {
+                "ref": "outputs.kind"
+              },
+              "geometry": {
+                "ref": "outputs.geometry"
+              },
+              "fields": {
+                "ref": "outputs.fields"
+              },
+              "spatial_reference": {
+                "ref": "outputs.spatial_reference"
+              },
+              "cardinality": {
+                "ref": "outputs.cardinality"
+              },
+              "selection_state": {
+                "ref": "outputs.selection_state"
+              },
+              "map_publication": {
+                "ref": "outputs.map_publication"
+              }
+            }
+          }
+        ],
+        "semantic_effects": [
+          {
+            "kind": "feature_create",
+            "result": {
+              "output": true
+            },
+            "action": {
+              "const": "create_star_polygon"
+            }
+          }
+        ]
+      }
     },
     {
       "id": "edit.append_star_polygons",
       "version": "1.0",
       "category": "edit_geometry",
       "summary": "向已有面图层追加星形面要素。",
-      "keywords": ["append star polygon", "追加五角星", "添加五角星", "已有图层"],
-      "model_card": "Use edit.append_star_polygons only when the user wants to add star polygon features into an existing polygon layer. This directly edits the target dataset and requires edit authorization. For one star, pass center_x, center_y, outer_radius, outer_radius_unit, optional point_count and name. For multiple stars, pass features array items; shared radius/unit/point_count may stay at top level.",
+      "keywords": [
+        "append star polygon",
+        "追加五角星",
+        "添加五角星",
+        "已有图层"
+      ],
       "parameters_schema": {
         "type": "object",
-        "required": ["target_layer"],
+        "required": [
+          "target_layer"
+        ],
         "properties": {
-          "target_layer": {"type": "string", "x-geopilot-kind": "layer"},
-          "center_x": {"type": "number"},
-          "center_y": {"type": "number"},
-          "outer_radius": {"type": "number"},
-          "outer_radius_unit": {"type": "string", "enum": ["map_units", "meters", "degrees"]},
-          "inner_radius": {"type": "number"},
-          "inner_radius_unit": {"type": "string", "enum": ["map_units", "meters", "degrees"]},
-          "point_count": {"type": "integer"},
-          "start_angle_degrees": {"type": "number"},
+          "target_layer": {
+            "type": "string",
+            "x-geopilot-kind": "layer"
+          },
+          "center_x": {
+            "type": "number"
+          },
+          "center_y": {
+            "type": "number"
+          },
+          "outer_radius": {
+            "type": "number"
+          },
+          "outer_radius_unit": {
+            "type": "string",
+            "enum": [
+              "map_units",
+              "meters",
+              "degrees"
+            ]
+          },
+          "inner_radius": {
+            "type": "number"
+          },
+          "inner_radius_unit": {
+            "type": "string",
+            "enum": [
+              "map_units",
+              "meters",
+              "degrees"
+            ]
+          },
+          "point_count": {
+            "type": "integer"
+          },
+          "start_angle_degrees": {
+            "type": "number"
+          },
           "features": {
             "type": "array",
-            "items": {"type": "object"},
+            "items": {
+              "type": "object"
+            },
             "minItems": 1
           },
-          "name": {"type": "string"}
+          "name": {
+            "type": "string"
+          }
         },
         "additionalProperties": false
       },
@@ -676,15 +2826,179 @@
           "arguments": {
             "target_layer": "stars",
             "features": [
-              {"center_x": 118.78, "center_y": 32.04, "name": "star_1"},
-              {"center_x": 118.79, "center_y": 32.05, "name": "star_2"}
+              {
+                "center_x": 118.78,
+                "center_y": 32.04,
+                "name": "star_1"
+              },
+              {
+                "center_x": 118.79,
+                "center_y": 32.05,
+                "name": "star_2"
+              }
             ],
             "outer_radius": 0.01,
             "outer_radius_unit": "degrees",
             "point_count": 5
           }
         }
-      ]
+      ],
+      "capability_contract": {
+        "inputs": [
+          {
+            "parameter": "target_layer",
+            "cardinality": "one",
+            "data_kind": [
+              "feature_layer"
+            ],
+            "geometry": [
+              "point",
+              "polyline",
+              "polygon"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          },
+          {
+            "parameter": "features",
+            "cardinality": "many",
+            "data_kind": [
+              "coordinate_sequence",
+              "feature_definition"
+            ],
+            "geometry": [
+              "not_applicable"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          }
+        ],
+        "parameters_schema": {
+          "type": "object",
+          "required": [
+            "target_layer"
+          ],
+          "properties": {
+            "target_layer": {
+              "type": "string",
+              "x-geopilot-kind": "layer"
+            },
+            "center_x": {
+              "type": "number"
+            },
+            "center_y": {
+              "type": "number"
+            },
+            "outer_radius": {
+              "type": "number"
+            },
+            "outer_radius_unit": {
+              "type": "string",
+              "enum": [
+                "map_units",
+                "meters",
+                "degrees"
+              ]
+            },
+            "inner_radius": {
+              "type": "number"
+            },
+            "inner_radius_unit": {
+              "type": "string",
+              "enum": [
+                "map_units",
+                "meters",
+                "degrees"
+              ]
+            },
+            "point_count": {
+              "type": "integer"
+            },
+            "start_angle_degrees": {
+              "type": "number"
+            },
+            "features": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              },
+              "minItems": 1
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "kind": "none",
+          "geometry": {
+            "rule": "not_applicable",
+            "value": "not_applicable"
+          },
+          "fields": {
+            "effect": "in_place_update",
+            "target": "target_layer",
+            "static_fields": [],
+            "parameter_field": "not_applicable"
+          },
+          "spatial_reference": {
+            "rule": "not_applicable",
+            "input": "not_applicable"
+          },
+          "cardinality": {
+            "rule": "fixed",
+            "value": "in_place"
+          },
+          "selection_state": "selection_preserved",
+          "map_publication": "none"
+        },
+        "side_effects": "edits_data",
+        "authorization": {
+          "required": true,
+          "scope": "edit_data"
+        },
+        "postconditions": [
+          {
+            "kind": "target_data_edited",
+            "target": "target_layer",
+            "expectation": {
+              "kind": {
+                "ref": "outputs.kind"
+              },
+              "geometry": {
+                "ref": "outputs.geometry"
+              },
+              "fields": {
+                "ref": "outputs.fields"
+              },
+              "spatial_reference": {
+                "ref": "outputs.spatial_reference"
+              },
+              "cardinality": {
+                "ref": "outputs.cardinality"
+              },
+              "selection_state": {
+                "ref": "outputs.selection_state"
+              },
+              "map_publication": {
+                "ref": "outputs.map_publication"
+              }
+            }
+          }
+        ],
+        "semantic_effects": [
+          {
+            "kind": "feature_append",
+            "target": {
+              "parameter": "target_layer"
+            },
+            "action": {
+              "const": "append_star_polygons"
+            }
+          }
+        ]
+      }
     }
   ]
 }

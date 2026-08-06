@@ -33,12 +33,16 @@ class ExecutionDeliveryTests(unittest.TestCase):
         root = Path(self.temp.name)
         self.store = RunStore(root / "runs.sqlite")
         context = {"layers": []}
-        run = self.store.create_run("x", "context_single")
+        run = self.store.create_run("x", "g1_context")
         self.store.bind_context(run["id"], {
             "context": context, "context_hash": context_hash(context), "bridge": TARGET, "captured_at": 1,
         })
         self.store.update_run(run["id"], "planned")
-        self.store.update_run(run["id"], "approved")
+        trace = self.store.run_trace(run["id"])
+        trace["stages"].append({
+            "name": "execution", "started_at": 2.0, "status": "running",
+        })
+        self.store.update_run(run["id"], "approved", trace=trace)
         self.store.claim_for_execution(run["id"], TARGET, "runtime-owner")
         self.run_id = run["id"]
         self.outbox_path = root / "execution-outbox"

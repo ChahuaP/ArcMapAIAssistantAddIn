@@ -11,7 +11,6 @@
         "导出图片",
         "PNG"
       ],
-      "model_card": "Use export.map_png to export current map to PNG. Arguments: output_name, resolution optional, output_folder optional when MXD is unsaved.",
       "parameters_schema": {
         "type": "object",
         "required": [
@@ -51,7 +50,99 @@
             "resolution": 150
           }
         }
-      ]
+      ],
+      "capability_contract": {
+        "inputs": [],
+        "parameters_schema": {
+          "type": "object",
+          "required": [
+            "output_name"
+          ],
+          "properties": {
+            "output_name": {
+              "type": "string"
+            },
+            "resolution": {
+              "type": "integer"
+            },
+            "output_folder": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "kind": "file",
+          "geometry": {
+            "rule": "not_applicable",
+            "value": "not_applicable"
+          },
+          "fields": {
+            "effect": "not_applicable",
+            "target": "not_applicable",
+            "static_fields": [],
+            "parameter_field": "not_applicable"
+          },
+          "spatial_reference": {
+            "rule": "not_applicable",
+            "input": "not_applicable"
+          },
+          "cardinality": {
+            "rule": "fixed",
+            "value": "one_snapshot"
+          },
+          "selection_state": "not_applicable",
+          "map_publication": "none"
+        },
+        "side_effects": "writes_data",
+        "authorization": {
+          "required": true,
+          "scope": "write_file"
+        },
+        "postconditions": [
+          {
+            "kind": "file_written",
+            "target": "output_name",
+            "expectation": {
+              "kind": {
+                "ref": "outputs.kind"
+              },
+              "geometry": {
+                "ref": "outputs.geometry"
+              },
+              "fields": {
+                "ref": "outputs.fields"
+              },
+              "spatial_reference": {
+                "ref": "outputs.spatial_reference"
+              },
+              "cardinality": {
+                "ref": "outputs.cardinality"
+              },
+              "selection_state": {
+                "ref": "outputs.selection_state"
+              },
+              "map_publication": {
+                "ref": "outputs.map_publication"
+              }
+            }
+          }
+        ],
+        "semantic_effects": [
+          {
+            "kind": "artifact_export",
+            "result": {
+              "output": true
+            },
+            "output_format": {
+              "const": "png"
+            },
+            "action": {
+              "const": "map_png"
+            }
+          }
+        ]
+      }
     },
     {
       "id": "export.map_pdf",
@@ -63,7 +154,6 @@
         "导出PDF",
         "PDF"
       ],
-      "model_card": "Use export.map_pdf to export current map to PDF. Arguments: output_name, resolution optional, output_folder optional when MXD is unsaved.",
       "parameters_schema": {
         "type": "object",
         "required": [
@@ -103,7 +193,99 @@
             "resolution": 150
           }
         }
-      ]
+      ],
+      "capability_contract": {
+        "inputs": [],
+        "parameters_schema": {
+          "type": "object",
+          "required": [
+            "output_name"
+          ],
+          "properties": {
+            "output_name": {
+              "type": "string"
+            },
+            "resolution": {
+              "type": "integer"
+            },
+            "output_folder": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "kind": "file",
+          "geometry": {
+            "rule": "not_applicable",
+            "value": "not_applicable"
+          },
+          "fields": {
+            "effect": "not_applicable",
+            "target": "not_applicable",
+            "static_fields": [],
+            "parameter_field": "not_applicable"
+          },
+          "spatial_reference": {
+            "rule": "not_applicable",
+            "input": "not_applicable"
+          },
+          "cardinality": {
+            "rule": "fixed",
+            "value": "one_snapshot"
+          },
+          "selection_state": "not_applicable",
+          "map_publication": "none"
+        },
+        "side_effects": "writes_data",
+        "authorization": {
+          "required": true,
+          "scope": "write_file"
+        },
+        "postconditions": [
+          {
+            "kind": "file_written",
+            "target": "output_name",
+            "expectation": {
+              "kind": {
+                "ref": "outputs.kind"
+              },
+              "geometry": {
+                "ref": "outputs.geometry"
+              },
+              "fields": {
+                "ref": "outputs.fields"
+              },
+              "spatial_reference": {
+                "ref": "outputs.spatial_reference"
+              },
+              "cardinality": {
+                "ref": "outputs.cardinality"
+              },
+              "selection_state": {
+                "ref": "outputs.selection_state"
+              },
+              "map_publication": {
+                "ref": "outputs.map_publication"
+              }
+            }
+          }
+        ],
+        "semantic_effects": [
+          {
+            "kind": "artifact_export",
+            "result": {
+              "output": true
+            },
+            "output_format": {
+              "const": "pdf"
+            },
+            "action": {
+              "const": "map_pdf"
+            }
+          }
+        ]
+      }
     },
     {
       "id": "export.table_csv",
@@ -116,7 +298,6 @@
         "导出属性表",
         "CSV"
       ],
-      "model_card": "Use export.table_csv to export a layer table to CSV. Arguments: layer, output_name, selected_only optional, output_folder optional when MXD is unsaved.",
       "parameters_schema": {
         "type": "object",
         "required": [
@@ -131,7 +312,8 @@
             "type": "string"
           },
           "selected_only": {
-            "type": "boolean"
+            "type": "boolean",
+            "default": false
           },
           "output_folder": {
             "type": "string"
@@ -162,7 +344,129 @@
             "selected_only": false
           }
         }
-      ]
+      ],
+      "capability_contract": {
+        "inputs": [
+          {
+            "parameter": "layer",
+            "cardinality": "one",
+            "data_kind": [
+              "feature_layer",
+              "raster_layer",
+              "table_view"
+            ],
+            "geometry": [
+              "point",
+              "polyline",
+              "polygon",
+              "raster",
+              "not_applicable"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "parameter_values_require_selected", "parameter": "selected_only", "values": [true]}
+          }
+        ],
+        "parameters_schema": {
+          "type": "object",
+          "required": [
+            "layer",
+            "output_name"
+          ],
+          "properties": {
+            "layer": {
+              "type": "string"
+            },
+            "output_name": {
+              "type": "string"
+            },
+            "selected_only": {
+              "type": "boolean",
+              "default": false
+            },
+            "output_folder": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "kind": "file",
+          "geometry": {
+            "rule": "not_applicable",
+            "value": "not_applicable"
+          },
+          "fields": {
+            "effect": "inherit_tabular_fields",
+            "target": "layer",
+            "static_fields": [],
+            "parameter_field": "not_applicable"
+          },
+          "spatial_reference": {
+            "rule": "not_applicable",
+            "input": "not_applicable"
+          },
+          "cardinality": {
+            "rule": "fixed",
+            "value": "one"
+          },
+          "selection_state": "not_applicable",
+          "map_publication": "none"
+        },
+        "side_effects": "writes_data",
+        "authorization": {
+          "required": true,
+          "scope": "write_file"
+        },
+        "postconditions": [
+          {
+            "kind": "file_written",
+            "target": "output_name",
+            "expectation": {
+              "kind": {
+                "ref": "outputs.kind"
+              },
+              "geometry": {
+                "ref": "outputs.geometry"
+              },
+              "fields": {
+                "ref": "outputs.fields"
+              },
+              "spatial_reference": {
+                "ref": "outputs.spatial_reference"
+              },
+              "cardinality": {
+                "ref": "outputs.cardinality"
+              },
+              "selection_state": {
+                "ref": "outputs.selection_state"
+              },
+              "map_publication": {
+                "ref": "outputs.map_publication"
+              }
+            }
+          }
+        ],
+        "semantic_effects": [
+          {
+            "kind": "artifact_export",
+            "target": {
+              "parameter": "layer"
+            },
+            "selected_only": {
+              "parameter": "selected_only"
+            },
+            "result": {
+              "output": true
+            },
+            "output_format": {
+              "const": "csv"
+            },
+            "action": {
+              "const": "table_csv"
+            }
+          }
+        ]
+      }
     },
     {
       "id": "export.layer_kml",
@@ -177,7 +481,6 @@
         "shp转kml",
         "导出选中为KML"
       ],
-      "model_card": "Use export.layer_kml to export a feature or raster layer to a KMZ file readable by KML viewers. Arguments: layer, output_name, selected_only optional, output_folder optional when MXD is unsaved, layer_output_scale optional integer default current map scale for raster exports, is_composite optional COMPOSITE|NO_COMPOSITE default NO_COMPOSITE for raster exports. Feature layers are written directly from ArcPy geometry into KML coordinates with ExtendedData attributes, so point/line/polygon geometry is preserved instead of relying on LayerToKML. If the user describes only some features, first use selection.select_by_attribute or selection.select_by_location, then call export.layer_kml with selected_only=true.",
       "parameters_schema": {
         "type": "object",
         "required": [
@@ -192,7 +495,8 @@
             "type": "string"
           },
           "selected_only": {
-            "type": "boolean"
+            "type": "boolean",
+            "default": false
           },
           "output_folder": {
             "type": "string"
@@ -240,7 +544,139 @@
             "selected_only": true
           }
         }
-      ]
+      ],
+      "capability_contract": {
+        "inputs": [
+          {
+            "parameter": "layer",
+            "cardinality": "one",
+            "data_kind": [
+              "feature_layer",
+              "raster_layer",
+              "table_view"
+            ],
+            "geometry": [
+              "point",
+              "polyline",
+              "polygon",
+              "raster",
+              "not_applicable"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "parameter_values_require_selected", "parameter": "selected_only", "values": [true]}
+          }
+        ],
+        "parameters_schema": {
+          "type": "object",
+          "required": [
+            "layer",
+            "output_name"
+          ],
+          "properties": {
+            "layer": {
+              "type": "string"
+            },
+            "output_name": {
+              "type": "string"
+            },
+            "selected_only": {
+              "type": "boolean",
+              "default": false
+            },
+            "output_folder": {
+              "type": "string"
+            },
+            "layer_output_scale": {
+              "type": "integer"
+            },
+            "is_composite": {
+              "type": "string",
+              "enum": [
+                "NO_COMPOSITE",
+                "COMPOSITE"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "kind": "file",
+          "geometry": {
+            "rule": "not_applicable",
+            "value": "not_applicable"
+          },
+          "fields": {
+            "effect": "not_applicable",
+            "target": "not_applicable",
+            "static_fields": [],
+            "parameter_field": "not_applicable"
+          },
+          "spatial_reference": {
+            "rule": "not_applicable",
+            "input": "not_applicable"
+          },
+          "cardinality": {
+            "rule": "fixed",
+            "value": "one"
+          },
+          "selection_state": "not_applicable",
+          "map_publication": "none"
+        },
+        "side_effects": "writes_data",
+        "authorization": {
+          "required": true,
+          "scope": "write_file"
+        },
+        "postconditions": [
+          {
+            "kind": "file_written",
+            "target": "output_name",
+            "expectation": {
+              "kind": {
+                "ref": "outputs.kind"
+              },
+              "geometry": {
+                "ref": "outputs.geometry"
+              },
+              "fields": {
+                "ref": "outputs.fields"
+              },
+              "spatial_reference": {
+                "ref": "outputs.spatial_reference"
+              },
+              "cardinality": {
+                "ref": "outputs.cardinality"
+              },
+              "selection_state": {
+                "ref": "outputs.selection_state"
+              },
+              "map_publication": {
+                "ref": "outputs.map_publication"
+              }
+            }
+          }
+        ],
+        "semantic_effects": [
+          {
+            "kind": "artifact_export",
+            "target": {
+              "parameter": "layer"
+            },
+            "selected_only": {
+              "parameter": "selected_only"
+            },
+            "result": {
+              "output": true
+            },
+            "output_format": {
+              "const": "kmz"
+            },
+            "action": {
+              "const": "layer_kml"
+            }
+          }
+        ]
+      }
     },
     {
       "id": "export.split_by_field",
@@ -255,7 +691,6 @@
         "每类导出kml",
         "每类导出kmz"
       ],
-      "model_card": "Use export.split_by_field to export one output per unique value of a field. Arguments: layer, field, output_name as the user-visible base output name, output_format optional shp|gdb|kmz, output_folder for shp/kmz, output_workspace for gdb, name_template optional for kmz filenames, include_null optional, selected_only optional, max_outputs optional. output_name may be Chinese; do not translate or romanize user-provided names. If the user asks KML/KMZ per field value, set output_format=kmz; do not use shp/gdb. For kmz, name_template controls the final file name without extension. Placeholders: {value}=exact field value, {prefix}=output_name, {index}=001, {index_number}=1. The model decides the template from user_request; the runtime only renders the provided template.",
       "parameters_schema": {
         "type": "object",
         "required": [
@@ -275,6 +710,7 @@
           },
           "output_format": {
             "type": "string",
+            "default": "gdb",
             "enum": [
               "shp",
               "gdb",
@@ -294,7 +730,8 @@
             "type": "boolean"
           },
           "selected_only": {
-            "type": "boolean"
+            "type": "boolean",
+            "default": false
           },
           "max_outputs": {
             "type": "integer"
@@ -319,6 +756,7 @@
           "shp",
           "kmz"
         ],
+        "default_format": "gdb",
         "workspace": "mxd_default_or_output_folder_or_output_workspace",
         "overwrite": false,
         "add_to_map": false
@@ -346,7 +784,154 @@
             "name_template": "{value}永农"
           }
         }
-      ]
+      ],
+      "capability_contract": {
+        "inputs": [
+          {
+            "parameter": "layer",
+            "cardinality": "one",
+            "data_kind": [
+              "feature_layer",
+              "raster_layer",
+              "table_view"
+            ],
+            "geometry": [
+              "point",
+              "polyline",
+              "polygon",
+              "raster",
+              "not_applicable"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "parameter_values_require_selected", "parameter": "selected_only", "values": [true]}
+          }
+        ],
+        "parameters_schema": {
+          "type": "object",
+          "required": [
+            "layer",
+            "field",
+            "output_name"
+          ],
+          "properties": {
+            "layer": {
+              "type": "string"
+            },
+            "field": {
+              "type": "string"
+            },
+            "output_name": {
+              "type": "string"
+            },
+            "output_format": {
+              "type": "string",
+              "default": "gdb",
+              "enum": [
+                "shp",
+                "gdb",
+                "kmz"
+              ]
+            },
+            "output_folder": {
+              "type": "string"
+            },
+            "output_workspace": {
+              "type": "string"
+            },
+            "name_template": {
+              "type": "string"
+            },
+            "include_null": {
+              "type": "boolean"
+            },
+            "selected_only": {
+              "type": "boolean",
+              "default": false
+            },
+            "max_outputs": {
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "kind": "file_collection",
+          "geometry": {
+            "rule": "not_applicable",
+            "value": "not_applicable"
+          },
+          "fields": {
+            "effect": "not_applicable",
+            "target": "not_applicable",
+            "static_fields": [],
+            "parameter_field": "not_applicable"
+          },
+          "spatial_reference": {
+            "rule": "not_applicable",
+            "input": "not_applicable"
+          },
+          "cardinality": {
+            "rule": "fixed",
+            "value": "one_per_distinct_field_value"
+          },
+          "selection_state": "not_applicable",
+          "map_publication": "none"
+        },
+        "side_effects": "writes_data",
+        "authorization": {
+          "required": true,
+          "scope": "write_file"
+        },
+        "postconditions": [
+          {
+            "kind": "file_written",
+            "target": "output_name",
+            "expectation": {
+              "kind": {
+                "ref": "outputs.kind"
+              },
+              "geometry": {
+                "ref": "outputs.geometry"
+              },
+              "fields": {
+                "ref": "outputs.fields"
+              },
+              "spatial_reference": {
+                "ref": "outputs.spatial_reference"
+              },
+              "cardinality": {
+                "ref": "outputs.cardinality"
+              },
+              "selection_state": {
+                "ref": "outputs.selection_state"
+              },
+              "map_publication": {
+                "ref": "outputs.map_publication"
+              }
+            }
+          }
+        ],
+        "semantic_effects": [
+          {
+            "kind": "artifact_export",
+            "target": {
+              "parameter": "layer"
+            },
+            "selected_only": {
+              "parameter": "selected_only"
+            },
+            "result": {
+              "output": true
+            },
+            "output_format": {
+              "parameter": "output_format"
+            },
+            "action": {
+              "const": "split_by_field"
+            }
+          }
+        ]
+      }
     }
   ]
 }

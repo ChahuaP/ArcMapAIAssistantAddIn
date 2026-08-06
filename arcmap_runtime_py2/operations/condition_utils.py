@@ -41,8 +41,12 @@ def condition_fields(condition):
         return _unique(fields)
     if op == "not":
         return condition_fields(condition.get("condition"))
-    field = condition.get("field")
-    return [common._text(field)] if field else []
+    fields = []
+    for name in ("field", "value_field"):
+        field = condition.get(name)
+        if field:
+            fields.append(common._text(field))
+    return fields
 
 
 def count_where(layer, condition):
@@ -82,17 +86,17 @@ def _compile_node(layer, condition):
     field_sql = _field_sql(layer, field.name)
 
     if op == "eq":
-        return "%s = %s" % (field_sql, _literal(field, _value(condition)))
+        return "%s = %s" % (field_sql, _comparison_operand(layer, field, condition, op))
     if op == "ne":
-        return "%s <> %s" % (field_sql, _literal(field, _value(condition)))
+        return "%s <> %s" % (field_sql, _comparison_operand(layer, field, condition, op))
     if op == "gt":
-        return "%s > %s" % (field_sql, _literal(field, _value(condition)))
+        return "%s > %s" % (field_sql, _comparison_operand(layer, field, condition, op))
     if op == "gte":
-        return "%s >= %s" % (field_sql, _literal(field, _value(condition)))
+        return "%s >= %s" % (field_sql, _comparison_operand(layer, field, condition, op))
     if op == "lt":
-        return "%s < %s" % (field_sql, _literal(field, _value(condition)))
+        return "%s < %s" % (field_sql, _comparison_operand(layer, field, condition, op))
     if op == "lte":
-        return "%s <= %s" % (field_sql, _literal(field, _value(condition)))
+        return "%s <= %s" % (field_sql, _comparison_operand(layer, field, condition, op))
     if op == "between":
         values = condition.get("values")
         if not isinstance(values, list) or len(values) != 2:
@@ -123,6 +127,26 @@ def _value(condition):
     if "value" not in condition:
         raise common.OperationError(u"条件缺少 value。")
     return condition["value"]
+
+
+def _comparison_operand(layer, left_field, condition, op):
+    has_value = "value" in condition
+    has_value_field = "value_field" in condition
+    if has_value == has_value_field:
+        raise common.OperationError(u"%s 条件必须且只能提供 value 或 value_field 其中一个。" % op)
+    if has_value:
+        return _literal(left_field, condition["value"])
+    if op not in condition_protocol.FIELD_COMPARISON_OPERATORS:
+        raise common.OperationError(u"%s 条件不能使用 value_field。" % op)
+    right_field = _field(layer, condition["value_field"])
+    left_family = condition_protocol.field_type_family(getattr(left_field, "type", ""))
+    right_family = condition_protocol.field_type_family(getattr(right_field, "type", ""))
+    if left_family and right_family and left_family != right_family:
+        raise common.OperationError(
+            u"字段比较类型不兼容：%s(%s) 与 %s(%s)。"
+            % (left_field.name, left_field.type, right_field.name, right_field.type)
+        )
+    return _field_sql(layer, right_field.name)
 
 
 def _field(layer, field_name):

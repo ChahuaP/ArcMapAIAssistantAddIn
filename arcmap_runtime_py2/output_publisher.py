@@ -29,7 +29,7 @@ def publish(plan, mxd=None):
             _apply_state(existing, item)
             already_visible += 1
             continue
-        layer = item.layer if item.layer is not None else arcpy.mapping.Layer(item.path)
+        layer = arcpy.mapping.Layer(item.path)
         arcpy.mapping.AddLayer(data_frame, layer, "TOP")
         live_layer = _find_source_layer(mxd, data_frame, item.path)
         if live_layer is None:

@@ -18,7 +18,6 @@
         "为空",
         "包含"
       ],
-      "model_card": "Use selection.select_by_attribute to select features by structured where condition, not SQL text. Arguments: layer, where, selection_type optional. Allowed where ops: eq, ne, gt, gte, lt, lte, between, in, like, is_null, is_not_null, and, or, not. Boolean filters must be {\"op\":\"and\",\"conditions\":[...]} or {\"op\":\"or\",\"conditions\":[...]}; never use shorthand {\"and\":[...]}. Text contains must use op like on text fields with SQL wildcard value such as %南京%; never use op contains.",
       "parameters_schema": {
         "type": "object",
         "required": [
@@ -34,6 +33,7 @@
           },
           "selection_type": {
             "type": "string",
+            "default": "NEW_SELECTION",
             "enum": [
               "NEW_SELECTION",
               "ADD_TO_SELECTION",
@@ -68,7 +68,127 @@
             }
           }
         }
-      ]
+      ],
+      "capability_contract": {
+        "inputs": [
+          {
+            "parameter": "layer",
+            "cardinality": "one",
+            "data_kind": [
+              "feature_layer"
+            ],
+            "geometry": [
+              "point",
+              "polyline",
+              "polygon"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "parameter_values_require_selected", "parameter": "selection_type", "values": ["REMOVE_FROM_SELECTION", "SUBSET_SELECTION"]}
+          }
+        ],
+        "parameters_schema": {
+          "type": "object",
+          "required": [
+            "layer",
+            "where"
+          ],
+          "properties": {
+            "layer": {
+              "type": "string"
+            },
+            "where": {
+              "type": "object"
+            },
+            "selection_type": {
+              "type": "string",
+              "default": "NEW_SELECTION",
+              "enum": [
+                "NEW_SELECTION",
+                "ADD_TO_SELECTION",
+                "REMOVE_FROM_SELECTION",
+                "SUBSET_SELECTION",
+                "SWITCH_SELECTION",
+                "CLEAR_SELECTION"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "kind": "map_state",
+          "geometry": {
+            "rule": "not_applicable",
+            "value": "not_applicable"
+          },
+          "fields": {
+            "effect": "not_applicable",
+            "target": "not_applicable",
+            "static_fields": [],
+            "parameter_field": "not_applicable"
+          },
+          "spatial_reference": {
+            "rule": "not_applicable",
+            "input": "not_applicable"
+          },
+          "cardinality": {
+            "rule": "fixed",
+            "value": "one_snapshot"
+          },
+          "selection_state": "applied",
+          "map_publication": "map_state_updated"
+        },
+        "side_effects": "changes_map",
+        "authorization": {
+          "required": true,
+          "scope": "modify_map"
+        },
+        "postconditions": [
+          {
+            "kind": "selection_count_matches_result",
+            "target": "map",
+            "expectation": {
+              "kind": {
+                "ref": "outputs.kind"
+              },
+              "geometry": {
+                "ref": "outputs.geometry"
+              },
+              "fields": {
+                "ref": "outputs.fields"
+              },
+              "spatial_reference": {
+                "ref": "outputs.spatial_reference"
+              },
+              "cardinality": {
+                "ref": "outputs.cardinality"
+              },
+              "selection_state": {
+                "ref": "outputs.selection_state"
+              },
+              "map_publication": {
+                "ref": "outputs.map_publication"
+              }
+            }
+          }
+        ],
+        "semantic_effects": [
+          {
+            "kind": "attribute_filter",
+            "target": {
+              "parameter": "layer"
+            },
+            "where": {
+              "parameter": "where"
+            },
+            "selection_type": {
+              "parameter": "selection_type"
+            },
+            "result": {
+              "output": true
+            }
+          }
+        ]
+      }
     },
     {
       "id": "selection.select_by_location",
@@ -85,7 +205,6 @@
         "距离内",
         "边界接触"
       ],
-      "model_card": "Use selection.select_by_location to select target features by spatial relation to another layer or its selected features. Arguments: target_layer, overlap_type, select_layer, selection_type optional, search_distance optional. overlap_type should be ArcPy SelectLayerByLocation values such as INTERSECT, WITHIN, CONTAINS, WITHIN_A_DISTANCE, BOUNDARY_TOUCHES, SHARE_A_LINE_SEGMENT_WITH, ARE_IDENTICAL_TO, HAVE_THEIR_CENTER_IN.",
       "parameters_schema": {
         "type": "object",
         "required": [
@@ -104,10 +223,15 @@
             "type": "string"
           },
           "selection_type": {
-            "type": "string"
+            "type": "string",
+            "default": "NEW_SELECTION"
           },
           "search_distance": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
           }
         },
         "additionalProperties": false
@@ -129,7 +253,150 @@
             "select_layer": "rivers"
           }
         }
-      ]
+      ],
+      "capability_contract": {
+        "inputs": [
+          {
+            "parameter": "target_layer",
+            "cardinality": "one",
+            "data_kind": [
+              "feature_layer"
+            ],
+            "geometry": [
+              "point",
+              "polyline",
+              "polygon"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "parameter_values_require_selected", "parameter": "selection_type", "values": ["REMOVE_FROM_SELECTION", "SUBSET_SELECTION"]}
+          },
+          {
+            "parameter": "select_layer",
+            "cardinality": "one",
+            "data_kind": [
+              "feature_layer"
+            ],
+            "geometry": [
+              "point",
+              "polyline",
+              "polygon"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          }
+        ],
+        "parameters_schema": {
+          "type": "object",
+          "required": [
+            "target_layer",
+            "overlap_type",
+            "select_layer"
+          ],
+          "properties": {
+            "target_layer": {
+              "type": "string"
+            },
+            "overlap_type": {
+              "type": "string"
+            },
+            "select_layer": {
+              "type": "string"
+            },
+            "selection_type": {
+              "type": "string",
+              "default": "NEW_SELECTION"
+            },
+            "search_distance": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "kind": "map_state",
+          "geometry": {
+            "rule": "not_applicable",
+            "value": "not_applicable"
+          },
+          "fields": {
+            "effect": "not_applicable",
+            "target": "not_applicable",
+            "static_fields": [],
+            "parameter_field": "not_applicable"
+          },
+          "spatial_reference": {
+            "rule": "not_applicable",
+            "input": "not_applicable"
+          },
+          "cardinality": {
+            "rule": "fixed",
+            "value": "one_snapshot"
+          },
+          "selection_state": "applied",
+          "map_publication": "map_state_updated"
+        },
+        "side_effects": "changes_map",
+        "authorization": {
+          "required": true,
+          "scope": "modify_map"
+        },
+        "postconditions": [
+          {
+            "kind": "selection_count_matches_result",
+            "target": "map",
+            "expectation": {
+              "kind": {
+                "ref": "outputs.kind"
+              },
+              "geometry": {
+                "ref": "outputs.geometry"
+              },
+              "fields": {
+                "ref": "outputs.fields"
+              },
+              "spatial_reference": {
+                "ref": "outputs.spatial_reference"
+              },
+              "cardinality": {
+                "ref": "outputs.cardinality"
+              },
+              "selection_state": {
+                "ref": "outputs.selection_state"
+              },
+              "map_publication": {
+                "ref": "outputs.map_publication"
+              }
+            }
+          }
+        ],
+        "semantic_effects": [
+          {
+            "kind": "spatial_filter",
+            "target": {
+              "parameter": "target_layer"
+            },
+            "selector": {
+              "parameter": "select_layer"
+            },
+            "overlap_type": {
+              "parameter": "overlap_type"
+            },
+            "search_distance": {
+              "parameter": "search_distance"
+            },
+            "selection_type": {
+              "parameter": "selection_type"
+            },
+            "result": {
+              "output": true
+            }
+          }
+        ]
+      }
     },
     {
       "id": "selection.clear_selection",
@@ -141,7 +408,6 @@
         "清除选择",
         "取消选择"
       ],
-      "model_card": "Use selection.clear_selection to clear selected features on one layer. Arguments: layer.",
       "parameters_schema": {
         "type": "object",
         "required": [
@@ -169,7 +435,108 @@
             "layer": "roads"
           }
         }
-      ]
+      ],
+      "capability_contract": {
+        "inputs": [
+          {
+            "parameter": "layer",
+            "cardinality": "one",
+            "data_kind": [
+              "feature_layer"
+            ],
+            "geometry": [
+              "point",
+              "polyline",
+              "polygon"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          }
+        ],
+        "parameters_schema": {
+          "type": "object",
+          "required": [
+            "layer"
+          ],
+          "properties": {
+            "layer": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "kind": "map_state",
+          "geometry": {
+            "rule": "not_applicable",
+            "value": "not_applicable"
+          },
+          "fields": {
+            "effect": "not_applicable",
+            "target": "not_applicable",
+            "static_fields": [],
+            "parameter_field": "not_applicable"
+          },
+          "spatial_reference": {
+            "rule": "not_applicable",
+            "input": "not_applicable"
+          },
+          "cardinality": {
+            "rule": "fixed",
+            "value": "one_snapshot"
+          },
+          "selection_state": "cleared",
+          "map_publication": "map_state_updated"
+        },
+        "side_effects": "changes_map",
+        "authorization": {
+          "required": true,
+          "scope": "modify_map"
+        },
+        "postconditions": [
+          {
+            "kind": "selection_count_matches_result",
+            "target": "map",
+            "expectation": {
+              "kind": {
+                "ref": "outputs.kind"
+              },
+              "geometry": {
+                "ref": "outputs.geometry"
+              },
+              "fields": {
+                "ref": "outputs.fields"
+              },
+              "spatial_reference": {
+                "ref": "outputs.spatial_reference"
+              },
+              "cardinality": {
+                "ref": "outputs.cardinality"
+              },
+              "selection_state": {
+                "ref": "outputs.selection_state"
+              },
+              "map_publication": {
+                "ref": "outputs.map_publication"
+              }
+            }
+          }
+        ],
+        "semantic_effects": [
+          {
+            "kind": "map_change",
+            "target": {
+              "parameter": "layer"
+            },
+            "result": {
+              "output": true
+            },
+            "action": {
+              "const": "clear_selection"
+            }
+          }
+        ]
+      }
     },
     {
       "id": "selection.export_selected_features",
@@ -181,7 +548,6 @@
         "导出选择",
         "导出选中"
       ],
-      "model_card": "Use selection.export_selected_features to export selected features. Arguments: layer, output_name, output_workspace optional for GDB output, output_folder optional for shapefile output, output_format optional: gdb or shp.",
       "parameters_schema": {
         "type": "object",
         "required": [
@@ -203,6 +569,7 @@
           },
           "output_format": {
             "type": "string",
+            "default": "gdb",
             "enum": [
               "gdb",
               "shp"
@@ -237,7 +604,132 @@
             "output_name": "roads_selected"
           }
         }
-      ]
+      ],
+      "capability_contract": {
+        "inputs": [
+          {
+            "parameter": "layer",
+            "cardinality": "one",
+            "data_kind": [
+              "feature_layer"
+            ],
+            "geometry": [
+              "point",
+              "polyline",
+              "polygon"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "requires_selected"}
+          }
+        ],
+        "parameters_schema": {
+          "type": "object",
+          "required": [
+            "layer",
+            "output_name"
+          ],
+          "properties": {
+            "layer": {
+              "type": "string"
+            },
+            "output_name": {
+              "type": "string"
+            },
+            "output_workspace": {
+              "type": "string"
+            },
+            "output_folder": {
+              "type": "string"
+            },
+            "output_format": {
+              "type": "string",
+              "default": "gdb",
+              "enum": [
+                "gdb",
+                "shp"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "kind": "feature_class",
+          "geometry": {
+            "rule": "inherit",
+            "value": "layer"
+          },
+          "fields": {
+            "effect": "inherit_input",
+            "target": "layer",
+            "static_fields": [],
+            "parameter_field": "not_applicable"
+          },
+          "spatial_reference": {
+            "rule": "inherit",
+            "input": "layer"
+          },
+          "cardinality": {
+            "rule": "fixed",
+            "value": "selected_feature_count"
+          },
+          "selection_state": "not_applicable",
+          "map_publication": "published"
+        },
+        "side_effects": "writes_data",
+        "authorization": {
+          "required": true,
+          "scope": "write_data"
+        },
+        "postconditions": [
+          {
+            "kind": "selected_features_exported",
+            "target": "output_name",
+            "expectation": {
+              "kind": {
+                "ref": "outputs.kind"
+              },
+              "geometry": {
+                "ref": "outputs.geometry"
+              },
+              "fields": {
+                "ref": "outputs.fields"
+              },
+              "spatial_reference": {
+                "ref": "outputs.spatial_reference"
+              },
+              "cardinality": {
+                "ref": "outputs.cardinality"
+              },
+              "selection_state": {
+                "ref": "outputs.selection_state"
+              },
+              "map_publication": {
+                "ref": "outputs.map_publication"
+              }
+            }
+          }
+        ],
+        "semantic_effects": [
+          {
+            "kind": "artifact_export",
+            "target": {
+              "parameter": "layer"
+            },
+            "selected_only": {
+              "const": true
+            },
+            "output_format": {
+              "parameter": "output_format"
+            },
+            "result": {
+              "output": true
+            },
+            "action": {
+              "const": "export_selected_features"
+            }
+          }
+        ]
+      }
     }
   ]
 }

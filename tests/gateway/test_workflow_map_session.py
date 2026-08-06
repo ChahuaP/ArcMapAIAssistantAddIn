@@ -36,6 +36,7 @@ class _Mapping:
     def __init__(self):
         self.layers = []
         self.added = []
+        self.added_layer_names = []
 
     def MapDocument(self, value):
         return "mxd"
@@ -50,8 +51,18 @@ class _Mapping:
         return _Layer(path)
 
     def AddLayer(self, data_frame, layer, position):
-        self.layers.append(_Layer(layer.dataSource))
+        added = _Layer(layer.dataSource)
+        added.name = layer.name
+        added.longName = layer.longName
+        added.visible = layer.visible
+        added.isFeatureLayer = layer.isFeatureLayer
+        added.selection = set(layer.selection)
+        self.layers.append(added)
         self.added.append((data_frame, layer.dataSource, position))
+        self.added_layer_names.append(layer.name)
+
+    def RemoveLayer(self, data_frame, layer):
+        self.layers.remove(layer)
 
 
 class ExecutionSessionTests(unittest.TestCase):
@@ -66,6 +77,8 @@ class ExecutionSessionTests(unittest.TestCase):
             SelectLayerByAttribute_management=self._select,
             ListFields=lambda layer: [],
         )
+        self.arcpy.MakeFeatureLayer_management = self._make_feature_layer
+        self.arcpy.Delete_management = lambda name: None
         self.delimiter_calls = []
         self.arcpy_patch = patch.object(common, "arcpy", self.arcpy)
         self.arcpy_patch.start()
@@ -96,6 +109,13 @@ class ExecutionSessionTests(unittest.TestCase):
             catalogPath=layer.catalogPath,
         )
 
+    @staticmethod
+    def _make_feature_layer(path, name):
+        layer = _Layer(path)
+        layer.name = name
+        layer.longName = name
+        return SimpleNamespace(getOutput=lambda index: layer)
+
     def _field_delimiters(self, data_source, field):
         if not isinstance(data_source, str) or not data_source:
             raise RuntimeError("data source must be a non-empty string")
@@ -123,13 +143,15 @@ class ExecutionSessionTests(unittest.TestCase):
             session.register_output("s1", output)
             first = common.find_layer({}, "from_step:s1", step_outputs)
             second = common.find_layer({}, "from_step:s1", step_outputs)
-            self.assertEqual(self.mapping.added, [])
+            publication_plan = session.publication_plan()
+            self.assertEqual(self.mapping.added[-1][2], "BOTTOM")
 
         self.assertIs(first, second)
-        self.assertEqual(self.mapping.added, [])
-        output_publisher.publish(session.publication_plan())
+        self.assertEqual(self.mapping.layers, [])
+        output_publisher.publish(publication_plan)
         self.assertIsNot(self.mapping.layers[0], first)
-        self.assertEqual(self.mapping.added, [("df", output, "TOP")])
+        self.assertEqual(self.mapping.added[-1], ("df", output, "TOP"))
+        self.assertEqual(self.mapping.added_layer_names[-1], output)
 
     def test_failed_workflow_does_not_publish_partial_outputs(self):
         with self.assertRaises(ValueError):
@@ -232,13 +254,37 @@ class ExecutionSessionTests(unittest.TestCase):
                 OIDFieldName="OBJECTID",
                 catalogPath=layer.catalogPath,
                 shapeType="Polygon",
+                spatialReference=SimpleNamespace(name="WGS_1984_UTM_Zone_50N"),
             )
 
         self.arcpy.Describe = describe
         info = context_reader._layer_info(layer, 0)
         self.assertEqual(calls, [layer])
         self.assertEqual(info["geometry_type"], "Polygon")
+        self.assertEqual(info["spatial_reference"], "WGS_1984_UTM_Zone_50N")
         self.assertEqual(info["selected_count"], 2)
+
+    def test_context_hash_changes_when_a_layer_spatial_reference_changes(self):
+        first = {"layers": [{"layer_ref": "layer:0", "name": "roads", "spatial_reference": "EPSG:3857"}]}
+        second = {"layers": [{"layer_ref": "layer:0", "name": "roads", "spatial_reference": "EPSG:32650"}]}
+        self.assertNotEqual(context_reader.context_hash(first), context_reader.context_hash(second))
+
+    def test_context_extent_removes_binary_noise_but_preserves_meaningful_changes(self):
+        first = SimpleNamespace(extent=SimpleNamespace(
+            XMin=664127.6836158192, YMin=3536999.9999999995,
+            XMax=695872.3163841808, YMax=3558179.661016949,
+        ))
+        binary_noise = SimpleNamespace(extent=SimpleNamespace(
+            XMin=664127.6836158193, YMin=3537000.0,
+            XMax=695872.3163841807, YMax=3558179.6610169495,
+        ))
+        meaningful_change = SimpleNamespace(extent=SimpleNamespace(
+            XMin=664127.6846158192, YMin=3536999.9999999995,
+            XMax=695872.3163841808, YMax=3558179.661016949,
+        ))
+
+        self.assertEqual(context_reader._extent(first), context_reader._extent(binary_noise))
+        self.assertNotEqual(context_reader._extent(first), context_reader._extent(meaningful_change))
 
     def test_clear_selection_failure_is_not_swallowed(self):
         layer = self.mapping.Layer(r"D:\out\clear.shp")
@@ -252,7 +298,7 @@ class ExecutionSessionTests(unittest.TestCase):
         with patch.object(selection_ops.common, "find_layer", return_value=layer), \
                 patch.object(selection_ops.common, "clear_layer_selection", side_effect=common.clear_layer_selection):
             result = selection_ops.clear_selection({}, {"layer": "roads"}, {})
-        self.assertEqual(result, {"layer": layer.name, "cleared": True})
+        self.assertEqual(result, {"layer": layer.name, "cleared": True, "selected_count": 0})
         self.assertEqual(layer.selection, set())
 
     def test_clear_selection_operation_does_not_claim_success_after_failure(self):
@@ -314,8 +360,11 @@ class _Session:
         self.events.append("commit" if exc_type is None else "abort")
         return False
 
-    def register_output(self, step_id, path):
+    def register_output(self, step_id, path, output_type):
         self.events.append("stage:" + step_id + ":" + path)
+
+    def canonicalize_runtime_references(self, value):
+        return value
 
     def publication_plan(self):
         self.events.append("plan")

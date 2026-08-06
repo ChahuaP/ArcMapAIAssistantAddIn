@@ -75,6 +75,20 @@ class ExecutionOutbox(object):
         self._write_atomic(destination, entry)
         return entry
 
+    def replace_result(self, entry, result):
+        if not isinstance(result, dict):
+            raise ValueError("publication result must be an object.")
+        run_id = _run_id(entry.get("run_id"))
+        destination = self._entry_path(run_id)
+        current = self._read(destination)
+        if current["publication_complete"]:
+            raise ValueError("execution outbox entry changed before publication result update.")
+        updated = dict(current)
+        updated["result"] = result
+        updated["result_hash"] = result_hash(result)
+        self._write_atomic(destination, updated)
+        return updated
+
     def mark_publication_complete(self, entry):
         run_id = _run_id(entry.get("run_id"))
         destination = self._entry_path(run_id)

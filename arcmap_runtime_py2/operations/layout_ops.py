@@ -3,7 +3,7 @@ from __future__ import absolute_import
 
 import arcpy
 
-from operations import common
+from . import common
 
 try:
     import map_exporter

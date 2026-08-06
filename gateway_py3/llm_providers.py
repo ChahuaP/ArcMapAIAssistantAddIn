@@ -7,6 +7,7 @@ import re
 import socket
 import urllib.error
 import urllib.request
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -16,11 +17,20 @@ from .paths import config_path, localappdata_dir
 DEEPSEEK_PROVIDER = "deepseek"
 MINIMAX_PROVIDER = "minimax"
 ZHIPU_PROVIDER = "zhipu"
+ZHIPU_CODING_PROVIDER = "zhipu_coding"
 QWEN_PROVIDER = "qwen"
-SUPPORTED_PROVIDERS = (DEEPSEEK_PROVIDER, MINIMAX_PROVIDER, ZHIPU_PROVIDER, QWEN_PROVIDER)
+SUPPORTED_PROVIDERS = (
+    DEEPSEEK_PROVIDER,
+    MINIMAX_PROVIDER,
+    ZHIPU_PROVIDER,
+    ZHIPU_CODING_PROVIDER,
+    QWEN_PROVIDER,
+)
 MINIMAX_TOKEN_PLAN_BASE_URL = "https://api.minimaxi.com/v1"
 MINIMAX_MODEL = "MiniMax-M3"
 ZHIPU_BASE_URL = "https://open.bigmodel.cn/api/paas/v4"
+ZHIPU_CODING_BASE_URL = "https://open.bigmodel.cn/api/anthropic"
+ZHIPU_CODING_MODEL = "glm-5.2"
 QWEN_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 QWEN_ASR_MODEL = "qwen3-asr-flash"
 MODEL_REQUEST_TIMEOUT_SECONDS = 300
@@ -47,6 +57,7 @@ MODEL_OPTIONS = (
     _model_option(DEEPSEEK_PROVIDER, "deepseek-v4-pro-thinking", "deepseek-v4-pro", "DeepSeek V4 Pro 思考", True),
     _model_option(DEEPSEEK_PROVIDER, "deepseek-v4-pro-non-thinking", "deepseek-v4-pro", "DeepSeek V4 Pro 非思考"),
     _model_option(ZHIPU_PROVIDER, "glm-5.1-thinking", "glm-5.1", "智谱 GLM-5.1 思考", True),
+    _model_option(ZHIPU_CODING_PROVIDER, ZHIPU_CODING_MODEL, ZHIPU_CODING_MODEL, "智谱 Coding Plan GLM-5.2"),
     _model_option(MINIMAX_PROVIDER, "MiniMax-M2.5", "MiniMax-M2.5", "MiniMax M2.5"),
     _model_option(MINIMAX_PROVIDER, "MiniMax-M2.7", "MiniMax-M2.7", "MiniMax M2.7"),
     _model_option(MINIMAX_PROVIDER, MINIMAX_MODEL, MINIMAX_MODEL, "MiniMax M3"),
@@ -76,8 +87,6 @@ THINKING_MODELS = {
 DEFAULT_CONFIG = {
     "primary_provider": DEEPSEEK_PROVIDER,
     "primary_model": "deepseek-v4-flash-thinking",
-    "reviewer_provider": MINIMAX_PROVIDER,
-    "reviewer_model": MINIMAX_MODEL,
     "providers": {
         DEEPSEEK_PROVIDER: {
             "model": "deepseek-v4-flash-thinking",
@@ -90,6 +99,10 @@ DEFAULT_CONFIG = {
         ZHIPU_PROVIDER: {
             "model": "glm-5.1-thinking",
             "base_url": ZHIPU_BASE_URL,
+        },
+        ZHIPU_CODING_PROVIDER: {
+            "model": ZHIPU_CODING_MODEL,
+            "base_url": ZHIPU_CODING_BASE_URL,
         },
         QWEN_PROVIDER: {
             "model": "qwen3.6-flash-2026-04-16",
@@ -106,18 +119,21 @@ ENV_KEYS = {
     DEEPSEEK_PROVIDER: "DEEPSEEK_API_KEY",
     MINIMAX_PROVIDER: "MINIMAX_API_KEY",
     ZHIPU_PROVIDER: "ZHIPU_API_KEY",
+    ZHIPU_CODING_PROVIDER: "ZHIPU_CODING_API_KEY",
     QWEN_PROVIDER: "DASHSCOPE_API_KEY",
 }
 ENV_KEY_ALIASES = {
     DEEPSEEK_PROVIDER: ("DEEPSEEK_API_KEY",),
     MINIMAX_PROVIDER: ("MINIMAX_API_KEY",),
     ZHIPU_PROVIDER: ("ZHIPU_API_KEY", "BIGMODEL_API_KEY"),
+    ZHIPU_CODING_PROVIDER: ("ZHIPU_CODING_API_KEY",),
     QWEN_PROVIDER: ("BAILIAN_TOKEN_PLAN_API_KEY", "DASHSCOPE_TOKEN_PLAN_API_KEY", "DASHSCOPE_API_KEY", "QWEN_API_KEY", "BAILIAN_API_KEY"),
 }
 PROVIDER_SECRET_FIELDS = {
     DEEPSEEK_PROVIDER: ("api_key",),
     MINIMAX_PROVIDER: ("api_key",),
     ZHIPU_PROVIDER: ("api_key",),
+    ZHIPU_CODING_PROVIDER: ("api_key",),
     QWEN_PROVIDER: ("token_plan_api_key", "api_key"),
 }
 PROVIDER_OPTIONS = (
@@ -149,6 +165,15 @@ PROVIDER_OPTIONS = (
         ],
     },
     {
+        "id": ZHIPU_CODING_PROVIDER,
+        "label": "智谱 Coding Plan",
+        "env_key": ENV_KEYS[ZHIPU_CODING_PROVIDER],
+        "key_placeholder": "智谱 Coding Plan Key",
+        "key_fields": [
+            {"field": "api_key", "label": "Coding Plan Key", "placeholder": "智谱 Coding Plan API Key"},
+        ],
+    },
+    {
         "id": QWEN_PROVIDER,
         "label": "阿里百炼",
         "env_key": ENV_KEYS[QWEN_PROVIDER],
@@ -166,6 +191,19 @@ class ProviderError(Exception):
     pass
 
 
+class ProviderProtocolError(ProviderError):
+    def __init__(self, message: str, evidence: Dict[str, Any]):
+        super().__init__(message)
+        self.evidence = evidence
+
+
+@dataclass(frozen=True)
+class StructuredOutputContract:
+    name: str
+    description: str
+    schema: Dict[str, Any]
+
+
 class ChatProvider:
     provider_id = ""
 
@@ -177,19 +215,36 @@ class ChatProvider:
         self.base_url = (base_url or provider_config.get("base_url") or DEFAULT_CONFIG["providers"][self.provider_id]["base_url"]).rstrip("/")
         self.timeout = timeout
 
-    def chat_json(self, messages: List[Dict[str, str]]) -> Dict[str, Any]:
+    def chat_structured(
+        self,
+        messages: List[Dict[str, str]],
+        contract: StructuredOutputContract,
+    ) -> Dict[str, Any]:
         payload = self._post_chat_completion({
             "model": self.model,
             "messages": messages,
-            "response_format": {"type": "json_object"},
-            "temperature": 0.1,
+            "tools": [{
+                "type": "function",
+                "function": {
+                    "name": contract.name,
+                    "description": contract.description,
+                    "parameters": contract.schema,
+                },
+            }],
+            "tool_choice": {
+                "type": "function",
+                "function": {"name": contract.name},
+            },
+            "temperature": 0,
         })
-        content = payload["choices"][0]["message"]["content"]
-        try:
-            result = json.loads(content)
-        except ValueError:
-            raise ProviderError("%s returned non-JSON content." % self.provider_id)
+        message = payload["choices"][0]["message"]
+        if self.provider_id == MINIMAX_PROVIDER:
+            message = _normalize_minimax_agent_message(message)
+        result = _openai_structured_result(message, contract, payload)
+        if self.provider_id == MINIMAX_PROVIDER:
+            result = _normalize_minimax_structured_result(result, contract.schema)
         result["_usage"] = normalize_usage(self.provider_id, payload.get("usage", {}))
+        result["_provider_response"] = payload
         return result
 
     def chat_text(self, messages: List[Dict[str, str]]) -> Dict[str, Any]:
@@ -226,16 +281,28 @@ class ChatProvider:
         if not self.api_key:
             raise ProviderError(missing_api_key_message(self.provider_id))
         body = self._prepare_body(dict(body))
-        data = json.dumps(body, ensure_ascii=False).encode("utf-8")
         url = "%s/chat/completions" % self.base_url
+        return self._post_json(
+            url,
+            body,
+            {
+                "Content-Type": "application/json",
+                "Authorization": "Bearer %s" % self.api_key,
+            },
+        )
+
+    def _post_json(
+        self,
+        url: str,
+        body: Dict[str, Any],
+        headers: Dict[str, str],
+    ) -> Dict[str, Any]:
+        data = json.dumps(body, ensure_ascii=False).encode("utf-8")
         try:
             request = urllib.request.Request(
                 url,
                 data=data,
-                headers={
-                    "Content-Type": "application/json",
-                    "Authorization": "Bearer %s" % self.api_key,
-                },
+                headers=headers,
                 method="POST",
             )
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
@@ -261,26 +328,16 @@ class DeepSeekProvider(ChatProvider):
             body["thinking"] = {"type": "enabled"}
             body["reasoning_effort"] = "max"
             body.pop("temperature", None)
+        else:
+            # DeepSeek V4 defaults to thinking mode.  Non-thinking model
+            # options must therefore be explicit so forced structured tool
+            # calls retain the selected model semantics.
+            body["thinking"] = {"type": "disabled"}
         return body
 
 
 class MiniMaxProvider(ChatProvider):
     provider_id = MINIMAX_PROVIDER
-
-    def chat_json(self, messages: List[Dict[str, str]]) -> Dict[str, Any]:
-        payload = self._post_chat_completion({
-            "model": self.model,
-            "messages": messages,
-            "response_format": {"type": "json_object"},
-            "temperature": 0.1,
-        })
-        content = _strip_minimax_thinking(payload["choices"][0]["message"]["content"])
-        try:
-            result = json.loads(content)
-        except ValueError:
-            raise ProviderError("%s returned non-JSON content." % self.provider_id)
-        result["_usage"] = normalize_usage(self.provider_id, payload.get("usage", {}))
-        return result
 
     def chat_text(self, messages: List[Dict[str, str]]) -> Dict[str, Any]:
         result = super().chat_text(messages)
@@ -313,8 +370,241 @@ class ZhipuProvider(ChatProvider):
         return body
 
 
+class ZhipuCodingProvider(ChatProvider):
+    provider_id = ZHIPU_CODING_PROVIDER
+
+    def chat_structured(
+        self,
+        messages: List[Dict[str, str]],
+        contract: StructuredOutputContract,
+    ) -> Dict[str, Any]:
+        if not self.api_key:
+            raise ProviderError(missing_api_key_message(self.provider_id))
+        system, conversation = _anthropic_messages(messages)
+        payload = self._post_json(
+            "%s/v1/messages" % self.base_url,
+            {
+                "model": self.model,
+                "max_tokens": 8192,
+                "system": system,
+                "messages": conversation,
+                "tools": [{
+                    "name": contract.name,
+                    "description": contract.description,
+                    "input_schema": contract.schema,
+                }],
+                "tool_choice": {"type": "tool", "name": contract.name},
+                "temperature": 0,
+            },
+            {
+                "Content-Type": "application/json",
+                "Authorization": "Bearer %s" % self.api_key,
+                "X-Api-Key": self.api_key,
+                "Anthropic-Version": "2023-06-01",
+            },
+        )
+        result = _anthropic_structured_result(payload, contract)
+        result["_usage"] = normalize_usage(self.provider_id, payload.get("usage", {}))
+        result["_provider_response"] = payload
+        return result
+
+
 class QwenProvider(ChatProvider):
     provider_id = QWEN_PROVIDER
+
+
+def _anthropic_messages(messages: List[Dict[str, str]]):
+    system_parts = []
+    conversation = []
+    for message in messages:
+        role = message.get("role")
+        content = message.get("content")
+        if not isinstance(content, str):
+            raise ProviderProtocolError("消息内容必须是字符串。", {"message": message})
+        if role == "system":
+            system_parts.append(content)
+        elif role in ("user", "assistant"):
+            conversation.append({"role": role, "content": content})
+        else:
+            raise ProviderProtocolError("Anthropic Messages 协议不支持角色：%s。" % role, {"message": message})
+    if not conversation:
+        raise ProviderProtocolError("Anthropic Messages 请求缺少对话消息。", {"messages": messages})
+    return "\n\n".join(system_parts), conversation
+
+
+def _anthropic_structured_result(
+    payload: Dict[str, Any],
+    contract: StructuredOutputContract,
+) -> Dict[str, Any]:
+    blocks = payload.get("content") if isinstance(payload, dict) else None
+    tool_uses = [
+        block
+        for block in (blocks or [])
+        if isinstance(block, dict) and block.get("type") == "tool_use"
+    ]
+    if len(tool_uses) != 1:
+        raise ProviderProtocolError(
+            "结构化响应必须且只能包含一次工具调用。",
+            payload,
+        )
+    call = tool_uses[0]
+    if call.get("name") != contract.name:
+        raise ProviderProtocolError(
+            "结构化响应调用了错误工具：%s。" % call.get("name"),
+            payload,
+        )
+    arguments = call.get("input")
+    if not isinstance(arguments, dict):
+        raise ProviderProtocolError("结构化响应工具参数必须是对象。", payload)
+    return dict(arguments)
+
+
+def _openai_structured_result(
+    message: Dict[str, Any],
+    contract: StructuredOutputContract,
+    payload: Dict[str, Any],
+) -> Dict[str, Any]:
+    tool_calls = message.get("tool_calls") if isinstance(message, dict) else None
+    if not isinstance(tool_calls, list) or len(tool_calls) != 1:
+        raise ProviderProtocolError(
+            "结构化响应必须且只能包含一次工具调用。",
+            payload,
+        )
+    function = tool_calls[0].get("function") if isinstance(tool_calls[0], dict) else None
+    if not isinstance(function, dict) or function.get("name") != contract.name:
+        raise ProviderProtocolError(
+            "结构化响应调用了错误工具。",
+            payload,
+        )
+    arguments = function.get("arguments")
+    try:
+        parsed = json.loads(arguments) if isinstance(arguments, str) else arguments
+    except ValueError:
+        raise ProviderProtocolError("结构化响应工具参数不是有效 JSON。", payload)
+    if not isinstance(parsed, dict):
+        raise ProviderProtocolError("结构化响应工具参数必须是对象。", payload)
+    return dict(parsed)
+
+
+def _normalize_minimax_structured_result(value, schema):
+    """Canonicalize only MiniMax wire shapes that the active schema proves.
+
+    MiniMax-M3 can serialize a schema array as the exact object
+    ``{"item": [...]}``.  This shape is not accepted generically: the
+    transformation is applied only at an array node of the exact tool schema.
+    Ambiguous ``oneOf`` branches and unsupported references remain untouched
+    so the domain parser fails closed.
+    """
+    return _normalize_minimax_schema_value(value, schema, schema)
+
+
+def _normalize_minimax_schema_value(value, schema, root_schema):
+    schema = _resolve_local_schema(schema, root_schema)
+    if not isinstance(schema, dict):
+        return value
+
+    branches = schema.get("oneOf")
+    if isinstance(branches, list):
+        branch = _unique_schema_branch(value, branches, root_schema)
+        if branch is None:
+            return value
+        return _normalize_minimax_schema_value(value, branch, root_schema)
+
+    schema_type = schema.get("type")
+    if schema_type == "array":
+        if (
+            isinstance(value, dict)
+            and set(value) == {"item"}
+            and isinstance(value["item"], list)
+        ):
+            value = value["item"]
+        if not isinstance(value, list):
+            return value
+        item_schema = schema.get("items")
+        if not isinstance(item_schema, dict):
+            return list(value)
+        return [
+            _normalize_minimax_schema_value(item, item_schema, root_schema)
+            for item in value
+        ]
+
+    if schema_type == "object" and isinstance(value, dict):
+        properties = schema.get("properties")
+        if not isinstance(properties, dict):
+            return dict(value)
+        return {
+            key: _normalize_minimax_schema_value(item, properties[key], root_schema)
+            if key in properties else item
+            for key, item in value.items()
+        }
+    return value
+
+
+def _resolve_local_schema(schema, root_schema):
+    if not isinstance(schema, dict) or "$ref" not in schema:
+        return schema
+    reference = schema.get("$ref")
+    if not isinstance(reference, str) or not reference.startswith("#/"):
+        return None
+    current = root_schema
+    for token in reference[2:].split("/"):
+        token = token.replace("~1", "/").replace("~0", "~")
+        if not isinstance(current, dict) or token not in current:
+            return None
+        current = current[token]
+    return current if isinstance(current, dict) else None
+
+
+def _unique_schema_branch(value, branches, root_schema):
+    candidates = [
+        branch for branch in branches
+        if _schema_branch_matches(value, branch, root_schema)
+    ]
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def _schema_branch_matches(value, branch, root_schema):
+    branch = _resolve_local_schema(branch, root_schema)
+    if not isinstance(branch, dict):
+        return False
+    schema_type = branch.get("type")
+    if schema_type == "object":
+        if not isinstance(value, dict):
+            return False
+        properties = branch.get("properties", {})
+        required = branch.get("required", [])
+        if not isinstance(properties, dict) or not isinstance(required, list):
+            return False
+        if not set(required).issubset(value):
+            return False
+        if branch.get("additionalProperties") is False and not set(value).issubset(properties):
+            return False
+        for key, property_schema in properties.items():
+            if key not in value:
+                continue
+            resolved = _resolve_local_schema(property_schema, root_schema)
+            if not isinstance(resolved, dict) or "const" not in resolved:
+                continue
+            if value[key] != resolved["const"]:
+                return False
+        return True
+    if schema_type == "array":
+        return isinstance(value, list) or (
+            isinstance(value, dict)
+            and set(value) == {"item"}
+            and isinstance(value["item"], list)
+        )
+    if schema_type == "string":
+        return isinstance(value, str)
+    if schema_type == "boolean":
+        return isinstance(value, bool)
+    if schema_type == "number":
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    if schema_type == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if schema_type == "null":
+        return value is None
+    return False
 
 
 def create_provider(
@@ -323,7 +613,7 @@ def create_provider(
     model_id: str | None = None,
 ) -> ChatProvider:
     config = load_config()
-    selected = provider_id or provider_for_mode(mode or "context_single", config)
+    selected = provider_id or provider_for_mode(mode or "g1_context", config)
     if selected not in SUPPORTED_PROVIDERS:
         raise ProviderError("未知模型供应商：%s。" % selected)
     if model_id is not None:
@@ -332,7 +622,7 @@ def create_provider(
     elif provider_id:
         model = provider_settings(selected, config)["model"]
     else:
-        model = model_for_mode(mode or "context_single", config)
+        model = model_for_mode(mode or "g1_context", config)
     base_url = provider_settings(selected, config)["base_url"]
     if selected == DEEPSEEK_PROVIDER:
         return DeepSeekProvider(model=model, base_url=base_url)
@@ -340,6 +630,8 @@ def create_provider(
         return MiniMaxProvider(model=model, base_url=base_url)
     if selected == ZHIPU_PROVIDER:
         return ZhipuProvider(model=model, base_url=base_url)
+    if selected == ZHIPU_CODING_PROVIDER:
+        return ZhipuCodingProvider(model=model, base_url=base_url)
     if selected == QWEN_PROVIDER:
         return QwenProvider(model=model, base_url=base_url)
     raise ProviderError("未知模型供应商：%s。" % selected)
@@ -391,8 +683,6 @@ def public_config(config: Dict[str, Any] | None = None) -> Dict[str, Any]:
     return {
         "primary_provider": config["primary_provider"],
         "primary_model": config["primary_model"],
-        "reviewer_provider": config["reviewer_provider"],
-        "reviewer_model": config["reviewer_model"],
         "providers": providers,
         "provider_options": [dict(item) for item in PROVIDER_OPTIONS],
         "model_options": [dict(item) for item in MODEL_OPTIONS],
@@ -433,12 +723,12 @@ def speech_settings(config: Dict[str, Any] | None = None) -> Dict[str, str]:
 
 def provider_for_mode(mode: str | None, config: Dict[str, Any] | None = None) -> str:
     config = config or load_config()
-    return config["reviewer_provider"] if mode == "multi_agent" else config["primary_provider"]
+    return config["primary_provider"]
 
 
 def model_for_mode(mode: str | None, config: Dict[str, Any] | None = None) -> str:
     config = config or load_config()
-    return config["reviewer_model"] if mode == "multi_agent" else config["primary_model"]
+    return config["primary_model"]
 
 
 def provider_settings(provider_id: str, config: Dict[str, Any] | None = None) -> Dict[str, str]:
@@ -676,6 +966,7 @@ def provider_label(provider_id: str) -> str:
         DEEPSEEK_PROVIDER: "DeepSeek",
         MINIMAX_PROVIDER: "MiniMax",
         ZHIPU_PROVIDER: "智谱",
+        ZHIPU_CODING_PROVIDER: "智谱 Coding Plan",
         QWEN_PROVIDER: "阿里百炼",
     }.get(provider_id, provider_id)
 
@@ -712,6 +1003,8 @@ def provider_http_error(provider_id: str, status_code: int, detail: str) -> str:
             return "DeepSeek API Key 无效。请在右上角“API Key”里重新保存 DeepSeek API Key。原始信息：%s" % readable
         if provider_id == ZHIPU_PROVIDER:
             return "智谱 API Key 无效。请在右上角“API Key”里重新保存智谱 API Key。原始信息：%s" % readable
+        if provider_id == ZHIPU_CODING_PROVIDER:
+            return "智谱 Coding Plan Key 无效。请重新保存 Coding Plan Key，并确认接口地址为 https://open.bigmodel.cn/api/anthropic。原始信息：%s" % readable
         if provider_id == QWEN_PROVIDER:
             return "阿里百炼 Key 无效。请在右上角“模型配置”里重新保存阿里百炼 API Key 或 Token Plan API Key，并确认接口地址为 https://dashscope.aliyuncs.com/compatible-mode/v1。原始信息：%s" % readable
     return "%s HTTP %s：%s" % (label, status_code, readable)
@@ -737,8 +1030,6 @@ def _normalized_config(config: Dict[str, Any], validate: bool = True) -> Dict[st
     allowed_top_level = {
         "primary_provider",
         "primary_model",
-        "reviewer_provider",
-        "reviewer_model",
         "providers",
         "speech",
     }
@@ -775,13 +1066,13 @@ def _normalized_config(config: Dict[str, Any], validate: bool = True) -> Dict[st
         normalized["providers"][provider_id].update(provider_config)
         normalized["providers"][provider_id]["model"] = _normalize_model_id(normalized["providers"][provider_id]["model"])
 
-    for key in ("primary_provider", "reviewer_provider"):
+    for key in ("primary_provider",):
         if config.get(key):
             normalized[key] = config[key]
-    for key in ("primary_model", "reviewer_model"):
+    for key in ("primary_model",):
         if config.get(key):
             normalized[key] = _normalize_model_id(config[key])
-    for model_key, provider_key in (("primary_model", "primary_provider"), ("reviewer_model", "reviewer_provider")):
+    for model_key, provider_key in (("primary_model", "primary_provider"),):
         if not config.get(model_key):
             normalized[model_key] = _fallback_model_for_provider(normalized[provider_key])
     if "speech" in config and not isinstance(config["speech"], dict):
@@ -808,8 +1099,6 @@ def _recoverable_config(config: Dict[str, Any]) -> Dict[str, Any]:
     for key in (
         "primary_provider",
         "primary_model",
-        "reviewer_provider",
-        "reviewer_model",
     ):
         if key in config:
             accepted[key] = config[key]
@@ -844,10 +1133,10 @@ def _recoverable_config(config: Dict[str, Any]) -> Dict[str, Any]:
 
 def _merge_config(existing: Dict[str, Any], patch: Dict[str, Any], validate_existing: bool = True) -> Dict[str, Any]:
     merged = _normalized_config(existing, validate=validate_existing)
-    for key in ("primary_provider", "reviewer_provider"):
+    for key in ("primary_provider",):
         if patch.get(key):
             merged[key] = str(patch[key]).strip()
-    for key in ("primary_model", "reviewer_model"):
+    for key in ("primary_model",):
         if patch.get(key):
             merged[key] = str(patch[key]).strip()
     providers = patch.get("providers") if isinstance(patch.get("providers"), dict) else {}
@@ -875,13 +1164,12 @@ def _merge_config(existing: Dict[str, Any], patch: Dict[str, Any], validate_exis
 
 
 def _validate_config(config: Dict[str, Any]) -> None:
-    for key in ("primary_provider", "reviewer_provider"):
+    for key in ("primary_provider",):
         if config[key] not in SUPPORTED_PROVIDERS:
             raise ProviderError("未知模型供应商：%s。" % config[key])
     for provider_id in SUPPORTED_PROVIDERS:
         _validate_provider_model(provider_id, config["providers"][provider_id]["model"])
     _validate_mode_model(config, "primary_provider", "primary_model")
-    _validate_mode_model(config, "reviewer_provider", "reviewer_model")
     speech = speech_settings(config)
     if speech["provider"] != "qwen_asr":
         raise ProviderError("未知语音识别供应商：%s。" % speech["provider"])

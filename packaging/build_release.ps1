@@ -127,6 +127,10 @@ function Build-ExternalArcMapBridge {
     if (-not (Test-Path -LiteralPath $exe)) {
         throw "缺少 ArcMapBridge.exe：$exe"
     }
+    $identity = Join-Path (Split-Path -Parent $exe) "ArcMapBridge.build"
+    if (-not (Test-Path -LiteralPath $identity)) {
+        throw "缺少 ArcMapBridge.build：$identity"
+    }
     return $exe
 }
 
@@ -214,6 +218,7 @@ Copy-Item -LiteralPath $gatewayDist -Destination (Join-Path $stageRoot "app\gate
 Write-AppCommandFiles (Join-Path $stageRoot "app")
 Copy-Item -LiteralPath (Join-Path $repoRoot "packaging\uninstall.ico") -Destination (Join-Path $stageRoot "app\uninstall.ico") -Force
 Copy-Item -LiteralPath $externalBridgeExe -Destination (Join-Path $stageRoot "app\bridge\ArcMapBridge.exe") -Force
+Copy-Item -LiteralPath (Join-Path (Split-Path -Parent $externalBridgeExe) "ArcMapBridge.build") -Destination (Join-Path $stageRoot "app\bridge\ArcMapBridge.build") -Force
 Copy-Item -LiteralPath $addinPackage -Destination (Join-Path $stageRoot "ArcMapAIAssistantAddIn\ArcMapAIAssistantAddIn.esriaddin") -Force
 Copy-PowerShellFile (Join-Path $repoRoot "packaging\install.ps1") (Join-Path $stageRoot "packaging\install.ps1")
 Copy-PowerShellFile (Join-Path $repoRoot "packaging\uninstall.ps1") (Join-Path $stageRoot "packaging\uninstall.ps1")

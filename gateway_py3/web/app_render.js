@@ -1,7 +1,7 @@
     function renderConversation(runs) {
       const chat = document.getElementById('chatLog');
       chat.innerHTML = '';
-      if (currentMode === 'multi_agent') {
+      if (currentMode === 'g3_audited') {
         const items = visibleRuns(runs).slice().reverse();
         if (!items.length && !transientUserMessage) {
           renderEmptyChat();
@@ -264,7 +264,7 @@
         selectedRunId = '';
         return;
       }
-      if (transientUserMessage && currentMode !== 'multi_agent' && !selectedRunId) return;
+      if (transientUserMessage && currentMode !== 'g3_audited' && !selectedRunId) return;
       if (!visible.some(item => item.id === selectedRunId)) {
         selectedRunId = visible[0].id;
       }
@@ -275,7 +275,7 @@
     }
 
     function runMode(item) {
-      return item.mode || 'context_single';
+      return item.mode || 'g1_context';
     }
 
     function visibleRuns(runs) {

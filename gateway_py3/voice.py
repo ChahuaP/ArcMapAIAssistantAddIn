@@ -14,6 +14,7 @@ from gateway_py3.llm_providers import (
     ProviderError,
     QWEN_ASR_MODEL,
     QWEN_PROVIDER,
+    StructuredOutputContract,
     create_provider,
     provider_api_key,
     provider_http_error,
@@ -27,6 +28,23 @@ from gateway_py3.layer_profiles import layer_value_profile, matching_layers_exac
 MAX_AUDIO_DATA_URI_BYTES = 10 * 1024 * 1024
 MAX_VOICE_VALUE_PROFILE_LAYERS = 3
 AUDIO_DATA_URI_RE = re.compile(r"^data:audio/[a-z0-9.+-]+(?:;[^,]*)?;base64,([a-z0-9+/=\r\n]+)$", re.IGNORECASE)
+VOICE_VALUE_PROFILE_CONTRACT = StructuredOutputContract(
+    name="decide_voice_value_profile",
+    description="Decide whether ArcMap attribute value samples are required for voice correction.",
+    schema={
+        "type": "object",
+        "properties": {
+            "needs_value_profile": {"type": "boolean"},
+            "layers": {
+                "type": "array",
+                "maxItems": MAX_VOICE_VALUE_PROFILE_LAYERS,
+                "items": {"type": "string"},
+            },
+        },
+        "required": ["needs_value_profile", "layers"],
+        "additionalProperties": False,
+    },
+)
 
 
 def transcribe_voice(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -170,25 +188,27 @@ def attribute_value_profiles_for_voice(
     compact_context: Dict[str, Any],
     context: Dict[str, Any],
 ) -> List[Dict[str, Any]]:
-    decision = provider.chat_json([
-        {
-            "role": "system",
-            "content": (
-                "你是 GeoPilot 的语音字段值样本读取判定器。判断 ASR 文本是否可能包含需要按属性值校正的字段值。"
-                "只返回 JSON：{\"needs_value_profile\": true|false, \"layers\": [\"layer:0\"]}。"
-                "只有当文本里出现行政区名、分类值、编号、地名、设施名等可能需要和属性表取值匹配的内容时，"
-                "才设置 needs_value_profile=true。只是图层名、字段名、路径、数字、单位、缓冲距离、导出格式或几何操作时返回 false。"
-                "layers 只能填写 arcmap_context.layers 里已有的 layer_ref、name 或 longName，最多 3 个；不要编造图层。"
-            ),
-        },
-        {
-            "role": "user",
-            "content": json.dumps({
-                "asr_text": text,
-                "arcmap_context": compact_context,
-            }, ensure_ascii=False, sort_keys=True),
-        },
-    ])
+    decision = provider.chat_structured(
+        [
+            {
+                "role": "system",
+                "content": (
+                    "你是 GeoPilot 的语音字段值样本读取判定器。判断 ASR 文本是否可能包含需要按属性值校正的字段值。"
+                    "只有当文本里出现行政区名、分类值、编号、地名、设施名等可能需要和属性表取值匹配的内容时，"
+                    "才设置 needs_value_profile=true。只是图层名、字段名、路径、数字、单位、缓冲距离、导出格式或几何操作时返回 false。"
+                    "layers 只能填写 arcmap_context.layers 里已有的 layer_ref、name 或 longName，最多 3 个；不要编造图层。"
+                ),
+            },
+            {
+                "role": "user",
+                "content": json.dumps({
+                    "asr_text": text,
+                    "arcmap_context": compact_context,
+                }, ensure_ascii=False, sort_keys=True),
+            },
+        ],
+        VOICE_VALUE_PROFILE_CONTRACT,
+    )
     if not isinstance(decision, dict):
         raise ProviderError("语音字段值判定模型返回格式无效。")
     needs_profile = decision.get("needs_value_profile")

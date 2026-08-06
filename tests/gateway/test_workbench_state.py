@@ -15,7 +15,7 @@ class WorkbenchStateTests(unittest.TestCase):
     def test_workbench_state_returns_first_screen_payload_without_trace(self):
         with tempfile.TemporaryDirectory() as directory:
             store = RunStore(pathlib.Path(directory) / "runs.sqlite")
-            _planned(store, "刷新地图", "context_single")
+            _planned(store, "刷新地图", "g1_context")
             state = SimpleNamespace(catalog=OperationCatalog(), store=store)
 
             with patch("gateway_py3.routes.arcmap.bridges", return_value=[{"bridge_pid": 1, "bridge_port": 8766, "arcmap_pid": 10, "hwnd": 2}]):
@@ -30,13 +30,13 @@ class WorkbenchStateTests(unittest.TestCase):
     def test_run_list_filters_and_detail_lazy_load(self):
         with tempfile.TemporaryDirectory() as directory:
             store = RunStore(pathlib.Path(directory) / "runs.sqlite")
-            first = _planned(store, "上下文单模型", "context_single")
+            first = _planned(store, "上下文单模型", "g1_context")
             time.sleep(0.01)
-            second = _planned(store, "多智能体", "multi_agent")
+            second = _planned(store, "多智能体", "g3_audited")
             state = SimpleNamespace(catalog=OperationCatalog(), store=store)
 
             listed = handle_get(state, "/api/runs", "0.21.2", {
-                "mode": ["multi_agent"],
+                "mode": ["g3_audited"],
                 "limit": ["10"],
                 "include_trace": ["false"],
             })
@@ -66,14 +66,34 @@ class WorkbenchStateTests(unittest.TestCase):
         self.assertEqual(calls, [8771])
 
     def test_bridge_restart_refreshes_transport_for_same_arcmap_identity(self):
-        stored = {"bridge_pid": 1, "bridge_port": 8766, "arcmap_pid": 20, "hwnd": 2}
-        refreshed = arcmap.target_bridge_from_health({
-            "bridge_pid": 9, "bridge_port": 8770,
-            "summary": {"targets": [{"arcmap_pid": 20, "hwnd": 2}]},
-        }, stored, 2)
+        with tempfile.TemporaryDirectory() as directory:
+            store = RunStore(pathlib.Path(directory) / "runs.sqlite")
+            state = SimpleNamespace(store=store)
+            store.set_state("arcmap_active_bridge", {
+                "bridge_pid": 1, "bridge_port": 8766, "arcmap_pid": 20, "hwnd": 2,
+            })
+            live = [{"bridge_pid": 9, "bridge_port": 8770, "arcmap_pid": 20, "hwnd": 2}]
+
+            arcmap.mark_active_bridge(state, live)
+
+            refreshed = store.get_state("arcmap_active_bridge")["value"]
         self.assertEqual(refreshed["bridge_pid"], 9)
         self.assertEqual(refreshed["bridge_port"], 8770)
         self.assertEqual(refreshed["arcmap_pid"], 20)
+
+    def test_run_target_selection_uses_the_exact_stored_identity_without_a_health_race(self):
+        stored = {"bridge_pid": 1, "bridge_port": 8766, "arcmap_pid": 20, "hwnd": 2}
+        with tempfile.TemporaryDirectory() as directory:
+            store = RunStore(pathlib.Path(directory) / "runs.sqlite")
+            store.set_state("arcmap_active_bridge", stored)
+            state = SimpleNamespace(store=store)
+            with patch(
+                "gateway_py3.routes.arcmap.arcmap_bridge_client.health",
+                side_effect=AssertionError("run submission must not race bridge health"),
+            ):
+                selected = arcmap.active_bridge(state)
+
+        self.assertEqual(stored, selected)
 
     def test_arcmap_restart_reusing_hwnd_does_not_inherit_active_selection(self):
         with tempfile.TemporaryDirectory() as directory:

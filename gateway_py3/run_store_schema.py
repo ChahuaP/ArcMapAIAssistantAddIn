@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from typing import Any, Dict
 
+from .execution_contract import validate_execution_contract
+
 
 RUN_COLUMNS = {
     "id",
@@ -101,19 +103,24 @@ def validate_database_schema(conn) -> None:
 
 
 def run_row_to_dict(row, include_trace: bool = True) -> Dict[str, Any]:
+    workflow = json.loads(row[5])
+    agent_trace = json.loads(row[6])
     result = {
         "id": row[0],
         "status": row[1],
         "mode": row[2],
         "command": row[3],
         "context_hash": row[4],
-        "workflow": json.loads(row[5]),
+        "workflow": workflow,
         "created_at": row[7],
         "updated_at": row[8],
         "result": json.loads(row[9]) if row[9] else None
     }
+    execution_contract = agent_trace[0]["run"].get("execution_contract")
+    if execution_contract is not None:
+        result["execution_contract"] = validate_execution_contract(execution_contract, workflow)
     if include_trace:
-        result["agent_trace"] = json.loads(row[6])
+        result["agent_trace"] = agent_trace
     return result
 
 

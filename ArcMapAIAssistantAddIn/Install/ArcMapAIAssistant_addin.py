@@ -10,6 +10,7 @@ import sys
 RUNTIME_MODULE = "arcmap_ai_assistant_runtime"
 RUNTIME_FILE = "runtime.py"
 INSTALL_CONFIG = os.path.join("ArcMapAIAssistant", "install.json")
+_RUNTIME = None
 
 
 try:
@@ -63,8 +64,10 @@ def load_runtime_module():
 
 
 def load_runtime():
-    runtime = load_runtime_module()
-    return runtime
+    global _RUNTIME
+    if _RUNTIME is None:
+        _RUNTIME = load_runtime_module()
+    return _RUNTIME
 
 
 class OpenAssistantButton(object):

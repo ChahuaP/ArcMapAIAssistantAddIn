@@ -12,7 +12,6 @@
         "缓冲区",
         "距离"
       ],
-      "model_card": "Use analysis.buffer to create a buffer feature class. Arguments: input_layer, distance, output_name, output_workspace optional for GDB output, output_folder optional for shapefile output, output_format optional: gdb or shp.",
       "parameters_schema": {
         "type": "object",
         "required": [
@@ -73,7 +72,131 @@
             "output_name": "roads_buffer_100m"
           }
         }
-      ]
+      ],
+      "capability_contract": {
+        "inputs": [
+          {
+            "parameter": "input_layer",
+            "cardinality": "one",
+            "data_kind": [
+              "feature_layer"
+            ],
+            "geometry": [
+              "point",
+              "polyline",
+              "polygon"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          }
+        ],
+        "parameters_schema": {
+          "type": "object",
+          "required": [
+            "input_layer",
+            "distance",
+            "output_name"
+          ],
+          "properties": {
+            "input_layer": {
+              "type": "string"
+            },
+            "distance": {
+              "type": "string"
+            },
+            "output_name": {
+              "type": "string"
+            },
+            "output_workspace": {
+              "type": "string"
+            },
+            "output_folder": {
+              "type": "string"
+            },
+            "output_format": {
+              "type": "string",
+              "enum": [
+                "gdb",
+                "shp"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "kind": "feature_class",
+          "geometry": {
+            "rule": "fixed",
+            "value": "polygon"
+          },
+          "fields": {
+        "effect": "add_static_fields",
+        "target": "input_layer",
+        "static_fields": [
+          "BUFF_DIST"
+        ],
+            "parameter_field": "not_applicable"
+          },
+          "spatial_reference": {
+            "rule": "inherit",
+            "input": "input_layer"
+          },
+          "cardinality": {
+            "rule": "fixed",
+            "value": "one_per_input_feature"
+          },
+          "selection_state": "not_applicable",
+          "map_publication": "published"
+        },
+        "side_effects": "writes_data",
+        "authorization": {
+          "required": true,
+          "scope": "write_data"
+        },
+        "postconditions": [
+          {
+            "kind": "feature_class_created",
+            "target": "output_name",
+            "expectation": {
+              "kind": {
+                "ref": "outputs.kind"
+              },
+              "geometry": {
+                "ref": "outputs.geometry"
+              },
+              "fields": {
+                "ref": "outputs.fields"
+              },
+              "spatial_reference": {
+                "ref": "outputs.spatial_reference"
+              },
+              "cardinality": {
+                "ref": "outputs.cardinality"
+              },
+              "selection_state": {
+                "ref": "outputs.selection_state"
+              },
+              "map_publication": {
+                "ref": "outputs.map_publication"
+              }
+            }
+          }
+        ],
+        "semantic_effects": [
+          {
+            "kind": "buffer",
+            "source": {
+              "parameter": "input_layer"
+            },
+            "distance": {
+              "parameter": "distance"
+            },
+            "result": {
+              "output": true
+            }
+          }
+        ]
+      }
     },
     {
       "id": "analysis.clip",
@@ -84,7 +207,6 @@
         "clip",
         "裁剪"
       ],
-      "model_card": "Use analysis.clip to clip input features by clip features. Arguments: input_layer, clip_layer, output_name, output_workspace optional for GDB output, output_folder optional for shapefile output, output_format optional: gdb or shp.",
       "parameters_schema": {
         "type": "object",
         "required": [
@@ -145,7 +267,148 @@
             "output_name": "roads_clip"
           }
         }
-      ]
+      ],
+      "capability_contract": {
+        "inputs": [
+          {
+            "parameter": "input_layer",
+            "cardinality": "one",
+            "data_kind": [
+              "feature_layer"
+            ],
+            "geometry": [
+              "point",
+              "polyline",
+              "polygon"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          },
+          {
+            "parameter": "clip_layer",
+            "cardinality": "one",
+            "data_kind": [
+              "feature_layer"
+            ],
+            "geometry": [
+              "point",
+              "polyline",
+              "polygon"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          }
+        ],
+        "parameters_schema": {
+          "type": "object",
+          "required": [
+            "input_layer",
+            "clip_layer",
+            "output_name"
+          ],
+          "properties": {
+            "input_layer": {
+              "type": "string"
+            },
+            "clip_layer": {
+              "type": "string"
+            },
+            "output_name": {
+              "type": "string"
+            },
+            "output_workspace": {
+              "type": "string"
+            },
+            "output_folder": {
+              "type": "string"
+            },
+            "output_format": {
+              "type": "string",
+              "enum": [
+                "gdb",
+                "shp"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "kind": "feature_class",
+          "geometry": {
+            "rule": "inherit",
+            "value": "input_layer"
+          },
+          "fields": {
+            "effect": "inherit_input",
+            "target": "input_layer",
+            "static_fields": [],
+            "parameter_field": "not_applicable"
+          },
+          "spatial_reference": {
+            "rule": "inherit",
+            "input": "input_layer"
+          },
+          "cardinality": {
+            "rule": "fixed",
+            "value": "one_or_more_per_input_feature"
+          },
+          "selection_state": "not_applicable",
+          "map_publication": "published"
+        },
+        "side_effects": "writes_data",
+        "authorization": {
+          "required": true,
+          "scope": "write_data"
+        },
+        "postconditions": [
+          {
+            "kind": "feature_class_created",
+            "target": "output_name",
+            "expectation": {
+              "kind": {
+                "ref": "outputs.kind"
+              },
+              "geometry": {
+                "ref": "outputs.geometry"
+              },
+              "fields": {
+                "ref": "outputs.fields"
+              },
+              "spatial_reference": {
+                "ref": "outputs.spatial_reference"
+              },
+              "cardinality": {
+                "ref": "outputs.cardinality"
+              },
+              "selection_state": {
+                "ref": "outputs.selection_state"
+              },
+              "map_publication": {
+                "ref": "outputs.map_publication"
+              }
+            }
+          }
+        ],
+        "semantic_effects": [
+          {
+            "kind": "overlay",
+            "sources": [
+              {
+                "parameter": "input_layer"
+              },
+              {
+                "parameter": "clip_layer"
+              }
+            ],
+            "method": {
+              "const": "clip"
+            },
+            "result": {
+              "output": true
+            }
+          }
+        ]
+      }
     },
     {
       "id": "analysis.intersect",
@@ -157,7 +420,6 @@
         "相交分析",
         "叠加"
       ],
-      "model_card": "Use analysis.intersect to intersect multiple input layers. Arguments: input_layers, output_name, output_workspace optional for GDB output, output_folder optional for shapefile output, output_format optional: gdb or shp.",
       "parameters_schema": {
         "type": "object",
         "required": [
@@ -220,7 +482,133 @@
             "output_name": "roads_boundary_intersect"
           }
         }
-      ]
+      ],
+      "capability_contract": {
+        "inputs": [
+          {
+            "parameter": "input_layers",
+            "cardinality": "many",
+            "data_kind": [
+              "feature_layer"
+            ],
+            "geometry": [
+              "point",
+              "polyline",
+              "polygon"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          }
+        ],
+        "parameters_schema": {
+          "type": "object",
+          "required": [
+            "input_layers",
+            "output_name"
+          ],
+          "properties": {
+            "input_layers": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 2
+            },
+            "output_name": {
+              "type": "string"
+            },
+            "output_workspace": {
+              "type": "string"
+            },
+            "output_folder": {
+              "type": "string"
+            },
+            "output_format": {
+              "type": "string",
+              "enum": [
+                "gdb",
+                "shp"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "kind": "feature_class",
+          "geometry": {
+            "rule": "lowest_dimension",
+            "value": "input_layers"
+          },
+          "fields": {
+            "effect": "merge_inputs",
+            "sources": [
+              "input_layers"
+            ],
+            "static_fields": [],
+            "parameter_field": "not_applicable"
+          },
+          "spatial_reference": {
+            "rule": "inherit",
+            "input": "input_layers"
+          },
+          "cardinality": {
+            "rule": "fixed",
+            "value": "one_or_more_per_input_feature"
+          },
+          "selection_state": "not_applicable",
+          "map_publication": "published"
+        },
+        "side_effects": "writes_data",
+        "authorization": {
+          "required": true,
+          "scope": "write_data"
+        },
+        "postconditions": [
+          {
+            "kind": "feature_class_created",
+            "target": "output_name",
+            "expectation": {
+              "kind": {
+                "ref": "outputs.kind"
+              },
+              "geometry": {
+                "ref": "outputs.geometry"
+              },
+              "fields": {
+                "ref": "outputs.fields"
+              },
+              "spatial_reference": {
+                "ref": "outputs.spatial_reference"
+              },
+              "cardinality": {
+                "ref": "outputs.cardinality"
+              },
+              "selection_state": {
+                "ref": "outputs.selection_state"
+              },
+              "map_publication": {
+                "ref": "outputs.map_publication"
+              }
+            }
+          }
+        ],
+        "semantic_effects": [
+          {
+            "kind": "overlay",
+            "sources": [
+              {
+                "parameter": "input_layers"
+              }
+            ],
+            "method": {
+              "const": "intersect"
+            },
+            "result": {
+              "output": true
+            }
+          }
+        ]
+      }
     },
     {
       "id": "analysis.dissolve",
@@ -232,7 +620,6 @@
         "融合",
         "按字段合并"
       ],
-      "model_card": "Use analysis.dissolve to dissolve features. Arguments: input_layer, output_name, dissolve_fields optional, output_workspace optional for GDB output, output_folder optional for shapefile output, output_format optional: gdb or shp.",
       "parameters_schema": {
         "type": "object",
         "required": [
@@ -248,6 +635,7 @@
           },
           "dissolve_fields": {
             "type": "array",
+            "default": [],
             "items": {
               "type": "string"
             }
@@ -297,7 +685,137 @@
             ]
           }
         }
-      ]
+      ],
+      "capability_contract": {
+        "inputs": [
+          {
+            "parameter": "input_layer",
+            "cardinality": "one",
+            "data_kind": [
+              "feature_layer"
+            ],
+            "geometry": [
+              "point",
+              "polyline",
+              "polygon"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          }
+        ],
+        "parameters_schema": {
+          "type": "object",
+          "required": [
+            "input_layer",
+            "output_name"
+          ],
+          "properties": {
+            "input_layer": {
+              "type": "string"
+            },
+            "output_name": {
+              "type": "string"
+            },
+            "dissolve_fields": {
+              "type": "array",
+              "default": [],
+              "items": {
+                "type": "string"
+              }
+            },
+            "output_workspace": {
+              "type": "string"
+            },
+            "output_folder": {
+              "type": "string"
+            },
+            "output_format": {
+              "type": "string",
+              "enum": [
+                "gdb",
+                "shp"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "kind": "feature_class",
+          "geometry": {
+            "rule": "inherit",
+            "value": "input_layer"
+          },
+          "fields": {
+            "effect": "aggregate_by_parameter_fields",
+            "target": "input_layer",
+            "static_fields": [],
+            "parameter_field": "not_applicable"
+          },
+          "spatial_reference": {
+            "rule": "inherit",
+            "input": "input_layer"
+          },
+          "cardinality": {
+            "rule": "parameter_array_empty",
+            "parameter": "dissolve_fields",
+            "when_empty": "reduced",
+            "otherwise": "one_per_aggregate_group"
+          },
+          "selection_state": "not_applicable",
+          "map_publication": "published"
+        },
+        "side_effects": "writes_data",
+        "authorization": {
+          "required": true,
+          "scope": "write_data"
+        },
+        "postconditions": [
+          {
+            "kind": "feature_class_created",
+            "target": "output_name",
+            "expectation": {
+              "kind": {
+                "ref": "outputs.kind"
+              },
+              "geometry": {
+                "ref": "outputs.geometry"
+              },
+              "fields": {
+                "ref": "outputs.fields"
+              },
+              "spatial_reference": {
+                "ref": "outputs.spatial_reference"
+              },
+              "cardinality": {
+                "ref": "outputs.cardinality"
+              },
+              "selection_state": {
+                "ref": "outputs.selection_state"
+              },
+              "map_publication": {
+                "ref": "outputs.map_publication"
+              }
+            }
+          }
+        ],
+        "semantic_effects": [
+          {
+            "kind": "aggregate",
+            "preserves": [
+              "merge"
+            ],
+            "source": {
+              "parameter": "input_layer"
+            },
+            "dissolve_fields": {
+              "parameter": "dissolve_fields"
+            },
+            "result": {
+              "output": true
+            }
+          }
+        ]
+      }
     },
     {
       "id": "analysis.project",
@@ -309,7 +827,6 @@
         "投影",
         "坐标转换"
       ],
-      "model_card": "Use analysis.project to project a layer. Arguments: input_layer, output_name, spatial_reference, output_workspace optional for GDB output, output_folder optional for shapefile output, output_format optional: gdb or shp.",
       "parameters_schema": {
         "type": "object",
         "required": [
@@ -370,7 +887,129 @@
             "spatial_reference": "WGS 1984"
           }
         }
-      ]
+      ],
+      "capability_contract": {
+        "inputs": [
+          {
+            "parameter": "input_layer",
+            "cardinality": "one",
+            "data_kind": [
+              "feature_layer"
+            ],
+            "geometry": [
+              "point",
+              "polyline",
+              "polygon"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          }
+        ],
+        "parameters_schema": {
+          "type": "object",
+          "required": [
+            "input_layer",
+            "output_name",
+            "spatial_reference"
+          ],
+          "properties": {
+            "input_layer": {
+              "type": "string"
+            },
+            "output_name": {
+              "type": "string"
+            },
+            "spatial_reference": {
+              "type": "string"
+            },
+            "output_workspace": {
+              "type": "string"
+            },
+            "output_folder": {
+              "type": "string"
+            },
+            "output_format": {
+              "type": "string",
+              "enum": [
+                "gdb",
+                "shp"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "kind": "feature_class",
+          "geometry": {
+            "rule": "inherit",
+            "value": "input_layer"
+          },
+          "fields": {
+            "effect": "inherit_input",
+            "target": "input_layer",
+            "static_fields": [],
+            "parameter_field": "not_applicable"
+          },
+          "spatial_reference": {
+            "rule": "from_parameter",
+            "input": "spatial_reference"
+          },
+          "cardinality": {
+            "rule": "fixed",
+            "value": "one_per_input_feature"
+          },
+          "selection_state": "not_applicable",
+          "map_publication": "published"
+        },
+        "side_effects": "writes_data",
+        "authorization": {
+          "required": true,
+          "scope": "write_data"
+        },
+        "postconditions": [
+          {
+            "kind": "feature_class_created",
+            "target": "output_name",
+            "expectation": {
+              "kind": {
+                "ref": "outputs.kind"
+              },
+              "geometry": {
+                "ref": "outputs.geometry"
+              },
+              "fields": {
+                "ref": "outputs.fields"
+              },
+              "spatial_reference": {
+                "ref": "outputs.spatial_reference"
+              },
+              "cardinality": {
+                "ref": "outputs.cardinality"
+              },
+              "selection_state": {
+                "ref": "outputs.selection_state"
+              },
+              "map_publication": {
+                "ref": "outputs.map_publication"
+              }
+            }
+          }
+        ],
+        "semantic_effects": [
+          {
+            "kind": "project",
+            "source": {
+              "parameter": "input_layer"
+            },
+            "spatial_reference": {
+              "parameter": "spatial_reference"
+            },
+            "result": {
+              "output": true
+            }
+          }
+        ]
+      }
     },
     {
       "id": "analysis.spatial_join",
@@ -381,7 +1020,6 @@
         "spatial join",
         "空间连接"
       ],
-      "model_card": "Use analysis.spatial_join for ArcPy SpatialJoin_analysis. Arguments: target_layer, join_layer, output_name, output_workspace optional for GDB output, output_folder optional for shapefile output, output_format optional: gdb or shp.",
       "parameters_schema": {
         "type": "object",
         "required": [
@@ -442,7 +1080,146 @@
             "output_name": "parcels_schools_join"
           }
         }
-      ]
+      ],
+      "capability_contract": {
+        "inputs": [
+          {
+            "parameter": "target_layer",
+            "cardinality": "one",
+            "data_kind": [
+              "feature_layer"
+            ],
+            "geometry": [
+              "point",
+              "polyline",
+              "polygon"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          },
+          {
+            "parameter": "join_layer",
+            "cardinality": "one",
+            "data_kind": [
+              "feature_layer"
+            ],
+            "geometry": [
+              "point",
+              "polyline",
+              "polygon"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          }
+        ],
+        "parameters_schema": {
+          "type": "object",
+          "required": [
+            "target_layer",
+            "join_layer",
+            "output_name"
+          ],
+          "properties": {
+            "target_layer": {
+              "type": "string"
+            },
+            "join_layer": {
+              "type": "string"
+            },
+            "output_name": {
+              "type": "string"
+            },
+            "output_workspace": {
+              "type": "string"
+            },
+            "output_folder": {
+              "type": "string"
+            },
+            "output_format": {
+              "type": "string",
+              "enum": [
+                "gdb",
+                "shp"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "kind": "feature_class",
+          "geometry": {
+            "rule": "inherit",
+            "value": "target_layer"
+          },
+          "fields": {
+            "effect": "inherit_target_merge_join",
+            "target": "target_layer",
+            "static_fields": [
+              "Join_Count",
+              "TARGET_FID"
+            ],
+            "parameter_field": "not_applicable"
+          },
+          "spatial_reference": {
+            "rule": "inherit",
+            "input": "target_layer"
+          },
+          "cardinality": {
+            "rule": "fixed",
+            "value": "one_per_target_feature"
+          },
+          "selection_state": "not_applicable",
+          "map_publication": "published"
+        },
+        "side_effects": "writes_data",
+        "authorization": {
+          "required": true,
+          "scope": "write_data"
+        },
+        "postconditions": [
+          {
+            "kind": "feature_class_created",
+            "target": "output_name",
+            "expectation": {
+              "kind": {
+                "ref": "outputs.kind"
+              },
+              "geometry": {
+                "ref": "outputs.geometry"
+              },
+              "fields": {
+                "ref": "outputs.fields"
+              },
+              "spatial_reference": {
+                "ref": "outputs.spatial_reference"
+              },
+              "cardinality": {
+                "ref": "outputs.cardinality"
+              },
+              "selection_state": {
+                "ref": "outputs.selection_state"
+              },
+              "map_publication": {
+                "ref": "outputs.map_publication"
+              }
+            }
+          }
+        ],
+        "semantic_effects": [
+          {
+            "kind": "spatial_join",
+            "target": {
+              "parameter": "target_layer"
+            },
+            "join": {
+              "parameter": "join_layer"
+            },
+            "result": {
+              "output": true
+            }
+          }
+        ]
+      }
     },
     {
       "id": "analysis.erase",
@@ -454,7 +1231,6 @@
         "擦除",
         "去除重叠"
       ],
-      "model_card": "Use analysis.erase to erase overlapped areas from an input layer. Arguments: input_layer, erase_layer, output_name, output_workspace optional for GDB output, output_folder optional for shapefile output, output_format optional: gdb or shp.",
       "parameters_schema": {
         "type": "object",
         "required": [
@@ -515,7 +1291,148 @@
             "output_name": "roads_erase"
           }
         }
-      ]
+      ],
+      "capability_contract": {
+        "inputs": [
+          {
+            "parameter": "input_layer",
+            "cardinality": "one",
+            "data_kind": [
+              "feature_layer"
+            ],
+            "geometry": [
+              "point",
+              "polyline",
+              "polygon"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          },
+          {
+            "parameter": "erase_layer",
+            "cardinality": "one",
+            "data_kind": [
+              "feature_layer"
+            ],
+            "geometry": [
+              "point",
+              "polyline",
+              "polygon"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          }
+        ],
+        "parameters_schema": {
+          "type": "object",
+          "required": [
+            "input_layer",
+            "erase_layer",
+            "output_name"
+          ],
+          "properties": {
+            "input_layer": {
+              "type": "string"
+            },
+            "erase_layer": {
+              "type": "string"
+            },
+            "output_name": {
+              "type": "string"
+            },
+            "output_workspace": {
+              "type": "string"
+            },
+            "output_folder": {
+              "type": "string"
+            },
+            "output_format": {
+              "type": "string",
+              "enum": [
+                "gdb",
+                "shp"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "kind": "feature_class",
+          "geometry": {
+            "rule": "inherit",
+            "value": "input_layer"
+          },
+          "fields": {
+            "effect": "inherit_input",
+            "target": "input_layer",
+            "static_fields": [],
+            "parameter_field": "not_applicable"
+          },
+          "spatial_reference": {
+            "rule": "inherit",
+            "input": "input_layer"
+          },
+          "cardinality": {
+            "rule": "fixed",
+            "value": "one_or_more_per_input_feature"
+          },
+          "selection_state": "not_applicable",
+          "map_publication": "published"
+        },
+        "side_effects": "writes_data",
+        "authorization": {
+          "required": true,
+          "scope": "write_data"
+        },
+        "postconditions": [
+          {
+            "kind": "feature_class_created",
+            "target": "output_name",
+            "expectation": {
+              "kind": {
+                "ref": "outputs.kind"
+              },
+              "geometry": {
+                "ref": "outputs.geometry"
+              },
+              "fields": {
+                "ref": "outputs.fields"
+              },
+              "spatial_reference": {
+                "ref": "outputs.spatial_reference"
+              },
+              "cardinality": {
+                "ref": "outputs.cardinality"
+              },
+              "selection_state": {
+                "ref": "outputs.selection_state"
+              },
+              "map_publication": {
+                "ref": "outputs.map_publication"
+              }
+            }
+          }
+        ],
+        "semantic_effects": [
+          {
+            "kind": "overlay",
+            "sources": [
+              {
+                "parameter": "input_layer"
+              },
+              {
+                "parameter": "erase_layer"
+              }
+            ],
+            "method": {
+              "const": "erase"
+            },
+            "result": {
+              "output": true
+            }
+          }
+        ]
+      }
     },
     {
       "id": "analysis.identity",
@@ -527,7 +1444,6 @@
         "标识",
         "叠加属性"
       ],
-      "model_card": "Use analysis.identity for identity overlay. Arguments: input_layer, identity_layer, output_name, output_workspace optional for GDB output, output_folder optional for shapefile output, output_format optional: gdb or shp.",
       "parameters_schema": {
         "type": "object",
         "required": [
@@ -588,7 +1504,151 @@
             "output_name": "parcels_identity"
           }
         }
-      ]
+      ],
+      "capability_contract": {
+        "inputs": [
+          {
+            "parameter": "input_layer",
+            "cardinality": "one",
+            "data_kind": [
+              "feature_layer"
+            ],
+            "geometry": [
+              "point",
+              "polyline",
+              "polygon"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          },
+          {
+            "parameter": "identity_layer",
+            "cardinality": "one",
+            "data_kind": [
+              "feature_layer"
+            ],
+            "geometry": [
+              "point",
+              "polyline",
+              "polygon"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          }
+        ],
+        "parameters_schema": {
+          "type": "object",
+          "required": [
+            "input_layer",
+            "identity_layer",
+            "output_name"
+          ],
+          "properties": {
+            "input_layer": {
+              "type": "string"
+            },
+            "identity_layer": {
+              "type": "string"
+            },
+            "output_name": {
+              "type": "string"
+            },
+            "output_workspace": {
+              "type": "string"
+            },
+            "output_folder": {
+              "type": "string"
+            },
+            "output_format": {
+              "type": "string",
+              "enum": [
+                "gdb",
+                "shp"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "kind": "feature_class",
+          "geometry": {
+            "rule": "inherit",
+            "value": "input_layer"
+          },
+          "fields": {
+            "effect": "merge_inputs",
+            "sources": [
+              "input_layer",
+              "identity_layer"
+            ],
+            "static_fields": [],
+            "parameter_field": "not_applicable"
+          },
+          "spatial_reference": {
+            "rule": "inherit",
+            "input": "input_layer"
+          },
+          "cardinality": {
+            "rule": "fixed",
+            "value": "one_or_more_per_input_feature"
+          },
+          "selection_state": "not_applicable",
+          "map_publication": "published"
+        },
+        "side_effects": "writes_data",
+        "authorization": {
+          "required": true,
+          "scope": "write_data"
+        },
+        "postconditions": [
+          {
+            "kind": "feature_class_created",
+            "target": "output_name",
+            "expectation": {
+              "kind": {
+                "ref": "outputs.kind"
+              },
+              "geometry": {
+                "ref": "outputs.geometry"
+              },
+              "fields": {
+                "ref": "outputs.fields"
+              },
+              "spatial_reference": {
+                "ref": "outputs.spatial_reference"
+              },
+              "cardinality": {
+                "ref": "outputs.cardinality"
+              },
+              "selection_state": {
+                "ref": "outputs.selection_state"
+              },
+              "map_publication": {
+                "ref": "outputs.map_publication"
+              }
+            }
+          }
+        ],
+        "semantic_effects": [
+          {
+            "kind": "overlay",
+            "sources": [
+              {
+                "parameter": "input_layer"
+              },
+              {
+                "parameter": "identity_layer"
+              }
+            ],
+            "method": {
+              "const": "identity"
+            },
+            "result": {
+              "output": true
+            }
+          }
+        ]
+      }
     },
     {
       "id": "analysis.union",
@@ -600,7 +1660,6 @@
         "联合",
         "叠加联合"
       ],
-      "model_card": "Use analysis.union to union multiple polygon layers. Arguments: input_layers, output_name, output_workspace optional for GDB output, output_folder optional for shapefile output, output_format optional: gdb or shp.",
       "parameters_schema": {
         "type": "object",
         "required": [
@@ -663,7 +1722,133 @@
             "output_name": "nanjing_zoning_union"
           }
         }
-      ]
+      ],
+      "capability_contract": {
+        "inputs": [
+          {
+            "parameter": "input_layers",
+            "cardinality": "many",
+            "data_kind": [
+              "feature_layer"
+            ],
+            "geometry": [
+              "point",
+              "polyline",
+              "polygon"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          }
+        ],
+        "parameters_schema": {
+          "type": "object",
+          "required": [
+            "input_layers",
+            "output_name"
+          ],
+          "properties": {
+            "input_layers": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 2
+            },
+            "output_name": {
+              "type": "string"
+            },
+            "output_workspace": {
+              "type": "string"
+            },
+            "output_folder": {
+              "type": "string"
+            },
+            "output_format": {
+              "type": "string",
+              "enum": [
+                "gdb",
+                "shp"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "kind": "feature_class",
+          "geometry": {
+            "rule": "inherit",
+            "value": "input_layers"
+          },
+          "fields": {
+            "effect": "merge_inputs",
+            "sources": [
+              "input_layers"
+            ],
+            "static_fields": [],
+            "parameter_field": "not_applicable"
+          },
+          "spatial_reference": {
+            "rule": "inherit",
+            "input": "input_layers"
+          },
+          "cardinality": {
+            "rule": "fixed",
+            "value": "one_or_more_per_input_feature"
+          },
+          "selection_state": "not_applicable",
+          "map_publication": "published"
+        },
+        "side_effects": "writes_data",
+        "authorization": {
+          "required": true,
+          "scope": "write_data"
+        },
+        "postconditions": [
+          {
+            "kind": "feature_class_created",
+            "target": "output_name",
+            "expectation": {
+              "kind": {
+                "ref": "outputs.kind"
+              },
+              "geometry": {
+                "ref": "outputs.geometry"
+              },
+              "fields": {
+                "ref": "outputs.fields"
+              },
+              "spatial_reference": {
+                "ref": "outputs.spatial_reference"
+              },
+              "cardinality": {
+                "ref": "outputs.cardinality"
+              },
+              "selection_state": {
+                "ref": "outputs.selection_state"
+              },
+              "map_publication": {
+                "ref": "outputs.map_publication"
+              }
+            }
+          }
+        ],
+        "semantic_effects": [
+          {
+            "kind": "overlay",
+            "sources": [
+              {
+                "parameter": "input_layers"
+              }
+            ],
+            "method": {
+              "const": "union"
+            },
+            "result": {
+              "output": true
+            }
+          }
+        ]
+      }
     },
     {
       "id": "analysis.symmetrical_difference",
@@ -676,7 +1861,6 @@
         "对称差异",
         "差异"
       ],
-      "model_card": "Use analysis.symmetrical_difference to keep non-overlapping areas of two layers. Arguments: input_layer, update_layer, output_name, output_workspace optional for GDB output, output_folder optional for shapefile output, output_format optional: gdb or shp.",
       "parameters_schema": {
         "type": "object",
         "required": [
@@ -737,7 +1921,148 @@
             "output_name": "roads_boundary_symdiff"
           }
         }
-      ]
+      ],
+      "capability_contract": {
+        "inputs": [
+          {
+            "parameter": "input_layer",
+            "cardinality": "one",
+            "data_kind": [
+              "feature_layer"
+            ],
+            "geometry": [
+              "point",
+              "polyline",
+              "polygon"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          },
+          {
+            "parameter": "update_layer",
+            "cardinality": "one",
+            "data_kind": [
+              "feature_layer"
+            ],
+            "geometry": [
+              "point",
+              "polyline",
+              "polygon"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          }
+        ],
+        "parameters_schema": {
+          "type": "object",
+          "required": [
+            "input_layer",
+            "update_layer",
+            "output_name"
+          ],
+          "properties": {
+            "input_layer": {
+              "type": "string"
+            },
+            "update_layer": {
+              "type": "string"
+            },
+            "output_name": {
+              "type": "string"
+            },
+            "output_workspace": {
+              "type": "string"
+            },
+            "output_folder": {
+              "type": "string"
+            },
+            "output_format": {
+              "type": "string",
+              "enum": [
+                "gdb",
+                "shp"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "kind": "feature_class",
+          "geometry": {
+            "rule": "inherit",
+            "value": "input_layer"
+          },
+          "fields": {
+            "effect": "inherit_input",
+            "target": "input_layer",
+            "static_fields": [],
+            "parameter_field": "not_applicable"
+          },
+          "spatial_reference": {
+            "rule": "inherit",
+            "input": "input_layer"
+          },
+          "cardinality": {
+            "rule": "fixed",
+            "value": "one_or_more_per_input_feature"
+          },
+          "selection_state": "not_applicable",
+          "map_publication": "published"
+        },
+        "side_effects": "writes_data",
+        "authorization": {
+          "required": true,
+          "scope": "write_data"
+        },
+        "postconditions": [
+          {
+            "kind": "feature_class_created",
+            "target": "output_name",
+            "expectation": {
+              "kind": {
+                "ref": "outputs.kind"
+              },
+              "geometry": {
+                "ref": "outputs.geometry"
+              },
+              "fields": {
+                "ref": "outputs.fields"
+              },
+              "spatial_reference": {
+                "ref": "outputs.spatial_reference"
+              },
+              "cardinality": {
+                "ref": "outputs.cardinality"
+              },
+              "selection_state": {
+                "ref": "outputs.selection_state"
+              },
+              "map_publication": {
+                "ref": "outputs.map_publication"
+              }
+            }
+          }
+        ],
+        "semantic_effects": [
+          {
+            "kind": "overlay",
+            "sources": [
+              {
+                "parameter": "input_layer"
+              },
+              {
+                "parameter": "update_layer"
+              }
+            ],
+            "method": {
+              "const": "symmetrical_difference"
+            },
+            "result": {
+              "output": true
+            }
+          }
+        ]
+      }
     },
     {
       "id": "analysis.update_overlay",
@@ -749,7 +2074,6 @@
         "更新叠加",
         "叠加更新"
       ],
-      "model_card": "Use analysis.update_overlay for ArcPy Update_analysis overlay. Arguments: input_layer, update_layer, output_name, output_workspace optional for GDB output, output_folder optional for shapefile output, output_format optional: gdb or shp.",
       "parameters_schema": {
         "type": "object",
         "required": [
@@ -810,7 +2134,151 @@
             "output_name": "boundary_update"
           }
         }
-      ]
+      ],
+      "capability_contract": {
+        "inputs": [
+          {
+            "parameter": "input_layer",
+            "cardinality": "one",
+            "data_kind": [
+              "feature_layer"
+            ],
+            "geometry": [
+              "point",
+              "polyline",
+              "polygon"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          },
+          {
+            "parameter": "update_layer",
+            "cardinality": "one",
+            "data_kind": [
+              "feature_layer"
+            ],
+            "geometry": [
+              "point",
+              "polyline",
+              "polygon"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          }
+        ],
+        "parameters_schema": {
+          "type": "object",
+          "required": [
+            "input_layer",
+            "update_layer",
+            "output_name"
+          ],
+          "properties": {
+            "input_layer": {
+              "type": "string"
+            },
+            "update_layer": {
+              "type": "string"
+            },
+            "output_name": {
+              "type": "string"
+            },
+            "output_workspace": {
+              "type": "string"
+            },
+            "output_folder": {
+              "type": "string"
+            },
+            "output_format": {
+              "type": "string",
+              "enum": [
+                "gdb",
+                "shp"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "kind": "feature_class",
+          "geometry": {
+            "rule": "inherit",
+            "value": "input_layer"
+          },
+          "fields": {
+            "effect": "merge_inputs",
+            "sources": [
+              "input_layer",
+              "update_layer"
+            ],
+            "static_fields": [],
+            "parameter_field": "not_applicable"
+          },
+          "spatial_reference": {
+            "rule": "inherit",
+            "input": "input_layer"
+          },
+          "cardinality": {
+            "rule": "fixed",
+            "value": "one_or_more_per_input_feature"
+          },
+          "selection_state": "not_applicable",
+          "map_publication": "published"
+        },
+        "side_effects": "writes_data",
+        "authorization": {
+          "required": true,
+          "scope": "write_data"
+        },
+        "postconditions": [
+          {
+            "kind": "feature_class_created",
+            "target": "output_name",
+            "expectation": {
+              "kind": {
+                "ref": "outputs.kind"
+              },
+              "geometry": {
+                "ref": "outputs.geometry"
+              },
+              "fields": {
+                "ref": "outputs.fields"
+              },
+              "spatial_reference": {
+                "ref": "outputs.spatial_reference"
+              },
+              "cardinality": {
+                "ref": "outputs.cardinality"
+              },
+              "selection_state": {
+                "ref": "outputs.selection_state"
+              },
+              "map_publication": {
+                "ref": "outputs.map_publication"
+              }
+            }
+          }
+        ],
+        "semantic_effects": [
+          {
+            "kind": "overlay",
+            "sources": [
+              {
+                "parameter": "input_layer"
+              },
+              {
+                "parameter": "update_layer"
+              }
+            ],
+            "method": {
+              "const": "update"
+            },
+            "result": {
+              "output": true
+            }
+          }
+        ]
+      }
     },
     {
       "id": "analysis.merge",
@@ -822,7 +2290,6 @@
         "合并",
         "合并图层"
       ],
-      "model_card": "Use analysis.merge to merge multiple input layers into a new feature class. Arguments: input_layers, output_name, output_workspace optional for GDB output, output_folder optional for shapefile output, output_format optional: gdb or shp.",
       "parameters_schema": {
         "type": "object",
         "required": [
@@ -885,7 +2352,128 @@
             "output_name": "roads_merge"
           }
         }
-      ]
+      ],
+      "capability_contract": {
+        "inputs": [
+          {
+            "parameter": "input_layers",
+            "cardinality": "many",
+            "data_kind": [
+              "feature_layer"
+            ],
+            "geometry": [
+              "point",
+              "polyline",
+              "polygon"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          }
+        ],
+        "parameters_schema": {
+          "type": "object",
+          "required": [
+            "input_layers",
+            "output_name"
+          ],
+          "properties": {
+            "input_layers": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 2
+            },
+            "output_name": {
+              "type": "string"
+            },
+            "output_workspace": {
+              "type": "string"
+            },
+            "output_folder": {
+              "type": "string"
+            },
+            "output_format": {
+              "type": "string",
+              "enum": [
+                "gdb",
+                "shp"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "kind": "feature_class",
+          "geometry": {
+            "rule": "inherit",
+            "value": "input_layers"
+          },
+          "fields": {
+            "effect": "merge_inputs",
+            "sources": [
+              "input_layers"
+            ],
+            "static_fields": [],
+            "parameter_field": "not_applicable"
+          },
+          "spatial_reference": {
+            "rule": "inherit",
+            "input": "input_layers"
+          },
+          "cardinality": {
+            "rule": "fixed",
+            "value": "one_or_more_per_input_feature"
+          },
+          "selection_state": "not_applicable",
+          "map_publication": "published"
+        },
+        "side_effects": "writes_data",
+        "authorization": {
+          "required": true,
+          "scope": "write_data"
+        },
+        "postconditions": [
+          {
+            "kind": "feature_class_created",
+            "target": "output_name",
+            "expectation": {
+              "kind": {
+                "ref": "outputs.kind"
+              },
+              "geometry": {
+                "ref": "outputs.geometry"
+              },
+              "fields": {
+                "ref": "outputs.fields"
+              },
+              "spatial_reference": {
+                "ref": "outputs.spatial_reference"
+              },
+              "cardinality": {
+                "ref": "outputs.cardinality"
+              },
+              "selection_state": {
+                "ref": "outputs.selection_state"
+              },
+              "map_publication": {
+                "ref": "outputs.map_publication"
+              }
+            }
+          }
+        ],
+        "semantic_effects": [
+          {
+            "kind": "merge",
+            "sources": {
+              "parameter": "input_layers"
+            },
+            "result": {
+              "output": true
+            }
+          }
+        ]
+      }
     },
     {
       "id": "analysis.append",
@@ -897,7 +2485,6 @@
         "追加",
         "追加到"
       ],
-      "model_card": "Use analysis.append to append input layers into an existing target layer. This directly edits target data and requires confirmation. Arguments: input_layers, target_layer, schema_type optional.",
       "parameters_schema": {
         "type": "object",
         "required": [
@@ -917,6 +2504,7 @@
           },
           "schema_type": {
             "type": "string",
+            "default": "NO_TEST",
             "enum": [
               "TEST",
               "NO_TEST"
@@ -946,7 +2534,138 @@
             "schema_type": "NO_TEST"
           }
         }
-      ]
+      ],
+      "capability_contract": {
+        "inputs": [
+          {
+            "parameter": "input_layers",
+            "cardinality": "many",
+            "data_kind": [
+              "feature_layer"
+            ],
+            "geometry": [
+              "point",
+              "polyline",
+              "polygon"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          },
+          {
+            "parameter": "target_layer",
+            "cardinality": "one",
+            "data_kind": [
+              "feature_layer"
+            ],
+            "geometry": [
+              "point",
+              "polyline",
+              "polygon"
+            ],
+            "required_fields": [],
+            "selection": {"rule": "any"}
+          }
+        ],
+        "parameters_schema": {
+          "type": "object",
+          "required": [
+            "input_layers",
+            "target_layer"
+          ],
+          "properties": {
+            "input_layers": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1
+            },
+            "target_layer": {
+              "type": "string"
+            },
+            "schema_type": {
+              "type": "string",
+              "default": "NO_TEST",
+              "enum": [
+                "TEST",
+                "NO_TEST"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "kind": "none",
+          "geometry": {
+            "rule": "not_applicable",
+            "value": "not_applicable"
+          },
+          "fields": {
+            "effect": "in_place_update",
+            "target": "target_layer",
+            "static_fields": [],
+            "parameter_field": "not_applicable"
+          },
+          "spatial_reference": {
+            "rule": "not_applicable",
+            "input": "not_applicable"
+          },
+          "cardinality": {
+            "rule": "fixed",
+            "value": "in_place"
+          },
+          "selection_state": "selection_preserved",
+          "map_publication": "none"
+        },
+        "side_effects": "edits_data",
+        "authorization": {
+          "required": true,
+          "scope": "edit_data"
+        },
+        "postconditions": [
+          {
+            "kind": "target_data_edited",
+            "target": "target_layer",
+            "expectation": {
+              "kind": {
+                "ref": "outputs.kind"
+              },
+              "geometry": {
+                "ref": "outputs.geometry"
+              },
+              "fields": {
+                "ref": "outputs.fields"
+              },
+              "spatial_reference": {
+                "ref": "outputs.spatial_reference"
+              },
+              "cardinality": {
+                "ref": "outputs.cardinality"
+              },
+              "selection_state": {
+                "ref": "outputs.selection_state"
+              },
+              "map_publication": {
+                "ref": "outputs.map_publication"
+              }
+            }
+          }
+        ],
+        "semantic_effects": [
+          {
+            "kind": "append",
+            "sources": {
+              "parameter": "input_layers"
+            },
+            "target": {
+              "parameter": "target_layer"
+            },
+            "schema_type": {
+              "parameter": "schema_type"
+            }
+          }
+        ]
+      }
     }
   ]
 }

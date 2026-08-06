@@ -1,34 +1,3363 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
+  "additionalProperties": false,
   "required": [
     "id",
     "version",
     "category",
     "summary",
-    "model_card",
     "parameters_schema",
-    "context_requirements",
     "side_effects",
     "output_policy",
     "executor",
-    "examples"
+    "examples",
+    "capability_contract"
   ],
   "properties": {
-    "id": {"type": "string"},
-    "version": {"type": "string"},
-    "category": {"type": "string"},
-    "summary": {"type": "string"},
-    "keywords": {"type": "array", "items": {"type": "string"}},
-    "model_card": {"type": "string"},
-    "parameters_schema": {"type": "object"},
-    "context_requirements": {"type": "object"},
-    "side_effects": {
+    "id": {
       "type": "string",
-      "enum": ["read_only", "changes_map", "writes_data", "edits_data"]
+      "pattern": "^[a-z]+(\\.[a-z][a-z0-9_]*)+$"
     },
-    "output_policy": {"type": "object"},
-    "executor": {"type": "string"},
-    "examples": {"type": "array"}
+    "version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "category": {
+      "type": "string",
+      "minLength": 1
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "keywords": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "parameters_schema": {
+      "type": "object"
+    },
+    "context_requirements": {
+      "type": "object"
+    },
+    "side_effects": {
+      "enum": [
+        "read_only",
+        "changes_map",
+        "writes_data",
+        "edits_data"
+      ]
+    },
+    "output_policy": {
+      "type": "object"
+    },
+    "executor": {
+      "type": "string",
+      "minLength": 1
+    },
+    "examples": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object"
+      }
+    },
+    "capability_contract": {
+      "$ref": "#/$defs/capabilityContract"
+    }
+  },
+  "$defs": {
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "parameter",
+        "cardinality",
+        "data_kind",
+        "geometry",
+        "required_fields",
+        "selection"
+      ],
+      "properties": {
+        "parameter": {
+          "type": "string",
+          "minLength": 1
+        },
+        "cardinality": {
+          "enum": [
+            "one",
+            "many"
+          ]
+        },
+        "data_kind": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "enum": [
+              "feature_layer",
+              "raster_layer",
+              "table_view",
+              "coordinate_sequence",
+              "feature_definition"
+            ]
+          }
+        },
+        "geometry": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "enum": [
+              "point",
+              "polyline",
+              "polygon",
+              "raster",
+              "not_applicable"
+            ]
+          }
+        },
+        "required_fields": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "selection": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["rule"],
+              "properties": {
+                "rule": {
+                  "enum": ["any", "requires_selected"]
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["rule", "parameter", "values"],
+              "properties": {
+                "rule": {
+                  "const": "parameter_values_require_selected"
+                },
+                "parameter": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "values": {
+                  "type": "array",
+                  "minItems": 1,
+                  "uniqueItems": true
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "capabilityContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "inputs",
+        "parameters_schema",
+        "outputs",
+        "semantic_effects",
+        "side_effects",
+        "authorization",
+        "postconditions"
+      ],
+      "properties": {
+        "inputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/input"
+          }
+        },
+        "parameters_schema": {
+          "type": "object"
+        },
+        "outputs": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "geometry",
+            "fields",
+            "spatial_reference",
+            "cardinality",
+            "selection_state",
+            "map_publication"
+          ],
+          "properties": {
+            "kind": {
+              "enum": [
+                "none",
+                "map_state",
+                "file",
+                "file_collection",
+                "feature_class",
+                "raster",
+                "table"
+              ]
+            },
+            "geometry": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "rule",
+                "value"
+              ],
+              "properties": {
+                "rule": {
+                  "enum": [
+                    "fixed",
+                    "inherit",
+                    "lowest_dimension",
+                    "not_applicable"
+                  ]
+                },
+                "value": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "fields": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "effect",
+                "static_fields",
+                "parameter_field"
+              ],
+              "properties": {
+                "effect": {
+                  "enum": [
+                    "not_applicable",
+                    "inherit_input",
+                    "inherit_tabular_fields",
+                    "inherit_target_merge_join",
+                    "merge_inputs",
+                    "aggregate_by_parameter_fields",
+                    "static_generated",
+                    "add_static_fields",
+                    "add_parameter_field",
+                    "delete_parameter_field",
+                    "in_place_update"
+                  ]
+                },
+                "target": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "sources": {
+                  "type": "array",
+                  "minItems": 1,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "static_fields": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "parameter_field": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "oneOf": [
+                {
+                  "required": [
+                    "target"
+                  ],
+                  "not": {
+                    "required": [
+                      "sources"
+                    ]
+                  }
+                },
+                {
+                  "required": [
+                    "sources"
+                  ],
+                  "not": {
+                    "required": [
+                      "target"
+                    ]
+                  }
+                }
+              ]
+            },
+            "spatial_reference": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "rule",
+                "input"
+              ],
+              "properties": {
+                "rule": {
+                  "enum": [
+                    "inherit",
+                    "from_parameter",
+                    "from_parameter_or_map",
+                    "not_applicable"
+                  ]
+                },
+                "input": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "cardinality": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "rule",
+                    "value"
+                  ],
+                  "properties": {
+                    "rule": {
+                      "const": "fixed"
+                    },
+                    "value": {
+                      "enum": [
+                        "in_place",
+                        "not_applicable",
+                        "one",
+                        "one_or_more_per_input_feature",
+                        "one_per_aggregate_group",
+                        "one_per_distinct_field_value",
+                        "one_per_input_feature",
+                        "one_per_target_feature",
+                        "one_snapshot",
+                        "reduced",
+                        "selected_feature_count"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "rule",
+                    "parameter",
+                    "when_empty",
+                    "otherwise"
+                  ],
+                  "properties": {
+                    "rule": {
+                      "const": "parameter_array_empty"
+                    },
+                    "parameter": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "when_empty": {
+                      "enum": [
+                        "in_place",
+                        "not_applicable",
+                        "one",
+                        "one_or_more_per_input_feature",
+                        "one_per_aggregate_group",
+                        "one_per_distinct_field_value",
+                        "one_per_input_feature",
+                        "one_per_target_feature",
+                        "one_snapshot",
+                        "reduced",
+                        "selected_feature_count"
+                      ]
+                    },
+                    "otherwise": {
+                      "enum": [
+                        "in_place",
+                        "not_applicable",
+                        "one",
+                        "one_or_more_per_input_feature",
+                        "one_per_aggregate_group",
+                        "one_per_distinct_field_value",
+                        "one_per_input_feature",
+                        "one_per_target_feature",
+                        "one_snapshot",
+                        "reduced",
+                        "selected_feature_count"
+                      ]
+                    }
+                  }
+                }
+              ]
+            },
+            "selection_state": {
+              "enum": [
+                "not_applicable",
+                "selection_preserved",
+                "applied",
+                "cleared"
+              ]
+            },
+            "map_publication": {
+              "enum": [
+                "none",
+                "published",
+                "map_state_updated"
+              ]
+            }
+          }
+        },
+        "semantic_effects": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "inspect"
+                  },
+                  "result": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "preserves": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "add_xy",
+                        "aggregate",
+                        "append",
+                        "artifact_export",
+                        "attribute_filter",
+                        "buffer",
+                        "copy",
+                        "define_projection",
+                        "feature_append",
+                        "feature_create",
+                        "field_add",
+                        "field_delete",
+                        "field_update",
+                        "inspect",
+                        "layout_change",
+                        "map_change",
+                        "merge",
+                        "overlay",
+                        "project",
+                        "repair",
+                        "source_preserved",
+                        "spatial_filter",
+                        "spatial_join"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "kind"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "inspect"
+                  },
+                  "result": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "preserves": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "add_xy",
+                        "aggregate",
+                        "append",
+                        "artifact_export",
+                        "attribute_filter",
+                        "buffer",
+                        "copy",
+                        "define_projection",
+                        "feature_append",
+                        "feature_create",
+                        "field_add",
+                        "field_delete",
+                        "field_update",
+                        "inspect",
+                        "layout_change",
+                        "map_change",
+                        "merge",
+                        "overlay",
+                        "project",
+                        "repair",
+                        "source_preserved",
+                        "spatial_filter",
+                        "spatial_join"
+                      ]
+                    }
+                  },
+                  "target": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "kind",
+                  "target"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "source_preserved"
+                  },
+                  "result": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "preserves": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "add_xy",
+                        "aggregate",
+                        "append",
+                        "artifact_export",
+                        "attribute_filter",
+                        "buffer",
+                        "copy",
+                        "define_projection",
+                        "feature_append",
+                        "feature_create",
+                        "field_add",
+                        "field_delete",
+                        "field_update",
+                        "inspect",
+                        "layout_change",
+                        "map_change",
+                        "merge",
+                        "overlay",
+                        "project",
+                        "repair",
+                        "source_preserved",
+                        "spatial_filter",
+                        "spatial_join"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "kind"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "map_change"
+                  },
+                  "result": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "preserves": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "add_xy",
+                        "aggregate",
+                        "append",
+                        "artifact_export",
+                        "attribute_filter",
+                        "buffer",
+                        "copy",
+                        "define_projection",
+                        "feature_append",
+                        "feature_create",
+                        "field_add",
+                        "field_delete",
+                        "field_update",
+                        "inspect",
+                        "layout_change",
+                        "map_change",
+                        "merge",
+                        "overlay",
+                        "project",
+                        "repair",
+                        "source_preserved",
+                        "spatial_filter",
+                        "spatial_join"
+                      ]
+                    }
+                  },
+                  "action": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "action",
+                  "kind"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "map_change"
+                  },
+                  "result": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "preserves": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "add_xy",
+                        "aggregate",
+                        "append",
+                        "artifact_export",
+                        "attribute_filter",
+                        "buffer",
+                        "copy",
+                        "define_projection",
+                        "feature_append",
+                        "feature_create",
+                        "field_add",
+                        "field_delete",
+                        "field_update",
+                        "inspect",
+                        "layout_change",
+                        "map_change",
+                        "merge",
+                        "overlay",
+                        "project",
+                        "repair",
+                        "source_preserved",
+                        "spatial_filter",
+                        "spatial_join"
+                      ]
+                    }
+                  },
+                  "target": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "action": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "action",
+                  "kind",
+                  "target"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "layout_change"
+                  },
+                  "result": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "preserves": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "add_xy",
+                        "aggregate",
+                        "append",
+                        "artifact_export",
+                        "attribute_filter",
+                        "buffer",
+                        "copy",
+                        "define_projection",
+                        "feature_append",
+                        "feature_create",
+                        "field_add",
+                        "field_delete",
+                        "field_update",
+                        "inspect",
+                        "layout_change",
+                        "map_change",
+                        "merge",
+                        "overlay",
+                        "project",
+                        "repair",
+                        "source_preserved",
+                        "spatial_filter",
+                        "spatial_join"
+                      ]
+                    }
+                  },
+                  "action": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "action",
+                  "kind"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "attribute_filter"
+                  },
+                  "result": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "preserves": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "add_xy",
+                        "aggregate",
+                        "append",
+                        "artifact_export",
+                        "attribute_filter",
+                        "buffer",
+                        "copy",
+                        "define_projection",
+                        "feature_append",
+                        "feature_create",
+                        "field_add",
+                        "field_delete",
+                        "field_update",
+                        "inspect",
+                        "layout_change",
+                        "map_change",
+                        "merge",
+                        "overlay",
+                        "project",
+                        "repair",
+                        "source_preserved",
+                        "spatial_filter",
+                        "spatial_join"
+                      ]
+                    }
+                  },
+                  "where": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "selection_type": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "kind",
+                  "selection_type",
+                  "where"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "attribute_filter"
+                  },
+                  "result": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "preserves": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "add_xy",
+                        "aggregate",
+                        "append",
+                        "artifact_export",
+                        "attribute_filter",
+                        "buffer",
+                        "copy",
+                        "define_projection",
+                        "feature_append",
+                        "feature_create",
+                        "field_add",
+                        "field_delete",
+                        "field_update",
+                        "inspect",
+                        "layout_change",
+                        "map_change",
+                        "merge",
+                        "overlay",
+                        "project",
+                        "repair",
+                        "source_preserved",
+                        "spatial_filter",
+                        "spatial_join"
+                      ]
+                    }
+                  },
+                  "where": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "selection_type": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "target": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "kind",
+                  "selection_type",
+                  "target",
+                  "where"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "spatial_filter"
+                  },
+                  "result": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "preserves": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "add_xy",
+                        "aggregate",
+                        "append",
+                        "artifact_export",
+                        "attribute_filter",
+                        "buffer",
+                        "copy",
+                        "define_projection",
+                        "feature_append",
+                        "feature_create",
+                        "field_add",
+                        "field_delete",
+                        "field_update",
+                        "inspect",
+                        "layout_change",
+                        "map_change",
+                        "merge",
+                        "overlay",
+                        "project",
+                        "repair",
+                        "source_preserved",
+                        "spatial_filter",
+                        "spatial_join"
+                      ]
+                    }
+                  },
+                  "selector": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "overlap_type": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "target": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "selection_type": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "search_distance": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "kind",
+                  "overlap_type",
+                  "search_distance",
+                  "selection_type",
+                  "selector",
+                  "target"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "buffer"
+                  },
+                  "result": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "preserves": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "add_xy",
+                        "aggregate",
+                        "append",
+                        "artifact_export",
+                        "attribute_filter",
+                        "buffer",
+                        "copy",
+                        "define_projection",
+                        "feature_append",
+                        "feature_create",
+                        "field_add",
+                        "field_delete",
+                        "field_update",
+                        "inspect",
+                        "layout_change",
+                        "map_change",
+                        "merge",
+                        "overlay",
+                        "project",
+                        "repair",
+                        "source_preserved",
+                        "spatial_filter",
+                        "spatial_join"
+                      ]
+                    }
+                  },
+                  "source": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "distance": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "distance",
+                  "kind",
+                  "source"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "overlay"
+                  },
+                  "result": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "preserves": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "add_xy",
+                        "aggregate",
+                        "append",
+                        "artifact_export",
+                        "attribute_filter",
+                        "buffer",
+                        "copy",
+                        "define_projection",
+                        "feature_append",
+                        "feature_create",
+                        "field_add",
+                        "field_delete",
+                        "field_update",
+                        "inspect",
+                        "layout_change",
+                        "map_change",
+                        "merge",
+                        "overlay",
+                        "project",
+                        "repair",
+                        "source_preserved",
+                        "spatial_filter",
+                        "spatial_join"
+                      ]
+                    }
+                  },
+                  "sources": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "object",
+                      "minProperties": 1,
+                      "maxProperties": 1,
+                      "properties": {
+                        "parameter": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "output": {
+                          "const": true
+                        },
+                        "const": {}
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "method": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "kind",
+                  "method",
+                  "sources"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "spatial_join"
+                  },
+                  "result": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "preserves": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "add_xy",
+                        "aggregate",
+                        "append",
+                        "artifact_export",
+                        "attribute_filter",
+                        "buffer",
+                        "copy",
+                        "define_projection",
+                        "feature_append",
+                        "feature_create",
+                        "field_add",
+                        "field_delete",
+                        "field_update",
+                        "inspect",
+                        "layout_change",
+                        "map_change",
+                        "merge",
+                        "overlay",
+                        "project",
+                        "repair",
+                        "source_preserved",
+                        "spatial_filter",
+                        "spatial_join"
+                      ]
+                    }
+                  },
+                  "join": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "target": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "join",
+                  "kind",
+                  "target"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "aggregate"
+                  },
+                  "result": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "preserves": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "add_xy",
+                        "aggregate",
+                        "append",
+                        "artifact_export",
+                        "attribute_filter",
+                        "buffer",
+                        "copy",
+                        "define_projection",
+                        "feature_append",
+                        "feature_create",
+                        "field_add",
+                        "field_delete",
+                        "field_update",
+                        "inspect",
+                        "layout_change",
+                        "map_change",
+                        "merge",
+                        "overlay",
+                        "project",
+                        "repair",
+                        "source_preserved",
+                        "spatial_filter",
+                        "spatial_join"
+                      ]
+                    }
+                  },
+                  "dissolve_fields": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "source": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "dissolve_fields",
+                  "kind",
+                  "source"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "project"
+                  },
+                  "result": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "preserves": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "add_xy",
+                        "aggregate",
+                        "append",
+                        "artifact_export",
+                        "attribute_filter",
+                        "buffer",
+                        "copy",
+                        "define_projection",
+                        "feature_append",
+                        "feature_create",
+                        "field_add",
+                        "field_delete",
+                        "field_update",
+                        "inspect",
+                        "layout_change",
+                        "map_change",
+                        "merge",
+                        "overlay",
+                        "project",
+                        "repair",
+                        "source_preserved",
+                        "spatial_filter",
+                        "spatial_join"
+                      ]
+                    }
+                  },
+                  "source": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "spatial_reference": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "kind",
+                  "source",
+                  "spatial_reference"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "merge"
+                  },
+                  "result": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "preserves": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "add_xy",
+                        "aggregate",
+                        "append",
+                        "artifact_export",
+                        "attribute_filter",
+                        "buffer",
+                        "copy",
+                        "define_projection",
+                        "feature_append",
+                        "feature_create",
+                        "field_add",
+                        "field_delete",
+                        "field_update",
+                        "inspect",
+                        "layout_change",
+                        "map_change",
+                        "merge",
+                        "overlay",
+                        "project",
+                        "repair",
+                        "source_preserved",
+                        "spatial_filter",
+                        "spatial_join"
+                      ]
+                    }
+                  },
+                  "sources": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "object",
+                      "minProperties": 1,
+                      "maxProperties": 1,
+                      "properties": {
+                        "parameter": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "output": {
+                          "const": true
+                        },
+                        "const": {}
+                      },
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "kind",
+                  "sources"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "append"
+                  },
+                  "result": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "preserves": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "add_xy",
+                        "aggregate",
+                        "append",
+                        "artifact_export",
+                        "attribute_filter",
+                        "buffer",
+                        "copy",
+                        "define_projection",
+                        "feature_append",
+                        "feature_create",
+                        "field_add",
+                        "field_delete",
+                        "field_update",
+                        "inspect",
+                        "layout_change",
+                        "map_change",
+                        "merge",
+                        "overlay",
+                        "project",
+                        "repair",
+                        "source_preserved",
+                        "spatial_filter",
+                        "spatial_join"
+                      ]
+                    }
+                  },
+                  "schema_type": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "target": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "sources": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "object",
+                      "minProperties": 1,
+                      "maxProperties": 1,
+                      "properties": {
+                        "parameter": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "output": {
+                          "const": true
+                        },
+                        "const": {}
+                      },
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "kind",
+                  "schema_type",
+                  "sources",
+                  "target"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "field_add"
+                  },
+                  "result": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "preserves": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "add_xy",
+                        "aggregate",
+                        "append",
+                        "artifact_export",
+                        "attribute_filter",
+                        "buffer",
+                        "copy",
+                        "define_projection",
+                        "feature_append",
+                        "feature_create",
+                        "field_add",
+                        "field_delete",
+                        "field_update",
+                        "inspect",
+                        "layout_change",
+                        "map_change",
+                        "merge",
+                        "overlay",
+                        "project",
+                        "repair",
+                        "source_preserved",
+                        "spatial_filter",
+                        "spatial_join"
+                      ]
+                    }
+                  },
+                  "field_length": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "field_type": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "field_name": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "target": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "field_length",
+                  "field_name",
+                  "field_type",
+                  "kind",
+                  "target"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "field_delete"
+                  },
+                  "result": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "preserves": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "add_xy",
+                        "aggregate",
+                        "append",
+                        "artifact_export",
+                        "attribute_filter",
+                        "buffer",
+                        "copy",
+                        "define_projection",
+                        "feature_append",
+                        "feature_create",
+                        "field_add",
+                        "field_delete",
+                        "field_update",
+                        "inspect",
+                        "layout_change",
+                        "map_change",
+                        "merge",
+                        "overlay",
+                        "project",
+                        "repair",
+                        "source_preserved",
+                        "spatial_filter",
+                        "spatial_join"
+                      ]
+                    }
+                  },
+                  "field_name": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "target": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "field_name",
+                  "kind",
+                  "target"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "field_update"
+                  },
+                  "result": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "preserves": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "add_xy",
+                        "aggregate",
+                        "append",
+                        "artifact_export",
+                        "attribute_filter",
+                        "buffer",
+                        "copy",
+                        "define_projection",
+                        "feature_append",
+                        "feature_create",
+                        "field_add",
+                        "field_delete",
+                        "field_update",
+                        "inspect",
+                        "layout_change",
+                        "map_change",
+                        "merge",
+                        "overlay",
+                        "project",
+                        "repair",
+                        "source_preserved",
+                        "spatial_filter",
+                        "spatial_join"
+                      ]
+                    }
+                  },
+                  "where": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "assignments": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "target": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "assignments",
+                  "kind",
+                  "target",
+                  "where"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "field_update"
+                  },
+                  "result": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "preserves": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "add_xy",
+                        "aggregate",
+                        "append",
+                        "artifact_export",
+                        "attribute_filter",
+                        "buffer",
+                        "copy",
+                        "define_projection",
+                        "feature_append",
+                        "feature_create",
+                        "field_add",
+                        "field_delete",
+                        "field_update",
+                        "inspect",
+                        "layout_change",
+                        "map_change",
+                        "merge",
+                        "overlay",
+                        "project",
+                        "repair",
+                        "source_preserved",
+                        "spatial_filter",
+                        "spatial_join"
+                      ]
+                    }
+                  },
+                  "where": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "target": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "kind",
+                  "target",
+                  "where"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "feature_create"
+                  },
+                  "result": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "preserves": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "add_xy",
+                        "aggregate",
+                        "append",
+                        "artifact_export",
+                        "attribute_filter",
+                        "buffer",
+                        "copy",
+                        "define_projection",
+                        "feature_append",
+                        "feature_create",
+                        "field_add",
+                        "field_delete",
+                        "field_update",
+                        "inspect",
+                        "layout_change",
+                        "map_change",
+                        "merge",
+                        "overlay",
+                        "project",
+                        "repair",
+                        "source_preserved",
+                        "spatial_filter",
+                        "spatial_join"
+                      ]
+                    }
+                  },
+                  "action": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "action",
+                  "kind"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "feature_append"
+                  },
+                  "result": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "preserves": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "add_xy",
+                        "aggregate",
+                        "append",
+                        "artifact_export",
+                        "attribute_filter",
+                        "buffer",
+                        "copy",
+                        "define_projection",
+                        "feature_append",
+                        "feature_create",
+                        "field_add",
+                        "field_delete",
+                        "field_update",
+                        "inspect",
+                        "layout_change",
+                        "map_change",
+                        "merge",
+                        "overlay",
+                        "project",
+                        "repair",
+                        "source_preserved",
+                        "spatial_filter",
+                        "spatial_join"
+                      ]
+                    }
+                  },
+                  "target": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "action": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "action",
+                  "kind",
+                  "target"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "copy"
+                  },
+                  "result": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "preserves": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "add_xy",
+                        "aggregate",
+                        "append",
+                        "artifact_export",
+                        "attribute_filter",
+                        "buffer",
+                        "copy",
+                        "define_projection",
+                        "feature_append",
+                        "feature_create",
+                        "field_add",
+                        "field_delete",
+                        "field_update",
+                        "inspect",
+                        "layout_change",
+                        "map_change",
+                        "merge",
+                        "overlay",
+                        "project",
+                        "repair",
+                        "source_preserved",
+                        "spatial_filter",
+                        "spatial_join"
+                      ]
+                    }
+                  },
+                  "source": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "kind",
+                  "source"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "repair"
+                  },
+                  "result": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "preserves": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "add_xy",
+                        "aggregate",
+                        "append",
+                        "artifact_export",
+                        "attribute_filter",
+                        "buffer",
+                        "copy",
+                        "define_projection",
+                        "feature_append",
+                        "feature_create",
+                        "field_add",
+                        "field_delete",
+                        "field_update",
+                        "inspect",
+                        "layout_change",
+                        "map_change",
+                        "merge",
+                        "overlay",
+                        "project",
+                        "repair",
+                        "source_preserved",
+                        "spatial_filter",
+                        "spatial_join"
+                      ]
+                    }
+                  },
+                  "target": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "kind",
+                  "target"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "define_projection"
+                  },
+                  "result": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "preserves": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "add_xy",
+                        "aggregate",
+                        "append",
+                        "artifact_export",
+                        "attribute_filter",
+                        "buffer",
+                        "copy",
+                        "define_projection",
+                        "feature_append",
+                        "feature_create",
+                        "field_add",
+                        "field_delete",
+                        "field_update",
+                        "inspect",
+                        "layout_change",
+                        "map_change",
+                        "merge",
+                        "overlay",
+                        "project",
+                        "repair",
+                        "source_preserved",
+                        "spatial_filter",
+                        "spatial_join"
+                      ]
+                    }
+                  },
+                  "target": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "spatial_reference": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "kind",
+                  "spatial_reference",
+                  "target"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "add_xy"
+                  },
+                  "result": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "preserves": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "add_xy",
+                        "aggregate",
+                        "append",
+                        "artifact_export",
+                        "attribute_filter",
+                        "buffer",
+                        "copy",
+                        "define_projection",
+                        "feature_append",
+                        "feature_create",
+                        "field_add",
+                        "field_delete",
+                        "field_update",
+                        "inspect",
+                        "layout_change",
+                        "map_change",
+                        "merge",
+                        "overlay",
+                        "project",
+                        "repair",
+                        "source_preserved",
+                        "spatial_filter",
+                        "spatial_join"
+                      ]
+                    }
+                  },
+                  "target": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "kind",
+                  "target"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "artifact_export"
+                  },
+                  "result": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "preserves": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "add_xy",
+                        "aggregate",
+                        "append",
+                        "artifact_export",
+                        "attribute_filter",
+                        "buffer",
+                        "copy",
+                        "define_projection",
+                        "feature_append",
+                        "feature_create",
+                        "field_add",
+                        "field_delete",
+                        "field_update",
+                        "inspect",
+                        "layout_change",
+                        "map_change",
+                        "merge",
+                        "overlay",
+                        "project",
+                        "repair",
+                        "source_preserved",
+                        "spatial_filter",
+                        "spatial_join"
+                      ]
+                    }
+                  },
+                  "action": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "action",
+                  "kind"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "artifact_export"
+                  },
+                  "result": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "preserves": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "add_xy",
+                        "aggregate",
+                        "append",
+                        "artifact_export",
+                        "attribute_filter",
+                        "buffer",
+                        "copy",
+                        "define_projection",
+                        "feature_append",
+                        "feature_create",
+                        "field_add",
+                        "field_delete",
+                        "field_update",
+                        "inspect",
+                        "layout_change",
+                        "map_change",
+                        "merge",
+                        "overlay",
+                        "project",
+                        "repair",
+                        "source_preserved",
+                        "spatial_filter",
+                        "spatial_join"
+                      ]
+                    }
+                  },
+                  "output_format": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "action": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "action",
+                  "kind",
+                  "output_format"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "artifact_export"
+                  },
+                  "result": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "preserves": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "add_xy",
+                        "aggregate",
+                        "append",
+                        "artifact_export",
+                        "attribute_filter",
+                        "buffer",
+                        "copy",
+                        "define_projection",
+                        "feature_append",
+                        "feature_create",
+                        "field_add",
+                        "field_delete",
+                        "field_update",
+                        "inspect",
+                        "layout_change",
+                        "map_change",
+                        "merge",
+                        "overlay",
+                        "project",
+                        "repair",
+                        "source_preserved",
+                        "spatial_filter",
+                        "spatial_join"
+                      ]
+                    }
+                  },
+                  "selected_only": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "target": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "action": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "action",
+                  "kind",
+                  "selected_only",
+                  "target"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "const": "artifact_export"
+                  },
+                  "result": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "preserves": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "add_xy",
+                        "aggregate",
+                        "append",
+                        "artifact_export",
+                        "attribute_filter",
+                        "buffer",
+                        "copy",
+                        "define_projection",
+                        "feature_append",
+                        "feature_create",
+                        "field_add",
+                        "field_delete",
+                        "field_update",
+                        "inspect",
+                        "layout_change",
+                        "map_change",
+                        "merge",
+                        "overlay",
+                        "project",
+                        "repair",
+                        "source_preserved",
+                        "spatial_filter",
+                        "spatial_join"
+                      ]
+                    }
+                  },
+                  "output_format": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "selected_only": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "target": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "action": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "action",
+                  "kind",
+                  "output_format",
+                  "selected_only",
+                  "target"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "side_effects": {
+          "enum": [
+            "read_only",
+            "changes_map",
+            "writes_data",
+            "edits_data"
+          ]
+        },
+        "authorization": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "required",
+            "scope"
+          ],
+          "properties": {
+            "required": {
+              "type": "boolean"
+            },
+            "scope": {
+              "enum": [
+                "none",
+                "read_current_map",
+                "modify_map",
+                "write_data",
+                "write_file",
+                "edit_data"
+              ]
+            }
+          }
+        },
+        "postconditions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "target",
+              "expectation"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "minLength": 1
+              },
+              "target": {
+                "type": "string",
+                "minLength": 1
+              },
+              "expectation": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "geometry",
+                  "fields",
+                  "spatial_reference",
+                  "cardinality",
+                  "selection_state",
+                  "map_publication"
+                ],
+                "properties": {
+                  "kind": {
+                    "$ref": "#/$defs/capabilityContract/properties/outputReference"
+                  },
+                  "geometry": {
+                    "$ref": "#/$defs/capabilityContract/properties/outputReference"
+                  },
+                  "fields": {
+                    "$ref": "#/$defs/capabilityContract/properties/outputReference"
+                  },
+                  "spatial_reference": {
+                    "$ref": "#/$defs/capabilityContract/properties/outputReference"
+                  },
+                  "cardinality": {
+                    "$ref": "#/$defs/capabilityContract/properties/outputReference"
+                  },
+                  "selection_state": {
+                    "$ref": "#/$defs/capabilityContract/properties/outputReference"
+                  },
+                  "map_publication": {
+                    "$ref": "#/$defs/capabilityContract/properties/outputReference"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "outputReference": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "ref"
+          ],
+          "properties": {
+            "ref": {
+              "type": "string",
+              "pattern": "^outputs\\.(kind|geometry|fields|spatial_reference|cardinality|selection_state|map_publication)$"
+            }
+          }
+        }
+      }
+    }
   }
 }

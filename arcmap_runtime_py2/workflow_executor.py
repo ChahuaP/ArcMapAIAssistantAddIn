@@ -7,15 +7,21 @@ import json
 import os
 import sys
 
+import arcpy
+
 try:
     import context_reader
+    import artifact_observation
     import execution_session
     import exception_text
+    import map_state_observation
     import path_utils
 except ImportError:
     from . import context_reader
+    from . import artifact_observation
     from . import execution_session
     from . import exception_text
+    from . import map_state_observation
     from . import path_utils
 
 
@@ -42,7 +48,13 @@ CUSTOM_TOOLS_ROOT = path_utils.join_path(
 
 
 class WorkflowExecutionError(Exception):
-    pass
+    def __init__(self, message, step_id=None, capability_id=None, contract_path=None, expected=None, actual=None):
+        Exception.__init__(self, message)
+        self.step_id = step_id
+        self.capability_id = capability_id
+        self.contract_path = contract_path
+        self.expected = expected
+        self.actual = actual
 
 
 def execute(workflow_row, context, confirm_callback=None):
@@ -69,16 +81,32 @@ def execute(workflow_row, context, confirm_callback=None):
                     _validate_write_policy(operation, context, arguments)
                     runtime_arguments = _prepare_runtime_arguments(operation, context, arguments, step_outputs)
                     _confirm_edit_if_needed(operation, context, runtime_arguments, step_outputs, confirm_callback)
+                    input_snapshot = _input_snapshot(operation, context, runtime_arguments, step_outputs)
                     result = _call_executor(operation["executor"], context, runtime_arguments, step_outputs)
+                    _commit_map_state_if_needed(operation)
                     result = _finalize_runtime_result(operation, context, runtime_arguments, result)
+                    for output_index, output_path in enumerate(_result_output_paths(operation, result)):
+                        registered_step_id = step_id if output_index == 0 else "%s#%d" % (step_id, output_index)
+                        session.register_output(
+                            registered_step_id, output_path, _output_policy_type(operation.get("output_policy") or {}))
+                    publication_state = _publication_state(operation, result)
+                    try:
+                        observation = artifact_observation.observe_and_verify(
+                            operation, runtime_arguments, result, context, step_outputs, publication_state,
+                            input_snapshot, _execution_contract_proof(workflow_row, step_id, operation_id))
+                    except artifact_observation.ArtifactVerificationError as exc:
+                        raise WorkflowExecutionError(
+                            u"步骤 %s（%s）后置条件失败：%s" % (step_id, operation_id, exc.contract_path),
+                            step_id, operation_id, exc.contract_path, exc.expected, exc.actual)
+                    result["input_snapshot"] = input_snapshot
+                    result["observation"] = observation
+                    result = session.canonicalize_runtime_references(result)
                 except WorkflowExecutionError:
                     raise
                 except Exception as exc:
                     raise WorkflowExecutionError(u"步骤 %s（%s）执行失败：%s" % (step_id, operation_id, _exception_text(exc)))
                 step_outputs[step_id] = result
                 results.append({"step_id": step_id, "operation": operation_id, "result": result})
-                if _result_adds_to_map(operation, result):
-                    session.register_output(step_id, result["output"])
             publication_plan = session.publication_plan()
     except WorkflowExecutionError:
         raise
@@ -87,6 +115,14 @@ def execute(workflow_row, context, confirm_callback=None):
 
     result = {"ok": True, "summary": workflow["summary"], "steps": results}
     return execution_session.ExecutionOutcome(result, publication_plan)
+
+
+def _commit_map_state_if_needed(operation):
+    """Commit ArcMap UI/COM state centrally after every map-mutating step."""
+    if operation.get("side_effects") != "changes_map":
+        return
+    arcpy.RefreshTOC()
+    arcpy.RefreshActiveView()
 
 
 def _load_operations():
@@ -318,6 +354,68 @@ def _result_adds_to_map(operation, result):
         and bool(result.get("output"))
         and _output_adds_to_map(operation.get("output_policy") or {})
     )
+
+
+def _result_has_output(operation, result):
+    return bool(_result_output_paths(operation, result))
+
+
+def _result_output_paths(operation, result):
+    if operation.get("side_effects") != "writes_data" or not isinstance(result, dict):
+        return []
+    if result.get("output"):
+        return [result["output"]]
+    if isinstance(result.get("outputs"), list):
+        return list(result["outputs"])
+    return []
+
+
+def _publication_state(operation, result):
+    if _result_adds_to_map(operation, result):
+        return "scheduled"
+    if operation.get("side_effects") == "changes_map":
+        declared = (((operation.get("capability_contract") or {}).get("outputs") or {}).get("map_publication"))
+        return declared if declared in ("published", "map_state_updated") else "map_state_updated"
+    return "none"
+
+
+def _input_snapshot(operation, context, arguments, step_outputs):
+    """Capture only observable pre-state; edits_data is intentionally non-rollbackable."""
+    snapshot = {"side_effects": operation.get("side_effects"), "inputs": {}}
+    try:
+        common = _operations_common()
+        for name in _layer_argument_names(operation):
+            if name in arguments:
+                resolved = _resolve_layer_argument(common, context, arguments[name], step_outputs)
+                snapshot["inputs"][name] = _observe_layer_argument(resolved)
+        map_state_before = map_state_observation.capture_before(
+            operation, arguments, context, step_outputs,
+        )
+        if map_state_before is not None:
+            snapshot["map_state_before"] = map_state_before
+    except Exception as exc:
+        raise WorkflowExecutionError(u"无法采集步骤输入快照：%s" % _exception_text(exc))
+    return snapshot
+
+
+def _observe_layer_argument(value):
+    if isinstance(value, list):
+        return [_observe_layer_argument(item) for item in value]
+    return artifact_observation._observe(value, "feature_class")
+
+
+def _execution_contract_proof(workflow_row, step_id, capability_id):
+    contract = workflow_row.get("execution_contract")
+    if not isinstance(contract, dict) or contract.get("schema") != "geopilot-execution-contract/v1":
+        return None
+    matches = [
+        proof for proof in contract.get("cardinality_proofs", [])
+        if isinstance(proof, dict)
+        and proof.get("step_id") == step_id
+        and proof.get("capability_id") == capability_id
+        and proof.get("contract_path") == "outputs.cardinality"
+    ]
+    return matches[0] if len(matches) == 1 else None
 
 
 def _validate_custom_output_artifact(policy, output_path):

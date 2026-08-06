@@ -5,7 +5,7 @@ import threading
 from gateway_py3.logs import write_event
 from gateway_py3.catalog_loader import OperationCatalog
 from gateway_py3.event_bus import EventBus
-from gateway_py3.experiments import ExperimentRunner
+from gateway_py3.planning_engine import PlanningEngine
 from gateway_py3.run_controller import RunController
 from gateway_py3.validators import validate_catalog
 from gateway_py3.run_store import RunStore
@@ -21,7 +21,7 @@ class GatewayState:
         self._recovery_context_reader = None
         self._recovery_scheduler = None
         self._recover_runs()
-        self.runner = ExperimentRunner(catalog=self.catalog, store=self.store)
+        self.runner = PlanningEngine(catalog=self.catalog, store=self.store)
 
     def _recover_runs(self):
         self.store.recover_stale_executions(lease_seconds=30.0)
@@ -42,10 +42,7 @@ class GatewayState:
                 error,
                 trace[0]["run"],
             )
-        for row in self.store.iter_runs(
-            statuses=("succeeded", "failed", "context_failed", "cancelled", "clarify", "reject"), include_trace=False
-        ):
-            self.store.finalize_target_episode(row["id"])
+        self.store.release_terminal_target_episodes()
 
     def resume_interrupted_runs(self, context_reader, scheduler):
         self.configure_recovery(context_reader, scheduler)
@@ -99,4 +96,4 @@ class GatewayState:
     def reload_catalog(self):
         self.catalog = OperationCatalog()
         validate_catalog(self.catalog)
-        self.runner = ExperimentRunner(catalog=self.catalog, store=self.store)
+        self.runner = PlanningEngine(catalog=self.catalog, store=self.store)

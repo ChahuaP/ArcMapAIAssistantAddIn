@@ -8,7 +8,7 @@ from gateway_py3.diagnostics import collect_agent_diagnostics, collect_diagnosti
 from gateway_py3.folder_dialog import select_folder
 from gateway_py3.llm_providers import public_config, save_config
 from gateway_py3.workflow_protocol import workflow_protocol
-from gateway_py3.experiments import planning_policy
+from gateway_py3.planning_engine import planning_policy
 from gateway_py3.paths import config_path, log_dir
 from gateway_py3.routes import common, runs, arcmap, tools, voice
 from gateway_py3.routes.event_topics import publish_mutation_events
@@ -41,7 +41,7 @@ def handle_get(state, path, app_version, query=None):
             "app_version": app_version,
             "operation_count": len(state.catalog.operations),
             "operations": [
-                common.public_operation(operation, detail=detail)
+                common.public_operation(state.catalog, operation, detail=detail)
                 for operation in state.catalog.all_operations()
             ],
             "workflow_protocol": protocol,
@@ -53,6 +53,9 @@ def handle_get(state, path, app_version, query=None):
         return collect_agent_diagnostics(app_version, len(state.catalog.operations), state)
     if path == "/runs/report":
         return runs.report(state, common.optional_query(query, "mode"))
+    if path.startswith("/runs/") and path.endswith("/execution-state") and path.count("/") == 3:
+        row = state.store.get(_run_id(path.split("/")[2]))
+        return {"status": row["status"]}
     if path.startswith("/runs/") and path.count("/") == 2:
         return {"run": state.store.get(_run_id(path.rsplit("/", 1)[1]))}
     if path == "/arcmap/health":
@@ -94,6 +97,8 @@ def _handle_post(state, path, payload):
         return voice.correct(state, payload)
     if path == "/runs":
         return runs.create(state, payload)
+    if path == "/experiments/reset":
+        return runs.create_formal_reset(state, payload)
     if path.startswith("/runs/") and path.endswith("/cancel") and path.count("/") == 3:
         return runs.cancel(state, _run_id(path.split("/")[2]))
     if path == "/arcmap/register":

@@ -4,6 +4,8 @@ import argparse
 import csv
 import hashlib
 import json
+import os
+import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Sequence
 
@@ -19,11 +21,25 @@ CRS = "EPSG:32650"
 VERSION = "synthetic-city-v1"
 CITY_BOUNDS = (670000.0, 3538000.0, 690000.0, 3558000.0)
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_OUTPUT = REPO_ROOT / "out" / VERSION
+DEFAULT_OUTPUT = REPO_ROOT / "experiments" / "data" / VERSION
 
 
 def frame(records: Sequence[Mapping[str, Any]], geometries: Sequence[Any]) -> gpd.GeoDataFrame:
     return gpd.GeoDataFrame(list(records), geometry=list(geometries), crs=CRS)
+
+
+def intersects_closed_metric_buffer(
+    targets: gpd.GeoDataFrame,
+    sources: gpd.GeoDataFrame,
+    distance: float,
+) -> Any:
+    """Match ArcGIS INTERSECT against a metric buffer without polygon tessellation error."""
+    if distance < 0:
+        raise ValueError("Buffer distance cannot be negative")
+    source_geometry = unary_union(sources.geometry)
+    if source_geometry.is_empty:
+        return np.zeros(len(targets), dtype=bool)
+    return targets.geometry.distance(source_geometry) <= distance
 
 
 def district_id(point: Point) -> str:
@@ -136,10 +152,15 @@ def build_roads() -> gpd.GeoDataFrame:
     return frame(records, geometries)
 
 
-def build_accidents(roads: gpd.GeoDataFrame, rng: np.random.Generator) -> gpd.GeoDataFrame:
+def build_accidents(
+    roads: gpd.GeoDataFrame,
+    rng: np.random.Generator,
+    *,
+    count: int = 108,
+) -> gpd.GeoDataFrame:
     weights = np.array([2, 2, 8, 2, 7, 2, 2, 2, 9, 2, 2, 7, 2, 2, 8, 6], dtype=float)
     weights /= weights.sum()
-    choices = rng.choice(len(roads), size=108, p=weights)
+    choices = rng.choice(len(roads), size=count, p=weights)
     records: List[Dict[str, Any]] = []
     geometries = []
     for index, road_position in enumerate(choices, start=1):
@@ -197,7 +218,7 @@ def build_communities(rng: np.random.Generator) -> gpd.GeoDataFrame:
 
 
 def ellipse(x: float, y: float, x_radius: float, y_radius: float):
-    return affinity.scale(Point(x, y).buffer(1.0, resolution=48), xfact=x_radius, yfact=y_radius)
+    return affinity.scale(Point(x, y).buffer(1.0, quad_segs=48), xfact=x_radius, yfact=y_radius)
 
 
 def build_flood_zones() -> gpd.GeoDataFrame:
@@ -385,9 +406,11 @@ def build_truth(layers: Mapping[str, gpd.GeoDataFrame]) -> tuple[Dict[str, gpd.G
         & (communities["POP"] >= 800)
         & (communities["VULN_LVL"] == "HIGH")
     ].copy()
-    service_area = unary_union(flood_affected.geometry).buffer(2000)
     shelters = layers["shelters"]
-    flood_available = shelters.loc[shelters.geometry.within(service_area) & (shelters["STATUS"] == "OPEN")].copy()
+    flood_available = shelters.loc[
+        intersects_closed_metric_buffer(shelters, flood_affected, 2000)
+        & (shelters["STATUS"] == "OPEN")
+    ].copy()
     flood_priority = flood_available.loc[flood_available["CAPACITY"] >= 1000].copy()
 
     sites = layers["candidate_sites"]
@@ -408,8 +431,9 @@ def build_truth(layers: Mapping[str, gpd.GeoDataFrame]) -> tuple[Dict[str, gpd.G
     site_safe.geometry = site_safe.geometry.difference(exclusions)
     site_safe = site_safe.loc[~site_safe.geometry.is_empty & (site_safe.geometry.area >= 30000)].copy()
     dense_communities = communities.loc[communities["POP"] >= 1000]
-    demand_area = unary_union(dense_communities.geometry).buffer(1500)
-    site_final = site_safe.loc[site_safe.geometry.intersects(demand_area)].copy()
+    site_final = site_safe.loc[
+        intersects_closed_metric_buffer(site_safe, dense_communities, 1500)
+    ].copy()
 
     construction = layers["construction"]
     land_suspect = construction.loc[(construction["PERMIT"] == "NO") | (construction["STATUS"] == "STOP")].copy()
@@ -426,10 +450,12 @@ def build_truth(layers: Mapping[str, gpd.GeoDataFrame]) -> tuple[Dict[str, gpd.G
     road_ids = set(accident_counts.loc[accident_counts >= 8].index)
     road_hotspots = layers["roads"].loc[layers["roads"]["ROAD_ID"].isin(road_ids)].copy()
     road_hotspots["ACC_COUNT"] = road_hotspots["ROAD_ID"].map(accident_counts).astype(int)
-    hotspot_area = unary_union(road_hotspots.geometry).buffer(300)
-    road_risk_schools = layers["schools"].loc[layers["schools"].geometry.within(hotspot_area)].copy()
-    school_area = unary_union(layers["schools"].geometry).buffer(500)
-    road_priority = road_hotspots.loc[road_hotspots.geometry.intersects(school_area)].copy()
+    road_risk_schools = layers["schools"].loc[
+        intersects_closed_metric_buffer(layers["schools"], road_hotspots, 300)
+    ].copy()
+    road_priority = road_hotspots.loc[
+        intersects_closed_metric_buffer(road_hotspots, road_risk_schools, 500)
+    ].copy()
 
     truth_layers = {
         "flood_high": flood_high,
@@ -604,7 +630,11 @@ def write_data_dictionary(layers: Mapping[str, gpd.GeoDataFrame], output_path: P
                 writer.writerow([layer_name, field_name, str(dtype), "synthetic experiment attribute"])
 
 
-def validate_written_layers(layer_dir: Path, layers: Mapping[str, gpd.GeoDataFrame]) -> Dict[str, Any]:
+def validate_written_layers(
+    layer_dir: Path,
+    layers: Mapping[str, gpd.GeoDataFrame],
+    city_bounds: Sequence[float],
+) -> Dict[str, Any]:
     validation: Dict[str, Any] = {"ok": True, "layers": {}}
     for name, original in layers.items():
         path = layer_dir / f"{name}.shp"
@@ -617,27 +647,91 @@ def validate_written_layers(layer_dir: Path, layers: Mapping[str, gpd.GeoDataFra
             "null_geometries": int(loaded.geometry.isna().sum()),
             "fields": [field for field in loaded.columns if field != "geometry"],
         }
+        xmin, ymin, xmax, ymax = loaded.total_bounds
+        expected_xmin, expected_ymin, expected_xmax, expected_ymax = city_bounds
+        tolerance = 1e-6
+        checks["within_city_bounds"] = bool(
+            xmin >= expected_xmin - tolerance
+            and ymin >= expected_ymin - tolerance
+            and xmax <= expected_xmax + tolerance
+            and ymax <= expected_ymax + tolerance
+        )
         checks["ok"] = (
             checks["feature_count"] == checks["expected_feature_count"]
             and checks["crs"] == CRS
             and checks["valid_geometries"]
             and checks["null_geometries"] == 0
+            and checks["within_city_bounds"]
         )
         validation["layers"][name] = checks
         validation["ok"] = validation["ok"] and checks["ok"]
     return validation
 
 
-def generate(output_dir: Path) -> None:
-    output_dir = output_dir.resolve()
-    if output_dir.exists():
-        raise FileExistsError(f"Output already exists: {output_dir}")
-    source_dir = output_dir / "source"
-    truth_dir = output_dir / "truth"
+def validate_generation_inputs(
+    scale: float,
+    city_bounds: Sequence[float],
+) -> tuple[float, tuple[float, float, float, float]]:
+    scale = float(scale)
+    if not np.isfinite(scale) or scale <= 0:
+        raise ValueError("scale must be a positive finite number")
+    if len(city_bounds) != 4:
+        raise ValueError("city_bounds must contain xmin, ymin, xmax, ymax")
+    bounds = tuple(float(value) for value in city_bounds)
+    if not all(np.isfinite(value) for value in bounds):
+        raise ValueError("city_bounds values must be finite")
+    xmin, ymin, xmax, ymax = bounds
+    if xmax <= xmin or ymax <= ymin:
+        raise ValueError("city_bounds must have positive width and height")
+    return scale, bounds
+
+
+def transform_layers(
+    layers: Mapping[str, gpd.GeoDataFrame],
+    target_bounds: Sequence[float],
+) -> Dict[str, gpd.GeoDataFrame]:
+    if tuple(target_bounds) == CITY_BOUNDS:
+        return {name: layer.copy() for name, layer in layers.items()}
+    source_xmin, source_ymin, source_xmax, source_ymax = CITY_BOUNDS
+    target_xmin, target_ymin, target_xmax, target_ymax = target_bounds
+    x_scale = (target_xmax - target_xmin) / (source_xmax - source_xmin)
+    y_scale = (target_ymax - target_ymin) / (source_ymax - source_ymin)
+
+    def transform_geometry(geometry):
+        scaled = affinity.scale(
+            geometry,
+            xfact=x_scale,
+            yfact=y_scale,
+            origin=(source_xmin, source_ymin),
+        )
+        return affinity.translate(
+            scaled,
+            xoff=target_xmin - source_xmin,
+            yoff=target_ymin - source_ymin,
+        )
+
+    transformed: Dict[str, gpd.GeoDataFrame] = {}
+    for name, layer in layers.items():
+        result = layer.copy()
+        result.geometry = result.geometry.apply(transform_geometry)
+        transformed[name] = result
+    return transformed
+
+
+def _generate_into(
+    staging_dir: Path,
+    final_output_dir: Path,
+    *,
+    seed: int,
+    scale: float,
+    city_bounds: tuple[float, float, float, float],
+) -> None:
+    source_dir = staging_dir / "source"
+    truth_dir = staging_dir / "truth"
     source_dir.mkdir(parents=True)
     truth_dir.mkdir(parents=True)
 
-    rng = np.random.default_rng(SEED)
+    rng = np.random.default_rng(seed)
     districts = build_districts()
     parcels = build_parcels()
     roads = build_roads()
@@ -645,7 +739,11 @@ def generate(output_dir: Path) -> None:
         "districts": districts,
         "parcels": parcels,
         "roads": roads,
-        "accidents": build_accidents(roads, rng),
+        "accidents": build_accidents(
+            roads,
+            rng,
+            count=max(1, int(round(108 * scale))),
+        ),
         "communities": build_communities(rng),
         "flood_zones": build_flood_zones(),
         "shelters": build_shelters(),
@@ -657,6 +755,7 @@ def generate(output_dir: Path) -> None:
         "candidate_sites": build_candidate_sites(rng),
         "construction": build_construction(parcels),
     }
+    layers = transform_layers(layers, city_bounds)
     truth_layers, expected_ids = build_truth(layers)
     if any(not values for values in expected_ids.values()):
         empty = [name for name, values in expected_ids.items() if not values]
@@ -667,8 +766,8 @@ def generate(output_dir: Path) -> None:
     for name, gdf in truth_layers.items():
         write_shapefile(gdf, truth_dir / f"{name}.shp")
 
-    source_validation = validate_written_layers(source_dir, layers)
-    truth_validation = validate_written_layers(truth_dir, truth_layers)
+    source_validation = validate_written_layers(source_dir, layers, city_bounds)
+    truth_validation = validate_written_layers(truth_dir, truth_layers, city_bounds)
     validation = {
         "ok": source_validation["ok"] and truth_validation["ok"],
         "source": source_validation,
@@ -676,23 +775,24 @@ def generate(output_dir: Path) -> None:
     }
     if not validation["ok"]:
         raise ValueError("Written layer validation failed")
-    (output_dir / "validation.json").write_text(json.dumps(validation, ensure_ascii=False, indent=2), encoding="utf-8")
-    (output_dir / "task_cases.json").write_text(json.dumps(task_cases(expected_ids), ensure_ascii=False, indent=2), encoding="utf-8")
+    (staging_dir / "validation.json").write_text(json.dumps(validation, ensure_ascii=False, indent=2), encoding="utf-8")
+    (staging_dir / "task_cases.json").write_text(json.dumps(task_cases(expected_ids), ensure_ascii=False, indent=2), encoding="utf-8")
     (truth_dir / "expected_ids.json").write_text(json.dumps(expected_ids, ensure_ascii=False, indent=2), encoding="utf-8")
-    write_data_dictionary(layers, output_dir / "data_dictionary.csv")
+    write_data_dictionary(layers, staging_dir / "data_dictionary.csv")
 
-    load_order = [str((source_dir / f"{name}.shp").resolve()) for name in layers]
-    (output_dir / "load_order.json").write_text(json.dumps(load_order, ensure_ascii=False, indent=2), encoding="utf-8")
+    load_order = [str((final_output_dir / "source" / f"{name}.shp").resolve()) for name in layers]
+    (staging_dir / "load_order.json").write_text(json.dumps(load_order, ensure_ascii=False, indent=2), encoding="utf-8")
     file_records = [
-        {"path": str(path.relative_to(output_dir)).replace("\\", "/"), "bytes": path.stat().st_size, "sha256": sha256(path)}
-        for path in sorted(output_dir.rglob("*"))
+        {"path": str(path.relative_to(staging_dir)).replace("\\", "/"), "bytes": path.stat().st_size, "sha256": sha256(path)}
+        for path in sorted(staging_dir.rglob("*"))
         if path.is_file()
     ]
     manifest = {
         "version": VERSION,
-        "seed": SEED,
+        "seed": seed,
         "crs": CRS,
-        "city_bounds": list(CITY_BOUNDS),
+        "data_scale": scale,
+        "city_bounds": list(city_bounds),
         "source_layers": {name: len(gdf) for name, gdf in layers.items()},
         "truth_layers": {name: len(gdf) for name, gdf in truth_layers.items()},
         "source_feature_total": sum(len(gdf) for gdf in layers.values()),
@@ -700,14 +800,57 @@ def generate(output_dir: Path) -> None:
         "rounds_per_case": 3,
         "files": file_records,
     }
-    (output_dir / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    (staging_dir / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def generate(
+    output_dir: Path,
+    *,
+    seed: int = SEED,
+    scale: float = 1.0,
+    city_bounds: Sequence[float] = CITY_BOUNDS,
+) -> None:
+    scale, bounds = validate_generation_inputs(scale, city_bounds)
+    output_dir = output_dir.resolve()
+    if output_dir.exists():
+        raise FileExistsError(f"Output already exists: {output_dir}")
+    output_dir.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(
+        prefix=f".{output_dir.name}.tmp-",
+        dir=output_dir.parent,
+    ) as temporary:
+        staging_dir = Path(temporary) / "dataset"
+        staging_dir.mkdir()
+        _generate_into(
+            staging_dir,
+            output_dir,
+            seed=seed,
+            scale=scale,
+            city_bounds=bounds,
+        )
+        os.replace(staging_dir, output_dir)
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate the deterministic GeoPilot synthetic-city experiment dataset.")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument("--seed", type=int, default=SEED)
+    parser.add_argument("--scale", type=float, default=1.0)
+    parser.add_argument(
+        "--city-bounds",
+        type=float,
+        nargs=4,
+        metavar=("XMIN", "YMIN", "XMAX", "YMAX"),
+        default=CITY_BOUNDS,
+    )
     return parser.parse_args()
 
 
 if __name__ == "__main__":
-    generate(parse_args().output)
+    arguments = parse_args()
+    generate(
+        arguments.output,
+        seed=arguments.seed,
+        scale=arguments.scale,
+        city_bounds=arguments.city_bounds,
+    )

@@ -3,8 +3,8 @@ from __future__ import absolute_import
 
 import arcpy
 
-from operations import common
-from operations import condition_utils
+from . import common
+from . import condition_utils
 
 
 FIELD_TYPE_MAP = {
