@@ -1,6 +1,7 @@
 using ESRI.ArcGIS;
 using ESRI.ArcGIS.Framework;
 using ESRI.ArcGIS.esriSystem;
+using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -24,6 +25,7 @@ namespace GeoPilot.ArcMapBridgeExternal
         private const string GatewayUrl = "http://127.0.0.1:8765";
         private const string SilentCommandFileName = "bridge_command.json";
         private const string BuildIdentityFileName = "ArcMapBridge.build";
+        private const string ReadyFileName = "bridge.ready";
 
         [STAThread]
         private static int Main(string[] args)
@@ -105,6 +107,7 @@ namespace GeoPilot.ArcMapBridgeExternal
                     try { _listener.Stop(); } catch { }
                     _listener = null;
                 }
+                DeleteReadyFile();
             }
 
             private TcpListener BindListener()
@@ -116,6 +119,7 @@ namespace GeoPilot.ArcMapBridgeExternal
                     {
                         candidate.Start();
                         Port = port;
+                        WriteReadyFile();
                         return candidate;
                     }
                     catch
@@ -124,6 +128,37 @@ namespace GeoPilot.ArcMapBridgeExternal
                     }
                 }
                 throw new InvalidOperationException("No free ArcMapBridge port.");
+            }
+
+            private static string ReadyFilePath()
+            {
+                string baseDir = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "ArcMapAIAssistant");
+                return Path.Combine(baseDir, ReadyFileName);
+            }
+
+            private void WriteReadyFile()
+            {
+                try
+                {
+                    string path = ReadyFilePath();
+                    Directory.CreateDirectory(Path.GetDirectoryName(path));
+                    var json = new JObject(
+                        new JProperty("pid", CurrentProcessId()),
+                        new JProperty("port", Port),
+                        new JProperty("started_at", DateTime.UtcNow.ToString("o")));
+                    string tmp = path + ".tmp";
+                    File.WriteAllText(tmp, json.ToString(), Encoding.UTF8);
+                    File.Delete(path);
+                    File.Move(tmp, path);
+                }
+                catch (Exception ex) { Log("bridge.ready_write_failed", ex.ToString()); }
+            }
+
+            private static void DeleteReadyFile()
+            {
+                try { File.Delete(ReadyFilePath()); } catch { }
             }
 
             private void ListenLoop()
@@ -164,13 +199,21 @@ namespace GeoPilot.ArcMapBridgeExternal
                     {
                         WriteJson(client, HealthJson());
                     }
-                    else if (request.Method == "POST" && request.Path == "/sync-context")
+                    else if (request.Method == "POST" && request.Path == "/dispatch")
+                    {
+                        WriteJson(client, EnqueueAndWait("execute", request.Body));
+                    }
+                    else if (request.Method == "POST" && request.Path == "/capture-context")
                     {
                         WriteJson(client, EnqueueAndWait("sync", request.Body));
                     }
-                    else if (request.Method == "POST" && IsRunExecutePath(request.Path))
+                    else if (request.Method == "POST" && request.Path == "/reconcile")
                     {
-                        WriteJson(client, EnqueueAndWait("execute", request.Body, RunIdFromExecutePath(request.Path)));
+                        WriteJson(client, ReconcileExecution(request.Body));
+                    }
+                    else if (request.Method == "POST" && request.Path == "/sample-values")
+                    {
+                        WriteJson(client, SampleValues(request.Body));
                     }
                     else
                     {
@@ -188,9 +231,9 @@ namespace GeoPilot.ArcMapBridgeExternal
                 }
             }
 
-            private string EnqueueAndWait(string action, string body, string runId = null)
+            private string EnqueueAndWait(string action, string body)
             {
-                var request = new BridgeRequest(action, body, runId);
+                var request = new BridgeRequest(action, body);
                 lock (_queueGate)
                 {
                     _queue.Enqueue(request);
@@ -237,41 +280,86 @@ namespace GeoPilot.ArcMapBridgeExternal
             {
                 int hwnd = ExtractInt(request.Body, "hwnd");
                 bool allowEdits = ExtractBool(request.Body, "allow_edits");
+                string leaseId = ExtractString(request.Body, "lease_id");
+                int epoch = ExtractInt(request.Body, "epoch");
+                string planHash = ExtractString(request.Body, "plan_hash");
+                string runId = ExtractString(request.Body, "run_id");
                 if (request.Action == "sync")
                 {
-                    string runId = ExtractString(request.Body, "run_id");
-                    string syncToken = ExtractString(request.Body, "sync_token");
                     string phase = ExtractString(request.Body, "phase");
-                    if (string.IsNullOrWhiteSpace(runId))
+                    if (phase != "before_planning" && phase != "after_execution")
                     {
-                        return ErrorJson("run_id is required.");
+                        return ErrorJson("phase is required.");
                     }
-                    if (string.IsNullOrWhiteSpace(syncToken) ||
-                        (phase != "before_planning" && phase != "after_execution"))
+                    // before_planning runs before any lease exists — no fencing.
+                    // after_execution requires fencing to prove the caller still
+                    // owns the run.
+                    if (phase == "after_execution" &&
+                        (!IsCanonicalGuid(leaseId) || epoch <= 0 || string.IsNullOrWhiteSpace(planHash)))
                     {
-                        return ErrorJson("sync_token and phase are required.");
+                        return ErrorJson("lease_id, epoch and plan_hash are required for after_execution.");
                     }
-                    ExecuteArcMapCommand(hwnd, "sync", false, runId, null, syncToken, phase);
+                    string safeLease = string.IsNullOrEmpty(leaseId) ? "00000000-0000-0000-0000-000000000000" : leaseId;
+                    int safeEpoch = epoch <= 0 ? 1 : epoch;
+                    string safePlanHash = string.IsNullOrEmpty(planHash) ? "context-capture" : planHash;
+                    ExecuteArcMapCommand(hwnd, "sync", false, safeLease, safeEpoch, safePlanHash, runId, null, phase);
                     return "{\"ok\":true}";
+                }
+                if (!IsCanonicalGuid(leaseId) || epoch <= 0 || string.IsNullOrWhiteSpace(planHash))
+                {
+                    return ErrorJson("lease_id, epoch and plan_hash are required (lease fencing).");
                 }
                 if (request.Action == "execute")
                 {
-                    string runId = request.RunId;
-                    Guid parsedRunId;
-                    if (string.IsNullOrWhiteSpace(runId) ||
-                        !Guid.TryParseExact(runId, "D", out parsedRunId) ||
-                        !string.Equals(parsedRunId.ToString("D"), runId, StringComparison.Ordinal))
+                    if (!IsCanonicalGuid(runId))
                     {
                         return ErrorJson("canonical run_id is required.");
                     }
-                    string ownerId = Guid.NewGuid().ToString("D");
-                    ExecuteArcMapCommand(hwnd, "execute", allowEdits, runId, ownerId, null, null);
+                    string contextJson = ExtractString(request.Body, "context_snapshot");
+                    ExecuteArcMapCommand(hwnd, "execute", allowEdits, leaseId, epoch, planHash, runId, contextJson, null);
                     return "{\"ok\":true,\"run_id\":\"" + JsonEscape(runId) + "\"}";
                 }
                 return ErrorJson("Unknown request.");
             }
 
-            private void ExecuteArcMapCommand(int hwnd, string silentAction, bool allowEdits, string runId, string ownerId, string syncToken, string phase)
+            private string ReconcileExecution(string body)
+            {
+                string leaseId = ExtractString(body, "lease_id");
+                int epoch = ExtractInt(body, "epoch");
+                string planHash = ExtractString(body, "plan_hash");
+                string runId = ExtractString(body, "run_id");
+                if (!IsCanonicalGuid(leaseId) || epoch <= 0 || !IsCanonicalGuid(runId))
+                {
+                    return ErrorJson("lease_id, epoch and run_id are required.");
+                }
+                // The Bridge does not own the authoritative receipt; it reports
+                // its own execution view. The gateway decides ExecutionIndeterminate
+                // when this cannot prove status.
+                string status = ExecutionStatusForRun(runId);
+                if (status == "unknown")
+                {
+                    return "{\"ok\":true,\"status\":\"unknown\"}";
+                }
+                return "{\"ok\":true,\"status\":\"" + JsonEscape(status) + "\"}";
+            }
+
+            private string SampleValues(string body)
+            {
+                string layerRef = ExtractString(body, "layer_ref");
+                int maxRows = ExtractInt(body, "max_rows");
+                int maxSamples = ExtractInt(body, "max_samples");
+                if (string.IsNullOrWhiteSpace(layerRef))
+                {
+                    return ErrorJson("layer_ref is required.");
+                }
+                string fields = ExtractString(body, "fields");
+                string samplePayload = "{\"layer_ref\":\"" + JsonEscape(layerRef) + "\",\"fields\":" + (string.IsNullOrWhiteSpace(fields) ? "[]" : fields) + ",\"max_rows\":" + maxRows + ",\"max_samples\":" + maxSamples + "}";
+                WriteSilentCommand("sample", false, "", 0, "", "", samplePayload, "", 0, Port, 0);
+                return "{\"ok\":true,\"values\":{}}";
+            }
+
+            private void ExecuteArcMapCommand(int hwnd, string silentAction, bool allowEdits,
+                string leaseId, int epoch, string planHash, string runId, string contextJson, string phase)
             {
                 IApplication app = ResolveArcMap(hwnd);
                 IDocument document = app.Document;
@@ -282,20 +370,23 @@ namespace GeoPilot.ArcMapBridgeExternal
                     throw new InvalidOperationException("ArcMap command not found: " + BridgeCommandId);
                 }
                 int arcMapPid = ArcMapProcessId(hwnd);
-                WriteSilentCommand(silentAction, allowEdits, runId, ownerId, syncToken, phase, hwnd, Port, arcMapPid);
+                WriteSilentCommand(silentAction, allowEdits, leaseId, epoch, planHash, runId, contextJson, phase, hwnd, Port, arcMapPid);
                 if (silentAction == "execute")
                 {
-                    StartExecutionHeartbeat(runId, ownerId, arcMapPid);
+                    StartExecutionHeartbeat(leaseId, epoch, planHash, runId, arcMapPid);
                 }
                 item.Execute();
             }
 
-            private void StartExecutionHeartbeat(string runId, string ownerId, int arcMapPid)
+            private void StartExecutionHeartbeat(string leaseId, int epoch, string planHash,
+                string runId, int arcMapPid)
             {
                 Interlocked.Increment(ref _activeExecutionCount);
                 var heartbeat = new GatewayExecutionHeartbeat(
+                    leaseId,
+                    epoch,
+                    planHash,
                     runId,
-                    ownerId,
                     arcMapPid,
                     delegate { Interlocked.Decrement(ref _activeExecutionCount); }
                 );
@@ -429,30 +520,33 @@ namespace GeoPilot.ArcMapBridgeExternal
         {
             public readonly string Action;
             public readonly string Body;
-            public readonly string RunId;
             public readonly ManualResetEvent Done = new ManualResetEvent(false);
             public string ResponseJson = "{\"ok\":false,\"error\":\"Request did not complete.\"}";
 
-            public BridgeRequest(string action, string body, string runId)
+            public BridgeRequest(string action, string body)
             {
                 Action = action;
                 Body = body ?? "";
-                RunId = runId ?? "";
             }
         }
 
         private sealed class GatewayExecutionHeartbeat
         {
+            private readonly string _leaseId;
+            private readonly int _epoch;
+            private readonly string _planHash;
             private readonly string _runId;
-            private readonly string _ownerId;
             private readonly int _arcMapPid;
             private readonly Action _onFinished;
             private Thread _thread;
 
-            public GatewayExecutionHeartbeat(string runId, string ownerId, int arcMapPid, Action onFinished)
+            public GatewayExecutionHeartbeat(string leaseId, int epoch, string planHash,
+                string runId, int arcMapPid, Action onFinished)
             {
+                _leaseId = leaseId;
+                _epoch = epoch;
+                _planHash = planHash;
                 _runId = runId;
-                _ownerId = ownerId;
                 _arcMapPid = arcMapPid;
                 _onFinished = onFinished;
             }
@@ -510,7 +604,9 @@ namespace GeoPilot.ArcMapBridgeExternal
             {
                 try
                 {
-                    string payload = "{\"owner_id\":\"" + JsonEscape(_ownerId) + "\"}";
+                    string payload = "{\"lease_id\":\"" + JsonEscape(_leaseId) +
+                        "\",\"epoch\":" + _epoch +
+                        ",\"plan_hash\":\"" + JsonEscape(_planHash) + "\"}";
                     byte[] body = Encoding.UTF8.GetBytes(payload);
                     HttpWebRequest request = (HttpWebRequest)WebRequest.Create(
                         GatewayUrl + "/runs/" + _runId + "/heartbeat"
@@ -732,7 +828,9 @@ namespace GeoPilot.ArcMapBridgeExternal
             stream.Write(data, 0, data.Length);
         }
 
-        private static void WriteSilentCommand(string action, bool allowEdits, string runId, string ownerId, string syncToken, string phase, int hwnd, int bridgePort, int arcMapPid)
+        private static void WriteSilentCommand(string action, bool allowEdits, string leaseId,
+            int epoch, string planHash, string runId, string contextJson, string phase,
+            int hwnd, int bridgePort, int arcMapPid)
         {
             string temporaryPath = null;
             try
@@ -747,9 +845,11 @@ namespace GeoPilot.ArcMapBridgeExternal
                 string json = "{\"action\":\"" + JsonEscape(action) + "\",\"expires_at\":" +
                     expiresAt.ToString(System.Globalization.CultureInfo.InvariantCulture) +
                     ",\"allow_edits\":" + (allowEdits ? "true" : "false") +
+                    (string.IsNullOrWhiteSpace(leaseId) ? "" : ",\"lease_id\":\"" + JsonEscape(leaseId) + "\"") +
+                    (epoch > 0 ? ",\"epoch\":" + epoch : "") +
+                    (string.IsNullOrWhiteSpace(planHash) ? "" : ",\"plan_hash\":\"" + JsonEscape(planHash) + "\"") +
                     (string.IsNullOrWhiteSpace(runId) ? "" : ",\"run_id\":\"" + JsonEscape(runId) + "\"") +
-                    (string.IsNullOrWhiteSpace(ownerId) ? "" : ",\"owner_id\":\"" + JsonEscape(ownerId) + "\"") +
-                    (string.IsNullOrWhiteSpace(syncToken) ? "" : ",\"sync_token\":\"" + JsonEscape(syncToken) + "\"") +
+                    (string.IsNullOrWhiteSpace(contextJson) ? "" : ",\"context\":" + contextJson) +
                     (string.IsNullOrWhiteSpace(phase) ? "" : ",\"phase\":\"" + JsonEscape(phase) + "\"") +
                     ",\"target\":{\"bridge_pid\":" + CurrentProcessId() +
                     ",\"bridge_port\":" + bridgePort.ToString(System.Globalization.CultureInfo.InvariantCulture) +
@@ -868,17 +968,20 @@ namespace GeoPilot.ArcMapBridgeExternal
             return "{\"ok\":false,\"error\":\"" + JsonEscape(message) + "\"}";
         }
 
-        private static bool IsRunExecutePath(string path)
+        private static bool IsCanonicalGuid(string value)
         {
-            return !string.IsNullOrWhiteSpace(path) &&
-                path.StartsWith("/runs/", StringComparison.Ordinal) &&
-                path.EndsWith("/execute", StringComparison.Ordinal) &&
-                path.Length > "/runs//execute".Length;
+            Guid parsed;
+            return !string.IsNullOrWhiteSpace(value) &&
+                Guid.TryParseExact(value, "D", out parsed) &&
+                string.Equals(parsed.ToString("D"), value, StringComparison.Ordinal);
         }
 
-        private static string RunIdFromExecutePath(string path)
+        private static string ExecutionStatusForRun(string runId)
         {
-            return path.Substring("/runs/".Length, path.Length - "/runs/".Length - "/execute".Length);
+            // The Bridge does not own the authoritative receipt; it always
+            // reports "unknown" so the gateway decides ExecutionIndeterminate
+            // via its own lease + receipt state.
+            return "unknown";
         }
 
         private static string JsonEscape(string value)
@@ -895,105 +998,43 @@ namespace GeoPilot.ArcMapBridgeExternal
 
         private static int ExtractInt(string json, string key)
         {
-            if (string.IsNullOrWhiteSpace(json))
+            try
             {
-                return 0;
+                JObject obj = JObject.Parse(json);
+                JToken token = obj[key];
+                return token != null ? (int)token : 0;
             }
-            string marker = "\"" + key + "\"";
-            int pos = json.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
-            if (pos < 0)
-            {
-                return 0;
-            }
-            pos = json.IndexOf(':', pos);
-            if (pos < 0)
-            {
-                return 0;
-            }
-            pos++;
-            while (pos < json.Length && char.IsWhiteSpace(json[pos]))
-            {
-                pos++;
-            }
-            int start = pos;
-            while (pos < json.Length && (char.IsDigit(json[pos]) || json[pos] == '-'))
-            {
-                pos++;
-            }
-            int value;
-            return int.TryParse(json.Substring(start, pos - start), out value) ? value : 0;
+            catch { return 0; }
         }
 
         private static string ExtractString(string json, string key)
         {
-            if (string.IsNullOrWhiteSpace(json))
+            try
             {
-                return "";
+                JObject obj = JObject.Parse(json);
+                JToken token = obj[key];
+                return token != null ? (string)token : "";
             }
-            string marker = "\"" + key + "\"";
-            int pos = json.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
-            if (pos < 0)
-            {
-                return "";
-            }
-            pos = json.IndexOf(':', pos);
-            if (pos < 0)
-            {
-                return "";
-            }
-            pos++;
-            while (pos < json.Length && char.IsWhiteSpace(json[pos]))
-            {
-                pos++;
-            }
-            if (pos >= json.Length || json[pos] != '\"')
-            {
-                return "";
-            }
-            int end = json.IndexOf('\"', pos + 1);
-            return end > pos ? json.Substring(pos + 1, end - pos - 1) : "";
+            catch { return ""; }
         }
 
         private static bool ExtractBool(string json, string key)
         {
-            if (string.IsNullOrWhiteSpace(json))
+            try
             {
+                JObject obj = JObject.Parse(json);
+                JToken token = obj[key];
+                if (token == null) return false;
+                if (token.Type == JTokenType.Boolean) return (bool)token;
+                if (token.Type == JTokenType.Integer) return (int)token != 0;
                 return false;
             }
-            string marker = "\"" + key + "\"";
-            int pos = json.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
-            if (pos < 0)
-            {
-                return false;
-            }
-            pos = json.IndexOf(':', pos);
-            if (pos < 0)
-            {
-                return false;
-            }
-            pos++;
-            while (pos < json.Length && char.IsWhiteSpace(json[pos]))
-            {
-                pos++;
-            }
-            if (pos >= json.Length)
-            {
-                return false;
-            }
-            if (string.Compare(json, pos, "true", 0, 4, true, System.Globalization.CultureInfo.InvariantCulture) == 0)
-            {
-                return true;
-            }
-            if (json[pos] == '1')
-            {
-                return true;
-            }
-            return false;
+            catch { return false; }
         }
 
         private static string SafeString(Func<string> getter)
         {
-            try { return getter() ?? ""; } catch { return ""; }
+            try { return getter() ?? ""; } catch (Exception ex) { Log("bridge.safe_string_failed", ex.ToString()); return ""; }
         }
 
         private static int CurrentProcessId()

@@ -83,6 +83,7 @@ def open_or_handle_bridge_command():
 def open_assistant():
     _clear_silent_state()
     gateway_client.ensure_running()
+    # Bridge startup is handled by the gateway (HTTP adapter _bridge_list).
     map_exporter.cleanup_stale()
     _sync_current_context()
     open_web()
@@ -99,7 +100,10 @@ def _run_silent_command(command):
     if action == "sync":
         _sync_current_context(
             command.get("run_id"),
-            command.get("sync_token"),
+            command.get("context"),
+            command.get("lease_id"),
+            command.get("epoch") or 0,
+            command.get("plan_hash") or u"",
             command.get("phase"),
             command.get("target"),
         )
@@ -107,16 +111,20 @@ def _run_silent_command(command):
     if action == "execute":
         run_id = command.get("run_id")
         target = command.get("target")
-        owner_id = command.get("owner_id")
-        row = _claim_run(run_id, target, owner_id)
-        heartbeat = _start_execution_heartbeat(run_id, owner_id)
+        lease_id = command.get("lease_id")
+        epoch = command.get("epoch") or 0
+        plan_hash = command.get("plan_hash") or u""
+        context = command.get("context")
+        _validate_lease_identity(run_id, lease_id, epoch, plan_hash)
+        row = _acknowledge_lease(run_id, lease_id, epoch, plan_hash, target)
+        heartbeat = _start_execution_heartbeat(run_id, lease_id, epoch, plan_hash)
         try:
             arcmap_ui_dispatch.defer(lambda: _run_deferred_execution(
-                run_id, target, owner_id, row, heartbeat,
+                run_id, target, lease_id, epoch, plan_hash, context, row, heartbeat,
             ))
         except Exception as exc:
             _persist_claimed_failure(
-                run_id, owner_id, target, heartbeat, exc, u"arcmap_ui_dispatch",
+                run_id, target, lease_id, epoch, plan_hash, heartbeat, exc, u"arcmap_ui_dispatch",
             )
             raise
         _log_event(u"execution.deferred_to_arcmap_ui", run_id)
@@ -124,53 +132,59 @@ def _run_silent_command(command):
     raise RuntimeError(u"未知 Bridge 指令：%s" % _unicode_text(action))
 
 
-def _claim_run(run_id, target, owner_id):
-    _validate_execution_identity(run_id, owner_id)
-    return gateway_client.claim_run(run_id, target, owner_id)["run"]
+def _acknowledge_lease(run_id, lease_id, epoch, plan_hash, target):
+    _validate_lease_identity(run_id, lease_id, epoch, plan_hash)
+    return gateway_client.acknowledge_lease(run_id, lease_id, epoch, plan_hash, target)
 
 
-def _validate_execution_identity(run_id, owner_id):
+def _validate_lease_identity(run_id, lease_id, epoch, plan_hash):
     if not isinstance(run_id, unicode) or not run_id:
         raise RuntimeError(u"Bridge execute command lacks run_id.")
-    if not isinstance(owner_id, unicode) or not owner_id:
-        raise RuntimeError(u"Bridge execute command lacks owner_id.")
+    if not isinstance(lease_id, unicode) or not lease_id:
+        raise RuntimeError(u"Bridge execute command lacks lease_id.")
+    if not isinstance(epoch, (int, long)) or epoch <= 0:
+        raise RuntimeError(u"Bridge execute command lacks a valid epoch.")
+    if not isinstance(plan_hash, unicode) or not plan_hash:
+        raise RuntimeError(u"Bridge execute command lacks plan_hash.")
     try:
         parsed_run = unicode(uuid.UUID(run_id))
-        parsed_owner = unicode(uuid.UUID(owner_id))
+        parsed_lease = unicode(uuid.UUID(lease_id))
     except (ValueError, AttributeError, TypeError):
         raise RuntimeError(u"Bridge execute command identity is invalid.")
     if parsed_run != run_id:
         raise RuntimeError(u"Bridge execute command run_id is not canonical.")
-    if parsed_owner != owner_id:
-        raise RuntimeError(u"Bridge execute command owner_id is not canonical.")
+    if parsed_lease != lease_id:
+        raise RuntimeError(u"Bridge execute command lease_id is not canonical.")
 
 
-def _start_execution_heartbeat(run_id, owner_id):
-    heartbeat = _ExecutionHeartbeat(run_id, owner_id)
+def _start_execution_heartbeat(run_id, lease_id, epoch, plan_hash):
+    heartbeat = _ExecutionHeartbeat(run_id, lease_id, epoch, plan_hash)
     heartbeat.start()
     return heartbeat
 
 
-def _run_deferred_execution(run_id, target, owner_id, row, heartbeat):
+def _run_deferred_execution(run_id, target, lease_id, epoch, plan_hash, context, row, heartbeat):
     try:
         _execute_claimed_run(
-            run_id, target, owner_id, row, heartbeat, silent=True,
+            run_id, target, lease_id, epoch, plan_hash, context, row, heartbeat, silent=True,
         )
     except Exception as exc:
         _log_event(u"execution.deferred_failed", _exception_text(exc))
 
 
-def _execute_run(run_id, target, owner_id, silent=False):
-    row = _claim_run(run_id, target, owner_id)
-    heartbeat = _start_execution_heartbeat(run_id, owner_id)
+def _execute_run(run_id, target, lease_id, epoch, plan_hash, context, silent=False):
+    _validate_lease_identity(run_id, lease_id, epoch, plan_hash)
+    row = _acknowledge_lease(run_id, lease_id, epoch, plan_hash, target)
+    heartbeat = _start_execution_heartbeat(run_id, lease_id, epoch, plan_hash)
     return _execute_claimed_run(
-        run_id, target, owner_id, row, heartbeat, silent=silent,
+        run_id, target, lease_id, epoch, plan_hash, context, row, heartbeat, silent=silent,
     )
 
 
-def _execute_claimed_run(run_id, target, owner_id, row, heartbeat, silent=False):
+def _execute_claimed_run(run_id, target, lease_id, epoch, plan_hash, context, row, heartbeat, silent=False):
     try:
-        context = context_reader.read_context()
+        if not isinstance(context, dict) or not context:
+            context = context_reader.read_context()
         outcome = workflow_executor.execute(row, context, confirm_callback=_confirm_direct_edit)
         result = outcome.result
     except Exception as exc:
@@ -181,13 +195,13 @@ def _execute_claimed_run(run_id, target, owner_id, row, heartbeat, silent=False)
             "postcondition_failure": _postcondition_failure(exc),
         }
         _persist_publish_and_deliver(
-            run_id, owner_id, "failed", result, target, heartbeat,
+            run_id, target, "failed", result, lease_id, epoch, plan_hash, heartbeat,
             execution_session.PublicationPlan([]),
         )
         raise
 
     acknowledged = _persist_publish_and_deliver(
-        run_id, owner_id, "executed", result, target, heartbeat, outcome.publication_plan,
+        run_id, target, "executed", result, lease_id, epoch, plan_hash, heartbeat, outcome.publication_plan,
     )
     if not silent:
         if acknowledged:
@@ -196,7 +210,7 @@ def _execute_claimed_run(run_id, target, owner_id, row, heartbeat, silent=False)
             show_message(u"工作流已执行完成，权威结果正在重试提交到本地网关。")
 
 
-def _persist_claimed_failure(run_id, owner_id, target, heartbeat, exc, phase):
+def _persist_claimed_failure(run_id, target, lease_id, epoch, plan_hash, heartbeat, exc, phase):
     result = {
         "ok": False,
         "error": _exception_text(exc),
@@ -205,15 +219,15 @@ def _persist_claimed_failure(run_id, owner_id, target, heartbeat, exc, phase):
         "failure_phase": phase,
     }
     _persist_publish_and_deliver(
-        run_id, owner_id, "failed", result, target, heartbeat,
+        run_id, target, "failed", result, lease_id, epoch, plan_hash, heartbeat,
         execution_session.PublicationPlan([]),
     )
 
 
-def _persist_publish_and_deliver(run_id, owner_id, status, result, target, heartbeat, publication_plan):
+def _persist_publish_and_deliver(run_id, target, status, result, lease_id, epoch, plan_hash, heartbeat, publication_plan):
     try:
         entry = EXECUTION_OUTBOX.enqueue(
-            run_id, owner_id, status, result, target, publication_plan.records,
+            run_id, lease_id, epoch, plan_hash, status, result, target, publication_plan.records,
         )
     except Exception as exc:
         heartbeat.stop()
@@ -237,10 +251,10 @@ def _persist_publish_and_deliver(run_id, owner_id, status, result, target, heart
         acknowledged = EXECUTION_OUTBOX.deliver(entry, gateway_client)
     except Exception as exc:
         _log_event(u"execution.delivery_failed", _exception_text(exc))
-        _start_delivery_retry(entry, heartbeat)
+        _start_delivery_retry(entry, lease_id, epoch, plan_hash, heartbeat)
         return False
     if not acknowledged:
-        _start_delivery_retry(entry, heartbeat)
+        _start_delivery_retry(entry, lease_id, epoch, plan_hash, heartbeat)
         return False
     heartbeat.stop()
     return True
@@ -290,13 +304,16 @@ def _same_target(left, right):
         return False
 
 
-def _start_delivery_retry(entry, heartbeat=None):
+def _start_delivery_retry(entry, lease_id=None, epoch=None, plan_hash=None, heartbeat=None):
     run_id = entry["run_id"]
     with _DELIVERY_LOCK:
         if run_id in _DELIVERY_WORKERS:
             return
         if heartbeat is None:
-            heartbeat = _ExecutionHeartbeat(run_id, entry["owner"])
+            lease_id = lease_id or entry.get("lease_id")
+            epoch = epoch or entry.get("epoch") or 0
+            plan_hash = plan_hash or entry.get("plan_hash") or u""
+            heartbeat = _ExecutionHeartbeat(run_id, lease_id, epoch, plan_hash)
             heartbeat.start()
         worker = _ExecutionDeliveryWorker(entry, heartbeat)
         _DELIVERY_WORKERS[run_id] = worker
@@ -335,9 +352,11 @@ class _ExecutionDeliveryWorker(object):
 
 
 class _ExecutionHeartbeat(object):
-    def __init__(self, run_id, owner_id, interval=5.0):
+    def __init__(self, run_id, lease_id, epoch, plan_hash, interval=5.0):
         self.run_id = run_id
-        self.owner_id = owner_id
+        self.lease_id = lease_id
+        self.epoch = epoch
+        self.plan_hash = plan_hash
         self.interval = interval
         self.stopped = threading.Event()
         self.thread = threading.Thread(target=self._run)
@@ -353,15 +372,16 @@ class _ExecutionHeartbeat(object):
     def _run(self):
         while not self.stopped.wait(self.interval):
             try:
-                gateway_client.heartbeat_run(self.run_id, self.owner_id)
+                gateway_client.heartbeat_run(self.run_id, self.lease_id, self.epoch, self.plan_hash)
             except Exception as exc:
                 _log_event(u"execution.heartbeat_failed", _exception_text(exc))
 
 
-def _sync_current_context(run_id=None, sync_token=None, phase=None, target=None):
-    context = context_reader.read_context()
+def _sync_current_context(run_id=None, context=None, lease_id=None, epoch=0, plan_hash=u"", phase=None, target=None):
+    if not isinstance(context, dict) or not context:
+        context = context_reader.read_context()
     if run_id:
-        gateway_client.sync_run_context(run_id, context, sync_token, phase, target)
+        gateway_client.sync_run_context(run_id, context, lease_id, epoch, plan_hash, phase, target)
     return context
 
 

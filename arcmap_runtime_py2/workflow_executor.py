@@ -59,10 +59,11 @@ class WorkflowExecutionError(Exception):
 
 def execute(workflow_row, context, confirm_callback=None):
     workflow = workflow_row["workflow"]
-    expected_hash = workflow_row["context_hash"]
-    actual_hash = context_reader.context_hash(context)
-    if expected_hash != actual_hash:
-        raise WorkflowExecutionError(u"ArcGIS 地图结构已变化。请重新同步上下文，并重新生成任务后再执行。")
+    expected_hash = workflow_row.get("context_hash") or u""
+    if expected_hash:
+        actual_hash = context_reader.context_hash(context)
+        if expected_hash != actual_hash:
+            raise WorkflowExecutionError(u"ArcGIS 地图结构已变化。请重新同步上下文，并重新生成任务后再执行。")
 
     operations = _load_operations()
     step_outputs = {}

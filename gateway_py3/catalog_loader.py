@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
 from .paths import CATALOG_ROOT
-from .tool_builder import enabled_operation_specs
 from .capability_registry import CapabilityRegistry
 
 
@@ -33,8 +32,6 @@ class OperationCatalog:
             self.packs.append(pack)
             for operation in pack["operations"]:
                 self._register_operation(operation)
-        for operation in enabled_operation_specs():
-            self._register_operation(operation)
 
     def _register_operation(self, operation: Dict[str, Any]) -> None:
         operation_id = operation["id"]

@@ -602,53 +602,6 @@ def _validate_condition_arguments(operation: Dict[str, Any], arguments: Dict[str
 
 def _validate_condition_node(condition: Any) -> None:
     validate_condition_tree(condition, ValidationError)
-    return
-    if not isinstance(condition, dict) or not condition:
-        raise ValidationError("属性条件 where 必须是结构化对象。")
-    op = _condition_operator(condition)
-    if op in ("and", "or"):
-        children = condition.get("conditions")
-        if not isinstance(children, list) or not children:
-            raise ValidationError("%s 条件必须包含非空 conditions。" % op)
-        for child in children:
-            _validate_condition_node(child)
-        return
-    if op == "not":
-        child = condition.get("condition")
-        if not isinstance(child, dict):
-            raise ValidationError("not 条件必须包含 condition。")
-        _validate_condition_node(child)
-        return
-    if op not in LEAF_CONDITION_OPERATORS:
-        raise ValidationError(
-            "属性条件操作符“%s”不支持。可用操作符：%s。文本包含请使用 op=like，value 写成 %%关键词%%；不要使用 contains、starts_with、ends_with 或 regex。"
-            % (op, CONDITION_OPERATOR_HELP)
-        )
-    if not condition.get("field"):
-        raise ValidationError("属性条件缺少字段名。")
-    if op in VALUE_CONDITION_OPERATORS:
-        has_value = "value" in condition
-        has_value_field = "value_field" in condition
-        if has_value_field and op not in FIELD_COMPARISON_OPERATORS:
-            raise ValidationError("%s 条件不能使用 value_field。" % op)
-        if has_value == has_value_field:
-            raise ValidationError("%s 条件必须且只能提供 value 或 value_field 其中一个。" % op)
-    if op == "between":
-        values = condition.get("values")
-        if not isinstance(values, list) or len(values) != 2:
-            raise ValidationError("between 条件必须提供两个 values。")
-        if "value" in condition or "value_field" in condition:
-            raise ValidationError("between 条件必须使用 values，不能提供 value 或 value_field。")
-    if op == "in":
-        values = condition.get("values")
-        if not isinstance(values, list) or not values:
-            raise ValidationError("in 条件必须提供非空 values。")
-        if "value" in condition or "value_field" in condition:
-            raise ValidationError("in 条件必须使用 values，不能提供 value 或 value_field。")
-    if op in ("is_null", "is_not_null") and (
-        "value" in condition or "value_field" in condition
-    ):
-        raise ValidationError("%s 条件不能提供 value 或 value_field。" % op)
 
 
 def _validate_field_references(

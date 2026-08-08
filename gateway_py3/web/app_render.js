@@ -1,33 +1,19 @@
     function renderConversation(runs) {
       const chat = document.getElementById('chatLog');
       chat.innerHTML = '';
-      if (currentMode === 'g3_audited') {
-        const items = visibleRuns(runs).slice().reverse();
-        if (!items.length && !transientUserMessage) {
-          renderEmptyChat();
-          return;
-        }
-        items.forEach(item => {
-          appendBubble('user', item.command, false);
-          appendAssistantForRun(item, false, false);
-        });
-        appendTransientConversation(false);
-        chat.scrollTop = chat.scrollHeight;
-        const selected = selectedRun(runs);
-        if (selected) setStatus(statusText(selected));
-        return;
-      }
-      const item = selectedRun(runs);
-      if (!item && !transientUserMessage) {
+      const items = visibleRuns(runs).slice().reverse();
+      if (!items.length && !transientUserMessage) {
         renderEmptyChat();
         return;
       }
-      if (item) {
-        appendBubble('user', item.command, false);
-        appendAssistantForRun(item, false);
-      }
+      items.forEach(item => {
+        appendBubble('user', item.command || item.text || '', false);
+        appendAssistantForRun(item, false, false);
+      });
       appendTransientConversation(false);
       chat.scrollTop = chat.scrollHeight;
+      const selected = selectedRun(runs);
+      if (selected) setStatus(stageLabel(selected.stage));
     }
 
     function appendTransientConversation(scroll = true) {
@@ -36,7 +22,7 @@
       if (modelWait && !transientAssistantMessage) {
         appendModelWaitBubble(scroll);
       } else {
-        appendBubble('assistant', transientAssistantMessage || '正在思考...', scroll);
+        appendBubble('assistant', transientAssistantMessage || '正在处理...', scroll);
       }
     }
 
@@ -51,20 +37,18 @@
     }
 
     function appendAssistantForRun(item, scroll = true, updateStatus = true) {
-      const wf = item.workflow;
-      const action = wf.action || 'execute';
-      let text = wf.summary;
-      if (action === 'execute') {
-        text += item.status === 'planned'
-          ? '\n\n任务已规划，未请求执行。'
-          : '\n\n任务已发送到 ArcMap。';
-      } else if (action === 'clarify') {
+      const stage = item.stage || '';
+      const outcome = item.outcome || {};
+      let text = outcome.message || stageLabel(stage);
+      if (stage === 'authorization_required') {
+        text = '任务已规划，等待授权确认。';
+      } else if (stage === 'clarification_required') {
         text += '\n\n信息不够，当前不会执行任何操作。';
-      } else if (action === 'unsupported') {
-        text += '\n\n当前版本还没有这个能力。';
+      } else if (isTerminalStage(stage) && stage !== 'succeeded') {
+        text += '\n\n任务未成功完成。';
       }
       appendBubble('assistant', text, scroll);
-      if (updateStatus) setStatus(statusText(item));
+      if (updateStatus) setStatus(stageLabel(stage));
     }
 
     function appendBubble(role, text, scroll = true) {
@@ -248,7 +232,7 @@
       box.innerHTML = '';
       const items = visibleRuns(runs);
       if (!items.length) {
-        const text = `${taskScopeLabel()}暂无任务。`;
+        const text = '暂无任务。';
         box.innerHTML = `<div class="empty-state-card">${text}</div>`;
         return;
       }
@@ -264,7 +248,7 @@
         selectedRunId = '';
         return;
       }
-      if (transientUserMessage && currentMode !== 'g3_audited' && !selectedRunId) return;
+      if (transientUserMessage && !selectedRunId) return;
       if (!visible.some(item => item.id === selectedRunId)) {
         selectedRunId = visible[0].id;
       }
@@ -274,18 +258,12 @@
       return visibleRuns(runs).find(item => item.id === selectedRunId) || null;
     }
 
-    function runMode(item) {
-      return item.mode || 'g1_context';
-    }
-
     function visibleRuns(runs) {
-      return (runs || []).filter(item => {
-        return runMode(item) === currentMode;
-      });
+      return runs || [];
     }
 
     function clearScope() {
-      return {mode: currentMode};
+      return {};
     }
 
     function taskCard(item) {
@@ -305,8 +283,13 @@
       `;
       const actions = document.createElement('div');
       actions.className = 'task-actions';
-      const undeletableStatuses = new Set(['running', 'planned', 'approved', 'executing', 'executed', 'recovery_required', 'indeterminate']);
-      if (!undeletableStatuses.has(item.status)) {
+      const undeletableStages = new Set([
+        'received', 'context_frozen', 'intent_compiled', 'plan_verified',
+        'authorization_required', 'authorized', 'runtime_acquired',
+        'executing', 'executed', 'accepted', 'published',
+        'execution_indeterminate',
+      ]);
+      if (!undeletableStages.has(item.stage)) {
         const deleteButton = document.createElement('button');
         deleteButton.className = 'btn btn-danger btn-sm';
         deleteButton.textContent = '删除';
@@ -316,7 +299,7 @@
       card.appendChild(actions);
 
       const steps = document.createElement('details');
-      restoreTaskDetailsState(steps, item.id, 'steps', item.status === 'planned');
+      restoreTaskDetailsState(steps, item.id, 'steps', item.stage === 'plan_verified');
       steps.innerHTML = `<summary>执行步骤</summary><ol class="task-steps">${stepItems(item.workflow)}</ol>`;
       card.appendChild(steps);
 
@@ -370,31 +353,18 @@
     }
 
     function failedMessage(item) {
-      if (item.status === 'indeterminate') return '<div class="task-note error">ArcMap 执行后的权威结果无法判定；该审计记录不可删除，但可以重新运行此任务。</div>';
-      if (item.status === 'context_failed') return '<div class="task-note error">ArcPy 执行已完成，但更新执行后地图上下文失败。</div>';
-      if (item.status !== 'failed' || !item.result || !item.result.error) return '';
-      return `<div class="task-note error">执行失败：${escapeHtml(item.result.error)}</div>`;
+      if (item.stage === 'execution_indeterminate') return '<div class="task-note error">ArcMap 执行后的权威结果无法判定；该审计记录不可删除，但可以重新运行此任务。</div>';
+      if (item.stage === 'infrastructure_failed') return '<div class="task-note error">基础设施故障。</div>';
+      if (item.outcome && item.outcome.kind !== 'Succeeded' && item.outcome.message) {
+        return `<div class="task-note error">${escapeHtml(item.outcome.message)}</div>`;
+      }
+      return '';
     }
 
     function statusText(item) {
-      const action = item.workflow.action || 'execute';
-      if (action === 'clarify') return '需要补充信息。';
-      if (action === 'unsupported') return '暂不支持。';
-      if (action === 'answer') return '已回答。';
-      if (item.status === 'planned') return '任务已规划，未请求执行。';
-      return statusLabel(item, action);
+      return stageLabel(item.stage || item.status || '');
     }
 
     function statusLabel(item, action) {
-      if (action === 'answer') return '已回答';
-      if (action === 'clarify') return '需要补充';
-      if (action === 'unsupported') return '暂不支持';
-      if (item.status === 'planned') return '已规划';
-      if (item.status === 'executing') return 'ArcMap 执行中';
-      if (item.status === 'executed') return '正在更新地图上下文';
-      if (item.status === 'recovery_required') return '执行状态待恢复';
-      if (item.status === 'indeterminate') return '结果无法判定';
-      if (item.status === 'succeeded') return '已完成';
-      if (item.status === 'failed' || item.status === 'context_failed') return '失败';
-      return item.status;
+      return stageLabel(item.stage || item.status || '');
     }

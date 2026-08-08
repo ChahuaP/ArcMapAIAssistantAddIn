@@ -12,7 +12,7 @@ from arcmap_runtime_py2.capability_contract_protocol import (
 
 from .validators import ValidationError, prepare_workflow
 from .semantic_domain import canonicalize_semantic_fact
-from .plan_artifact import canonical_hash
+from .kernel.contracts import digest as canonical_hash
 from .artifact_identity import canonical_artifact_name
 
 
@@ -619,7 +619,7 @@ class WorkflowVerifier:
 
     @staticmethod
     def _kind_matches(expected, actual):
-        return expected == actual or (expected == "feature_layer" and actual == "feature_class") or (expected == "raster_layer" and actual == "raster")
+        return expected == actual
 
     @classmethod
     def _matches_output(cls, output, fact):

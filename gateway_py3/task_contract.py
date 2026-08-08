@@ -8,7 +8,7 @@ from typing import Any, Dict
 
 from .artifact_identity import artifact_filename_is_mentioned, artifact_format_is_mentioned
 from .llm_providers import StructuredOutputContract
-from .plan_artifact import canonical_hash
+from .kernel.contracts import digest as canonical_hash
 from .semantic_domain import (
     bind_condition_field_types,
     parse_task_predicate,
@@ -193,9 +193,8 @@ def parse_task_contract(value: Dict[str, Any], request: str, context: Dict[str, 
         _evidence(item["evidence"], request, "input_entities[%d].evidence" % index)
         if context is not None:
             layer = context_by_reference.get(item["reference"])
-            if layer is None:
-                raise TaskContractError("input entity reference is not present in current context.")
-            input_context[item["entity_id"]] = layer
+            if layer is not None:
+                input_context[item["entity_id"]] = layer
         if item["entity_id"] in ids:
             raise TaskContractError("task-contract ids must be unique.")
         if item["reference"] in input_references:
@@ -522,7 +521,39 @@ def bind_model_task_contract(
     _bind_input_entity_kinds(result, context)
     _bind_model_requirements(result, request)
     _bind_section_evidence(result, "clarifications", _MODEL_CLARIFICATION, request)
+    _bind_output_destinations(result)
     return result
+
+
+def _bind_output_destinations(result):
+    """Derive ``destination`` for non-persisted outputs.
+
+    When a requirement is ``map_change`` (e.g. "add layer"), the output is a
+    transient map state — the model may classify it as ``feature_layer`` but
+    the destination must be ``not_applicable`` because nothing is written to
+    disk.  The server reconciles this instead of forcing the model to guess.
+    """
+    requirements = result.get("requirements") or []
+    has_map_change = any(
+        isinstance(r.get("predicate"), dict)
+        and r["predicate"].get("kind") == "map_change"
+        for r in requirements
+    )
+    has_export = any(
+        isinstance(r.get("predicate"), dict)
+        and r["predicate"].get("kind") == "artifact_export"
+        for r in requirements
+    )
+    if not has_map_change or has_export:
+        return
+    for output in result.get("outputs", []):
+        if not isinstance(output, dict):
+            continue
+        if output.get("destination") == "not_applicable":
+            output["kind"] = "map_state"
+            output["format"] = "not_applicable"
+            output["geometry"] = "not_applicable"
+            output["spatial_reference"] = "not_applicable"
 
 
 def _bind_section_evidence(result, section, fields, request):
@@ -581,21 +612,44 @@ def _bind_input_entity_kinds(result, context):
         reference = item["reference"]
         binding = bindings_by_reference.get(reference)
         if binding is None:
-            raise TaskContractError(
-                "input_entities[%d].reference is not a bindable live ArcMap layer." % index
-            )
-        kind, identity = binding
+            # Not a live context layer — may be a file-system path the user
+            # wants to add.  Classify by extension; reject if unrecognized.
+            kind = _file_reference_kind(reference)
+            if kind is None:
+                raise TaskContractError(
+                    "input_entities[%d].reference is not a bindable live ArcMap layer "
+                    "or a recognized file path." % index
+                )
+            identity = reference
+        else:
+            kind, identity = binding
         if identity in identities:
             raise TaskContractError("input entity references must be unique.")
         item["kind"] = kind
         identities.add(identity)
 
 
+def _file_reference_kind(reference):
+    """Classify a file-system path into an entity kind by extension."""
+    if not isinstance(reference, str) or not reference:
+        return None
+    lowered = reference.lower()
+    if lowered.endswith((".shp",)):
+        return "feature_class"
+    if lowered.endswith((".tif", ".tiff", ".img", ".bmp", ".jpg", ".jpeg", ".png")):
+        return "raster"
+    if lowered.endswith((".csv", ".txt", ".dbf")):
+        return "table"
+    if lowered.endswith((".gdb",)):
+        return "file"
+    return None
+
+
 def _context_layer_kind(layer):
     if layer.get("isFeatureLayer") or layer.get("geometry_type"):
-        return "feature_layer"
+        return "feature_class"
     if layer.get("dataSource"):
-        return "raster_layer"
+        return "raster"
     return None
 
 

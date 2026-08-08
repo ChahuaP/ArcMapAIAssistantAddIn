@@ -280,14 +280,12 @@ class CatalogTests(unittest.TestCase):
         self.assertIn("install.json", addin_source)
 
     def test_runtime_process_paths_come_from_installed_app(self):
-        bridge_client = (ROOT / "gateway_py3" / "arcmap_bridge_client.py").read_text(encoding="utf-8")
+        # The legacy arcmap_bridge_client.py is replaced by
+        # runtime/bridge_client.py (lease protocol). Verify the Py2 side
+        # still references the installed gateway executable.
         gateway_client = (ROOT / "arcmap_runtime_py2" / "gateway_client.py").read_text(encoding="utf-8")
         runtime = (ROOT / "arcmap_runtime_py2" / "runtime.py").read_text(encoding="utf-8")
 
-        self.assertIn('"install.json"', bridge_client)
-        self.assertIn('"bridge_exe"', bridge_client)
-        self.assertNotIn("GEOPILOT_ARCMAP_BRIDGE", bridge_client)
-        self.assertNotIn('"ArcMapBridgeExternal"', bridge_client)
         self.assertIn('"gateway", "ArcMapAIAssistantGateway.exe"', gateway_client)
         self.assertNotIn('"dist"', gateway_client)
         self.assertNotIn('"python", "-m", "gateway_py3"', gateway_client)

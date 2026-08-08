@@ -1,11 +1,13 @@
     function tagClass(item, action) {
-      if (item.status === 'succeeded') return 'done';
-      if (action === 'answer') return 'done';
-      if (action === 'clarify') return 'clarify';
-      if (action === 'unsupported' || item.status === 'failed' || item.status === 'context_failed' || item.status === 'indeterminate') return 'unsupported';
+      const stage = item.stage || '';
+      if (stage === 'succeeded') return 'done';
+      if (stage === 'clarification_required') return 'clarify';
+      if (stage === 'contract_failed' || stage === 'capability_failed' ||
+          stage === 'infrastructure_failed' || stage === 'acceptance_failed' ||
+          stage === 'execution_indeterminate' || stage === 'cancelled' ||
+          stage === 'policy_denied') return 'unsupported';
       return 'execute';
     }
-
     function shortCommand(command) {
       return command.length > 44 ? command.slice(0, 44) + '...' : command;
     }
@@ -21,11 +23,32 @@
     async function refreshAll() {
       try {
         await loadWorkbenchState();
+        await loadArcMapBridges();
+        resumeActiveRun();
       } catch (err) {
         setTile('gatewayState', 'bad', '未连接');
-        setTile('restartState', 'warn', '启动控制台');
         setStatus(err.message);
         renderEmptyChat();
+      }
+    }
+
+    function resumeActiveRun() {
+      // On page refresh, find the latest non-terminal run and resume its
+      // modelWait display so the user sees progress instead of stale text.
+      const active = cachedRuns.find(r => {
+        const s = r.stage || r.status || '';
+        return s && !['succeeded','clarification_required','policy_denied',
+          'contract_failed','capability_failed','infrastructure_failed',
+          'quota_stopped','model_call_uncertain','execution_indeterminate',
+          'acceptance_failed','cancelled'].includes(s);
+      });
+      if (active) {
+        selectedRunId = active.run_id || active.id;
+        transientUserMessage = active.command || active.text || '';
+        transientAssistantMessage = '';
+        startModelWait('任务进行中', active.stage || active.status || 'received');
+        renderConversation(cachedRuns);
+        waitForRunSSE(selectedRunId, active.stage || active.status || 'received');
       }
     }
 
@@ -46,8 +69,23 @@
       eventSource.addEventListener('error', () => {
         setTile('gatewayState', 'warn', '等待重连');
       });
-      ['runs.changed', 'context.changed', 'arcmap.changed', 'config.changed', 'tools.changed', 'catalog.changed'].forEach(type => {
-        eventSource.addEventListener(type, () => scheduleEventRefresh(type));
+      // §14: consume kernel stage-changed events (SSE projection of run_events).
+      eventSource.addEventListener('run.stage_changed', (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          if (payload.run_id && payload.stage) {
+            handleRunStageChanged(payload.run_id, payload.stage);
+          }
+        } catch (e) { /* ignore malformed event */ }
+        // Don't refreshRuns while modelWait is active — it would destroy
+        // the progress bubble. handleRunStageChanged handles the UI update.
+        if (!modelWait) scheduleEventRefresh('runs');
+      });
+      eventSource.addEventListener('planning.node_update', () => scheduleEventRefresh('runs'));
+      eventSource.addEventListener('arcmap.execution_started', () => scheduleEventRefresh('runs'));
+      eventSource.addEventListener('arcmap.execution_done', () => scheduleEventRefresh('runs'));
+      ['config.changed', 'catalog.changed', 'arcmap.changed', 'tools.changed'].forEach(type => {
+        eventSource.addEventListener(type, () => scheduleEventRefresh(eventSlice(type)));
       });
     }
 
@@ -78,7 +116,7 @@
         }
         if (types.has('arcmap')) await loadArcMapBridges();
         if (types.has('tools') && !document.getElementById('toolsModal').hidden) await loadPendingTools();
-        if (types.has('runs') || types.has('context')) await refreshRuns(!transientUserMessage);
+        if (types.has('runs')) await refreshRuns(!transientUserMessage);
       } catch (err) {
         setTile('gatewayState', 'bad', '未连接');
         setTile('restartState', 'warn', '启动控制台');

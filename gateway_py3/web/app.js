@@ -1,13 +1,14 @@
-    const EXPECTED_GATEWAY_VERSION = '1.1.4';
+    const EXPECTED_GATEWAY_VERSION = '2.0.0';
     const API_ORIGIN = window.location.protocol === 'file:' ? 'http://127.0.0.1:8765' : '';
-    const MODE_STORAGE_KEY = 'geopilot.currentMode';
+    
+    const SESSION_STORAGE_KEY = 'geopilot.sessionId';
     let eventSource = null;
     let eventRefreshBusy = false;
     let eventRefreshTimer = 0;
     let pendingEventTypes = new Set();
     let capabilitiesLoaded = false;
-    let currentMode = 'g1_context';
-    let modeInitialized = false;
+    
+    
     let arcmapBridges = [];
     let cachedRuns = [];
     let selectedRunId = '';
@@ -18,6 +19,7 @@
     let providerOptions = [];
     let modelOptions = [];
     let pendingProviderKeyClears = {};
+    let pendingApprovalRunId = '';
     const appState = {
       config: null,
       health: null,
@@ -26,12 +28,76 @@
     };
     const taskDetailsState = new Map();
 
+    // §5 session isolation: one stable UUID per browser, sent as X-Session-Id.
+    // New task = same session (kernel creates a fresh run with its own run_id);
+    // clearing history starts a new session.
+    function getSessionId() {
+      let id = localStorage.getItem(SESSION_STORAGE_KEY);
+      if (!id) {
+        id = crypto.randomUUID();
+        localStorage.setItem(SESSION_STORAGE_KEY, id);
+      }
+      return id;
+    }
+
+    function resetSessionId() {
+      localStorage.removeItem(SESSION_STORAGE_KEY);
+    }
+
+    // §14.4: run stage → user-facing label (no fake timer).
+    const STAGE_LABELS = {
+      received: '已接收',
+      context_frozen: '正在捕获地图上下文',
+      intent_compiled: '正在理解任务意图',
+      plan_verified: '正在验证执行计划',
+      authorization_required: '等待授权确认',
+      authorized: '已授权',
+      runtime_acquired: '正在绑定 ArcMap',
+      executing: '正在执行到 ArcMap',
+      executed: '执行完成，正在验收',
+      accepted: '验收通过，正在发布',
+      published: '已发布',
+      succeeded: '任务完成',
+      clarification_required: '需要补充信息',
+      policy_denied: '授权被拒绝',
+      contract_failed: '任务合同校验失败',
+      capability_failed: '能力执行失败',
+      infrastructure_failed: '基础设施故障',
+      quota_stopped: '模型额度不足',
+      model_call_uncertain: '模型调用结果不确定',
+      execution_indeterminate: '执行状态不确定',
+      acceptance_failed: '成果验收失败',
+      cancelled: '已取消',
+    };
+
+    function stageLabel(stage) {
+      return STAGE_LABELS[stage] || stage;
+    }
+
+    function isTerminalStage(stage) {
+      return stage === 'succeeded' ||
+        stage === 'clarification_required' ||
+        stage === 'policy_denied' ||
+        stage === 'contract_failed' ||
+        stage === 'capability_failed' ||
+        stage === 'infrastructure_failed' ||
+        stage === 'quota_stopped' ||
+        stage === 'model_call_uncertain' ||
+        stage === 'execution_indeterminate' ||
+        stage === 'acceptance_failed' ||
+        stage === 'cancelled';
+    }
+
+    function isApprovalStage(stage) {
+      return stage === 'authorization_required';
+    }
+
     function setState(patch) {
       patch = patch || {};
       Object.assign(appState, patch);
       if (Object.prototype.hasOwnProperty.call(patch, 'runs')) cachedRuns = patch.runs || [];
       if (Object.prototype.hasOwnProperty.call(patch, 'arcmapBridges')) arcmapBridges = patch.arcmapBridges || [];
-      if (Object.prototype.hasOwnProperty.call(patch, 'currentMode')) currentMode = patch.currentMode || currentMode;
+      
     }
 
     function renderApp(changedKeys) {
@@ -51,8 +117,11 @@
 
     async function api(path, options) {
       let response;
+      const opts = options || {};
+      // §8: every request carries the session token
+      opts.headers = Object.assign({'X-Session-Id': getSessionId()}, opts.headers || {});
       try {
-        response = await fetch(apiUrl(path), options || {});
+        response = await fetch(apiUrl(path), opts);
       } catch (err) {
         throw new Error(offlineMessage());
       }
@@ -229,9 +298,9 @@
       document.getElementById('status').textContent = text;
     }
 
-    function startModelWait(label) {
+    function startModelWait(label, stage) {
       stopModelWait();
-      modelWait = {label, startedAt: Date.now(), stage: '', completedStageIndex: -1};
+      modelWait = {label, startedAt: Date.now(), stage: stage || 'received'};
       updateModelWait();
       modelWaitTimer = window.setInterval(updateModelWait, 1000);
       const button = document.getElementById('sendButton');
@@ -248,9 +317,15 @@
       if (button) button.disabled = false;
     }
 
+    function setModelWaitStage(stage) {
+      if (!modelWait) return;
+      modelWait.stage = stage;
+      updateModelWait();
+    }
+
     function updateModelWait() {
       if (!modelWait) return;
-      setStatus(`${modelWait.label}，已等待 ${formatDuration(modelWaitElapsed())}`);
+      setStatus(`${modelWait.label}：${stageLabel(modelWait.stage)}（已等待 ${formatDuration(modelWaitElapsed())}）`);
       const bubble = document.getElementById('modelWaitBubble');
       if (bubble) {
         bubble.innerHTML = renderModelWait();
@@ -270,37 +345,25 @@
     }
 
     function modelWaitStageIndex() {
-      const order = ['sync_arcmap', 'read_capabilities', 'analyze', 'read_fields', 'generate_workflow', 'validate', 'execute_arcmap', 'complete', 'failed'];
-      const stage = (modelWait && modelWait.stage) || '';
+      const order = ['received', 'context_frozen', 'intent_compiled', 'plan_verified', 'authorized', 'runtime_acquired', 'executing', 'executed', 'accepted', 'published', 'succeeded'];
+      const stage = (modelWait && modelWait.stage) || 'received';
       const index = order.indexOf(stage);
-      if (index >= 0) return Math.min(7, index);
-      return modelWait && modelWait.completedStageIndex >= 0 ? modelWait.completedStageIndex : Math.min(7, Math.floor(modelWaitElapsed() / 12));
+      return index >= 0 ? index : 0;
     }
 
     function renderModelWait() {
-      const stages = ['同步 ArcMap', '读取能力', '分析任务', '读取字段', '生成 workflow', '校验任务', '执行到 ArcMap', '完成/失败'];
-      const notes = [
-        '正在读取 ArcMap 窗口和地图状态。',
-        '正在读取可用操作与工具目录。',
-        '正在理解任务和会话上下文。',
-        '需要时会读取字段和值样本。',
-        '正在生成可校验的任务流程。',
-        '正在做本地规则校验。',
-        '全代理模式会直接发送到 ArcMap。',
-        '等待最终结果返回。'
-      ];
-      const active = modelWaitStageIndex();
+      const stages = ['接收', '上下文', '意图', '计划', '授权', '绑定', '执行', '验收', '发布', '完成'];
+      const active = Math.min(modelWaitStageIndex(), stages.length - 1);
       return `
         <div class="model-wait" aria-live="polite">
           <div class="model-wait-header">
             <strong class="model-wait-title">${escapeHtml(modelWait.label)}</strong>
             <span class="model-wait-time">${formatDuration(modelWaitElapsed())}</span>
           </div>
-          <div class="model-wait-progress" aria-hidden="true"><div class="model-wait-bar"></div></div>
           <div class="model-wait-steps">
             ${stages.map((stage, index) => `<span class="model-wait-step ${index === active ? 'active' : index < active ? 'done' : ''}">${stage}</span>`).join('')}
           </div>
-          <div class="model-wait-note">${notes[active]}</div>
+          <div class="model-wait-note">${escapeHtml(stageLabel(modelWait.stage))}</div>
         </div>
       `;
     }
@@ -338,27 +401,16 @@
 
     async function loadWorkbenchState() {
       const data = await api('/api/workbench-state');
-      applyHealthData(data.health || {}, true);
-      applyConfig(data.config || {});
-      applyArcMapBridges((data.arcmap && data.arcmap.bridges) || [], (data.arcmap && data.arcmap.error) || '');
-      applyRuns(data.runs || [], true);
-      setStatus(`网关已连接，版本 ${(data.health && data.health.app_version) || EXPECTED_GATEWAY_VERSION}。`);
-    }
-
-    function loadStoredMode() {
       try {
-        const mode = localStorage.getItem(MODE_STORAGE_KEY);
-        return ['g0_direct', 'g1_context', 'g2_constrained', 'g3_audited'].includes(mode) ? mode : '';
-      } catch (err) {
-        return '';
-      }
-    }
-
-    function storeMode(mode) {
-      try {
-        localStorage.setItem(MODE_STORAGE_KEY, mode);
-      } catch (err) {
-        // 浏览器禁用本地存储时，当前页面状态仍然有效。
+        applyHealthData(data.health || {}, true);
+        applyConfig(data.config || {});
+        applyArcMapBridges((data.arcmap && data.arcmap.bridges) || [], (data.arcmap && data.arcmap.error) || '');
+        applyRuns(data.runs || [], true);
+        setStatus(`网关已连接，版本 ${(data.health && data.health.app_version) || EXPECTED_GATEWAY_VERSION}。`);
+      } catch (renderErr) {
+        console.error('loadWorkbenchState render error:', renderErr);
+        // Still set health so the UI shows connected
+        applyHealthData(data.health || {}, true);
       }
     }
 
@@ -390,10 +442,6 @@
       renderModelConfig(config);
       const keyStates = providerKeyStates(providers);
       const ok = keyStates.some(item => item.ok);
-      if (!modeInitialized) {
-        currentMode = loadStoredMode() || currentMode;
-        modeInitialized = true;
-      }
       updateModeUI();
       document.getElementById('keyBadge').textContent = providerKeyLabel(keyStates);
       document.getElementById('keyActionText').textContent = '模型配置';
@@ -417,7 +465,7 @@
       const node = document.getElementById('activeModelHint');
       if (!node || !config) return;
       const primary = modelOptionLabel(config.primary_provider, config.primary_model);
-      node.textContent = currentMode === 'g3_audited' ? `G3 各角色统一使用：${primary}` : `当前模型：${primary}`;
+      node.textContent = `当前模型：${primary}`;
     }
 
     function renderSpeechConfigHint(config) {
@@ -647,20 +695,12 @@
     }
 
     async function setMode(mode) {
-      if (!['g0_direct', 'g1_context', 'g2_constrained', 'g3_audited'].includes(mode)) return;
-      currentMode = mode;
-      storeMode(mode);
-      updateModeUI();
-      setStatus(mode === 'g3_audited' ? '已切换到多 Agent 审核模式。' : '已切换到当前规划模式。');
-      await refreshRuns();
+      // Mode system removed in 2.0 — kept as no-op for backwards compatibility
+      // with any lingering HTML onclick references.
     }
 
     function updateModeUI() {
-      document.querySelectorAll('[data-mode]').forEach((button) => button.classList.toggle('active', button.dataset.mode === currentMode));
-      document.getElementById('taskPanelHint').textContent = taskScopeText();
-      updateModeStatus();
       renderCurrentModelHint(appState.config);
-      ensureSelectedWorkflow();
       renderTasks(cachedRuns);
       renderConversation(cachedRuns);
     }
@@ -680,16 +720,11 @@
     }
 
     function renderArcMapBridgeState(error) {
-      if (error) {
+      if (error || !arcmapBridges.length) {
         setTile('arcgisState', 'bad', '未连接');
         return;
       }
-      if (!arcmapBridges.length) {
-        setTile('arcgisState', 'bad', '未连接');
-        return;
-      }
-      const target = activeArcMapBridge() || arcmapBridges[0];
-      setTile('arcgisState', arcmapBridges.length > 1 ? 'warn' : 'ok', arcmapBridgeLabel(target, arcmapBridges.length));
+      setTile('arcgisState', 'ok', '已连接');
     }
 
     function activeArcMapBridge() {
@@ -698,25 +733,14 @@
 
     function arcmapBridgeLabel(bridge, count) {
       if (!bridge) return '未连接';
-      const summary = bridge.summary || {};
-      const title = summary.title || summary.name || 'ArcMap';
-      const parts = [title];
-      if (bridge.hwnd) parts.push(`hwnd ${bridge.hwnd}`);
-      if (bridge.pid) parts.push(`pid ${bridge.pid}`);
-      if (count > 1) parts.push(`${count} 个`);
-      return parts.join(' · ');
+      return '已连接';
     }
 
     function updateModeStatus() {
-      setTile('restartState', 'ok', currentMode);
-    }
-
-    function taskScopeLabel() {
-      return currentMode;
     }
 
     function taskScopeText() {
-      return `显示${taskScopeLabel()}的全部任务`;
+      return '输入 GIS 指令';
     }
 
     async function loadPendingTools() {
@@ -789,80 +813,162 @@
       input.value = '';
       transientUserMessage = command;
       transientAssistantMessage = '';
-      startModelWait('模型正在思考');
-      if (currentMode === 'g3_audited') {
-        renderConversation(cachedRuns);
-      } else {
+      const execute = true;
+        startModelWait('模型正在思考', 'received');
         selectedRunId = '';
         renderConversation(cachedRuns);
-      }
       try {
-        setStatus('正在生成任务...');
-        const data = await api('/runs', {
+        setStatus('正在提交任务...');
+        const payload = {text: command, execute: execute};
+        // side_effect_level is not declared by the caller — the plan's
+        // risk_level determines if authorization is needed (level >= 2).
+        const data = await api('/api/v1/runs', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({command, mode: currentMode, execute: true, confirmed: true, allow_edits: false})
+          body: JSON.stringify(payload)
         });
-        transientUserMessage = '';
+        // Keep transientUserMessage alive so the modelWait bubble persists.
+        // It will be cleared when the run reaches terminal state in
+        // handleRunStageChanged -> stopModelWait -> refreshRuns.
         transientAssistantMessage = '';
-        selectedRunId = data.run.id;
-        await waitForRun(data.run.id);
+        const run = data.run;
+        selectedRunId = run.run_id;
+        setModelWaitStage(run.stage);
+        renderConversation(cachedRuns);
+        // §14: SSE drives the wait. No polling.
+        await waitForRunSSE(run.run_id, run.stage);
       } catch (err) {
         stopModelWait();
         transientAssistantMessage = err.message;
         renderConversation(cachedRuns);
         setStatus(err.message);
-      } finally {
-        stopModelWait();
       }
     }
 
-    async function waitForRun(id) {
-      const terminal = new Set(['planned', 'clarify', 'reject', 'failed', 'context_failed', 'cancelled', 'succeeded', 'indeterminate']);
-      let attempt = 0;
-      while (true) {
-        const data = await api(`/runs/${id}`);
-        if (terminal.has(data.run.status)) {
-          await refreshRuns();
-          setStatus(`运行状态：${data.run.status}`);
-          return data.run;
-        }
-        await new Promise((resolve) => setTimeout(resolve, Math.min(250 * (attempt + 1), 2000)));
-        attempt += 1;
+    // §14: SSE-driven run wait. Replaces the old 250ms-2000ms backoff poll.
+    // The SSE stream pushes run.stage_changed events; we react to them.
+    async function waitForRunSSE(runId, initialStage) {
+      // One immediate inspect to sync the current stage (the background
+      // thread may have already advanced past 'received'). After this,
+      // SSE events drive all subsequent updates — no polling.
+      try {
+        const data = await api(`/api/v1/runs/${runId}`);
+        handleRunStageChanged(runId, data.run.stage);
+        if (isTerminalStage(data.run.stage) || isApprovalStage(data.run.stage)) return;
+      } catch (err) { /* SSE will handle it */ }
+    }
+
+    // Called by the SSE handler when a run.stage_changed event arrives.
+    async function handleRunStageChanged(runId, stage) {
+      if (selectedRunId !== runId) return;
+      setModelWaitStage(stage);
+      if (isApprovalStage(stage)) {
+        pendingApprovalRunId = runId;
+        renderApprovalPrompt(runId);
+        return;
       }
+      if (isTerminalStage(stage)) {
+        stopModelWait();
+        transientUserMessage = '';
+        await refreshRuns();
+        setStatus(stageLabel(stage));
+      }
+    }
+
+    // §6.6 authorization confirmation: the user must approve before execution.
+    window.approveRun = async function(runId) {
+      pendingApprovalRunId = '';
+      removeApprovalPrompt();
+      startModelWait('正在执行', 'authorized');
+      try {
+        const data = await api(`/api/v1/runs/${runId}/decide`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({approved: true})
+        });
+        setModelWaitStage(data.run.stage);
+        if (isTerminalStage(data.run.stage)) {
+          stopModelWait();
+          await refreshRuns();
+          setModelWaitStage(data.run.stage);
+        }
+      } catch (err) {
+        setStatus(err.message);
+      }
+    }
+
+    window.denyRun = async function(runId) {
+      pendingApprovalRunId = '';
+      removeApprovalPrompt();
+      try {
+        await api(`/api/v1/runs/${runId}/decide`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({approved: false})
+        });
+        await refreshRuns();
+        setStatus('已拒绝授权。');
+      } catch (err) {
+        setStatus(err.message);
+      }
+    }
+
+    function renderApprovalPrompt(runId) {
+      const chat = document.getElementById('chatLog');
+      const existing = document.getElementById('approvalPrompt');
+      if (existing) existing.remove();
+      const prompt = document.createElement('div');
+      prompt.id = 'approvalPrompt';
+      prompt.className = 'approval-prompt';
+      prompt.innerHTML = `
+        <div class="approval-body">
+          <p class="approval-title">⚠️ 执行授权确认</p>
+          <p>该任务将对 ArcMap 地图产生操作。是否确认执行？</p>
+          <div class="approval-actions">
+            <button class="btn-primary" onclick="approveRun('${escapeJs(runId)}')">确认执行</button>
+            <button class="btn-secondary" onclick="denyRun('${escapeJs(runId)}')">拒绝</button>
+          </div>
+        </div>
+      `;
+      chat.appendChild(prompt);
+      chat.scrollTop = chat.scrollHeight;
+    }
+
+    function removeApprovalPrompt() {
+      const prompt = document.getElementById('approvalPrompt');
+      if (prompt) prompt.remove();
     }
 
     async function clearConversation() {
-      await api('/runs/clear', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(clearScope())
-      });
+      resetSessionId();
       selectedRunId = '';
       transientUserMessage = '';
       transientAssistantMessage = '';
-      setStatus(currentMode === 'g3_audited' ? '已清空多 Agent 会话。' : '已清空。');
-      await refreshRuns();
+      stopModelWait();
+      setStatus('已清空会话。');
+      cachedRuns = [];
+      renderConversation(cachedRuns);
+      renderTasks(cachedRuns);
     }
 
     async function deleteRun(id) {
-      await api(`/runs/${id}/delete`, {method: 'POST', body: '{}'});
+      try {
+        await api(`/api/v1/runs/${id}/delete`, {method: 'POST', body: '{}'});
+      } catch (err) { /* ignore */ }
       if (selectedRunId === id) selectedRunId = '';
+      cachedRuns = cachedRuns.filter(r => r.run_id !== id && r.id !== id);
+      renderTasks(cachedRuns);
+      renderConversation(cachedRuns);
       setStatus('已删除。');
-      await refreshRuns();
     }
 
     async function refreshRuns(renderChat = true) {
-      const data = await api(runListPath());
+      const data = await api('/api/v1/runs');
       applyRuns(data.runs || [], renderChat);
     }
 
     function runListPath() {
-      const params = new URLSearchParams();
-      params.set('limit', '50');
-      params.set('mode', currentMode);
-      params.set('include_trace', 'false');
-      return `/api/runs?${params.toString()}`;
+      return '/api/v1/runs';
     }
 
     function applyRuns(runs, renderChat = true) {

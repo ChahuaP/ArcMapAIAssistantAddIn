@@ -1,4 +1,0 @@
-interface:
-  display_name: "GeoPilot ArcMap"
-  short_description: "Operate ArcMap through local GeoPilot Bridge."
-  default_prompt: "Use GeoPilot ArcMap to run doctor, sync ArcMap, validate a workflow locally, and execute it through ArcMap Bridge."

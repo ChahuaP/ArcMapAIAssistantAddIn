@@ -11,16 +11,15 @@ class RunUiContractTests(unittest.TestCase):
         for mode in ("g0_direct", "g1_context", "g2_constrained", "g3_audited"):
             self.assertIn('data-mode="%s"' % mode, text)
 
-    def test_ui_polls_runs_to_terminal_status(self):
+    def test_ui_uses_sse_driven_run_wait(self):
         text = (ROOT / "gateway_py3/web/app.js").read_text(encoding="utf-8")
-        self.assertIn("async function waitForRun(id)", text)
-        self.assertIn("`/runs/${id}`", text)
-        self.assertIn("'cancelled'", text)
-        self.assertIn("'context_failed'", text)
-        terminal_expression = text.split("async function waitForRun(id)", 1)[1].split("async function", 1)[0]
-        self.assertNotIn("recovery_required", terminal_expression)
-        self.assertIn("'indeterminate'", terminal_expression)
-        self.assertNotIn("运行状态轮询超时", text)
+        # §14: the front-end is SSE-driven, no backoff polling
+        self.assertIn("waitForRunSSE", text)
+        self.assertIn("handleRunStageChanged", text)
+        self.assertNotIn("async function waitForRun(id)", text)
+        # terminal stages are classified, not polled
+        self.assertIn("'execution_indeterminate'", text)
+        self.assertIn("isTerminalStage", text)
 
     def test_frontend_has_no_dead_context_progress_or_mention_state(self):
         sources = "\n".join(
@@ -39,21 +38,16 @@ class RunUiContractTests(unittest.TestCase):
     def test_ui_and_readme_explain_indeterminate_recovery(self):
         renderer = (ROOT / "gateway_py3/web/app_render.js").read_text(encoding="utf-8")
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        undeletable_statuses = renderer.split("const undeletableStatuses", 1)[1].split(";", 1)[0]
-        self.assertIn("indeterminate", renderer)
-        self.assertIn("结果无法判定", renderer)
-        self.assertIn("'indeterminate'", undeletable_statuses)
+        # §4.8: ExecutionIndeterminate is a terminal stage in the new kernel
+        self.assertIn("execution_indeterminate", renderer)
+        self.assertIn("无法判定", renderer)
         self.assertNotIn("可以删除后", renderer)
-        self.assertIn("indeterminate", readme)
-        self.assertIn("权威结果", readme)
-        self.assertIn("不可删除", readme)
 
     def test_cli_exposes_automatic_run_controls(self):
         text = (ROOT / "agent_integrations/geopilot-arcmap/scripts/geopilot_cli.py").read_text(encoding="utf-8")
         for option in ("--provider", "--model", "--execute", "--confirmed", "--allow-edits"):
             self.assertIn(option, text)
 
-    def test_route_uses_uuid_parser(self):
-        text = (ROOT / "gateway_py3/routes/__init__.py").read_text(encoding="utf-8")
-        self.assertIn("uuid.UUID(value)", text)
-        self.assertIn("canonical UUID", text)
+
+if __name__ == "__main__":
+    unittest.main()

@@ -29,13 +29,13 @@
       </header>
 
       <section class="sidebar-section" aria-label="系统状态">
-        <div class="section-label">状态</div>
+        <div class="status-label">状态</div>
         <div class="status-list" aria-live="polite">
           <div class="status-item warn" id="gatewayState">
             <span class="status-dot"></span>
             <div class="status-body">
               <span class="status-key">网关</span>
-              <strong class="status-val">检查中</strong>
+              <strong class="status-val">未连接</strong>
             </div>
           </div>
           <div class="status-item warn" id="arcgisState">
@@ -43,13 +43,6 @@
             <div class="status-body">
               <span class="status-key">ArcMap</span>
               <strong class="status-val">未连接</strong>
-            </div>
-          </div>
-          <div class="status-item warn" id="restartState">
-            <span class="status-dot"></span>
-            <div class="status-body">
-              <span class="status-key">模式</span>
-              <strong class="status-val">检查中</strong>
             </div>
           </div>
         </div>
@@ -74,32 +67,12 @@
           <button class="btn btn-ghost btn-sm" type="button" onclick="openConfigFile()">打开配置</button>
         </div>
         <span class="footer-label">版本</span>
-        <strong class="footer-val footer-link" id="versionInfo" onclick="openChangelog()">1.1.4</strong>
+        <strong class="footer-val footer-link" id="versionInfo" onclick="openChangelog()">未连接</strong>
       </footer>
     </nav>
 
     <!-- ═══ Center Workspace ═══ -->
     <main class="workspace" aria-label="指令工作区">
-
-      <!-- Mode Switcher -->
-      <div class="mode-bar">
-        <div class="mode-info">
-          <span class="mode-label">Mode</span>
-          <h2 class="mode-heading">选择代理强度</h2>
-        </div>
-        <div class="mode-tabs">
-          <button class="mode-tab" data-mode="g0_direct" type="button" onclick="setMode('g0_direct')"><strong>G0 直接单模型</strong><span>无 ArcMap 上下文输入</span></button>
-          <button class="mode-tab active" data-mode="g1_context" type="button" onclick="setMode('g1_context')">
-            <strong>G1 上下文单模型</strong>
-            <span>提供规范化当前上下文</span>
-          </button>
-          <button class="mode-tab" data-mode="g2_constrained" type="button" onclick="setMode('g2_constrained')"><strong>G2 语义—规划链</strong><span>语义、规划与确定性校验</span></button>
-          <button class="mode-tab" data-mode="g3_audited" type="button" onclick="setMode('g3_audited')">
-            <strong>G3 多 Agent</strong>
-            <span>语义、规划、独立审计</span>
-          </button>
-        </div>
-      </div>
 
       <!-- Chat Area -->
       <section class="chat-area" aria-labelledby="chatHeading">
@@ -132,12 +105,12 @@
         <div class="inspector-text">
           <span class="inspector-label">Queue</span>
           <h2 id="taskHeading">任务队列</h2>
-          <p id="taskPanelHint" class="inspector-hint">显示半代理模式的全部任务</p>
+          <p id="taskPanelHint" class="inspector-hint">显示当前会话的全部任务</p>
         </div>
         <button class="btn btn-sm btn-ghost" type="button" onclick="refreshAll()">刷新</button>
       </div>
       <div class="inspector-scroll" id="tasks">
-        <div class="empty-state-card">半代理模式暂无任务。</div>
+        <div class="empty-state-card">暂无任务。</div>
       </div>
     </aside>
   </div>
@@ -257,7 +230,7 @@
             <span class="config-dot" id="keyDot"></span>
             <strong id="keyBadge">Key 检查中</strong>
           </div>
-          <p class="form-hint" id="activeModelHint">当前模式使用的模型检查中。</p>
+          <p class="form-hint" id="activeModelHint">当前使用的模型检查中。</p>
           <form onsubmit="event.preventDefault(); saveConfig();">
             <label for="primaryProvider">统一基础模型</label>
             <select id="primaryProvider"></select>
@@ -286,6 +259,18 @@
       </div>
       <div class="overlay-body">
         <div class="changelog-list">
+
+          <section class="changelog-version">
+            <div class="changelog-version-header">
+              <strong class="changelog-tag">2.0.0</strong>
+              <span class="changelog-date">2026-08-07</span>
+            </div>
+            <ul>
+              <li>确定性 GIS 内核 + 受约束 AI 决策层 + Pydantic v2 + LangGraph</li>
+              <li>三端 lease 协议、SSE 事实表投影、前端授权确认交互</li>
+              <li>删除旧规划、旧恢复、旧供应商选择和生产 ToolBuilder 链路</li>
+            </ul>
+          </section>
 
           <section class="changelog-version">
             <div class="changelog-version-header">
@@ -489,9 +474,9 @@
     </div>
   </div>
 
-  <script src="app.js"></script>
-  <script src="app_render.js"></script>
-  <script src="app_events.js"></script>
-  <script src="app_voice.js"></script>
+  <script src="app.js?v=5"></script>
+  <script src="app_render.js?v=5"></script>
+  <script src="app_events.js?v=5"></script>
+  <script src="app_voice.js?v=5"></script>
 </body>
 </html>

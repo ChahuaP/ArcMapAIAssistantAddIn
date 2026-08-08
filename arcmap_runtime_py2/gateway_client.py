@@ -3,6 +3,7 @@ from __future__ import absolute_import
 
 import json
 import os
+import socket
 import subprocess
 import time
 import urllib2
@@ -33,12 +34,14 @@ def save_config(config):
     return _post("/config", config)
 
 
-def sync_run_context(run_id, context, sync_token, phase, target):
-    if not run_id or not sync_token or phase not in ("before_planning", "after_execution") or not isinstance(target, dict):
-        raise RuntimeError(u"ArcMap context callback requires run_id, sync_token, phase and target.")
+def sync_run_context(run_id, context, lease_id, epoch, plan_hash, phase, target):
+    if not run_id or not lease_id or epoch <= 0 or not plan_hash or phase not in ("before_planning", "after_execution") or not isinstance(target, dict):
+        raise RuntimeError(u"ArcMap context callback requires run_id, lease_id, epoch, plan_hash, phase and target.")
     return _post("/runs/%s/context" % run_id, {
         "context": context,
-        "sync_token": sync_token,
+        "lease_id": lease_id,
+        "epoch": int(epoch),
+        "plan_hash": plan_hash,
         "phase": phase,
         "target": target,
     })
@@ -68,6 +71,88 @@ def ensure_running():
     if payload and not _is_expected_version(payload):
         raise RuntimeError(u"本地网关版本不匹配：当前 %s，需要 %s。请重新安装最新版。" % (payload.get("app_version", u"未知"), EXPECTED_APP_VERSION))
     raise RuntimeError(u"本地网关启动失败。请双击 StartGateway.cmd 查看错误。")
+
+
+def ensure_bridge_running():
+    """Scan 8766-8789 for a live Bridge; start ArcMapBridge.exe if none found.
+
+    The Bridge EXE path comes from install.json (bridge_exe key). This
+    replaces the deleted gateway_py3/arcmap_bridge_client.ensure_running.
+    """
+    for port in [8766] + list(range(8767, 8790)):
+        if not _is_local_port_open(port):
+            continue
+        try:
+            result = _get_bridge_health(port)
+            if result and result.get("ok"):
+                return
+        except Exception:
+            continue
+    exe = _bridge_exe_path()
+    subprocess.Popen(
+        [exe],
+        cwd=path_utils.dirname(exe),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        creationflags=CREATE_NO_WINDOW
+    )
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        for port in [8766] + list(range(8767, 8790)):
+            if not _is_local_port_open(port):
+                continue
+            try:
+                result = _get_bridge_health(port)
+                if result and result.get("ok"):
+                    return
+            except Exception:
+                continue
+        time.sleep(0.2)
+    raise RuntimeError(u"ArcMapBridge.exe 启动后没有在 8766-8789 端口响应。")
+
+
+def _is_local_port_open(port):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(0.05)
+    try:
+        return sock.connect_ex(("127.0.0.1", int(port))) == 0
+    finally:
+        sock.close()
+
+
+def _get_bridge_health(port):
+    url = "http://127.0.0.1:%d/health" % int(port)
+    request = urllib2.Request(url)
+    response = urllib2.urlopen(request, timeout=2)
+    return json.loads(response.read().decode("utf-8"))
+
+
+def _bridge_exe_path():
+    install = _install_config()
+    value = install.get("bridge_exe")
+    if not isinstance(value, unicode) or not value.strip():
+        raise RuntimeError(u"install.json 缺少 bridge_exe。请重新安装 GeoPilot。")
+    exe = path_utils.abspath(value)
+    if not path_utils.isfile(exe):
+        raise RuntimeError(u"ArcMapBridge.exe 不存在：%s。请重新安装 GeoPilot。" % exe)
+    return exe
+
+
+def _install_config():
+    config_path = path_utils.join_path(
+        os.environ.get("APPDATA", os.path.expanduser("~")),
+        "ArcMapAIAssistant", "install.json"
+    )
+    if not path_utils.isfile(config_path):
+        raise RuntimeError(u"缺少安装配置：%s。请先安装 GeoPilot。" % config_path)
+    with path_utils.open_binary(config_path, "rb") as handle:
+        raw = handle.read()
+    if not isinstance(raw, unicode):
+        raw = raw.decode("utf-8-sig", "replace")
+    data = json.loads(raw.lstrip(u"\ufeff"))
+    if not isinstance(data, dict):
+        raise RuntimeError(u"install.json 必须是 JSON 对象。")
+    return data
 
 
 def is_running(timeout=2):
@@ -127,19 +212,33 @@ def start_gateway():
         raise RuntimeError(u"无法启动本地网关：%s" % exc)
 
 
-def claim_run(run_id, target, owner_id):
-    return _post("/runs/%s/claim" % run_id, {"target": target, "owner_id": owner_id})
+def acknowledge_lease(run_id, lease_id, epoch, plan_hash, target):
+    """Confirm lease binding for a run before execution (replaces claim)."""
+    if not run_id or not lease_id or epoch <= 0 or not plan_hash or not isinstance(target, dict):
+        raise RuntimeError(u"lease acknowledgement requires run_id, lease_id, epoch, plan_hash and target.")
+    return _post("/runs/%s/lease-ack" % run_id, {
+        "lease_id": lease_id,
+        "epoch": int(epoch),
+        "plan_hash": plan_hash,
+        "target": target,
+    })
 
 
-def heartbeat_run(run_id, owner_id):
-    return _post("/runs/%s/heartbeat" % run_id, {"owner_id": owner_id}, timeout=10)
+def heartbeat_run(run_id, lease_id, epoch, plan_hash):
+    return _post("/runs/%s/heartbeat" % run_id, {
+        "lease_id": lease_id,
+        "epoch": int(epoch),
+        "plan_hash": plan_hash,
+    }, timeout=10)
 
 
-def complete_run(run_id, status, result, owner_id, result_hash, target):
+def complete_run(run_id, status, result, lease_id, epoch, plan_hash, result_hash, target):
     return _post("/runs/%s/complete" % run_id, {
         "status": status,
         "result": result,
-        "owner_id": owner_id,
+        "lease_id": lease_id,
+        "epoch": int(epoch),
+        "plan_hash": plan_hash,
         "result_hash": result_hash,
         "target": target,
     }, timeout=10)

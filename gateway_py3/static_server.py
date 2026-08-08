@@ -48,8 +48,10 @@ def _relative_path(path: str) -> str | None:
 
 
 def _direct_asset(path: str) -> str | None:
-    if "/" not in path[1:]:
-        name = path.lstrip("/")
+    # Strip query string (e.g., app.js?v=3 -> app.js)
+    base = path.split("?", 1)[0]
+    if "/" not in base[1:]:
+        name = base.lstrip("/")
         if name in {
             "index.html",
             "tokens.css",

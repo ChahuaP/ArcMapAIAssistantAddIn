@@ -851,3 +851,23 @@ pre {
   .model-wait-steps { grid-template-columns: repeat(2, 1fr); }
   .bubble { max-width: 90%; }
 }
+
+/* §6.6 authorization confirmation prompt */
+.approval-prompt {
+  margin: 12px 0;
+  padding: 16px;
+  border-radius: 8px;
+  background: var(--color-surface-elevated, #fff8e1);
+  border: 1px solid var(--color-border, #ffb74d);
+}
+.approval-body { text-align: center; }
+.approval-title { font-weight: 600; margin-bottom: 8px; }
+.approval-actions { display: flex; gap: 12px; justify-content: center; margin-top: 12px; }
+.approval-actions .btn-primary {
+  padding: 8px 20px; border: none; border-radius: 6px;
+  background: var(--color-accent, #1976d2); color: #fff; cursor: pointer; font-size: 14px;
+}
+.approval-actions .btn-secondary {
+  padding: 8px 20px; border: 1px solid var(--color-border, #ccc); border-radius: 6px;
+  background: transparent; cursor: pointer; font-size: 14px;
+}

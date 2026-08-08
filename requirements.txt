@@ -1,0 +1,7 @@
+# GeoPilot gateway dependencies (target architecture §13.3).
+# Locked to exact versions. The gateway is no longer stdlib-only.
+pydantic==2.12.5
+langgraph==1.0.10
+langgraph-checkpoint==4.1.1
+langgraph-checkpoint-sqlite==3.1.1
+aiosqlite==0.22.1

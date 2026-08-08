@@ -274,6 +274,33 @@ class ChatProvider:
             "usage": normalize_usage(self.provider_id, payload.get("usage", {})),
         }
 
+    def chat_with_tools(
+        self,
+        messages: List[Dict[str, str]],
+        tools: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Multi-tool structured call (native function calling).
+
+        Unlike ``chat_structured`` (single contract, forced tool_choice), this
+        method exposes all ``tools`` to the model and uses ``tool_choice:
+        "auto"`` so the model picks the right one(s).  Returns a dict with a
+        ``tool_calls`` list: ``[{"name": ..., "arguments": {...}}, ...]``.
+        """
+        payload = self._post_chat_completion({
+            "model": self.model,
+            "messages": messages,
+            "tools": tools,
+            "tool_choice": "auto",
+            "temperature": 0,
+        })
+        message = payload["choices"][0]["message"]
+        if self.provider_id == MINIMAX_PROVIDER:
+            message = _normalize_minimax_agent_message(message)
+        result = _openai_tool_calls_result(message, payload)
+        result["_usage"] = normalize_usage(self.provider_id, payload.get("usage", {}))
+        result["_provider_response"] = payload
+        return result
+
     def _prepare_body(self, body: Dict[str, Any]) -> Dict[str, Any]:
         return body
 
@@ -465,25 +492,60 @@ def _openai_structured_result(
     payload: Dict[str, Any],
 ) -> Dict[str, Any]:
     tool_calls = message.get("tool_calls") if isinstance(message, dict) else None
-    if not isinstance(tool_calls, list) or len(tool_calls) != 1:
+    if isinstance(tool_calls, list) and len(tool_calls) == 1:
+        function = tool_calls[0].get("function") if isinstance(tool_calls[0], dict) else None
+        if isinstance(function, dict) and function.get("name") == contract.name:
+            arguments = function.get("arguments")
+            try:
+                parsed = json.loads(arguments) if isinstance(arguments, str) else arguments
+            except ValueError:
+                raise ProviderProtocolError("结构化响应工具参数不是有效 JSON。", payload)
+            if not isinstance(parsed, dict):
+                raise ProviderProtocolError("结构化响应工具参数必须是对象。", payload)
+            return dict(parsed)
+    raise ProviderProtocolError(
+        "结构化响应必须且只能包含一次工具调用。",
+        payload,
+    )
+
+
+def _openai_tool_calls_result(
+    message: Dict[str, Any],
+    payload: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Parse multi-tool-call responses (native function calling).
+
+    Returns ``{"tool_calls": [{"name": str, "arguments": dict}, ...]}``.
+    Fail closed if the model did not produce valid tool_calls.
+    """
+    raw_calls = message.get("tool_calls") if isinstance(message, dict) else None
+    if not isinstance(raw_calls, list) or not raw_calls:
         raise ProviderProtocolError(
-            "结构化响应必须且只能包含一次工具调用。",
+            "模型未返回工具调用。请检查任务描述是否清晰。",
             payload,
         )
-    function = tool_calls[0].get("function") if isinstance(tool_calls[0], dict) else None
-    if not isinstance(function, dict) or function.get("name") != contract.name:
+    parsed_calls: List[Dict[str, Any]] = []
+    for raw in raw_calls:
+        if not isinstance(raw, dict):
+            continue
+        function = raw.get("function")
+        if not isinstance(function, dict):
+            continue
+        name = function.get("name")
+        arguments = function.get("arguments")
+        try:
+            parsed = json.loads(arguments) if isinstance(arguments, str) else arguments
+        except ValueError:
+            raise ProviderProtocolError("工具参数不是有效 JSON。", payload)
+        if not isinstance(parsed, dict):
+            raise ProviderProtocolError("工具参数必须是对象。", payload)
+        parsed_calls.append({"name": name, "arguments": parsed})
+    if not parsed_calls:
         raise ProviderProtocolError(
-            "结构化响应调用了错误工具。",
+            "模型未返回有效的工具调用。",
             payload,
         )
-    arguments = function.get("arguments")
-    try:
-        parsed = json.loads(arguments) if isinstance(arguments, str) else arguments
-    except ValueError:
-        raise ProviderProtocolError("结构化响应工具参数不是有效 JSON。", payload)
-    if not isinstance(parsed, dict):
-        raise ProviderProtocolError("结构化响应工具参数必须是对象。", payload)
-    return dict(parsed)
+    return {"tool_calls": parsed_calls}
 
 
 def _normalize_minimax_structured_result(value, schema):

@@ -42,17 +42,23 @@ class ExecutionOutboxPython27Tests(unittest.TestCase):
     def test_byte_uuid_owner_is_normalized_and_delivered(self):
         outbox = ExecutionOutbox(self.directory)
         run_id = str(uuid.uuid4())
-        owner_id = str(uuid.uuid4())
-        entry = outbox.enqueue(run_id, owner_id, "failed", {
+        lease_id = str(uuid.uuid4())
+        plan_hash = "a" * 64
+        entry = outbox.enqueue(run_id, lease_id, 1, plan_hash, "failed", {
             "ok": False, "traceback": "ArcPy traceback",
         }, TARGET, [])
         self.assertTrue(isinstance(entry["run_id"], unicode))
         self.assertTrue(isinstance(entry["owner"], unicode))
+        self.assertEqual(entry["epoch"], 1)
+        self.assertEqual(entry["plan_hash"], plan_hash)
         client = _Client()
         self.assertTrue(outbox.deliver(entry, client))
         self.assertEqual(len(client.calls), 1)
         self.assertEqual(client.calls[0][0], unicode(run_id))
-        self.assertEqual(client.calls[0][3], unicode(owner_id))
+        # complete_run(run_id, status, result, lease_id, epoch, plan_hash, result_hash, target)
+        self.assertEqual(client.calls[0][3], unicode(lease_id))
+        self.assertEqual(client.calls[0][4], 1)
+        self.assertEqual(client.calls[0][5], plan_hash)
 
     def test_expired_a_release_cannot_delete_b_and_c_is_blocked(self):
         outbox = ExecutionOutbox(self.directory)
@@ -70,7 +76,7 @@ class ExecutionOutboxPython27Tests(unittest.TestCase):
     def test_publication_plan_is_durable_before_execution_delivery(self):
         outbox = ExecutionOutbox(self.directory)
         entry = outbox.enqueue(
-            str(uuid.uuid4()), str(uuid.uuid4()), "executed", {"ok": True}, TARGET,
+            str(uuid.uuid4()), str(uuid.uuid4()), 1, "a" * 64, "executed", {"ok": True}, TARGET,
             [{"path": u"D:\\成果\\最终图层.shp", "visible": False, "selection_oids": [3, 1]}],
         )
         self.assertFalse(entry["publication_complete"])
@@ -81,7 +87,7 @@ class ExecutionOutboxPython27Tests(unittest.TestCase):
     def test_publication_lease_has_one_owner(self):
         outbox = ExecutionOutbox(self.directory)
         entry = outbox.enqueue(
-            str(uuid.uuid4()), str(uuid.uuid4()), "executed", {"ok": True}, TARGET,
+            str(uuid.uuid4()), str(uuid.uuid4()), 1, "a" * 64, "executed", {"ok": True}, TARGET,
             [{"path": u"D:\\成果\\最终图层.shp", "visible": True, "selection_oids": None}],
         )
         with outbox.publication_lease(entry) as first:

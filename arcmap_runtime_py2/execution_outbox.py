@@ -46,9 +46,14 @@ class ExecutionOutbox(object):
             path_utils.makedirs(self.directory)
         self._prune_orphan_guards()
 
-    def enqueue(self, run_id, owner_id, status, result, target, publication_items):
+    def enqueue(self, run_id, lease_id, epoch, plan_hash, status, result, target, publication_items):
         run_id = _run_id(run_id)
-        owner_id = _owner_id(owner_id)
+        lease_id = _lease_id(lease_id)
+        if not isinstance(epoch, integer_types) or epoch <= 0:
+            raise ValueError("execution epoch must be a positive int.")
+        plan_hash = _protocol_text(plan_hash, "execution plan_hash")
+        if not plan_hash:
+            raise ValueError("execution plan_hash is required.")
         if status not in ("executed", "failed"):
             raise ValueError("execution status is invalid.")
         if not isinstance(result, dict):
@@ -58,7 +63,9 @@ class ExecutionOutbox(object):
             raise ValueError("failed execution cannot publish outputs.")
         entry = {
             "run_id": run_id,
-            "owner": owner_id,
+            "lease_id": lease_id,
+            "epoch": int(epoch),
+            "plan_hash": plan_hash,
             "status": status,
             "result": result,
             "result_hash": result_hash(result),
@@ -146,7 +153,8 @@ class ExecutionOutbox(object):
                 if not stored["publication_complete"]:
                     raise ValueError("execution outputs have not been published.")
                 client.complete_run(
-                    stored["run_id"], stored["status"], stored["result"], stored["owner"],
+                    stored["run_id"], stored["status"], stored["result"],
+                    stored["lease_id"], stored["epoch"], stored["plan_hash"],
                     stored["result_hash"], stored["target"],
                 )
                 try:
@@ -240,7 +248,7 @@ class ExecutionOutbox(object):
             current = self._read_lease(path)
             if float(current.get("expires_at") or 0) > claimed_at:
                 return False
-            tombstone = path + ".expired." + _owner_id(str(uuid.uuid4()))
+            tombstone = path + ".expired." + _lease_id(str(uuid.uuid4()))
             if not _atomic_move_no_replace(path, tombstone):
                 return False
             try:
@@ -290,8 +298,12 @@ class ExecutionOutbox(object):
         entry = json.loads(payload)
         if not isinstance(entry, dict):
             raise ValueError("execution outbox entry is invalid.")
-        if not isinstance(entry.get("owner"), text_type) or not entry["owner"]:
-            raise ValueError("execution outbox owner is invalid.")
+        if not isinstance(entry.get("lease_id"), text_type) or not entry["lease_id"]:
+            raise ValueError("execution outbox lease_id is invalid.")
+        if not isinstance(entry.get("epoch"), integer_types) or entry.get("epoch") <= 0:
+            raise ValueError("execution outbox epoch is invalid.")
+        if not isinstance(entry.get("plan_hash"), text_type) or not entry["plan_hash"]:
+            raise ValueError("execution outbox plan_hash is invalid.")
         if entry.get("status") not in ("executed", "failed") or not isinstance(entry.get("result"), dict):
             raise ValueError("execution outbox result is invalid.")
         publication_items = _publication_items(entry.get("publication_items"))
@@ -327,10 +339,10 @@ def _canonical_uuid(value):
         return False
 
 
-def _owner_id(value):
-    value = _protocol_text(value, "execution owner_id")
+def _lease_id(value):
+    value = _protocol_text(value, "execution lease_id")
     if not value:
-        raise ValueError("execution owner_id is required.")
+        raise ValueError("execution lease_id is required.")
     return value
 
 

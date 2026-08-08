@@ -1,6 +1,14 @@
+"""Structured output contracts for provider wire calls.
+
+The workflow planner uses native function-tool calling: each operation is a
+separate tool with its own ``parameters`` JSON Schema.  The model sees the
+exact field names and types each operation requires, so it never has to guess
+argument shapes (the root cause of the old ``arguments_json`` opaque-string
+design).
+"""
 from __future__ import annotations
 
-from typing import Dict
+from typing import Any, Dict, List
 
 from .audit_contract import AUDIT_CONTRACT
 from .task_contract import TASK_CONTRACT
@@ -22,11 +30,30 @@ STRUCTURED_OUTPUT_CONTRACTS: Dict[str, StructuredOutputContract] = {
 }
 
 
-def workflow_contract_for_capabilities(capabilities) -> StructuredOutputContract:
-    """Build the fixed provider-wire Workflow tool from selected cards.
+def tool_name_for_operation(operation_id: str) -> str:
+    """Map an operation id (``layer.add_layer``) to a function-tool name.
 
-    Operation arguments travel as canonical JSON text. The server remains the
-    authority that decodes and validates each operation-specific object.
+    OpenAI function names allow ``[a-zA-Z0-9_-]`` (no dots); dots in
+    operation ids become hyphens.  No operation id contains a hyphen, so
+    the mapping is reversible.
+    """
+    return "step_" + operation_id.replace(".", "-")
+
+
+def operation_id_from_tool(tool_name: str) -> str:
+    """Inverse of :func:`tool_name_for_operation`."""
+    if not tool_name.startswith("step_"):
+        return tool_name
+    return tool_name[5:].replace("-", ".")
+
+
+def workflow_tools_for_capabilities(capabilities: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Build one OpenAI function tool per operation (native function calling).
+
+    Each tool carries the operation's real ``parameters_schema`` as its
+    ``parameters`` JSON Schema, so the model is structurally constrained to
+    the correct argument names and types — no opaque ``arguments_json``
+    string, no guessing.
     """
     if not isinstance(capabilities, list) or not capabilities:
         raise ValueError("workflow capabilities must be a non-empty array")
@@ -38,36 +65,25 @@ def workflow_contract_for_capabilities(capabilities) -> StructuredOutputContract
         or len(set(operation_ids)) != len(operation_ids)
     ):
         raise ValueError("workflow capability identities are invalid")
+    tools: List[Dict[str, Any]] = []
     for card in cards:
         parameters = card.get("parameters_schema")
         if not isinstance(parameters, dict) or parameters.get("type") != "object":
             raise ValueError("workflow capability parameters_schema is invalid: " + card["id"])
-    step_schema = {
-        "type": "object",
-        "properties": {
-            "id": {"type": "string", "minLength": 1},
-            "operation": {"type": "string", "enum": operation_ids},
-            "arguments_json": {"type": "string", "minLength": 2},
-            "reason": {"type": "string"},
-        },
-        "required": ["id", "operation", "arguments_json", "reason"],
-        "additionalProperties": False,
-    }
-    workflow_schema = {
-        "type": "object",
-        "properties": {
-            "action": {"const": "execute"},
-            "summary": {"type": "string"},
-            "steps": {"type": "array", "minItems": 1, "items": step_schema},
-        },
-        "required": ["action", "summary", "steps"],
-        "additionalProperties": False,
-    }
-    return StructuredOutputContract(
-        name="submit_workflow_v3",
-        description="Submit a workflow through the fixed provider wire contract.",
-        schema=_wrapper({"workflow_draft": workflow_schema}, ["workflow_draft"]),
-    )
+        tools.append({
+            "type": "function",
+            "function": {
+                "name": tool_name_for_operation(card["id"]),
+                "description": card.get("summary", card["id"]),
+                "parameters": parameters,
+            },
+        })
+    return tools
+
+
+def workflow_capability_index(capabilities: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """Map tool-name → operation card for draft parsing."""
+    return {tool_name_for_operation(c["id"]): c for c in capabilities if isinstance(c, dict)}
 
 
 def structured_output_contract(name: str) -> StructuredOutputContract:
