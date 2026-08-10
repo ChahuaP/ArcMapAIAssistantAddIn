@@ -129,17 +129,26 @@
             {
               "type": "object",
               "additionalProperties": false,
-              "required": ["rule"],
+              "required": [
+                "rule"
+              ],
               "properties": {
                 "rule": {
-                  "enum": ["any", "requires_selected"]
+                  "enum": [
+                    "any",
+                    "requires_selected"
+                  ]
                 }
               }
             },
             {
               "type": "object",
               "additionalProperties": false,
-              "required": ["rule", "parameter", "values"],
+              "required": [
+                "rule",
+                "parameter",
+                "values"
+              ],
               "properties": {
                 "rule": {
                   "const": "parameter_values_require_selected"
@@ -1024,6 +1033,22 @@
                       ]
                     }
                   },
+                  "target": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
                   "where": {
                     "type": "object",
                     "minProperties": 1,
@@ -1041,22 +1066,6 @@
                     "additionalProperties": false
                   },
                   "selection_type": {
-                    "type": "object",
-                    "minProperties": 1,
-                    "maxProperties": 1,
-                    "properties": {
-                      "parameter": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "output": {
-                        "const": true
-                      },
-                      "const": {}
-                    },
-                    "additionalProperties": false
-                  },
-                  "target": {
                     "type": "object",
                     "minProperties": 1,
                     "maxProperties": 1,
@@ -1136,7 +1145,7 @@
                       ]
                     }
                   },
-                  "selector": {
+                  "target": {
                     "type": "object",
                     "minProperties": 1,
                     "maxProperties": 1,
@@ -1168,23 +1177,7 @@
                     },
                     "additionalProperties": false
                   },
-                  "target": {
-                    "type": "object",
-                    "minProperties": 1,
-                    "maxProperties": 1,
-                    "properties": {
-                      "parameter": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "output": {
-                        "const": true
-                      },
-                      "const": {}
-                    },
-                    "additionalProperties": false
-                  },
-                  "selection_type": {
+                  "selector": {
                     "type": "object",
                     "minProperties": 1,
                     "maxProperties": 1,
@@ -1201,6 +1194,22 @@
                     "additionalProperties": false
                   },
                   "search_distance": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "selection_type": {
                     "type": "object",
                     "minProperties": 1,
                     "maxProperties": 1,
@@ -1282,7 +1291,7 @@
                       ]
                     }
                   },
-                  "source": {
+                  "distance": {
                     "type": "object",
                     "minProperties": 1,
                     "maxProperties": 1,
@@ -1298,7 +1307,7 @@
                     },
                     "additionalProperties": false
                   },
-                  "distance": {
+                  "source": {
                     "type": "object",
                     "minProperties": 1,
                     "maxProperties": 1,
@@ -1377,6 +1386,22 @@
                       ]
                     }
                   },
+                  "method": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
                   "sources": {
                     "type": "array",
                     "minItems": 1,
@@ -1396,22 +1421,6 @@
                       },
                       "additionalProperties": false
                     }
-                  },
-                  "method": {
-                    "type": "object",
-                    "minProperties": 1,
-                    "maxProperties": 1,
-                    "properties": {
-                      "parameter": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "output": {
-                        "const": true
-                      },
-                      "const": {}
-                    },
-                    "additionalProperties": false
                   }
                 },
                 "required": [
@@ -1476,7 +1485,7 @@
                       ]
                     }
                   },
-                  "join": {
+                  "target": {
                     "type": "object",
                     "minProperties": 1,
                     "maxProperties": 1,
@@ -1492,7 +1501,7 @@
                     },
                     "additionalProperties": false
                   },
-                  "target": {
+                  "join": {
                     "type": "object",
                     "minProperties": 1,
                     "maxProperties": 1,
@@ -1843,22 +1852,6 @@
                       ]
                     }
                   },
-                  "schema_type": {
-                    "type": "object",
-                    "minProperties": 1,
-                    "maxProperties": 1,
-                    "properties": {
-                      "parameter": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "output": {
-                        "const": true
-                      },
-                      "const": {}
-                    },
-                    "additionalProperties": false
-                  },
                   "target": {
                     "type": "object",
                     "minProperties": 1,
@@ -1894,6 +1887,22 @@
                       },
                       "additionalProperties": false
                     }
+                  },
+                  "schema_type": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
                   }
                 },
                 "required": [
@@ -1959,23 +1968,7 @@
                       ]
                     }
                   },
-                  "field_length": {
-                    "type": "object",
-                    "minProperties": 1,
-                    "maxProperties": 1,
-                    "properties": {
-                      "parameter": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "output": {
-                        "const": true
-                      },
-                      "const": {}
-                    },
-                    "additionalProperties": false
-                  },
-                  "field_type": {
+                  "target": {
                     "type": "object",
                     "minProperties": 1,
                     "maxProperties": 1,
@@ -2007,7 +2000,23 @@
                     },
                     "additionalProperties": false
                   },
-                  "target": {
+                  "field_length": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "field_type": {
                     "type": "object",
                     "minProperties": 1,
                     "maxProperties": 1,
@@ -2088,7 +2097,7 @@
                       ]
                     }
                   },
-                  "field_name": {
+                  "target": {
                     "type": "object",
                     "minProperties": 1,
                     "maxProperties": 1,
@@ -2104,7 +2113,7 @@
                     },
                     "additionalProperties": false
                   },
-                  "target": {
+                  "field_name": {
                     "type": "object",
                     "minProperties": 1,
                     "maxProperties": 1,
@@ -2183,6 +2192,22 @@
                       ]
                     }
                   },
+                  "target": {
+                    "type": "object",
+                    "minProperties": 1,
+                    "maxProperties": 1,
+                    "properties": {
+                      "parameter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "const": true
+                      },
+                      "const": {}
+                    },
+                    "additionalProperties": false
+                  },
                   "where": {
                     "type": "object",
                     "minProperties": 1,
@@ -2200,22 +2225,6 @@
                     "additionalProperties": false
                   },
                   "assignments": {
-                    "type": "object",
-                    "minProperties": 1,
-                    "maxProperties": 1,
-                    "properties": {
-                      "parameter": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "output": {
-                        "const": true
-                      },
-                      "const": {}
-                    },
-                    "additionalProperties": false
-                  },
-                  "target": {
                     "type": "object",
                     "minProperties": 1,
                     "maxProperties": 1,
@@ -2295,7 +2304,7 @@
                       ]
                     }
                   },
-                  "where": {
+                  "target": {
                     "type": "object",
                     "minProperties": 1,
                     "maxProperties": 1,
@@ -2311,7 +2320,7 @@
                     },
                     "additionalProperties": false
                   },
-                  "target": {
+                  "where": {
                     "type": "object",
                     "minProperties": 1,
                     "maxProperties": 1,
@@ -2892,195 +2901,6 @@
                       ]
                     }
                   },
-                  "action": {
-                    "type": "object",
-                    "minProperties": 1,
-                    "maxProperties": 1,
-                    "properties": {
-                      "parameter": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "output": {
-                        "const": true
-                      },
-                      "const": {}
-                    },
-                    "additionalProperties": false
-                  }
-                },
-                "required": [
-                  "action",
-                  "kind"
-                ],
-                "additionalProperties": false
-              },
-              {
-                "type": "object",
-                "properties": {
-                  "kind": {
-                    "const": "artifact_export"
-                  },
-                  "result": {
-                    "type": "object",
-                    "minProperties": 1,
-                    "maxProperties": 1,
-                    "properties": {
-                      "parameter": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "output": {
-                        "const": true
-                      },
-                      "const": {}
-                    },
-                    "additionalProperties": false
-                  },
-                  "preserves": {
-                    "type": "array",
-                    "minItems": 1,
-                    "uniqueItems": true,
-                    "items": {
-                      "type": "string",
-                      "enum": [
-                        "add_xy",
-                        "aggregate",
-                        "append",
-                        "artifact_export",
-                        "attribute_filter",
-                        "buffer",
-                        "copy",
-                        "define_projection",
-                        "feature_append",
-                        "feature_create",
-                        "field_add",
-                        "field_delete",
-                        "field_update",
-                        "inspect",
-                        "layout_change",
-                        "map_change",
-                        "merge",
-                        "overlay",
-                        "project",
-                        "repair",
-                        "source_preserved",
-                        "spatial_filter",
-                        "spatial_join"
-                      ]
-                    }
-                  },
-                  "output_format": {
-                    "type": "object",
-                    "minProperties": 1,
-                    "maxProperties": 1,
-                    "properties": {
-                      "parameter": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "output": {
-                        "const": true
-                      },
-                      "const": {}
-                    },
-                    "additionalProperties": false
-                  },
-                  "action": {
-                    "type": "object",
-                    "minProperties": 1,
-                    "maxProperties": 1,
-                    "properties": {
-                      "parameter": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "output": {
-                        "const": true
-                      },
-                      "const": {}
-                    },
-                    "additionalProperties": false
-                  }
-                },
-                "required": [
-                  "action",
-                  "kind",
-                  "output_format"
-                ],
-                "additionalProperties": false
-              },
-              {
-                "type": "object",
-                "properties": {
-                  "kind": {
-                    "const": "artifact_export"
-                  },
-                  "result": {
-                    "type": "object",
-                    "minProperties": 1,
-                    "maxProperties": 1,
-                    "properties": {
-                      "parameter": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "output": {
-                        "const": true
-                      },
-                      "const": {}
-                    },
-                    "additionalProperties": false
-                  },
-                  "preserves": {
-                    "type": "array",
-                    "minItems": 1,
-                    "uniqueItems": true,
-                    "items": {
-                      "type": "string",
-                      "enum": [
-                        "add_xy",
-                        "aggregate",
-                        "append",
-                        "artifact_export",
-                        "attribute_filter",
-                        "buffer",
-                        "copy",
-                        "define_projection",
-                        "feature_append",
-                        "feature_create",
-                        "field_add",
-                        "field_delete",
-                        "field_update",
-                        "inspect",
-                        "layout_change",
-                        "map_change",
-                        "merge",
-                        "overlay",
-                        "project",
-                        "repair",
-                        "source_preserved",
-                        "spatial_filter",
-                        "spatial_join"
-                      ]
-                    }
-                  },
-                  "selected_only": {
-                    "type": "object",
-                    "minProperties": 1,
-                    "maxProperties": 1,
-                    "properties": {
-                      "parameter": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "output": {
-                        "const": true
-                      },
-                      "const": {}
-                    },
-                    "additionalProperties": false
-                  },
                   "target": {
                     "type": "object",
                     "minProperties": 1,
@@ -3099,133 +2919,32 @@
                   },
                   "action": {
                     "type": "object",
-                    "minProperties": 1,
-                    "maxProperties": 1,
+                    "additionalProperties": false,
                     "properties": {
-                      "parameter": {
+                      "const": {
                         "type": "string",
-                        "minLength": 1
-                      },
-                      "output": {
-                        "const": true
-                      },
-                      "const": {}
+                        "enum": [
+                          "export_selected_features"
+                        ]
+                      }
                     },
-                    "additionalProperties": false
-                  }
-                },
-                "required": [
-                  "action",
-                  "kind",
-                  "selected_only",
-                  "target"
-                ],
-                "additionalProperties": false
-              },
-              {
-                "type": "object",
-                "properties": {
-                  "kind": {
-                    "const": "artifact_export"
-                  },
-                  "result": {
-                    "type": "object",
-                    "minProperties": 1,
-                    "maxProperties": 1,
-                    "properties": {
-                      "parameter": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "output": {
-                        "const": true
-                      },
-                      "const": {}
-                    },
-                    "additionalProperties": false
-                  },
-                  "preserves": {
-                    "type": "array",
-                    "minItems": 1,
-                    "uniqueItems": true,
-                    "items": {
-                      "type": "string",
-                      "enum": [
-                        "add_xy",
-                        "aggregate",
-                        "append",
-                        "artifact_export",
-                        "attribute_filter",
-                        "buffer",
-                        "copy",
-                        "define_projection",
-                        "feature_append",
-                        "feature_create",
-                        "field_add",
-                        "field_delete",
-                        "field_update",
-                        "inspect",
-                        "layout_change",
-                        "map_change",
-                        "merge",
-                        "overlay",
-                        "project",
-                        "repair",
-                        "source_preserved",
-                        "spatial_filter",
-                        "spatial_join"
-                      ]
-                    }
+                    "required": [
+                      "const"
+                    ]
                   },
                   "output_format": {
                     "type": "object",
-                    "minProperties": 1,
-                    "maxProperties": 1,
+                    "additionalProperties": false,
                     "properties": {
-                      "parameter": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "output": {
-                        "const": true
-                      },
-                      "const": {}
+                      "const": {
+                        "const": "gdb"
+                      }
                     },
-                    "additionalProperties": false
+                    "required": [
+                      "const"
+                    ]
                   },
                   "selected_only": {
-                    "type": "object",
-                    "minProperties": 1,
-                    "maxProperties": 1,
-                    "properties": {
-                      "parameter": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "output": {
-                        "const": true
-                      },
-                      "const": {}
-                    },
-                    "additionalProperties": false
-                  },
-                  "target": {
-                    "type": "object",
-                    "minProperties": 1,
-                    "maxProperties": 1,
-                    "properties": {
-                      "parameter": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "output": {
-                        "const": true
-                      },
-                      "const": {}
-                    },
-                    "additionalProperties": false
-                  },
-                  "action": {
                     "type": "object",
                     "minProperties": 1,
                     "maxProperties": 1,

@@ -43,6 +43,6 @@ def get_spatial_reference(context, arguments, step_outputs):
 def _layer_info(context, layer_value, step_outputs=None):
     layer = common.find_layer(context, layer_value, step_outputs)
     for item in context_reader.read_context().get("layers", []):
-        if item["name"] == layer.name or item["longName"] == getattr(layer, "longName", layer.name):
+        if item["name"] == layer.name or item["long_name"] == getattr(layer, "longName", layer.name):
             return item
     raise common.OperationError("Layer metadata not found: %s" % layer_value)

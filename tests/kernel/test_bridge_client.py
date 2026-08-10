@@ -19,6 +19,7 @@ from gateway_py3.kernel.contracts import (
 from gateway_py3.runtime.bridge_client import (
     ArcMapBridgeError, RealBridgeClient,
 )
+from gateway_py3.runtime import bridge_client
 
 
 def _plan() -> VerifiedPlan:
@@ -145,6 +146,7 @@ class RealBridgeClientTest(unittest.TestCase):
 
     def test_wait_for_receipt_blocks_until_notify(self):
         token = self.lease.run_id
+        self.client._new_receipt_event(token)
         result = {}
 
         def deliver():
@@ -161,19 +163,33 @@ class RealBridgeClientTest(unittest.TestCase):
         self.assertEqual(receipt["status"], "executed")
 
     def test_wait_for_receipt_timeout_returns_none(self):
+        self.client._new_receipt_event("00000000-0000-0000-0000-0000000000ee")
         receipt = self.client.wait_for_receipt("00000000-0000-0000-0000-0000000000ee",
                                                timeout=0.5)
         self.assertIsNone(receipt)
 
     def test_reconcile_confirms_executed(self):
+        def deliver():
+            import time
+            time.sleep(0.1)
+            self.client.receive_receipt(self.lease.run_id, {
+                "lease_id": self.lease.lease_id, "epoch": self.lease.epoch,
+                "plan_hash": self.lease.plan_digest, "status": "executed",
+                "result": {"ok": True}, "result_hash": "e3b0c44298fc1c149afbf4c8996fb924"
+            })
+        threading.Thread(target=deliver, daemon=True).start()
         outcome = self.client.reconcile(self.lease, self.lease.run_id)
         self.assertIsNotNone(outcome)
         self.assertEqual(outcome["status"], "executed")
         self.assertEqual(outcome["lease_id"], self.lease.lease_id)
 
     def test_reconcile_unprovable_returns_none(self):
-        _FakeBridgeHandler.reconcile_status = "unknown"
-        outcome = self.client.reconcile(self.lease, self.lease.run_id)
+        original = bridge_client.RECEIPT_WAIT_TIMEOUT_SECONDS
+        bridge_client.RECEIPT_WAIT_TIMEOUT_SECONDS = 0.1
+        try:
+            outcome = self.client.reconcile(self.lease, self.lease.run_id)
+        finally:
+            bridge_client.RECEIPT_WAIT_TIMEOUT_SECONDS = original
         self.assertIsNone(outcome)
 
     def test_dispatch_error_raises(self):

@@ -63,10 +63,14 @@ class PolicyGate:
                 CONTRACT_FAILED, "authorization", "invalid_effect_level",
                 "副作用等级必须为 1..4。",
             )
-        if level > plan.risk_level:
+        # The plan's risk_level is the minimum authorization it requires; the
+        # requested effect level must cover it. level < plan.risk_level means
+        # the plan writes/destructs but the caller only authorized a lower tier.
+        if level < plan.risk_level:
             return outcome_failed(
-                POLICY_DENIED, "authorization", "effect_exceeds_plan",
-                "请求的副作用等级超过计划声明的风险等级。",
+                POLICY_DENIED, "authorization", "insufficient_effect_level",
+                "请求的副作用等级低于计划要求的最低风险等级（计划 %d，授权 %d）。"
+                % (plan.risk_level, level),
             )
         if level == 4 and not self.destructive_enabled:
             return outcome_failed(
@@ -106,10 +110,11 @@ class PolicyGate:
                 CONTRACT_FAILED, "authorization", "invalid_effect_level",
                 "副作用等级必须为 1..4。",
             )
-        if level > plan.risk_level:
+        if level < plan.risk_level:
             return outcome_failed(
-                POLICY_DENIED, "authorization", "effect_exceeds_plan",
-                "请求的副作用等级超过计划声明的风险等级。",
+                POLICY_DENIED, "authorization", "insufficient_effect_level",
+                "请求的副作用等级低于计划要求的最低风险等级（计划 %d，授权 %d）。"
+                % (plan.risk_level, level),
             )
         if level == 4 and not self.destructive_enabled:
             return outcome_failed(
@@ -135,7 +140,9 @@ class PolicyGate:
             str(item) for item in (effects.get("inputs") or ())
         )
         output_identities = tuple(
-            str(item) for item in (effects.get("outputs") or ())
+            (str(item["output_id"]), str(item["destination"]))
+            for item in effects.get("outputs", ())
+            if isinstance(item, dict)
         )
         return AuthorizationGrant(
             grant_id=str(uuid.uuid4()),

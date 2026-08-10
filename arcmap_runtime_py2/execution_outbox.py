@@ -44,9 +44,12 @@ class ExecutionOutbox(object):
         self.directory = path_utils.abspath(directory)
         if not path_utils.isdir(self.directory):
             path_utils.makedirs(self.directory)
+        self.receipts_directory = path_utils.join_path(self.directory, "receipts")
+        if not path_utils.isdir(self.receipts_directory):
+            path_utils.makedirs(self.receipts_directory)
         self._prune_orphan_guards()
 
-    def enqueue(self, run_id, lease_id, epoch, plan_hash, status, result, target, publication_items):
+    def enqueue(self, run_id, lease_id, epoch, plan_hash, status, result, target):
         run_id = _run_id(run_id)
         lease_id = _lease_id(lease_id)
         if not isinstance(epoch, integer_types) or epoch <= 0:
@@ -58,9 +61,6 @@ class ExecutionOutbox(object):
             raise ValueError("execution status is invalid.")
         if not isinstance(result, dict):
             raise ValueError("execution result must be an object.")
-        publication_items = _publication_items(publication_items)
-        if status == "failed" and publication_items:
-            raise ValueError("failed execution cannot publish outputs.")
         entry = {
             "run_id": run_id,
             "lease_id": lease_id,
@@ -70,60 +70,18 @@ class ExecutionOutbox(object):
             "result": result,
             "result_hash": result_hash(result),
             "target": _target(target),
-            "publication_items": publication_items,
-            "publication_complete": not publication_items,
         }
         destination = self._entry_path(run_id)
         if path_utils.isfile(destination):
             current = self._read(destination)
             if current != entry:
                 raise ValueError("conflicting execution outbox entry.")
+            if not path_utils.isfile(self._receipt_path(run_id)):
+                self._write_atomic(self._receipt_path(run_id), current)
             return current
         self._write_atomic(destination, entry)
+        self._write_atomic(self._receipt_path(run_id), entry)
         return entry
-
-    def replace_result(self, entry, result):
-        if not isinstance(result, dict):
-            raise ValueError("publication result must be an object.")
-        run_id = _run_id(entry.get("run_id"))
-        destination = self._entry_path(run_id)
-        current = self._read(destination)
-        if current["publication_complete"]:
-            raise ValueError("execution outbox entry changed before publication result update.")
-        updated = dict(current)
-        updated["result"] = result
-        updated["result_hash"] = result_hash(result)
-        self._write_atomic(destination, updated)
-        return updated
-
-    def mark_publication_complete(self, entry):
-        run_id = _run_id(entry.get("run_id"))
-        destination = self._entry_path(run_id)
-        if not path_utils.isfile(destination):
-            raise ValueError("execution outbox entry is missing.")
-        current = self._read(destination)
-        if current != entry:
-            raise ValueError("execution outbox entry changed before publication acknowledgement.")
-        if current["publication_complete"]:
-            return current
-        updated = dict(current)
-        updated["publication_complete"] = True
-        self._write_atomic(destination, updated)
-        return updated
-
-    @contextmanager
-    def publication_lease(self, entry):
-        run_id = _run_id(entry.get("run_id"))
-        guard = _delivery_guard(self._publication_guard_path(run_id), timeout_seconds=0.0)
-        try:
-            guard.__enter__()
-        except IOError:
-            yield False
-            return
-        try:
-            yield True
-        finally:
-            guard.__exit__(None, None, None)
 
     def pending(self):
         entries = []
@@ -138,33 +96,28 @@ class ExecutionOutbox(object):
         entry_path = self._entry_path(run_id)
         if not path_utils.isfile(entry_path):
             return True
-        with self.publication_lease(entry) as publication_idle:
-            if not publication_idle:
-                return False
-            lease_owner = str(uuid.uuid4())
-            if not self._acquire_delivery_lease(run_id, lease_owner):
-                return False
-            try:
-                if not path_utils.isfile(entry_path):
-                    return True
-                stored = self._read(entry_path)
-                if stored != entry:
-                    raise ValueError("execution outbox entry changed before delivery.")
-                if not stored["publication_complete"]:
-                    raise ValueError("execution outputs have not been published.")
-                client.complete_run(
-                    stored["run_id"], stored["status"], stored["result"],
-                    stored["lease_id"], stored["epoch"], stored["plan_hash"],
-                    stored["result_hash"], stored["target"],
-                )
-                try:
-                    path_utils.remove(entry_path)
-                except OSError as exc:
-                    if getattr(exc, "errno", None) != errno.ENOENT and path_utils.isfile(entry_path):
-                        raise
+        lease_owner = str(uuid.uuid4())
+        if not self._acquire_delivery_lease(run_id, lease_owner):
+            return False
+        try:
+            if not path_utils.isfile(entry_path):
                 return True
-            finally:
-                self._release_delivery_lease(run_id, lease_owner)
+            stored = self._read(entry_path)
+            if stored != entry:
+                raise ValueError("execution outbox entry changed before delivery.")
+            client.post_execution_receipt(
+                stored["run_id"], stored["status"], stored["result"],
+                stored["lease_id"], stored["epoch"], stored["plan_hash"],
+                stored["result_hash"], stored["target"],
+            )
+            try:
+                path_utils.remove(entry_path)
+            except OSError as exc:
+                if getattr(exc, "errno", None) != errno.ENOENT and path_utils.isfile(entry_path):
+                    raise
+            return True
+        finally:
+            self._release_delivery_lease(run_id, lease_owner)
 
     @staticmethod
     def _write_atomic(destination, entry):
@@ -191,7 +144,7 @@ class ExecutionOutbox(object):
 
     def _prune_orphan_guards(self):
         for name in path_utils.listdir(self.directory):
-            if not name.endswith(".lease") or name.endswith(".publication.lease"):
+            if not name.endswith(".lease"):
                 continue
             run_id = name[:-len(".lease")]
             if not _canonical_uuid(run_id) or path_utils.isfile(self._entry_path(run_id)):
@@ -201,10 +154,7 @@ class ExecutionOutbox(object):
             except OSError:
                 pass
         for name in path_utils.listdir(self.directory):
-            if name.endswith(".publication.lease.guard"):
-                run_id = name[:-len(".publication.lease.guard")]
-                lease_path = u""
-            elif name.endswith(".lease.guard"):
+            if name.endswith(".lease.guard"):
                 run_id = name[:-len(".lease.guard")]
                 lease_path = self._lease_path(run_id)
             else:
@@ -221,14 +171,24 @@ class ExecutionOutbox(object):
     def _entry_path(self, run_id):
         return path_utils.join_path(self.directory, run_id + ".json")
 
+    def _receipt_path(self, run_id):
+        return path_utils.join_path(self.receipts_directory, run_id + ".json")
+
+    def reconcile(self, run_id, target, client):
+        run_id = _run_id(run_id)
+        stored = self._read(self._receipt_path(run_id))
+        if stored["target"] != _target(target):
+            raise ValueError("execution receipt target does not match reconcile target.")
+        client.post_execution_receipt(stored["run_id"], stored["status"], stored["result"],
+                            stored["lease_id"], stored["epoch"], stored["plan_hash"],
+                            stored["result_hash"], stored["target"])
+        return stored
+
     def _lease_path(self, run_id):
         return path_utils.join_path(self.directory, run_id + ".lease")
 
     def _lease_guard_path(self, run_id):
         return path_utils.join_path(self.directory, run_id + ".lease.guard")
-
-    def _publication_guard_path(self, run_id):
-        return path_utils.join_path(self.directory, run_id + ".publication.lease.guard")
 
     def _acquire_delivery_lease(self, run_id, owner, now=None):
         return self._acquire_lease(
@@ -271,22 +231,21 @@ class ExecutionOutbox(object):
 
     @staticmethod
     def _read_lease(path):
-        fallback_expiry = os.path.getmtime(path_utils.to_unicode_path(path)) + DELIVERY_LEASE_SECONDS
         with path_utils.open_binary(path, "rb") as handle:
             payload = handle.read()
         if not isinstance(payload, text_type):
             payload = payload.decode("ascii")
         try:
             lease = json.loads(payload)
-        except (ValueError, TypeError):
-            return {"owner": None, "claimed_at": fallback_expiry - DELIVERY_LEASE_SECONDS, "expires_at": fallback_expiry}
+        except (ValueError, TypeError) as exc:
+            raise RuntimeError("execution outbox lease is corrupt: %s" % exc)
         if (
             not isinstance(lease, dict)
             or not isinstance(lease.get("owner"), text_type)
             or not _canonical_uuid(lease["owner"])
             or float(lease.get("expires_at") or 0) <= 0
         ):
-            return {"owner": None, "claimed_at": fallback_expiry - DELIVERY_LEASE_SECONDS, "expires_at": fallback_expiry}
+            raise RuntimeError("execution outbox lease is invalid")
         return lease
 
     @staticmethod
@@ -306,15 +265,6 @@ class ExecutionOutbox(object):
             raise ValueError("execution outbox plan_hash is invalid.")
         if entry.get("status") not in ("executed", "failed") or not isinstance(entry.get("result"), dict):
             raise ValueError("execution outbox result is invalid.")
-        publication_items = _publication_items(entry.get("publication_items"))
-        if publication_items != entry.get("publication_items"):
-            raise ValueError("execution publication items are not canonical.")
-        if not isinstance(entry.get("publication_complete"), bool):
-            raise ValueError("execution publication status is invalid.")
-        if not publication_items and not entry["publication_complete"]:
-            raise ValueError("empty execution publication is already complete.")
-        if entry.get("status") == "failed" and publication_items:
-            raise ValueError("failed execution cannot publish outputs.")
         if result_hash(entry.get("result")) != entry.get("result_hash"):
             raise ValueError("execution outbox result hash is invalid.")
         _run_id(entry.get("run_id"))
@@ -344,40 +294,6 @@ def _lease_id(value):
     if not value:
         raise ValueError("execution lease_id is required.")
     return value
-
-
-def _publication_items(values):
-    if not isinstance(values, list):
-        raise ValueError("execution publication items must be a list.")
-    result = []
-    seen = set()
-    for value in values:
-        if not isinstance(value, dict):
-            raise ValueError("execution publication item must be an object.")
-        path = _protocol_text(value.get("path"), "execution publication path")
-        if not path:
-            raise ValueError("execution publication path is required.")
-        visible = value.get("visible")
-        if visible is not None and not isinstance(visible, bool):
-            raise ValueError("execution publication visibility is invalid.")
-        selection_oids = value.get("selection_oids")
-        if selection_oids is not None:
-            if not isinstance(selection_oids, list) or any(
-                not isinstance(item, integer_types) or isinstance(item, bool)
-                for item in selection_oids
-            ):
-                raise ValueError("execution publication selection is invalid.")
-            selection_oids = sorted(set(selection_oids))
-        normalized = path_utils.normcase(path_utils.normpath(path))
-        if normalized in seen:
-            raise ValueError("execution publication items must be unique.")
-        seen.add(normalized)
-        result.append({
-            "path": path,
-            "visible": visible,
-            "selection_oids": selection_oids,
-        })
-    return result
 
 
 def _protocol_text(value, field):

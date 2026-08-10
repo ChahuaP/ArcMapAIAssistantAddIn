@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import ntpath
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -36,6 +37,14 @@ def canonical_json(value: Any) -> str:
 
 def digest(value: Any) -> str:
     return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
+
+
+def planning_context_hash(snapshot: "ContextSnapshot") -> str:
+    """Digest every planning-visible context fact, excluding lease timing only."""
+    document = snapshot.model_dump(mode="json")
+    document.pop("lease_id", None)
+    document.pop("captured_at", None)
+    return digest(document)
 
 
 def _seal_document(model: BaseModel) -> Any:
@@ -107,17 +116,66 @@ class SideEffectScope(_FrozenModel):
     """The side effects a user explicitly authorized for this request (§4.1).
 
     ``level`` follows PolicyGate risk tiers (§6.6): 1 read, 2 recoverable
-    session, 3 isolated workspace write, 4 destructive. ``paths`` and
-    ``datasets`` are the explicit inputs/outputs the user named.
+    session, 3 isolated workspace write, 4 destructive.  Formal output
+    authorization is the exact ``output_identities`` set.
     """
     level: int
-    paths: Tuple[str, ...] = ()
-    datasets: Tuple[str, ...] = ()
+    input_identities: Tuple[Tuple[str, str], ...] = ()
+    output_identities: Tuple[Tuple[str, str], ...] = ()
 
     @model_validator(mode="after")
     def _validate(self) -> "SideEffectScope":
         if self.level < 1 or self.level > 4:
             raise ValueError("side_effect.level must be 1..4.")
+        for label, identities in (("input", self.input_identities),
+                                  ("output", self.output_identities)):
+            seen = set()
+            for identity_id, location in identities:
+                _require_id(identity_id, "side_effect.%s_id" % label)
+                _require_id(location, "side_effect.%s_location" % label)
+                if (identity_id, location) in seen:
+                    raise ValueError("side_effect.%s_identities must be unique." % label)
+                seen.add((identity_id, location))
+        return self
+
+
+class TargetSelector(_FrozenModel):
+    """One stable ArcMap target selected by the caller."""
+    bridge_pid: int
+    bridge_port: int
+    arcmap_pid: int
+    hwnd: int
+    deployment_hash: str
+
+    @model_validator(mode="after")
+    def _validate(self) -> "TargetSelector":
+        for field in ("bridge_pid", "bridge_port", "arcmap_pid", "hwnd"):
+            if getattr(self, field) <= 0:
+                raise ValueError("target_selector.%s must be positive." % field)
+        _require_id(self.deployment_hash, "target_selector.deployment_hash")
+        return self
+
+
+class ExperimentSpec(_FrozenModel):
+    """Frozen formal-ablation facts carried by the normal request envelope."""
+    pair_id: str
+    arm: str
+    seed: int
+    provider: str
+    model: str
+    phase: str = "planning_gate"
+
+    @model_validator(mode="after")
+    def _validate(self) -> "ExperimentSpec":
+        _require_uuid(self.pair_id, "experiment.pair_id")
+        if self.arm not in ("g2", "g3"):
+            raise ValueError("experiment.arm must be g2 or g3.")
+        if self.seed < 0:
+            raise ValueError("experiment.seed must be non-negative.")
+        if self.provider != "minimax" or self.model != "MiniMax-M3":
+            raise ValueError("formal experiments require minimax/MiniMax-M3.")
+        if self.phase != "planning_gate":
+            raise ValueError("experiment.phase must be planning_gate.")
         return self
 
 
@@ -137,6 +195,8 @@ class RequestEnvelope(_FrozenModel):
     inputs: Tuple[str, ...] = ()
     outputs: Tuple[str, ...] = ()
     plan_artifact: Optional[Dict[str, Any]] = None
+    target_selector: TargetSelector
+    experiment: Optional[ExperimentSpec] = None
 
     @model_validator(mode="after")
     def _validate(self) -> "RequestEnvelope":
@@ -146,6 +206,8 @@ class RequestEnvelope(_FrozenModel):
             raise ValueError("execute=True requires an explicit side_effect scope.")
         if self.side_effects is not None and not self.execute:
             raise ValueError("side_effects require execute=True.")
+        if self.experiment is not None and self.execute:
+            raise ValueError("experiment planning_gate requires execute=False.")
         return self
 
 
@@ -182,6 +244,9 @@ class LayerSnapshot(_FrozenModel):
     coordinate_system: Optional[str] = None
     geometry_type: Optional[str] = None
     selection_count: int = 0
+    long_name: Optional[str] = None
+    visible: bool = False
+    selection_hash: Optional[str] = None
     value_summary: Optional[Dict[str, Any]] = None
 
     @model_validator(mode="after")
@@ -197,6 +262,12 @@ class ContextSnapshot(_FrozenModel):
     The model only sees a ``ContextProjection`` derived from this snapshot;
     the full snapshot is retained as evidence. Its ``digest`` binds every plan
     and execution request.
+
+    A real lease must be acquired before capture: ``lease_id`` binds the
+    snapshot to the ArcMap instance the plan is authored against, and the
+    lease's (arcmap_pid, bridge_pid, bridge_port, target_hwnd) is checked
+    again at execute time. An empty lease_id is rejected — there is no
+    "context without a lease" path.
     """
     lease_id: str
     arcmap_pid: int
@@ -206,7 +277,7 @@ class ContextSnapshot(_FrozenModel):
     document_identity: Dict[str, Any]
     layers: Tuple[LayerSnapshot, ...] = ()
     active_data_frame: Optional[str] = None
-    edit_session_active: bool = False
+    edit_session_state: str = "unknown"
     is_saved: bool = False
     view_state: Optional[Dict[str, Any]] = None
     captured_at: float = 0.0
@@ -224,6 +295,8 @@ class ContextSnapshot(_FrozenModel):
             raise ValueError("context.document_identity is required.")
         if self.captured_at < 0:
             raise ValueError("context.captured_at must be a non-negative number.")
+        if self.edit_session_state not in ("none", "single", "mixed", "unknown"):
+            raise ValueError("context.edit_session_state is invalid.")
         _require_id(self.deployment_hash, "context.deployment_hash")
         return self
 
@@ -231,33 +304,36 @@ class ContextSnapshot(_FrozenModel):
     def digest(self) -> str:
         return digest(_seal_document(self))
 
-    def to_legacy_dict(self) -> Dict[str, Any]:
-        """Project into the legacy context dict format validators expect.
 
-        Single source of truth — replaces duplicated ``_project_context``.
-        """
-        mxd = self.document_identity.get("mxd", "")
-        layers = []
-        for layer in self.layers:
-            layers.append({
-                "layer_ref": layer.identity.layer_ref,
-                "name": layer.identity.name,
-                "longName": layer.identity.name,
-                "dataSource": layer.identity.data_source,
-                "isFeatureLayer": layer.geometry_type is not None,
-                "geometry_type": layer.geometry_type,
-                "fields": [
-                    {"name": f.name, "type": f.dtype or "String"}
-                    for f in layer.fields
-                ],
-                "selected_count": layer.selection_count,
-            })
-        return {
-            "layers": layers,
-            "is_saved": self.is_saved,
-            "active_data_frame": self.active_data_frame,
-        }
 
+def context_verifier_view(snapshot: "ContextSnapshot") -> Dict[str, Any]:
+    """Project a ContextSnapshot into the dict shape the deterministic
+    WorkflowVerifier expects (layer refs, fields, geometry, selection).
+
+    This is an input adapter for the verifier, not a compatibility shim: the
+    verifier operates on this stable projection while ContextSnapshot remains
+    the sealed evidence type.
+    """
+    layers = []
+    for layer in snapshot.layers:
+        layers.append({
+            "layer_ref": layer.identity.layer_ref,
+            "name": layer.identity.name,
+            "longName": layer.identity.name,
+            "dataSource": layer.identity.data_source,
+            "isFeatureLayer": layer.geometry_type is not None,
+            "geometry_type": layer.geometry_type,
+            "fields": [
+                {"name": f.name, "type": f.dtype or "String"}
+                for f in layer.fields
+            ],
+            "selected_count": layer.selection_count,
+        })
+    return {
+        "layers": layers,
+        "is_saved": snapshot.is_saved,
+        "active_data_frame": snapshot.active_data_frame,
+    }
 
 # --- §4.4 CapabilitySnapshot ------------------------------------------------
 
@@ -314,7 +390,7 @@ class CapabilitySnapshot(_FrozenModel):
                 "id": card.operation_id,
                 "summary": card.business_semantic,
                 "parameters_schema": card.parameters_schema,
-                "side_effects": _side_effect_name(card.risk_level),
+                "risk_level": card.risk_level,
             }
             for card in self.operation_cards
         ]
@@ -377,11 +453,48 @@ class IntentSpec(_FrozenModel):
 
 # --- §4.5 VerifiedPlan ------------------------------------------------------
 
+class DeclaredOutput(_FrozenModel):
+    """Structured declaration of one workflow output, used by acceptance.
+
+    Filled by TaskCompiler from the operation's CapabilitySpec and the intent.
+    ``coordinate_system`` / ``geometry_type`` / ``expected_fields`` left empty
+    mean "not asserted" (loose check); acceptance only verifies what the plan
+    committed to.
+    """
+    output_id: str
+    name: str
+    kind: str  # feature_class | table | raster | layer_file
+    destination: str
+    coordinate_system: Optional[str] = None  # EPSG:xxxx; None = inherit from input
+    geometry_type: Optional[str] = None
+    expected_fields: Tuple[str, ...] = ()
+    min_record_count: int = 0
+
+    @model_validator(mode="after")
+    def _validate(self) -> "DeclaredOutput":
+        _require_id(self.output_id, "declared_output.output_id")
+        _require_id(self.name, "declared_output.name")
+        _require_id(self.kind, "declared_output.kind")
+        _require_id(self.destination, "declared_output.destination")
+        if self.kind == "map_state":
+            if self.destination != "not_applicable":
+                raise ValueError("map_state output must use not_applicable destination.")
+        else:
+            import ntpath
+            normalized = ntpath.normpath(self.destination)
+            if not ntpath.isabs(normalized) or normalized != self.destination:
+                raise ValueError("declared_output.destination must be a normalized absolute Windows path.")
+        if self.min_record_count < 0:
+            raise ValueError("declared_output.min_record_count must be non-negative.")
+        return self
+
+
 class WorkflowStep(_FrozenModel):
     id: str
     operation: str
     arguments: Dict[str, Any]
     reason: str
+    declared_outputs: Tuple[DeclaredOutput, ...] = ()
 
     @model_validator(mode="after")
     def _validate(self) -> "WorkflowStep":
@@ -406,6 +519,7 @@ class VerifiedPlan(_FrozenModel):
     prompt_version: str = EMPTY
     risk_level: int = 1
     required_permissions: Tuple[str, ...] = ()
+    input_identities: Tuple[str, ...] = ()
 
     @model_validator(mode="after")
     def _validate(self) -> "VerifiedPlan":
@@ -428,7 +542,49 @@ class VerifiedPlan(_FrozenModel):
         return digest(_seal_document(self))
 
 
-# --- §4.6 AuthorizationGrant ------------------------------------------------
+# --- §4.6 staged artifact identity -----------------------------------------
+
+class ArtifactIdentity(_FrozenModel):
+    """One sealed logical dataset and its single FileGDB publication unit."""
+    output_id: str
+    kind: str
+    logical_dataset_path: str
+    source_publish_unit_path: str
+    destination_dataset_path: str
+    destination_publish_unit_path: str
+
+    @model_validator(mode="after")
+    def _validate(self) -> "ArtifactIdentity":
+        _require_id(self.output_id, "artifact.output_id")
+        _require_id(self.kind, "artifact.kind")
+        values = ("logical_dataset_path", "source_publish_unit_path",
+                  "destination_dataset_path", "destination_publish_unit_path")
+        normalized = {}
+        for name in values:
+            value = getattr(self, name)
+            _require_id(value, "artifact.%s" % name)
+            normalized[name] = ntpath.normcase(ntpath.normpath(value))
+        if any(not ntpath.isabs(value) for value in normalized.values()):
+            raise ValueError("artifact paths must be absolute Windows paths")
+        source_relative = ntpath.relpath(normalized["logical_dataset_path"],
+                                         normalized["source_publish_unit_path"])
+        destination_relative = ntpath.relpath(normalized["destination_dataset_path"],
+                                              normalized["destination_publish_unit_path"])
+        if (source_relative == ".." or source_relative.startswith(".." + ntpath.sep)
+                or destination_relative == ".." or destination_relative.startswith(".." + ntpath.sep)):
+            raise ValueError("artifact dataset path escapes its publish unit")
+        if source_relative != destination_relative:
+            raise ValueError("artifact source and destination relative dataset paths differ")
+        if not normalized["source_publish_unit_path"].endswith(".gdb"):
+            raise ValueError("artifact.source_publish_unit_path must be a FileGDB")
+        if not normalized["destination_publish_unit_path"].endswith(".gdb"):
+            raise ValueError("artifact.destination_publish_unit_path must be a FileGDB")
+        if "\\staging\\" not in normalized["source_publish_unit_path"]:
+            raise ValueError("artifact.source_publish_unit_path must be under run staging")
+        return self
+
+
+# --- §4.7 AuthorizationGrant ------------------------------------------------
 
 class AuthorizationGrant(_FrozenModel):
     """Bound authorization for one run (§4.6).
@@ -441,7 +597,7 @@ class AuthorizationGrant(_FrozenModel):
     plan_digest: str
     actor: CallerIdentity
     input_identities: Tuple[str, ...] = ()
-    output_identities: Tuple[str, ...] = ()
+    output_identities: Tuple[Tuple[str, str], ...] = ()
     allowed_side_effect_level: int = 1
     lease_id: str = EMPTY
     lease_epoch: int = 0
@@ -462,16 +618,52 @@ class AuthorizationGrant(_FrozenModel):
         if self.expires_at <= 0:
             raise ValueError("grant.expires_at must be positive.")
         _require_id(self.nonce, "grant.nonce")
+        for output_id, destination in self.output_identities:
+            _require_id(output_id, "grant.output_id")
+            _require_id(destination, "grant.output_destination")
+        return self
+
+
+class AuthorizationDecision(_FrozenModel):
+    """User's authorization decision for one run (§6.6).
+
+    Submitted via ``decide()`` when a run is paused at AUTHORIZATION_REQUIRED.
+    Binds the exact plan the user approved (``plan_digest``) and the explicit
+    scope they authorized (``approved_scope``). If the plan changes, the old
+    decision is invalid — the user must re-approve.
+    """
+    decision_id: str
+    run_id: str
+    plan_digest: str
+    approved: bool
+    approved_scope: Optional["SideEffectScope"] = None
+
+    @model_validator(mode="after")
+    def _validate(self) -> "AuthorizationDecision":
+        _require_uuid(self.decision_id, "decision.decision_id")
+        _require_uuid(self.run_id, "decision.run_id")
+        _require_id(self.plan_digest, "decision.plan_digest")
+        # An approval must carry the exact scope the user authorized — an
+        # approved decision without a scope is an open-ended grant (§6.6).
+        if self.approved and self.approved_scope is None:
+            raise ValueError("decision.approved_scope is required when approved=True.")
         return self
 
 
 # --- §4.7 RuntimeLease -------------------------------------------------------
 
 class RuntimeLease(_FrozenModel):
-    """Single-writer ArcMap lease (§6.7). Fencing token for all execution."""
+    """Single-writer ArcMap lease (§6.7). Fencing token for all execution.
+
+    A lease is acquired in two phases: a ``context_lease`` is taken before
+    planning to bind the ArcMap target (``plan_digest`` empty), then at
+    execution the lease is re-signed with the sealed ``plan_digest`` and an
+    incremented ``epoch``. The plan binding is also enforced independently by
+    AuthorizationGrant.plan_digest.
+    """
     lease_id: str
     run_id: str
-    plan_digest: str
+    plan_digest: str = EMPTY
     gateway_pid: int
     arcmap_pid: int
     bridge_pid: int
@@ -486,7 +678,8 @@ class RuntimeLease(_FrozenModel):
     def _validate(self) -> "RuntimeLease":
         for name in ("lease_id", "run_id"):
             _require_uuid(getattr(self, name), "lease.%s" % name)
-        _require_id(self.plan_digest, "lease.plan_digest")
+        # plan_digest may be empty for a context lease (before planning); the
+        # execution-time binding is enforced via AuthorizationGrant.plan_digest.
         for name in ("gateway_pid", "arcmap_pid", "bridge_pid", "bridge_port", "target_hwnd", "epoch"):
             if getattr(self, name) <= 0:
                 raise ValueError("lease.%s must be a positive int." % name)
@@ -520,6 +713,7 @@ QUOTA_STOPPED = "QuotaStopped"
 MODEL_CALL_UNCERTAIN = "ModelCallUncertain"
 # Terminal/paused: execution dispatched but authoritative receipt unavailable.
 EXECUTION_INDETERMINATE = "ExecutionIndeterminate"
+PUBLICATION_INDETERMINATE = "PublicationIndeterminate"
 # Terminal: acceptance checks rejected the staged artifacts.
 ACCEPTANCE_FAILED = "AcceptanceFailed"
 # Terminal: user cancelled.
@@ -529,6 +723,7 @@ RECOVERABLE_OUTCOMES = frozenset({
     CLARIFICATION_REQUIRED,
     MODEL_CALL_UNCERTAIN,
     EXECUTION_INDETERMINATE,
+    PUBLICATION_INDETERMINATE,
 })
 TERMINAL_OUTCOMES = frozenset({
     SUCCEEDED, POLICY_DENIED, CONTRACT_FAILED, CAPABILITY_FAILED,
@@ -650,6 +845,7 @@ class RunView(_FrozenModel):
 # --- Run state machine (§6.1) -----------------------------------------------
 
 RECEIVED = "received"
+CONTEXT_LEASED = "context_leased"
 CONTEXT_FROZEN = "context_frozen"
 INTENT_COMPILED = "intent_compiled"
 PLAN_VERIFIED = "plan_verified"
@@ -663,7 +859,7 @@ PUBLISHED = "published"
 SUCCEEDED_STAGE = "succeeded"
 
 # Paused stages (outcome set, not terminal).
-PAUSED_STAGES = frozenset({AUTHORIZATION_REQUIRED})
+PAUSED_STAGES = frozenset({AUTHORIZATION_REQUIRED, "execution_indeterminate", "publication_indeterminate"})
 
 # Terminal stages (outcome set, terminal).
 TERMINAL_STAGES = frozenset({
@@ -675,7 +871,6 @@ TERMINAL_STAGES = frozenset({
     "infrastructure_failed",
     "quota_stopped",
     "model_call_uncertain",
-    "execution_indeterminate",
     "acceptance_failed",
     "cancelled",
 })
@@ -683,23 +878,26 @@ TERMINAL_STAGES = frozenset({
 # Forward progression (§6.1). Any stage may instead divert to a terminal
 # outcome stage paired with the matching Outcome kind.
 RUN_TRANSITIONS: Dict[str, frozenset] = {
-    RECEIVED: frozenset({CONTEXT_FROZEN, "contract_failed", "infrastructure_failed", "cancelled"}),
+    RECEIVED: frozenset({CONTEXT_LEASED, "contract_failed", "infrastructure_failed", "cancelled"}),
+    CONTEXT_LEASED: frozenset({CONTEXT_FROZEN, "contract_failed", "infrastructure_failed", "cancelled"}),
     CONTEXT_FROZEN: frozenset({INTENT_COMPILED, "clarification_required", "contract_failed", "infrastructure_failed", "cancelled"}),
     INTENT_COMPILED: frozenset({PLAN_VERIFIED, "contract_failed", "infrastructure_failed", "cancelled"}),
-    PLAN_VERIFIED: frozenset({AUTHORIZATION_REQUIRED, AUTHORIZED, "policy_denied", "infrastructure_failed", "cancelled"}),
+    PLAN_VERIFIED: frozenset({AUTHORIZATION_REQUIRED, AUTHORIZED, CLARIFICATION_REQUIRED, "policy_denied", "infrastructure_failed", "cancelled"}),
     AUTHORIZATION_REQUIRED: frozenset({AUTHORIZED, "policy_denied", "cancelled"}),
     AUTHORIZED: frozenset({RUNTIME_ACQUIRED, "infrastructure_failed", "cancelled"}),
     RUNTIME_ACQUIRED: frozenset({EXECUTING, "infrastructure_failed", "cancelled"}),
     EXECUTING: frozenset({EXECUTED, "capability_failed", "infrastructure_failed", "execution_indeterminate", "cancelled"}),
     EXECUTED: frozenset({ACCEPTED, "acceptance_failed", "infrastructure_failed", "cancelled"}),
-    ACCEPTED: frozenset({PUBLISHED, "acceptance_failed", "infrastructure_failed", "cancelled"}),
-    PUBLISHED: frozenset({SUCCEEDED_STAGE, "infrastructure_failed"}),
+    ACCEPTED: frozenset({PUBLISHED, "publication_indeterminate", "acceptance_failed", "infrastructure_failed", "cancelled"}),
+    PUBLISHED: frozenset({SUCCEEDED_STAGE, "infrastructure_failed", "publication_indeterminate"}),
+    "publication_indeterminate": frozenset({PUBLISHED, "cancelled"}),
+    "execution_indeterminate": frozenset({EXECUTED, "infrastructure_failed", "cancelled"}),
 }
 
 ACTIVE_RUN_STAGES = frozenset({
-    RECEIVED, CONTEXT_FROZEN, INTENT_COMPILED, PLAN_VERIFIED,
+    RECEIVED, CONTEXT_LEASED, CONTEXT_FROZEN, INTENT_COMPILED, PLAN_VERIFIED,
     AUTHORIZATION_REQUIRED, AUTHORIZED, RUNTIME_ACQUIRED,
-    EXECUTING, EXECUTED, ACCEPTED, PUBLISHED,
+    EXECUTING, EXECUTED, ACCEPTED, PUBLISHED, "publication_indeterminate",
 })
 
 
@@ -713,6 +911,7 @@ OUTCOME_TO_STAGE = {
     QUOTA_STOPPED: "quota_stopped",
     MODEL_CALL_UNCERTAIN: "model_call_uncertain",
     EXECUTION_INDETERMINATE: "execution_indeterminate",
+    PUBLICATION_INDETERMINATE: "publication_indeterminate",
     ACCEPTANCE_FAILED: "acceptance_failed",
     CANCELLED: "cancelled",
 }
@@ -728,16 +927,3 @@ def is_valid_transition(current: str, target: str) -> bool:
 
 
 # --- helpers ----------------------------------------------------------------
-
-_SIDE_EFFECT_NAMES = {
-    1: "read_only",
-    2: "changes_map",
-    3: "writes_data",
-    4: "edits_data",
-}
-
-
-def _side_effect_name(risk_level: int) -> str:
-    """Map PolicyGate risk tier (§6.6) to the legacy side-effect name the
-    existing validators and capability cards expect."""
-    return _SIDE_EFFECT_NAMES.get(risk_level, "read_only")

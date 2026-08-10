@@ -24,15 +24,23 @@ function Assert-UnderRepo {
 Assert-UnderRepo $ReleaseRoot
 Assert-UnderRepo $stageRoot
 
+function Test-IsPackageSourceItem {
+    param([System.IO.FileSystemInfo]$Item)
+    if ($Item.FullName -match "\\__pycache__(\\|$)") {
+        return $false
+    }
+    if (-not $Item.PSIsContainer -and $Item.Extension -eq ".pyc") {
+        return $false
+    }
+    return $true
+}
+
 function Copy-TreeFiltered {
     param([string]$Source, [string]$Destination)
     $sourceRoot = (Resolve-Path $Source).Path
     New-Item -ItemType Directory -Path $Destination -Force | Out-Null
     Get-ChildItem -LiteralPath $sourceRoot -Recurse -Force | ForEach-Object {
-        if ($_.FullName -match "\\__pycache__(\\|$)") {
-            return
-        }
-        if (-not $_.PSIsContainer -and $_.Extension -eq ".pyc") {
+        if (-not (Test-IsPackageSourceItem $_)) {
             return
         }
         $relative = $_.FullName.Substring($sourceRoot.Length).TrimStart("\")
@@ -85,13 +93,12 @@ exit /b 0
 }
 
 function Get-AppVersion {
-    $appPy = Join-Path $repoRoot "gateway_py3\app.py"
-    $text = [System.IO.File]::ReadAllText($appPy, [System.Text.Encoding]::UTF8)
-    $match = [regex]::Match($text, 'APP_VERSION\s*=\s*"([^"]+)"')
-    if (-not $match.Success) {
-        throw "无法从 $appPy 读取 APP_VERSION。"
+    $versionPath = Join-Path $repoRoot "VERSION"
+    $version = [System.IO.File]::ReadAllText($versionPath, [System.Text.Encoding]::ASCII).Trim()
+    if ($version -notmatch '^\d+(\.\d+)+$') {
+        throw "$versionPath 不含有效版本号。"
     }
-    return $match.Groups[1].Value
+    return $version
 }
 
 function Find-InnoCompiler {
@@ -131,14 +138,35 @@ function Build-ExternalArcMapBridge {
     if (-not (Test-Path -LiteralPath $identity)) {
         throw "缺少 ArcMapBridge.build：$identity"
     }
+    $jsonAssembly = Join-Path (Split-Path -Parent $exe) "Newtonsoft.Json.dll"
+    if (-not (Test-Path -LiteralPath $jsonAssembly)) {
+        throw "缺少 ArcMapBridge 运行依赖：$jsonAssembly"
+    }
     return $exe
 }
 
 function Build-ArcMapAddIn {
-    python (Join-Path $repoRoot "ArcMapAIAssistantAddIn\makeaddin.py") | Out-Host
     $addin = Join-Path $repoRoot "ArcMapAIAssistantAddIn\ArcMapAIAssistantAddIn.esriaddin"
+    if (Test-Path -LiteralPath $addin) {
+        Assert-UnderRepo $addin
+        Remove-Item -LiteralPath $addin -Force
+    }
+    python (Join-Path $repoRoot "ArcMapAIAssistantAddIn\makeaddin.py") | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        throw "ArcMap Add-in 打包失败，退出码：$LASTEXITCODE"
+    }
     if (-not (Test-Path -LiteralPath $addin)) {
         throw "缺少 ArcMap Add-in 包：$addin"
+    }
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $archive = [System.IO.Compression.ZipFile]::OpenRead($addin)
+    try {
+        if (-not ($archive.Entries | Where-Object { $_.FullName -eq "config.xml" })) {
+            throw "ArcMap Add-in 包缺少 config.xml：$addin"
+        }
+    }
+    finally {
+        $archive.Dispose()
     }
     return $addin
 }
@@ -169,19 +197,33 @@ function Stop-BuildOutputGateway {
     }
 }
 
+function New-PackagingPython {
+    $venvRoot = Join-Path $repoRoot "build\packaging-venv"
+    $venvPython = Join-Path $venvRoot "Scripts\python.exe"
+    if (Test-Path -LiteralPath $venvRoot) {
+        Assert-UnderRepo $venvRoot
+        Remove-Item -LiteralPath $venvRoot -Recurse -Force
+    }
+    python -m venv $venvRoot
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $venvPython)) {
+        throw "创建隔离打包环境失败。"
+    }
+    & $venvPython -m pip install --disable-pip-version-check --requirement (Join-Path $PSScriptRoot "requirements.txt") | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        throw "安装隔离打包依赖失败，退出码：$LASTEXITCODE"
+    }
+    return $venvPython
+}
+
 if ($BuildGateway) {
     Push-Location $PSScriptRoot
     try {
         $distPath = Join-Path $repoRoot "dist"
         $workPath = Join-Path $repoRoot "build"
+        $packagePython = New-PackagingPython
         Stop-BuildOutputGateway (Join-Path $distPath "ArcMapAIAssistantGateway\ArcMapAIAssistantGateway.exe")
         $pyinstallerArgs = @(".\pyinstaller_gateway.spec", "--noconfirm", "--clean", "--distpath", $distPath, "--workpath", $workPath)
-        $pyinstaller = Get-Command pyinstaller -ErrorAction SilentlyContinue
-        if ($pyinstaller) {
-            & $pyinstaller.Source @pyinstallerArgs
-        } else {
-            python -m PyInstaller @pyinstallerArgs
-        }
+        & $packagePython -m PyInstaller @pyinstallerArgs
         if ($LASTEXITCODE -ne 0) {
             throw "PyInstaller 打包失败，退出码：$LASTEXITCODE"
         }
@@ -211,14 +253,47 @@ New-Item -ItemType Directory -Path (Join-Path $stageRoot "ArcMapAIAssistantAddIn
 New-Item -ItemType Directory -Path (Join-Path $stageRoot "packaging") -Force | Out-Null
 
 $appVersion = Get-AppVersion
-Set-Content -LiteralPath (Join-Path $stageRoot "app\VERSION") -Value $appVersion -Encoding ASCII
+Copy-Item -LiteralPath (Join-Path $repoRoot "VERSION") -Destination (Join-Path $stageRoot "app\VERSION") -Force
 Copy-TreeFiltered (Join-Path $repoRoot "arcmap_runtime_py2") (Join-Path $stageRoot "app\arcmap_runtime_py2")
+Copy-TreeFiltered (Join-Path $repoRoot "shared_runtime") (Join-Path $stageRoot "app\shared_runtime")
 Copy-TreeFiltered (Join-Path $repoRoot "operation_catalog") (Join-Path $stageRoot "app\operation_catalog")
 Copy-Item -LiteralPath $gatewayDist -Destination (Join-Path $stageRoot "app\gateway") -Recurse -Force
 Write-AppCommandFiles (Join-Path $stageRoot "app")
 Copy-Item -LiteralPath (Join-Path $repoRoot "packaging\uninstall.ico") -Destination (Join-Path $stageRoot "app\uninstall.ico") -Force
 Copy-Item -LiteralPath $externalBridgeExe -Destination (Join-Path $stageRoot "app\bridge\ArcMapBridge.exe") -Force
 Copy-Item -LiteralPath (Join-Path (Split-Path -Parent $externalBridgeExe) "ArcMapBridge.build") -Destination (Join-Path $stageRoot "app\bridge\ArcMapBridge.build") -Force
+Copy-Item -LiteralPath (Join-Path (Split-Path -Parent $externalBridgeExe) "Newtonsoft.Json.dll") -Destination (Join-Path $stageRoot "app\bridge\Newtonsoft.Json.dll") -Force
+$identitySources = @(
+    (Join-Path $repoRoot "VERSION"),
+    (Join-Path $repoRoot "shared_runtime"),
+    (Join-Path $repoRoot "operation_catalog"),
+    (Join-Path $repoRoot "gateway_py3"),
+    (Join-Path $repoRoot "arcmap_runtime_py2"),
+    (Join-Path $repoRoot "ArcMapBridgeExternal\Program.cs"),
+    (Join-Path $repoRoot "ArcMapBridgeExternal\ArcMapBridgeExternal.csproj")
+)
+$identityBytes = [System.Text.StringBuilder]::new()
+foreach ($source in $identitySources) {
+    if (Test-Path -LiteralPath $source -PathType Container) {
+        Get-ChildItem -LiteralPath $source -File -Recurse -Force |
+            Where-Object { Test-IsPackageSourceItem $_ } |
+            Sort-Object FullName |
+            ForEach-Object {
+            [void]$identityBytes.Append($_.FullName.Substring($repoRoot.Length).Replace('\','/'))
+            [void]$identityBytes.Append(':')
+            [void]$identityBytes.Append((Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash.ToLowerInvariant())
+            [void]$identityBytes.Append("`n")
+        }
+    } else {
+        [void]$identityBytes.Append((Get-FileHash -Algorithm SHA256 -LiteralPath $source).Hash.ToLowerInvariant())
+        [void]$identityBytes.Append("`n")
+    }
+}
+$identityHash = [BitConverter]::ToString(([Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($identityBytes.ToString())))).Replace('-','').ToLowerInvariant()
+$identityJson = @{ deployment_hash = $identityHash } | ConvertTo-Json -Compress
+foreach ($component in @('gateway','bridge','arcmap_runtime_py2')) {
+    Set-Content -LiteralPath (Join-Path $stageRoot "app\$component\deployment_identity.json") -Value $identityJson -Encoding UTF8
+}
 Copy-Item -LiteralPath $addinPackage -Destination (Join-Path $stageRoot "ArcMapAIAssistantAddIn\ArcMapAIAssistantAddIn.esriaddin") -Force
 Copy-PowerShellFile (Join-Path $repoRoot "packaging\install.ps1") (Join-Path $stageRoot "packaging\install.ps1")
 Copy-PowerShellFile (Join-Path $repoRoot "packaging\uninstall.ps1") (Join-Path $stageRoot "packaging\uninstall.ps1")

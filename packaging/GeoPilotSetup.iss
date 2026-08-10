@@ -1,5 +1,5 @@
 #ifndef MyAppVersion
-#define MyAppVersion "1.1.4"
+#error MyAppVersion must be supplied from the repository VERSION file
 #endif
 
 #ifndef MySourceDir
@@ -35,10 +35,10 @@ Source: "{#MySourceDir}\packaging\uninstall.ps1"; DestDir: "{app}\packaging"; Fl
 Name: "{autoprograms}\GeoPilot\卸载 GeoPilot"; Filename: "{uninstallexe}"; IconFilename: "{app}\uninstall.ico"
 
 [Run]
-Filename: "powershell.exe"; Parameters: "-NoLogo -NoProfile -ExecutionPolicy Bypass -File ""{tmp}\GeoPilotPackage\packaging\install.ps1"" -InstallDir ""{app}"" -Quiet"; StatusMsg: "正在安装 GeoPilot..."; Flags: runhidden waituntilterminated
+Filename: "pwsh.exe"; Parameters: "-NoLogo -NoProfile -ExecutionPolicy Bypass -File ""{tmp}\GeoPilotPackage\packaging\install.ps1"" -InstallDir ""{app}"" -Quiet"; StatusMsg: "正在安装 GeoPilot..."; Flags: runhidden waituntilterminated
 
 [UninstallRun]
-Filename: "powershell.exe"; Parameters: "-NoLogo -NoProfile -ExecutionPolicy Bypass -File ""{app}\packaging\uninstall.ps1"" -Quiet{code:UninstallUserDataParameter}"; Flags: runhidden waituntilterminated; RunOnceId: "GeoPilotCleanup"
+Filename: "pwsh.exe"; Parameters: "-NoLogo -NoProfile -ExecutionPolicy Bypass -File ""{app}\packaging\uninstall.ps1"" -Quiet{code:UninstallUserDataParameter}"; Flags: runhidden waituntilterminated; RunOnceId: "GeoPilotCleanup"
 
 [Code]
 var

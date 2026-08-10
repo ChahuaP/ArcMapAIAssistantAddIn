@@ -16,6 +16,13 @@ try:
     import exception_text
     import map_state_observation
     import path_utils
+    from shared_runtime.output_contract import (
+        OutputContractError,
+        output_policy_type,
+        validate_output_policy,
+    )
+    from shared_runtime.operation_schema import OperationSchemaError, validate_parameter_schema
+    from shared_runtime import platform_paths
 except ImportError:
     from . import context_reader
     from . import artifact_observation
@@ -23,6 +30,13 @@ except ImportError:
     from . import exception_text
     from . import map_state_observation
     from . import path_utils
+    from shared_runtime.output_contract import (
+        OutputContractError,
+        output_policy_type,
+        validate_output_policy,
+    )
+    from shared_runtime.operation_schema import OperationSchemaError, validate_parameter_schema
+    from shared_runtime import platform_paths
 
 
 try:
@@ -40,10 +54,7 @@ PY2 = sys.version_info[0] == 2
 
 CATALOG_ROOT = path_utils.abspath(path_utils.join_path(os.path.dirname(__file__), "..", "operation_catalog"))
 CUSTOM_TOOLS_ROOT = path_utils.join_path(
-    os.environ.get("APPDATA", os.path.expanduser("~")),
-    "ArcMapAIAssistant",
-    "custom_tools",
-    "enabled"
+    platform_paths.appdata_path("custom_tools", "enabled")
 )
 
 
@@ -59,11 +70,25 @@ class WorkflowExecutionError(Exception):
 
 def execute(workflow_row, context, confirm_callback=None):
     workflow = workflow_row["workflow"]
-    expected_hash = workflow_row.get("context_hash") or u""
+    expected_hash = workflow_row.get("content_hash") or u""
     if expected_hash:
         actual_hash = context_reader.context_hash(context)
         if expected_hash != actual_hash:
             raise WorkflowExecutionError(u"ArcGIS 地图结构已变化。请重新同步上下文，并重新生成任务后再执行。")
+
+    # Inject the task staging directory so operations write outputs into an
+    # isolated per-run workspace instead of the MXD folder or a default GDB.
+    # The Gateway reads staged artifacts from this directory after execution.
+    # The Gateway is the only authority that names the run-scoped staging
+    # directory. Local derivation would permit stale runtimes to escape it.
+    run_id = workflow_row.get("run_id") or u""
+    staging_dir = workflow_row.get("staging_dir") or u""
+    if run_id:
+        if not staging_dir:
+            raise WorkflowExecutionError(u"Gateway lease acknowledgement lacks staging_dir.")
+        context = dict(context)
+        context["staging_dir"] = staging_dir
+        context["run_id"] = run_id
 
     operations = _load_operations()
     step_outputs = {}
@@ -79,7 +104,6 @@ def execute(workflow_row, context, confirm_callback=None):
                     operation = operations[operation_id]
                     arguments = step["arguments"]
                     _validate_arguments(step_id, arguments, operation["parameters_schema"])
-                    _validate_write_policy(operation, context, arguments)
                     runtime_arguments = _prepare_runtime_arguments(operation, context, arguments, step_outputs)
                     _confirm_edit_if_needed(operation, context, runtime_arguments, step_outputs, confirm_callback)
                     input_snapshot = _input_snapshot(operation, context, runtime_arguments, step_outputs)
@@ -89,7 +113,10 @@ def execute(workflow_row, context, confirm_callback=None):
                     for output_index, output_path in enumerate(_result_output_paths(operation, result)):
                         registered_step_id = step_id if output_index == 0 else "%s#%d" % (step_id, output_index)
                         session.register_output(
-                            registered_step_id, output_path, _output_policy_type(operation.get("output_policy") or {}))
+                            registered_step_id,
+                            output_path,
+                            output_policy_type(operation.get("output_policy") or {}),
+                        )
                     publication_state = _publication_state(operation, result)
                     try:
                         observation = artifact_observation.observe_and_verify(
@@ -108,14 +135,13 @@ def execute(workflow_row, context, confirm_callback=None):
                     raise WorkflowExecutionError(u"步骤 %s（%s）执行失败：%s" % (step_id, operation_id, _exception_text(exc)))
                 step_outputs[step_id] = result
                 results.append({"step_id": step_id, "operation": operation_id, "result": result})
-            publication_plan = session.publication_plan()
     except WorkflowExecutionError:
         raise
     except Exception as exc:
         raise WorkflowExecutionError(u"工作流执行会话失败：%s" % _exception_text(exc))
 
     result = {"ok": True, "summary": workflow["summary"], "steps": results}
-    return execution_session.ExecutionOutcome(result, publication_plan)
+    return execution_session.ExecutionOutcome(result)
 
 
 def _commit_map_state_if_needed(operation):
@@ -130,11 +156,20 @@ def _load_operations():
     with path_utils.open_text(path_utils.join_path(CATALOG_ROOT, "catalog.json"), "r") as f:
         catalog = json.load(f)
     operations = {}
+    def register(operation):
+        operation = _validated_operation(operation)
+        operation_id = operation.get("id")
+        if not isinstance(operation_id, basestring) or not operation_id:
+            raise WorkflowExecutionError(u"operation id 必须是非空字符串。")
+        if operation_id in operations:
+            raise WorkflowExecutionError(u"重复 operation id：%s。" % operation_id)
+        operations[operation_id] = operation
+
     for rel_path in catalog["packs"]:
         with path_utils.open_text(path_utils.join_path(CATALOG_ROOT, rel_path), "r") as f:
             pack = json.load(f)
         for operation in pack["operations"]:
-            operations[operation["id"]] = operation
+            register(operation)
     if path_utils.isdir(CUSTOM_TOOLS_ROOT):
         for name in sorted(path_utils.listdir(CUSTOM_TOOLS_ROOT)):
             spec_path = path_utils.join_path(CUSTOM_TOOLS_ROOT, name, "operation_spec.json")
@@ -142,134 +177,51 @@ def _load_operations():
                 continue
             with path_utils.open_text(spec_path, "r") as f:
                 operation = json.load(f)
-            operation = _canonicalize_operation(operation)
-            operations[operation["id"]] = operation
+            register(operation)
     return operations
 
 
-def _canonicalize_operation(operation):
+def _validated_operation(operation):
     result = dict(operation)
-    result["parameters_schema"] = _canonicalize_parameters_schema(result.get("parameters_schema", {}))
-    result["output_policy"] = _canonical_output_policy(result.get("output_policy"), result.get("side_effects"))
-    _ensure_managed_output_parameters(result)
+    result["parameters_schema"] = _validated_parameters_schema(result.get("parameters_schema", {}))
+    try:
+        result["output_policy"] = validate_output_policy(
+            result.get("output_policy"), result.get("side_effects")
+        )
+    except OutputContractError as exc:
+        raise WorkflowExecutionError(str(exc))
     if not isinstance(result.get("context_requirements"), dict):
         result["context_requirements"] = {}
     return result
 
 
-def _canonical_output_policy(policy, side_effects):
-    if not isinstance(policy, dict):
-        policy = {}
-    result = dict(policy)
-    if side_effects != "writes_data":
-        return result
-    output_type = _output_policy_type(result)
-    result["type"] = output_type
-    if output_type == "feature_class":
-        result.setdefault("formats", ["gdb", "shp"])
-        result.setdefault("default_format", "gdb")
-        result.setdefault("add_to_map", True)
-    elif output_type == "raster":
-        result.setdefault("formats", ["tif"])
-        result.setdefault("default_format", "tif")
-        result.setdefault("add_to_map", True)
-    elif output_type == "file":
-        result.setdefault("add_to_map", False)
+def _validated_parameters_schema(schema):
+    try:
+        validate_parameter_schema(schema)
+    except OperationSchemaError as exc:
+        raise WorkflowExecutionError(str(exc))
+    properties = schema["properties"]
+    result = dict(schema)
+    result["properties"] = _validated_parameter_properties(properties)
+    result["required"] = list(schema["required"])
     return result
 
 
-def _output_policy_type(policy):
-    value = policy.get("type")
-    if not value:
-        return "feature_class"
-    text = str(value).strip().lower()
-    if text in ("vector", "feature", "featureclass"):
-        return "feature_class"
-    return text
-
-
-def _ensure_managed_output_parameters(operation):
-    if operation.get("side_effects") != "writes_data":
-        return
-    schema = operation.get("parameters_schema")
-    if not isinstance(schema, dict):
-        return
-    properties = schema.setdefault("properties", {})
-    if not isinstance(properties, dict):
-        return
-    output_type = _output_policy_type(operation.get("output_policy") or {})
-    if output_type == "feature_class":
-        properties.setdefault("output_workspace", {
-            "type": "string",
-            "description": "Optional output folder or geodatabase for GDB output. GeoPilot resolves output_path from this value."
-        })
-        properties.setdefault("output_folder", {
-            "type": "string",
-            "description": "Optional output folder for shapefile output. GeoPilot resolves output_path from this value."
-        })
-        properties.setdefault("output_format", {
-            "type": "string",
-            "enum": ["gdb", "shp"],
-            "description": "Output vector format."
-        })
-    elif output_type in ("file", "raster"):
-        properties.setdefault("output_folder", {
-            "type": "string",
-            "description": "Optional output folder. GeoPilot resolves output_path from this value."
-        })
-
-
-def _canonicalize_parameters_schema(schema):
-    if not isinstance(schema, dict):
-        return {"type": "object", "required": [], "properties": {}, "additionalProperties": False}
-    if schema.get("type") == "object":
-        result = dict(schema)
-        properties = result.get("properties", {})
-        result["properties"] = _canonicalize_parameter_properties(properties if isinstance(properties, dict) else {})
-        required = result.get("required", [])
-        result["required"] = required if isinstance(required, list) else []
-        result.setdefault("additionalProperties", False)
-        return result
-
-    properties = {}
-    required = []
-    for name, value in schema.items():
-        if not isinstance(value, dict):
-            continue
-        prop = dict(value)
-        required_flag = prop.pop("required", False)
-        if required_flag is True or str(required_flag).lower() in ("true", "1", "yes"):
-            required.append(name)
-        properties[name] = _canonicalize_parameter_property(prop)
-    return {
-        "type": "object",
-        "required": required,
-        "properties": properties,
-        "additionalProperties": False
-    }
-
-
-def _canonicalize_parameter_properties(properties):
+def _validated_parameter_properties(properties):
     result = {}
     for name, value in properties.items():
-        result[name] = _canonicalize_parameter_property(value if isinstance(value, dict) else {})
+        if not isinstance(value, dict):
+            raise WorkflowExecutionError(u"参数 %s 的 schema 必须是对象。" % name)
+        result[name] = _validated_parameter_property(value)
     return result
 
 
-def _canonicalize_parameter_property(prop):
+def _validated_parameter_property(prop):
     result = dict(prop)
-    if result.get("type") == "layer":
-        result["type"] = "string"
-        result["x-geopilot-kind"] = "layer"
+    kind = result.get("x-geopilot-kind")
+    if kind is not None and kind not in ("layer", "path"):
+        raise WorkflowExecutionError(u"x-geopilot-kind 只能是 layer 或 path。")
     return result
-
-
-def _validate_write_policy(operation, context, arguments):
-    if operation["side_effects"] != "writes_data" or context.get("is_saved"):
-        return
-    if arguments.get("output_workspace") or arguments.get("output_folder"):
-        return
-    raise WorkflowExecutionError(u"当前 MXD 未保存。请先说明输出位置，或保存 MXD 后重新生成任务。")
 
 
 def _confirm_edit_if_needed(operation, context, arguments, step_outputs, confirm_callback):
@@ -307,7 +259,9 @@ def _call_executor(executor_path, context, arguments, step_outputs):
 def _prepare_runtime_arguments(operation, context, arguments, step_outputs):
     if not _is_custom_operation(operation):
         return arguments
-    runtime_arguments = _normalize_path_arguments(dict(arguments))
+    runtime_arguments = _normalize_declared_path_arguments(
+        dict(arguments), operation.get("parameters_schema") or {}
+    )
     common = _operations_common()
     for name in _layer_argument_names(operation):
         if name not in runtime_arguments:
@@ -318,9 +272,7 @@ def _prepare_runtime_arguments(operation, context, arguments, step_outputs):
             context,
             runtime_arguments["output_name"],
             operation.get("output_policy") or {},
-            runtime_arguments.get("output_workspace"),
-            runtime_arguments.get("output_folder"),
-            runtime_arguments.get("output_format")
+            runtime_arguments.get("output_workspace")
         )
     return runtime_arguments
 
@@ -334,7 +286,6 @@ def _finalize_runtime_result(operation, context, arguments, result):
     if not output_path:
         return result
     result.setdefault("output", output_path)
-    _validate_custom_output_artifact(operation.get("output_policy") or {}, output_path)
     return result
 
 
@@ -345,7 +296,7 @@ def _is_custom_writes_data(operation):
 def _output_adds_to_map(policy):
     if policy.get("add_to_map") is False:
         return False
-    return _output_policy_type(policy) in ("feature_class", "raster")
+    return output_policy_type(policy) == "feature_class"
 
 
 def _result_adds_to_map(operation, result):
@@ -419,38 +370,6 @@ def _execution_contract_proof(workflow_row, step_id, capability_id):
     return matches[0] if len(matches) == 1 else None
 
 
-def _validate_custom_output_artifact(policy, output_path):
-    output_type = _output_policy_type(policy)
-    if output_type not in ("file", "raster"):
-        return
-    output_path = path_utils.to_unicode_path(output_path)
-    if not path_utils.isfile(output_path):
-        raise WorkflowExecutionError(u"自定义工具没有生成输出文件：%s" % output_path)
-    if path_utils.getsize(output_path) <= 0:
-        raise WorkflowExecutionError(u"自定义工具生成了空文件：%s" % output_path)
-    if _obj_output_policy(policy, output_path):
-        _validate_obj_file(output_path)
-
-
-def _obj_output_policy(policy, output_path):
-    extension = str(policy.get("extension") or "")
-    return extension.lower() == ".obj" or str(output_path).lower().endswith(".obj")
-
-
-def _validate_obj_file(output_path):
-    has_vertex = False
-    has_face = False
-    with path_utils.open_text(output_path, "r") as handle:
-        for line in handle:
-            if line.startswith("v "):
-                has_vertex = True
-            elif line.startswith("f "):
-                has_face = True
-            if has_vertex and has_face:
-                return
-    raise WorkflowExecutionError(u"OBJ 输出没有有效顶点和面：%s" % output_path)
-
-
 def _is_custom_operation(operation):
     return operation.get("executor", "").startswith("custom_tool:")
 
@@ -460,10 +379,6 @@ def _layer_argument_names(operation):
     names = []
     for name in properties:
         if properties.get(name, {}).get("x-geopilot-kind") == "layer":
-            names.append(name)
-            continue
-        lowered = name.lower()
-        if "layer" in lowered and "output" not in lowered:
             names.append(name)
     return names
 
@@ -516,7 +431,6 @@ def _load_custom_module(executor_path):
     executor_file = path_utils.join_path(CUSTOM_TOOLS_ROOT, tool_id, "executor.py")
     if not path_utils.isfile(executor_file):
         raise WorkflowExecutionError(u"自定义工具文件不存在：%s" % executor_file)
-    _reject_legacy_custom_path_code(executor_file)
     module = imp.load_source("geopilot_custom_%s" % tool_id.replace("-", "_"), executor_file)
     import arcpy
     module.arcpy = arcpy
@@ -633,37 +547,21 @@ def _path_text(value):
     return path_utils.to_unicode_path(value)
 
 
-def _normalize_path_arguments(value, path_context=False, key=None):
-    current_path_context = path_context or _is_path_argument_name(key)
-    if isinstance(value, dict):
-        return dict((item_key, _normalize_path_arguments(item_value, current_path_context, item_key)) for item_key, item_value in value.items())
-    if isinstance(value, list):
-        return [_normalize_path_arguments(item, current_path_context, key) for item in value]
-    if current_path_context and isinstance(value, basestring):
+def _normalize_declared_path_arguments(arguments, schema):
+    properties = schema.get("properties") if isinstance(schema, dict) else None
+    if not isinstance(properties, dict):
+        raise WorkflowExecutionError(u"自定义工具缺少有效 parameters_schema。")
+    result = dict(arguments)
+    for name, specification in properties.items():
+        if (isinstance(specification, dict) and
+                specification.get("x-geopilot-kind") == "path" and name in result):
+            result[name] = _normalize_declared_path_value(result[name])
+    return result
+
+
+def _normalize_declared_path_value(value):
+    if isinstance(value, basestring):
         return path_utils.to_unicode_path(value)
-    return value
-
-
-def _is_path_argument_name(key):
-    if not key:
-        return False
-    text = str(key).lower()
-    return "path" in text or "folder" in text or "workspace" in text
-
-
-def _reject_legacy_custom_path_code(executor_file):
-    with path_utils.open_text(executor_file, "r") as handle:
-        code = handle.read()
-    forbidden = (
-        ".decode(",
-        ".encode(",
-        "sys.getfilesystemencoding",
-        "str(output_path)",
-        "unicode(output_path)",
-    )
-    for pattern in forbidden:
-        if pattern in code:
-            raise WorkflowExecutionError(
-                u"自定义工具包含旧路径编码逻辑（%s），需要重新审核后再运行。GeoPilot 现在会统一传入 Unicode 路径，工具不要自行 encode/decode。"
-                % pattern
-            )
+    if isinstance(value, list):
+        return [_normalize_declared_path_value(item) for item in value]
+    raise WorkflowExecutionError(u"声明为 path 的自定义工具参数必须是字符串或字符串列表。")

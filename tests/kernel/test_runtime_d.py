@@ -17,13 +17,16 @@ from gateway_py3.kernel import contracts
 from gateway_py3.kernel.contracts import (
     AuthorizationGrant, CallerIdentity, CapabilitySnapshot, CapabilitySpec,
     ContextSnapshot, IntentSpec, LayerRef, LayerSnapshot, RequestEnvelope,
-    RuntimeLease, SideEffectScope, VerifiedPlan, WorkflowStep,
+    RuntimeLease, SideEffectScope, VerifiedPlan, WorkflowStep, DeclaredOutput, ArtifactIdentity,
     EXECUTION_INDETERMINATE, POLICY_DENIED, ACCEPTANCE_FAILED, CONTRACT_FAILED,
     INFRASTRUCTURE_FAILED,
 )
 from gateway_py3.runtime.policy import PolicyGate
 from gateway_py3.runtime.arcmap_runtime import ArcMapRuntime
 from gateway_py3.runtime.acceptance_publisher import AcceptancePublisher
+from gateway_py3.kernel.coordinator import GeoPilotKernel
+from gateway_py3.kernel.coordinator import KernelPorts
+from gateway_py3.kernel.store import JournalStore
 
 
 def _caller(user="u1", tenant="t1", role="analyst"):
@@ -37,6 +40,9 @@ def _envelope(session_id="00000000-0000-0000-0000-000000000001",
     return RequestEnvelope(
         session_id=session_id, request_id=request_id, text=text,
         caller=_caller(), execute=execute, side_effects=side,
+        target_selector={"bridge_pid": 2001, "bridge_port": 8766,
+                         "arcmap_pid": 2000, "hwnd": 3000,
+                         "deployment_hash": "a" * 64} if execute else {},
     )
 
 
@@ -49,7 +55,10 @@ def _plan(risk_level=1, plan_id="00000000-0000-0000-0000-0000000000bb") -> Verif
         capability_digest="capability-digest",
         workflow=(
             WorkflowStep(id="s1", operation="analysis.buffer",
-                         arguments={"output_name": "out.shp"}, reason="buffer"),
+                         arguments={"output_name": "out"}, reason="buffer",
+                         declared_outputs=(DeclaredOutput(output_id="out-1", name="out",
+                             kind="feature_class", destination="C:\\publish\\out.gdb\\out",
+                             geometry_type="Polygon", expected_fields=("NAME",)),)),
         ),
         validation_report={"ok": True},
         model_identity="fake", prompt_version="v1",
@@ -101,8 +110,8 @@ class _ScriptedBridge:
     def reconcile(self, lease, run_id):
         return self.reconcile_result
 
-    def sample_values(self, layer_ref, fields, max_rows, max_samples):
-        self.sample_calls.append((layer_ref, fields))
+    def sample_values(self, lease, layer_ref, fields, max_rows, max_samples):
+        self.sample_calls.append((lease, layer_ref, fields))
         return {"values": {f: ["a", "b"] for f in fields}}
 
 
@@ -117,7 +126,7 @@ class PolicyGateTest(unittest.TestCase):
         lease = _lease(plan=plan)
         outcome = self.gate.authorize(_envelope(level=2), plan, lease,
                                       {"level": 2, "inputs": ("cities",),
-                                       "outputs": ("out.shp",)})
+                                       "outputs": ({"output_id": "out-1", "destination": "C:\\out\\out.shp"},)})
         self.assertTrue(outcome.succeeded)
         grant = outcome.details["grant"]
         self.assertIsInstance(grant, AuthorizationGrant)
@@ -127,14 +136,17 @@ class PolicyGateTest(unittest.TestCase):
         self.assertEqual(grant.lease_epoch, lease.epoch)
         self.assertEqual(grant.allowed_side_effect_level, 2)
         self.assertIn("cities", grant.input_identities)
-        self.assertIn("out.shp", grant.output_identities)
+        self.assertIn(("out-1", "C:\\out\\out.shp"), grant.output_identities)
         self.assertGreater(grant.expires_at, 0)
         self.assertEqual(grant.actor.user_id, "u1")
 
     def test_effect_exceeding_plan_risk_denied(self):
-        plan = _plan(risk_level=1)
-        outcome = self.gate.authorize(_envelope(level=3), plan, _lease(plan=plan),
-                                      {"level": 3})
+        # Policy direction (§6.6): the requested effect level must cover the
+        # plan's risk. level < plan.risk_level is denied; a high level against
+        # a low-risk plan is fine.
+        plan = _plan(risk_level=3)
+        outcome = self.gate.authorize(_envelope(level=1), plan, _lease(plan=plan),
+                                      {"level": 1})
         self.assertEqual(outcome.kind, POLICY_DENIED)
 
     def test_destructive_level4_disabled_by_default(self):
@@ -249,9 +261,23 @@ class ArcMapRuntimeFencingTest(unittest.TestCase):
                                        "fields": [{"name": "POP", "dtype": "Integer"}]},
                                   ])
         self.assertIsNone(context.layers[0].value_summary)
-        sampled = runtime.sample_values(context, ["cities"], ["POP"])
+        sampled = runtime.sample_values(self.lease, context, ["cities"], ["POP"])
         self.assertIsNotNone(sampled.layers[0].value_summary)
-        self.assertEqual(bridge.sample_calls, [("cities", ["POP"])])
+        self.assertEqual(len(bridge.sample_calls), 1)
+        self.assertIs(bridge.sample_calls[0][0], self.lease)
+        self.assertEqual(bridge.sample_calls[0][1:], ("cities", ["POP"]))
+
+    def test_lazy_sampling_fails_closed_when_bridge_has_no_values(self):
+        class MissingSamples(object):
+            def sample_values(self, lease, layer_ref, fields, max_rows, max_samples):
+                return {}
+        runtime = ArcMapRuntime(MissingSamples(), "deploy-v1", 1000)
+        context = runtime.capture(self.lease.run_id, self.lease, {"mxd": "a.mxd"}, [
+            {"name": "cities", "layer_ref": "cities",
+             "fields": [{"name": "POP", "dtype": "Integer"}]},
+        ])
+        with self.assertRaisesRegex(RuntimeError, "no authoritative lazy samples"):
+            runtime.sample_values(self.lease, context, ["cities"], ["POP"])
 
 
 class AcceptancePublisherTest(unittest.TestCase):
@@ -262,7 +288,7 @@ class AcceptancePublisherTest(unittest.TestCase):
         self.staging = self.tmp / "staging"
         self.publish_dir = self.tmp / "publish"
         self.staging.mkdir()
-        self.plan = _plan(risk_level=3)  # declares output_name "out.shp"
+        self.plan = _plan(risk_level=3)
         self.intent = IntentSpec(
             session_id="00000000-0000-0000-0000-000000000001",
             request_id="00000000-0000-0000-0000-000000000002",
@@ -274,43 +300,181 @@ class AcceptancePublisherTest(unittest.TestCase):
         ).details["grant"]
 
     def _stage_artifact(self):
-        artifact = self.staging / "out.shp"
+        artifact = self.staging / "out.gdb"
         artifact.write_text("shp-content", encoding="utf-8")
         return artifact
 
+    def _probe(self, artifact, digest=""):
+        probe = {"output_id": "out-1", "kind": "feature_class", "canonical_path": str(artifact),
+                 "exists": True, "geometry": "Polygon", "spatial_reference": "WGS84",
+                 "fields": ["NAME"], "feature_count": 1,
+                 "members": [{"relative_path": "out.gdb", "size": 11, "sha256": "a" * 64}]}
+        from gateway_py3.runtime.acceptance_publisher import _canonical_json
+        import hashlib
+        probe["manifest_digest"] = digest or hashlib.sha256(
+            _canonical_json(probe).encode("utf-8")).hexdigest()
+        return probe
+
+    def _unit_probe(self, source, members):
+        probe = {"probe_type": "unit", "source_publish_unit_path": str(source),
+                 "datasets": ["out"], "members": members}
+        from gateway_py3.runtime.acceptance_publisher import _canonical_json
+        import hashlib
+        probe["manifest_digest"] = hashlib.sha256(_canonical_json(probe).encode("utf-8")).hexdigest()
+        return probe
+
     def test_accept_passes_when_staged_output_present(self):
-        self._stage_artifact()
-        publisher = AcceptancePublisher(staging_root=self.staging)
-        outcome = publisher.accept(self.intent, self.plan, {})
+        source_gdb = self.staging / "staged.gdb"
+        source_gdb.mkdir()
+        (source_gdb / "a00000001.gdbtable").write_bytes(b"gdb-content")
+        publisher = AcceptancePublisher()
+        artifact = source_gdb / "out"
+        identity = ArtifactIdentity(output_id="out-1", kind="feature_class",
+            logical_dataset_path=str(artifact), source_publish_unit_path=str(source_gdb),
+            destination_dataset_path="C:\\publish\\out.gdb\\out",
+            destination_publish_unit_path="C:\\publish\\out.gdb")
+        output_probe = self._probe(artifact)
+        outcome = publisher.accept(self.intent, self.plan, [output_probe, self._unit_probe(source_gdb, output_probe["members"])], [identity])
         self.assertTrue(outcome.succeeded)
 
     def test_accept_fails_when_output_missing(self):
-        publisher = AcceptancePublisher(staging_root=self.staging)
-        outcome = publisher.accept(self.intent, self.plan, {})
+        publisher = AcceptancePublisher()
+        outcome = publisher.accept(self.intent, self.plan, [], [])
         self.assertEqual(outcome.kind, ACCEPTANCE_FAILED)
 
-    def test_publish_rejects_without_passed_report(self):
-        publisher = AcceptancePublisher(staging_root=self.staging,
-                                        publish_root=self.publish_dir)
-        outcome = publisher.publish([], {"passed": False}, self.grant)
-        self.assertEqual(outcome.kind, ACCEPTANCE_FAILED)
+    def _map_plan(self):
+        output = DeclaredOutput(output_id="map-1", name="map", kind="map_state",
+                                destination="not_applicable")
+        step = WorkflowStep(id="map", operation="layer.set_visibility",
+                            arguments={"layer": "layer:0", "visible": True},
+                            reason="show layer", declared_outputs=(output,))
+        return self.plan.model_copy(update={"workflow": (step,)})
 
-    def test_publish_atomically_copies_and_hashes(self):
-        artifact = self._stage_artifact()
-        publisher = AcceptancePublisher(staging_root=self.staging,
-                                        publish_root=self.publish_dir)
-        accepted = publisher.accept(self.intent, self.plan, {})
-        self.assertTrue(accepted.succeeded)
-        outcome = publisher.publish([{"path": str(artifact)}],
-                                    accepted.details["report"], self.grant)
+    def _map_probe(self, plan, passed=True, digest=None):
+        from gateway_py3.catalog_loader import OperationCatalog
+        from gateway_py3.runtime.acceptance_publisher import _canonical_json
+        condition = OperationCatalog().get("layer.set_visibility")["capability_contract"]["postconditions"][0]
+        probe = {"probe_type": "map_state", "output_id": "map-1", "kind": "map_state",
+                 "postcondition": condition, "arguments": plan.workflow[0].arguments,
+                 "map_state": {"active_view": "Layers", "extent": {}, "layers": []},
+                 "map_state_check": {"kind": condition["kind"], "verdict": "passed" if passed else "failed"},
+                 "passed": passed}
+        import hashlib
+        probe["manifest_digest"] = digest or hashlib.sha256(_canonical_json(probe).encode("utf-8")).hexdigest()
+        return probe
+
+    def test_map_state_probe_accepts_live_postcondition(self):
+        outcome = AcceptancePublisher().accept(self.intent, self._map_plan(),
+                                               [self._map_probe(self._map_plan())], [])
         self.assertTrue(outcome.succeeded)
-        publication = outcome.details["publication"]
-        self.assertEqual(len(publication["artifacts"]), 1)
-        published = self.publish_dir / "out.shp"
-        self.assertTrue(published.exists())
-        artifact_hash = publication["artifacts"][0]["hash"]
-        self.assertEqual(len(artifact_hash), 64)  # sha256 hex
-        self.assertTrue(all(c in "0123456789abcdef" for c in artifact_hash))
+
+    def test_map_state_probe_rejects_failed_live_postcondition(self):
+        plan = self._map_plan()
+        outcome = AcceptancePublisher().accept(self.intent, plan, [self._map_probe(plan, passed=False)], [])
+        self.assertEqual(outcome.kind, ACCEPTANCE_FAILED)
+
+    def test_map_state_probe_rejects_tampered_digest(self):
+        plan = self._map_plan()
+        outcome = AcceptancePublisher().accept(self.intent, plan, [self._map_probe(plan, digest="0" * 64)], [])
+        self.assertEqual(outcome.kind, ACCEPTANCE_FAILED)
+
+    def test_publish_filegdb_logical_dataset_as_one_atomic_unit(self):
+        source_gdb = self.staging / "staged.gdb"
+        source_gdb.mkdir()
+        (source_gdb / "a00000001.gdbtable").write_bytes(b"gdb-content")
+        target_gdb = self.publish_dir / "published.gdb"
+        output = self.plan.workflow[0].declared_outputs[0].model_copy(update={
+            "kind": "feature_class", "destination": str(target_gdb / "roads"),
+        })
+        plan = self.plan.model_copy(update={
+            "workflow": (self.plan.workflow[0].model_copy(update={"declared_outputs": (output,)}),),
+        })
+        logical_path = source_gdb / "roads"
+        members = [{"relative_path": "a00000001.gdbtable", "size": 11,
+                    "sha256": __import__("hashlib").sha256(b"gdb-content").hexdigest()}]
+        probe = {"output_id": "out-1", "kind": "feature_class",
+                 "canonical_path": str(logical_path), "exists": True,
+                 "geometry": "Polygon", "spatial_reference": "WGS84",
+                 "fields": ["NAME"], "feature_count": 1, "members": members}
+        from gateway_py3.runtime.acceptance_publisher import _canonical_json
+        probe["manifest_digest"] = __import__("hashlib").sha256(
+            _canonical_json(probe).encode("utf-8")).hexdigest()
+        artifact = ArtifactIdentity(output_id="out-1", kind="feature_class",
+            logical_dataset_path=str(logical_path), source_publish_unit_path=str(source_gdb),
+            destination_dataset_path=str(target_gdb / "roads"),
+            destination_publish_unit_path=str(target_gdb))
+        publisher = AcceptancePublisher()
+        accepted = publisher.accept(self.intent, plan, [probe, self._unit_probe(source_gdb, members)], [artifact])
+        self.assertTrue(accepted.succeeded)
+        grant = PolicyGate().authorize(
+            _envelope(level=3), plan, self.lease.model_copy(update={"plan_digest": plan.digest}),
+            {"level": 3, "outputs": ({"output_id": "out-1", "destination": str(target_gdb / "roads")},)}
+        ).details["grant"]
+        prepared = publisher.prepare([artifact], accepted.details["report"], grant,
+                                     "00000000-0000-0000-0000-0000000000cc")
+        self.assertTrue(prepared.succeeded)
+        self.assertTrue(publisher.materialize(prepared.details["publication"], [artifact]).succeeded)
+        outcome = publisher.commit(prepared.details["publication"])
+        self.assertTrue(outcome.succeeded)
+        self.assertEqual((target_gdb / "a00000001.gdbtable").read_bytes(), b"gdb-content")
+
+
+class AuthorizationOutputIdentityTest(unittest.TestCase):
+    def test_approval_cannot_omit_or_redirect_sealed_output(self):
+        plan = _plan(risk_level=3)
+        exact = SideEffectScope(level=3, output_identities=(("out-1", "C:\\publish\\out.gdb\\out"),))
+        GeoPilotKernel._validate_approved_outputs(plan, exact)
+        with self.assertRaises(ValueError):
+            GeoPilotKernel._validate_approved_outputs(plan, SideEffectScope(level=3))
+        with self.assertRaises(ValueError):
+            GeoPilotKernel._validate_approved_outputs(
+                plan, SideEffectScope(level=3, output_identities=(("out-1", "C:\\other\\out.gdb\\out"),)))
+
+
+class PublicationRecoveryGrantBindingTest(unittest.TestCase):
+    def test_prepared_publication_recovers_after_grant_expiry_without_rechecking_policy(self):
+        store = JournalStore(path=Path(tempfile.mkdtemp()) / "gp.sqlite")
+        request = _envelope()
+        store.create_session(request.session_id, request.caller.tenant_id)
+        run_id = store.create_run(request)["run_id"]
+        for kind, stage in (("context_leased", "context_leased"), ("context_frozen", "context_frozen"),
+                            ("intent_compiled", "intent_compiled"), ("plan_verified", "plan_verified"),
+                            ("authorization_required", "authorization_required"), ("authorization_approved", "authorized"),
+                            ("runtime_acquired", "runtime_acquired"), ("execution_started", "executing"),
+                            ("executed", "executed"), ("accepted", "accepted")):
+            store.append_event(run_id, kind, stage, {})
+        plan = _plan()
+        lease = _lease(run_id=run_id, plan=plan)
+        grant = PolicyGate().authorize(request, plan, lease, {"level": 1}).details["grant"].model_copy(
+            update={"expires_at": 1.0})
+        store.store_verified_plan(run_id, plan)
+        store.store_runtime_lease(lease)
+        store.store_authorization_grant(grant)
+        prepared = {
+            "publication_id": "00000000-0000-0000-0000-0000000000dd",
+            "publication_kind": "state_change", "run_id": run_id,
+            "grant_id": grant.grant_id, "artifacts": [],
+        }
+        store.prepare_publication(run_id, prepared)
+
+        class _PolicyMustNotRun(object):
+            def check_grant(self, *args):
+                raise AssertionError("prepared recovery must use its frozen grant binding")
+
+        class _RecoverOnly(object):
+            def __init__(self):
+                self.prepared = None
+            def recover(self, frozen, staged, report, frozen_grant):
+                self.prepared = (frozen, frozen_grant)
+                return contracts.outcome_succeeded("publish", "recovered", details={"publication": frozen})
+
+        publisher = _RecoverOnly()
+        kernel = GeoPilotKernel(KernelPorts(store=store, policy=_PolicyMustNotRun(), acceptance=publisher))
+        kernel._publish(run_id, store.get_run(run_id))
+
+        self.assertEqual("published", store.get_run(run_id)["stage"])
+        self.assertEqual(prepared, publisher.prepared[0])
+        self.assertEqual(1.0, publisher.prepared[1].expires_at)
 
 
 if __name__ == "__main__":

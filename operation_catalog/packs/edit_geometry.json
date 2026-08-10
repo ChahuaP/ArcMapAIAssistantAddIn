@@ -40,17 +40,8 @@
             "type": "integer"
           },
           "output_workspace": {
-            "type": "string"
-          },
-          "output_folder": {
-            "type": "string"
-          },
-          "output_format": {
             "type": "string",
-            "enum": [
-              "gdb",
-              "shp"
-            ]
+            "x-geopilot-kind": "path"
           }
         },
         "additionalProperties": false
@@ -65,11 +56,10 @@
         "type": "feature_class",
         "geometry_type": "UserSelected",
         "formats": [
-          "gdb",
-          "shp"
+          "gdb"
         ],
         "default_format": "gdb",
-        "workspace": "mxd_default_or_output_workspace_or_output_folder",
+        "workspace": "mxd_default_or_output_workspace",
         "overwrite": false,
         "add_to_map": true
       },
@@ -98,7 +88,9 @@
               "polygon"
             ],
             "required_fields": [],
-            "selection": {"rule": "any"}
+            "selection": {
+              "rule": "any"
+            }
           }
         ],
         "parameters_schema": {
@@ -127,17 +119,8 @@
               "type": "integer"
             },
             "output_workspace": {
-              "type": "string"
-            },
-            "output_folder": {
-              "type": "string"
-            },
-            "output_format": {
               "type": "string",
-              "enum": [
-                "gdb",
-                "shp"
-              ]
+              "x-geopilot-kind": "path"
             }
           },
           "additionalProperties": false
@@ -235,7 +218,8 @@
             "items": {
               "type": "object"
             },
-            "minItems": 1
+            "minItems": 1,
+            "x-geopilot-kind": "layer"
           },
           "output_name": {
             "type": "string"
@@ -248,17 +232,8 @@
             "type": "integer"
           },
           "output_workspace": {
-            "type": "string"
-          },
-          "output_folder": {
-            "type": "string"
-          },
-          "output_format": {
             "type": "string",
-            "enum": [
-              "gdb",
-              "shp"
-            ]
+            "x-geopilot-kind": "path"
           }
         },
         "additionalProperties": false
@@ -273,11 +248,10 @@
         "type": "feature_class",
         "geometry_type": "Point",
         "formats": [
-          "gdb",
-          "shp"
+          "gdb"
         ],
         "default_format": "gdb",
-        "workspace": "mxd_default_or_output_workspace_or_output_folder",
+        "workspace": "mxd_default_or_output_workspace",
         "overwrite": false,
         "add_to_map": true
       },
@@ -311,7 +285,9 @@
               "not_applicable"
             ],
             "required_fields": [],
-            "selection": {"rule": "any"}
+            "selection": {
+              "rule": "any"
+            }
           },
           {
             "parameter": "spatial_reference_layer",
@@ -325,7 +301,9 @@
               "polygon"
             ],
             "required_fields": [],
-            "selection": {"rule": "any"}
+            "selection": {
+              "rule": "any"
+            }
           }
         ],
         "parameters_schema": {
@@ -340,7 +318,8 @@
               "items": {
                 "type": "object"
               },
-              "minItems": 1
+              "minItems": 1,
+              "x-geopilot-kind": "layer"
             },
             "output_name": {
               "type": "string"
@@ -353,17 +332,8 @@
               "type": "integer"
             },
             "output_workspace": {
-              "type": "string"
-            },
-            "output_folder": {
-              "type": "string"
-            },
-            "output_format": {
               "type": "string",
-              "enum": [
-                "gdb",
-                "shp"
-              ]
+              "x-geopilot-kind": "path"
             }
           },
           "additionalProperties": false
@@ -465,7 +435,8 @@
             "items": {
               "type": "object"
             },
-            "minItems": 1
+            "minItems": 1,
+            "x-geopilot-kind": "layer"
           }
         },
         "additionalProperties": false
@@ -514,7 +485,9 @@
               "polygon"
             ],
             "required_fields": [],
-            "selection": {"rule": "any"}
+            "selection": {
+              "rule": "any"
+            }
           },
           {
             "parameter": "points",
@@ -527,7 +500,9 @@
               "not_applicable"
             ],
             "required_fields": [],
-            "selection": {"rule": "any"}
+            "selection": {
+              "rule": "any"
+            }
           }
         ],
         "parameters_schema": {
@@ -546,7 +521,8 @@
               "items": {
                 "type": "object"
               },
-              "minItems": 1
+              "minItems": 1,
+              "x-geopilot-kind": "layer"
             }
           },
           "additionalProperties": false
@@ -643,14 +619,16 @@
             "items": {
               "type": "object"
             },
-            "minItems": 2
+            "minItems": 2,
+            "x-geopilot-kind": "layer"
           },
           "features": {
             "type": "array",
             "items": {
               "type": "object"
             },
-            "minItems": 1
+            "minItems": 1,
+            "x-geopilot-kind": "layer"
           },
           "output_name": {
             "type": "string"
@@ -666,17 +644,8 @@
             "type": "integer"
           },
           "output_workspace": {
-            "type": "string"
-          },
-          "output_folder": {
-            "type": "string"
-          },
-          "output_format": {
             "type": "string",
-            "enum": [
-              "gdb",
-              "shp"
-            ]
+            "x-geopilot-kind": "path"
           }
         },
         "additionalProperties": false
@@ -691,11 +660,10 @@
         "type": "feature_class",
         "geometry_type": "Polyline",
         "formats": [
-          "gdb",
-          "shp"
+          "gdb"
         ],
         "default_format": "gdb",
-        "workspace": "mxd_default_or_output_workspace_or_output_folder",
+        "workspace": "mxd_default_or_output_workspace",
         "overwrite": false,
         "add_to_map": true
       },
@@ -718,7 +686,7 @@
           }
         },
         {
-          "user": "把两条道路线创建到同一个 shp",
+          "user": "把两条道路线创建到同一个要素类",
           "arguments": {
             "features": [
               {
@@ -765,7 +733,9 @@
               "not_applicable"
             ],
             "required_fields": [],
-            "selection": {"rule": "any"}
+            "selection": {
+              "rule": "any"
+            }
           },
           {
             "parameter": "features",
@@ -778,7 +748,9 @@
               "not_applicable"
             ],
             "required_fields": [],
-            "selection": {"rule": "any"}
+            "selection": {
+              "rule": "any"
+            }
           },
           {
             "parameter": "spatial_reference_layer",
@@ -792,7 +764,9 @@
               "polygon"
             ],
             "required_fields": [],
-            "selection": {"rule": "any"}
+            "selection": {
+              "rule": "any"
+            }
           }
         ],
         "parameters_schema": {
@@ -806,14 +780,16 @@
               "items": {
                 "type": "object"
               },
-              "minItems": 2
+              "minItems": 2,
+              "x-geopilot-kind": "layer"
             },
             "features": {
               "type": "array",
               "items": {
                 "type": "object"
               },
-              "minItems": 1
+              "minItems": 1,
+              "x-geopilot-kind": "layer"
             },
             "output_name": {
               "type": "string"
@@ -829,17 +805,8 @@
               "type": "integer"
             },
             "output_workspace": {
-              "type": "string"
-            },
-            "output_folder": {
-              "type": "string"
-            },
-            "output_format": {
               "type": "string",
-              "enum": [
-                "gdb",
-                "shp"
-              ]
+              "x-geopilot-kind": "path"
             }
           },
           "additionalProperties": false
@@ -940,14 +907,16 @@
             "items": {
               "type": "object"
             },
-            "minItems": 2
+            "minItems": 2,
+            "x-geopilot-kind": "layer"
           },
           "features": {
             "type": "array",
             "items": {
               "type": "object"
             },
-            "minItems": 1
+            "minItems": 1,
+            "x-geopilot-kind": "layer"
           },
           "name": {
             "type": "string"
@@ -998,7 +967,9 @@
               "polygon"
             ],
             "required_fields": [],
-            "selection": {"rule": "any"}
+            "selection": {
+              "rule": "any"
+            }
           },
           {
             "parameter": "coordinates",
@@ -1011,7 +982,9 @@
               "not_applicable"
             ],
             "required_fields": [],
-            "selection": {"rule": "any"}
+            "selection": {
+              "rule": "any"
+            }
           },
           {
             "parameter": "features",
@@ -1024,7 +997,9 @@
               "not_applicable"
             ],
             "required_fields": [],
-            "selection": {"rule": "any"}
+            "selection": {
+              "rule": "any"
+            }
           }
         ],
         "parameters_schema": {
@@ -1042,14 +1017,16 @@
               "items": {
                 "type": "object"
               },
-              "minItems": 2
+              "minItems": 2,
+              "x-geopilot-kind": "layer"
             },
             "features": {
               "type": "array",
               "items": {
                 "type": "object"
               },
-              "minItems": 1
+              "minItems": 1,
+              "x-geopilot-kind": "layer"
             },
             "name": {
               "type": "string"
@@ -1149,14 +1126,16 @@
             "items": {
               "type": "object"
             },
-            "minItems": 3
+            "minItems": 3,
+            "x-geopilot-kind": "layer"
           },
           "features": {
             "type": "array",
             "items": {
               "type": "object"
             },
-            "minItems": 1
+            "minItems": 1,
+            "x-geopilot-kind": "layer"
           },
           "output_name": {
             "type": "string"
@@ -1172,17 +1151,8 @@
             "type": "integer"
           },
           "output_workspace": {
-            "type": "string"
-          },
-          "output_folder": {
-            "type": "string"
-          },
-          "output_format": {
             "type": "string",
-            "enum": [
-              "gdb",
-              "shp"
-            ]
+            "x-geopilot-kind": "path"
           }
         },
         "additionalProperties": false
@@ -1197,11 +1167,10 @@
         "type": "feature_class",
         "geometry_type": "Polygon",
         "formats": [
-          "gdb",
-          "shp"
+          "gdb"
         ],
         "default_format": "gdb",
-        "workspace": "mxd_default_or_output_workspace_or_output_folder",
+        "workspace": "mxd_default_or_output_workspace",
         "overwrite": false,
         "add_to_map": true
       },
@@ -1295,7 +1264,9 @@
               "not_applicable"
             ],
             "required_fields": [],
-            "selection": {"rule": "any"}
+            "selection": {
+              "rule": "any"
+            }
           },
           {
             "parameter": "features",
@@ -1308,7 +1279,9 @@
               "not_applicable"
             ],
             "required_fields": [],
-            "selection": {"rule": "any"}
+            "selection": {
+              "rule": "any"
+            }
           },
           {
             "parameter": "spatial_reference_layer",
@@ -1322,7 +1295,9 @@
               "polygon"
             ],
             "required_fields": [],
-            "selection": {"rule": "any"}
+            "selection": {
+              "rule": "any"
+            }
           }
         ],
         "parameters_schema": {
@@ -1336,14 +1311,16 @@
               "items": {
                 "type": "object"
               },
-              "minItems": 3
+              "minItems": 3,
+              "x-geopilot-kind": "layer"
             },
             "features": {
               "type": "array",
               "items": {
                 "type": "object"
               },
-              "minItems": 1
+              "minItems": 1,
+              "x-geopilot-kind": "layer"
             },
             "output_name": {
               "type": "string"
@@ -1359,17 +1336,8 @@
               "type": "integer"
             },
             "output_workspace": {
-              "type": "string"
-            },
-            "output_folder": {
-              "type": "string"
-            },
-            "output_format": {
               "type": "string",
-              "enum": [
-                "gdb",
-                "shp"
-              ]
+              "x-geopilot-kind": "path"
             }
           },
           "additionalProperties": false
@@ -1470,14 +1438,16 @@
             "items": {
               "type": "object"
             },
-            "minItems": 3
+            "minItems": 3,
+            "x-geopilot-kind": "layer"
           },
           "features": {
             "type": "array",
             "items": {
               "type": "object"
             },
-            "minItems": 1
+            "minItems": 1,
+            "x-geopilot-kind": "layer"
           },
           "name": {
             "type": "string"
@@ -1536,7 +1506,9 @@
               "polygon"
             ],
             "required_fields": [],
-            "selection": {"rule": "any"}
+            "selection": {
+              "rule": "any"
+            }
           },
           {
             "parameter": "coordinates",
@@ -1549,7 +1521,9 @@
               "not_applicable"
             ],
             "required_fields": [],
-            "selection": {"rule": "any"}
+            "selection": {
+              "rule": "any"
+            }
           },
           {
             "parameter": "features",
@@ -1562,7 +1536,9 @@
               "not_applicable"
             ],
             "required_fields": [],
-            "selection": {"rule": "any"}
+            "selection": {
+              "rule": "any"
+            }
           }
         ],
         "parameters_schema": {
@@ -1580,14 +1556,16 @@
               "items": {
                 "type": "object"
               },
-              "minItems": 3
+              "minItems": 3,
+              "x-geopilot-kind": "layer"
             },
             "features": {
               "type": "array",
               "items": {
                 "type": "object"
               },
-              "minItems": 1
+              "minItems": 1,
+              "x-geopilot-kind": "layer"
             },
             "name": {
               "type": "string"
@@ -1714,17 +1692,8 @@
             "type": "integer"
           },
           "output_workspace": {
-            "type": "string"
-          },
-          "output_folder": {
-            "type": "string"
-          },
-          "output_format": {
             "type": "string",
-            "enum": [
-              "gdb",
-              "shp"
-            ]
+            "x-geopilot-kind": "path"
           }
         },
         "additionalProperties": false
@@ -1739,11 +1708,10 @@
         "type": "feature_class",
         "geometry_type": "Polygon",
         "formats": [
-          "gdb",
-          "shp"
+          "gdb"
         ],
         "default_format": "gdb",
-        "workspace": "mxd_default_or_output_workspace_or_output_folder",
+        "workspace": "mxd_default_or_output_workspace",
         "overwrite": false,
         "add_to_map": true
       },
@@ -1775,7 +1743,9 @@
               "polygon"
             ],
             "required_fields": [],
-            "selection": {"rule": "any"}
+            "selection": {
+              "rule": "any"
+            }
           }
         ],
         "parameters_schema": {
@@ -1814,17 +1784,8 @@
               "type": "integer"
             },
             "output_workspace": {
-              "type": "string"
-            },
-            "output_folder": {
-              "type": "string"
-            },
-            "output_format": {
               "type": "string",
-              "enum": [
-                "gdb",
-                "shp"
-              ]
+              "x-geopilot-kind": "path"
             }
           },
           "additionalProperties": false
@@ -1944,7 +1905,8 @@
             "items": {
               "type": "object"
             },
-            "minItems": 1
+            "minItems": 1,
+            "x-geopilot-kind": "layer"
           },
           "name": {
             "type": "string"
@@ -1960,17 +1922,8 @@
             "type": "integer"
           },
           "output_workspace": {
-            "type": "string"
-          },
-          "output_folder": {
-            "type": "string"
-          },
-          "output_format": {
             "type": "string",
-            "enum": [
-              "gdb",
-              "shp"
-            ]
+            "x-geopilot-kind": "path"
           }
         },
         "additionalProperties": false
@@ -1985,11 +1938,10 @@
         "type": "feature_class",
         "geometry_type": "Polygon",
         "formats": [
-          "gdb",
-          "shp"
+          "gdb"
         ],
         "default_format": "gdb",
-        "workspace": "mxd_default_or_output_workspace_or_output_folder",
+        "workspace": "mxd_default_or_output_workspace",
         "overwrite": false,
         "add_to_map": true
       },
@@ -2046,7 +1998,9 @@
               "not_applicable"
             ],
             "required_fields": [],
-            "selection": {"rule": "any"}
+            "selection": {
+              "rule": "any"
+            }
           },
           {
             "parameter": "spatial_reference_layer",
@@ -2060,7 +2014,9 @@
               "polygon"
             ],
             "required_fields": [],
-            "selection": {"rule": "any"}
+            "selection": {
+              "rule": "any"
+            }
           }
         ],
         "parameters_schema": {
@@ -2097,7 +2053,8 @@
               "items": {
                 "type": "object"
               },
-              "minItems": 1
+              "minItems": 1,
+              "x-geopilot-kind": "layer"
             },
             "name": {
               "type": "string"
@@ -2113,17 +2070,8 @@
               "type": "integer"
             },
             "output_workspace": {
-              "type": "string"
-            },
-            "output_folder": {
-              "type": "string"
-            },
-            "output_format": {
               "type": "string",
-              "enum": [
-                "gdb",
-                "shp"
-              ]
+              "x-geopilot-kind": "path"
             }
           },
           "additionalProperties": false
@@ -2246,7 +2194,8 @@
             "items": {
               "type": "object"
             },
-            "minItems": 1
+            "minItems": 1,
+            "x-geopilot-kind": "layer"
           },
           "name": {
             "type": "string"
@@ -2292,7 +2241,9 @@
               "polygon"
             ],
             "required_fields": [],
-            "selection": {"rule": "any"}
+            "selection": {
+              "rule": "any"
+            }
           },
           {
             "parameter": "features",
@@ -2305,7 +2256,9 @@
               "not_applicable"
             ],
             "required_fields": [],
-            "selection": {"rule": "any"}
+            "selection": {
+              "rule": "any"
+            }
           }
         ],
         "parameters_schema": {
@@ -2346,7 +2299,8 @@
               "items": {
                 "type": "object"
               },
-              "minItems": 1
+              "minItems": 1,
+              "x-geopilot-kind": "layer"
             },
             "name": {
               "type": "string"
@@ -2480,7 +2434,8 @@
             "items": {
               "type": "object"
             },
-            "minItems": 1
+            "minItems": 1,
+            "x-geopilot-kind": "layer"
           },
           "name": {
             "type": "string"
@@ -2496,17 +2451,8 @@
             "type": "integer"
           },
           "output_workspace": {
-            "type": "string"
-          },
-          "output_folder": {
-            "type": "string"
-          },
-          "output_format": {
             "type": "string",
-            "enum": [
-              "gdb",
-              "shp"
-            ]
+            "x-geopilot-kind": "path"
           }
         },
         "additionalProperties": false
@@ -2521,11 +2467,10 @@
         "type": "feature_class",
         "geometry_type": "Polygon",
         "formats": [
-          "gdb",
-          "shp"
+          "gdb"
         ],
         "default_format": "gdb",
-        "workspace": "mxd_default_or_output_workspace_or_output_folder",
+        "workspace": "mxd_default_or_output_workspace",
         "overwrite": false,
         "add_to_map": true
       },
@@ -2544,7 +2489,7 @@
           }
         },
         {
-          "user": "创建多个五角星到同一个 shp",
+          "user": "创建多个五角星到同一个要素类",
           "arguments": {
             "features": [
               {
@@ -2579,7 +2524,9 @@
               "not_applicable"
             ],
             "required_fields": [],
-            "selection": {"rule": "any"}
+            "selection": {
+              "rule": "any"
+            }
           },
           {
             "parameter": "spatial_reference_layer",
@@ -2593,7 +2540,9 @@
               "polygon"
             ],
             "required_fields": [],
-            "selection": {"rule": "any"}
+            "selection": {
+              "rule": "any"
+            }
           }
         ],
         "parameters_schema": {
@@ -2641,7 +2590,8 @@
               "items": {
                 "type": "object"
               },
-              "minItems": 1
+              "minItems": 1,
+              "x-geopilot-kind": "layer"
             },
             "name": {
               "type": "string"
@@ -2657,17 +2607,8 @@
               "type": "integer"
             },
             "output_workspace": {
-              "type": "string"
-            },
-            "output_folder": {
-              "type": "string"
-            },
-            "output_format": {
               "type": "string",
-              "enum": [
-                "gdb",
-                "shp"
-              ]
+              "x-geopilot-kind": "path"
             }
           },
           "additionalProperties": false
@@ -2802,7 +2743,8 @@
             "items": {
               "type": "object"
             },
-            "minItems": 1
+            "minItems": 1,
+            "x-geopilot-kind": "layer"
           },
           "name": {
             "type": "string"
@@ -2857,7 +2799,9 @@
               "polygon"
             ],
             "required_fields": [],
-            "selection": {"rule": "any"}
+            "selection": {
+              "rule": "any"
+            }
           },
           {
             "parameter": "features",
@@ -2870,7 +2814,9 @@
               "not_applicable"
             ],
             "required_fields": [],
-            "selection": {"rule": "any"}
+            "selection": {
+              "rule": "any"
+            }
           }
         ],
         "parameters_schema": {
@@ -2922,7 +2868,8 @@
               "items": {
                 "type": "object"
               },
-              "minItems": 1
+              "minItems": 1,
+              "x-geopilot-kind": "layer"
             },
             "name": {
               "type": "string"

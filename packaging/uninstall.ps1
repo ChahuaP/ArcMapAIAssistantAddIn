@@ -59,9 +59,9 @@ function Read-InstallDir {
 function Get-AddinTargetDirs {
     param([string]$AddinId)
     if ($DesktopVersion) {
-        return @((Join-Path $HOME "Documents\ArcGIS\AddIns\$DesktopVersion\$AddinId"))
+        return @((Join-Path $env:USERPROFILE "Documents\ArcGIS\AddIns\$DesktopVersion\$AddinId"))
     }
-    $addinRoot = Join-Path $HOME "Documents\ArcGIS\AddIns"
+    $addinRoot = Join-Path $env:USERPROFILE "Documents\ArcGIS\AddIns"
     if (-not (Test-Path -LiteralPath $addinRoot)) {
         return @()
     }

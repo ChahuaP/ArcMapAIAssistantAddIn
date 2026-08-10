@@ -14,7 +14,8 @@ import unittest
 from pathlib import Path
 from typing import Any, Dict, List
 
-from gateway_py3.intelligence.model_runtime import ModelRuntime, ModelAdapter
+from gateway_py3.model_runtime.adapter import ProviderError
+from gateway_py3.model_runtime.contracts import ProviderInvocation, ProviderResponse, StructuredOutputContract
 from gateway_py3.intelligence.task_compiler import TaskCompiler
 from gateway_py3.intelligence.workflow_engine import WorkflowEngine
 from gateway_py3.kernel import contracts
@@ -24,7 +25,7 @@ from gateway_py3.kernel.contracts import (
     RequestEnvelope, SUCCEEDED, CONTRACT_FAILED,
 )
 from gateway_py3.kernel.store import JournalStore
-from gateway_py3.llm_providers import StructuredOutputContract
+from tests.kernel.fakes import build_test_model_runtime
 
 
 # --- minimal valid task_contract + workflow fixtures ----------------------
@@ -54,20 +55,46 @@ def _task_contract_response():
 
 
 def _workflow_draft_response():
-    """A minimal workflow_draft the model would return."""
+    """A minimal tool_calls response the model would return.
+
+    The planner uses native function calling (``chat_with_tools``) and the
+    response is ``{"tool_calls": [{"name": ..., "arguments": ...}]}``. Each
+    tool_call maps to one workflow step.
+    """
     return {
-        "workflow_draft": {
-            "action": "execute",
-            "summary": "List map layers",
-            "steps": [
-                {
-                    "id": "step_1",
-                    "operation": "context.list_layers",
-                    "arguments_json": "{}",
-                    "reason": "list layers",
-                },
-            ],
-        }
+        "tool_calls": [
+            {"name": "step_context-list_layers", "arguments": {}},
+        ],
+    }
+
+
+def _add_layer_task_contract_response():
+    return {
+        "input_entities": [{
+            "entity_id": "input:nanjing_shp",
+            "role": "source shapefile to add",
+            "reference": "D:/Data/shapefile/nanjing.shp",
+        }],
+        "outputs": [{
+            "output_id": "output:nanjing_layer",
+            "kind": "feature_layer",
+            "name": "nanjing",
+            "format": "not_applicable",
+            "geometry": "not_applicable",
+            "required_fields": [],
+            "spatial_reference": "not_applicable",
+            "destination": "not_applicable",
+            "evidence": "D:/Data/shapefile/nanjing.shp",
+        }],
+        "requirements": [{
+            "requirement_id": "req:add_nanjing_shp",
+            "predicate_json": json.dumps({
+                "kind": "source_preserved",
+                "subject": "input:nanjing_shp",
+            }),
+        }],
+        "allowed_side_effects": ["changes_map"],
+        "clarifications": [],
     }
 
 
@@ -77,28 +104,29 @@ class _ScriptedAdapter:
     """Returns a fixed response; records call count."""
 
     def __init__(self, responses: Dict[str, Dict[str, Any]]):
-        self.provider = "fake"
-        self.model = "Fake"
+        self.provider_type = "fake"
+        self.connection_id = "fake-connection"
         self.call_count = 0
         self._responses = responses
         self._call_keys = []
 
-    def chat_structured(self, messages: List[Dict[str, str]],
-                        contract: StructuredOutputContract) -> Dict[str, Any]:
+    def invoke(self, call: ProviderInvocation, on_token=None) -> ProviderResponse:
         self.call_count += 1
-        # Detect role from system message to pick the right response.
-        system = messages[0]["content"] if messages else ""
+        system = call.messages[0]["content"] if call.messages else ""
         if "任务合同编译器" in system:
-            return dict(self._responses.get("task_contract", {}), _usage={"total_tokens": 10})
-        if "工作流规划器" in system:
-            return dict(self._responses.get("workflow", {}), _usage={"total_tokens": 20})
-        if "工作流修复器" in system:
-            return dict(self._responses.get("repair", self._responses.get("workflow", {})),
-                        _usage={"total_tokens": 15})
-        if "G3 审计器" in system:
-            return dict(self._responses.get("audit", {"decision": "pass"}),
-                        _usage={"total_tokens": 5})
-        return dict(self._responses.get("default", {}), _usage={"total_tokens": 1})
+            response, tokens = self._responses.get("task_contract", {}), 10
+        elif "工作流规划器" in system:
+            response, tokens = self._responses.get("workflow", {}), 20
+        elif "工作流修复器" in system:
+            response, tokens = self._responses.get("repair", self._responses.get("workflow", {})), 15
+        elif "G3 审计器" in system:
+            default_audit = {"audit_result": {"decision": "pass", "claims": []}}
+            response, tokens = self._responses.get("audit", default_audit), 5
+        else:
+            response, tokens = self._responses.get("default", {}), 1
+        if on_token is not None:
+            on_token("token")
+        return ProviderResponse(response=dict(response), usage={"total_tokens": tokens})
 
 
 # --- context + capability fixtures ----------------------------------------
@@ -154,6 +182,9 @@ def _request(text="列出地图图层") -> RequestEnvelope:
         request_id="00000000-0000-0000-0000-000000000002",
         text=text,
         caller=CallerIdentity(user_id="u1", tenant_id="t1", role="analyst"),
+        target_selector={"bridge_pid": 2001, "bridge_port": 8766,
+                         "arcmap_pid": 2000, "hwnd": 3000,
+                         "deployment_hash": "a" * 64},
     )
 
 
@@ -167,7 +198,7 @@ class _BaseIntelligenceTest(unittest.TestCase):
 
     def _runtime(self, responses):
         adapter = _ScriptedAdapter(responses)
-        return ModelRuntime(adapter, self.store)
+        return build_test_model_runtime(adapter, self.store)
 
 
 class TaskCompilerTest(_BaseIntelligenceTest):
@@ -186,16 +217,29 @@ class TaskCompilerTest(_BaseIntelligenceTest):
         self.assertEqual(intent.acceptable_side_effects, 1)
         self.assertIn("task_contract", intent.derived_facts)
 
+    def test_add_external_shapefile_binds_to_map_change(self):
+        runtime = self._runtime({"task_contract": _add_layer_task_contract_response()})
+        compiler = TaskCompiler(runtime)
+        request = _request("D:/Data/shapefile/nanjing.shp添加这个shp")
+
+        outcome = compiler.compile(request, self.context, self.capabilities)
+
+        self.assertTrue(outcome.succeeded, msg=str(outcome))
+        contract = outcome.details["task_contract"]
+        self.assertEqual("map_state", contract["outputs"][0]["kind"])
+        self.assertEqual({
+            "kind": "map_change",
+            "subject": "output:nanjing_layer",
+            "target": "input:nanjing_shp",
+            "action": "add_layer",
+        }, contract["requirements"][0]["predicate"])
+
     def test_quota_stop_returns_quota_outcome(self):
-        from gateway_py3.llm_providers import ProviderError
         adapter = _ScriptedAdapter({})
-        original_chat = adapter.chat_structured
-
-        def raise_quota(messages, contract):
-            raise ProviderError("额度不足，余额已用完")
-
-        adapter.chat_structured = raise_quota
-        runtime = ModelRuntime(adapter, self.store)
+        def raise_quota(call, on_token=None):
+            raise ProviderError("quota", "额度不足，余额已用完")
+        adapter.invoke = raise_quota
+        runtime = build_test_model_runtime(adapter, self.store)
         compiler = TaskCompiler(runtime)
         outcome = compiler.compile(self.request, self.context, self.capabilities)
         self.assertEqual(outcome.kind, contracts.QUOTA_STOPPED)
@@ -233,14 +277,9 @@ class WorkflowEngineTest(_BaseIntelligenceTest):
 
     def test_plan_fails_on_invalid_workflow_operation(self):
         bad_response = {
-            "workflow_draft": {
-                "action": "execute",
-                "summary": "bad",
-                "steps": [{
-                    "id": "s1", "operation": "nonexistent.operation",
-                    "arguments_json": "{}", "reason": "x",
-                }],
-            },
+            "tool_calls": [
+                {"name": "nonexistent_operation", "arguments": {}},
+            ],
         }
         responses = {
             "task_contract": _task_contract_response(),
@@ -254,6 +293,49 @@ class WorkflowEngineTest(_BaseIntelligenceTest):
         outcome = engine.plan("00000000-0000-0000-0000-00000000000c", intent, self.context, self.capabilities)
         self.assertFalse(outcome.succeeded)
         self.assertIn(outcome.kind, (CONTRACT_FAILED, contracts.INFRASTRUCTURE_FAILED))
+
+    def test_add_external_shapefile_plans_add_layer(self):
+        responses = {
+            "task_contract": _add_layer_task_contract_response(),
+            "workflow": {
+                "tool_calls": [{
+                    "name": "step_layer-add_layer",
+                    "arguments": {"path": "D:/Data/shapefile/nanjing.shp"},
+                }],
+            },
+        }
+        runtime = self._runtime(responses)
+        from gateway_py3.catalog_loader import OperationCatalog
+        from gateway_py3.runtime.capability_provider import CapabilityProvider
+        catalog = OperationCatalog()
+        capabilities = CapabilityProvider(catalog).snapshot("test-add-layer")
+        compiler = TaskCompiler(runtime)
+        request = _request("D:/Data/shapefile/nanjing.shp添加这个shp")
+        compiled = compiler.compile(request, self.context, capabilities)
+        self.assertTrue(compiled.succeeded, msg=str(compiled))
+        self.assertEqual(
+            "D:/Data/shapefile/nanjing.shp",
+            compiled.details["intent"].bound_inputs[0].path,
+        )
+        self.assertIsNone(compiled.details["intent"].bound_inputs[0].layer_ref)
+
+        engine = WorkflowEngine(catalog, runtime)
+        planned = engine.plan(
+            "00000000-0000-0000-0000-00000000000d",
+            compiled.details["intent"], self.context, capabilities,
+        )
+
+        self.assertTrue(planned.succeeded, msg=str(planned))
+        plan = planned.details["plan"]
+        self.assertEqual("layer.add_layer", plan.workflow[0].operation)
+        self.assertEqual(
+            "D:/Data/shapefile/nanjing.shp",
+            plan.workflow[0].arguments["path"],
+        )
+        self.assertEqual(
+            ("D:/Data/shapefile/nanjing.shp",),
+            plan.input_identities,
+        )
 
 
 if __name__ == "__main__":

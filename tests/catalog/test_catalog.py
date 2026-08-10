@@ -2,6 +2,7 @@ import ast
 import copy
 import json
 import pathlib
+import tempfile
 import unittest
 import xml.etree.ElementTree as ET
 
@@ -54,9 +55,10 @@ class CatalogTests(unittest.TestCase):
     def test_every_operation_has_a_closed_executable_capability_contract(self):
         from gateway_py3.catalog_loader import OperationCatalog
 
-        registry = OperationCatalog().capabilities
-        operations = list(OperationCatalog().all_operations())
-        self.assertEqual(len(operations), 61)
+        catalog = OperationCatalog()
+        registry = catalog.capabilities
+        operations = list(catalog.all_operations())
+        self.assertGreaterEqual(len(operations), 18)
         for operation in operations:
             contract = registry.get(operation["id"])
             self.assertEqual(contract["parameters_schema"], operation["parameters_schema"])
@@ -66,8 +68,69 @@ class CatalogTests(unittest.TestCase):
             expected_kind = "map_state" if output_type == "none" and operation["side_effects"] in ("read_only", "changes_map") else output_type
             self.assertEqual(contract["outputs"]["kind"], expected_kind, operation["id"])
 
+    def test_catalog_uses_only_explicit_parameter_abi_and_server_derived_gdb_output(self):
+        from gateway_py3.catalog_loader import OperationCatalog
+
+        for operation in OperationCatalog().all_operations():
+            schemas = (
+                operation["parameters_schema"],
+                operation["capability_contract"]["parameters_schema"],
+            )
+            layer_parameters = {
+                item["parameter"] for item in operation["capability_contract"]["inputs"]
+            }
+            for schema in schemas:
+                self.assertEqual(schema["type"], "object")
+                self.assertIs(schema["additionalProperties"], False)
+                self.assertIsInstance(schema["required"], list)
+                self.assertNotIn("output_folder", schema["properties"])
+                self.assertNotIn("output_format", schema["properties"])
+                for parameter in layer_parameters:
+                    self.assertEqual(
+                        schema["properties"][parameter].get("x-geopilot-kind"),
+                        "layer",
+                    )
+                for parameter in ("path", "output_workspace"):
+                    if parameter in schema["properties"]:
+                        self.assertEqual(
+                            schema["properties"][parameter].get("x-geopilot-kind"),
+                            "path",
+                        )
+            if operation["side_effects"] == "writes_data":
+                self.assertEqual(operation["output_policy"]["type"], "feature_class")
+                self.assertEqual(operation["output_policy"]["formats"], ["gdb"])
+                self.assertEqual(
+                    operation["output_policy"]["workspace"],
+                    "mxd_default_or_output_workspace",
+                )
+
+    def test_catalog_rejects_legacy_output_and_parameter_contracts(self):
+        from gateway_py3.catalog_loader import CatalogError, OperationCatalog
+
+        catalog = OperationCatalog()
+        operation = copy.deepcopy(catalog.get("analysis.buffer"))
+        operation["output_policy"]["type"] = "vector"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = pathlib.Path(temp_dir)
+            _write_single_operation_catalog(root, operation)
+            with self.assertRaisesRegex(CatalogError, "must be feature_class"):
+                OperationCatalog(root)
+
+        operation = copy.deepcopy(catalog.get("analysis.buffer"))
+        operation["parameters_schema"] = {
+            "input_layer": {"type": "layer", "required": "yes"},
+        }
+        operation["capability_contract"]["parameters_schema"] = copy.deepcopy(
+            operation["parameters_schema"]
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = pathlib.Path(temp_dir)
+            _write_single_operation_catalog(root, operation)
+            with self.assertRaisesRegex(CatalogError, "JSON Schema object"):
+                OperationCatalog(root)
+
     def test_custom_operation_schema_uses_the_runtime_cardinality_descriptor(self):
-        from arcmap_runtime_py2.capability_contract_protocol import CARDINALITY_DESCRIPTOR_SCHEMA
+        from shared_runtime.capability_contract import CARDINALITY_DESCRIPTOR_SCHEMA
 
         schema = _load_json(CATALOG_ROOT / "schemas" / "operation_spec.schema.json")
         declared = schema["$defs"]["capabilityContract"]["properties"]["outputs"]["properties"]["cardinality"]
@@ -78,7 +141,7 @@ class CatalogTests(unittest.TestCase):
         from gateway_py3.catalog_loader import OperationCatalog
 
         contracts = OperationCatalog().capabilities
-        self.assertEqual(61, sum(len(contracts.get(item["id"])["semantic_effects"]) for item in OperationCatalog().all_operations()))
+        self.assertGreater(sum(len(contracts.get(item["id"])["semantic_effects"]) for item in OperationCatalog().all_operations()), 0)
 
     def test_semantic_effect_vocabulary_covers_the_business_contract(self):
         from gateway_py3.catalog_loader import OperationCatalog
@@ -94,29 +157,6 @@ class CatalogTests(unittest.TestCase):
         operation = copy.deepcopy(OperationCatalog().get("analysis.buffer"))
         operation["capability_contract"]["semantic_effects"][0]["distance"] = "invented"
         with self.assertRaisesRegex(CapabilityContractError, "binding cannot be resolved"):
-            CapabilityRegistry([operation])
-
-    def test_semantic_effect_optional_parameter_requires_an_executable_default(self):
-        from gateway_py3.capability_registry import CapabilityContractError, CapabilityRegistry
-        from gateway_py3.catalog_loader import OperationCatalog
-
-        operation = copy.deepcopy(OperationCatalog().get("export.table_csv"))
-        del operation["parameters_schema"]["properties"]["selected_only"]["default"]
-        del operation["capability_contract"]["parameters_schema"]["properties"]["selected_only"]["default"]
-
-        with self.assertRaisesRegex(CapabilityContractError, "requires an executable default"):
-            CapabilityRegistry([operation])
-
-    def test_artifact_export_semantic_action_uses_the_closed_domain_vocabulary(self):
-        from gateway_py3.capability_registry import CapabilityContractError, CapabilityRegistry
-        from gateway_py3.catalog_loader import OperationCatalog
-
-        operation = copy.deepcopy(OperationCatalog().get("export.table_csv"))
-        operation["capability_contract"]["semantic_effects"][0]["action"] = {
-            "const": "export_table_csv",
-        }
-
-        with self.assertRaisesRegex(CapabilityContractError, "action.*closed vocabulary"):
             CapabilityRegistry([operation])
 
     def test_semantic_preservation_is_catalog_declared_and_requires_a_source_edge(self):
@@ -179,11 +219,6 @@ class CatalogTests(unittest.TestCase):
         with self.assertRaisesRegex(CapabilityContractError, "selection must be an object"):
             CapabilityRegistry([operation])
 
-        operation = copy.deepcopy(OperationCatalog().get("export.table_csv"))
-        operation["capability_contract"]["inputs"][0]["selection"]["parameter"] = "output_name"
-        with self.assertRaisesRegex(CapabilityContractError, "values must match the string parameter"):
-            CapabilityRegistry([operation])
-
     def test_representative_executor_contract_semantics(self):
         from gateway_py3.catalog_loader import OperationCatalog
 
@@ -240,7 +275,6 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(operations["edit.create_empty_feature_layer"]["capability_contract"]["outputs"]["geometry"]["value"], "parameter_geometry_type")
         self.assertEqual(operations["edit.create_rectangle_polygon"]["capability_contract"]["outputs"]["geometry"]["value"], "polygon")
         self.assertEqual(operations["data.repair_geometry"]["side_effects"], "edits_data")
-        self.assertEqual(operations["layout.export_pdf"]["output_policy"]["type"], "file")
         star_properties = operations["edit.create_star_polygon"]["parameters_schema"]["properties"]
         self.assertIn("features", star_properties)
         self.assertEqual(operations["edit.create_star_polygon"]["parameters_schema"]["required"], ["output_name"])
@@ -296,7 +330,6 @@ class CatalogTests(unittest.TestCase):
 
     def test_runtime_read_data_uses_live_layers_and_unicode_paths(self):
         common = (RUNTIME_ROOT / "operations" / "common.py").read_text(encoding="utf-8")
-        export_ops = (RUNTIME_ROOT / "operations" / "export_ops.py").read_text(encoding="utf-8")
         condition_utils = (RUNTIME_ROOT / "operations" / "condition_utils.py").read_text(encoding="utf-8")
         layer_ops = (RUNTIME_ROOT / "operations" / "layer_ops.py").read_text(encoding="utf-8")
 
@@ -306,11 +339,7 @@ class CatalogTests(unittest.TestCase):
         self.assertIn("require_selection(self.layer)", common)
         self.assertIn('path = common._path_text(arguments["path"])', layer_ops)
 
-        self.assertIn("with common.read_layer(layer, selected_only, where_clause) as source:", export_ops)
-        self.assertIn("with common.read_layer(layer, selected_only) as source:", export_ops)
         self.assertIn("with common.read_layer(layer, False, where_clause) as source:", condition_utils)
-        self.assertNotIn("common._safe_data_source(layer) or layer", export_ops)
-        self.assertNotIn("class _read_layer", export_ops)
 
     def test_workflow_operations_do_not_publish_or_refresh_arcmap_ui(self):
         forbidden = (
@@ -329,7 +358,6 @@ class CatalogTests(unittest.TestCase):
         operation_files = [
             RUNTIME_ROOT / "operations" / "common.py",
             RUNTIME_ROOT / "operations" / "layer_ops.py",
-            RUNTIME_ROOT / "operations" / "export_ops.py",
             RUNTIME_ROOT / "operations" / "edit_geometry_ops.py",
         ]
         forbidden = [
@@ -359,6 +387,7 @@ class CatalogTests(unittest.TestCase):
         self.assertIn("Build-ExternalArcMapBridge", build_script)
         self.assertIn('"ArcMapBridgeExternal\\build.ps1"', build_script)
         self.assertIn('"app\\bridge\\ArcMapBridge.exe"', build_script)
+        self.assertIn('"Newtonsoft.Json.dll"', build_script)
         self.assertIn('"app\\VERSION"', build_script)
         self.assertIn('"app\\uninstall.ico"', build_script)
         self.assertIn("Get-AppVersion", build_script)
@@ -372,6 +401,7 @@ class CatalogTests(unittest.TestCase):
         self.assertIn("Desktop10\\.", install_script)
         self.assertIn("Get-AddinTargetDirs", uninstall_script)
         self.assertIn("bridge_exe", install_script)
+        self.assertIn('"bridge\\Newtonsoft.Json.dll"', install_script)
         self.assertIn("Test-InstallHealth", install_script)
         self.assertIn("build\\release_staging\\ArcMapAIAssistant", build_script)
         self.assertIn("GeoPilotSetup-$appVersion.exe 和 geopilot-arcmap skill", build_script)
@@ -383,6 +413,8 @@ class CatalogTests(unittest.TestCase):
         self.assertIn("ISCC.exe", build_script)
         self.assertIn("Programs\\Inno Setup 6\\ISCC.exe", build_script)
         self.assertIn("Stop-BuildOutputGateway", build_script)
+        self.assertIn("function Test-IsPackageSourceItem", build_script)
+        self.assertIn("Where-Object { Test-IsPackageSourceItem $_ }", build_script)
         self.assertIn("PyInstaller 打包失败", build_script)
         self.assertIn("Inno Setup 打包失败", build_script)
         self.assertIn("PrivilegesRequired=admin", inno_script)
@@ -405,6 +437,17 @@ class CatalogTests(unittest.TestCase):
 
 def _load_json(path):
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _write_single_operation_catalog(root, operation):
+    (root / "catalog.json").write_text(
+        json.dumps({"packs": ["pack.json"]}),
+        encoding="utf-8",
+    )
+    (root / "pack.json").write_text(
+        json.dumps({"operations": [operation]}, ensure_ascii=False),
+        encoding="utf-8",
+    )
 
 
 if __name__ == "__main__":

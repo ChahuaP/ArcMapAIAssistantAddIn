@@ -12,15 +12,19 @@ from __future__ import annotations
 import json
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from gateway_py3.api.http_adapter import GeoPilotHttpAdapter, HttpError
 from gateway_py3.kernel.coordinator import GeoPilotKernel, KernelPorts
 from gateway_py3.kernel.store import JournalStore
-from gateway_py3.intelligence.model_runtime import ModelRuntime
+from gateway_py3.model_runtime import ModelRuntime
+from gateway_py3.model_runtime.configuration import (
+    ModelConfigurationStore,
+    build_provider_registry,
+)
+from gateway_py3.model_runtime.credentials import DpapiCredentialVault
 from gateway_py3.intelligence.task_compiler import TaskCompiler
 from gateway_py3.intelligence.workflow_engine import WorkflowEngine
-from gateway_py3.intelligence.minimax_adapter import MiniMaxAdapter
 from gateway_py3.runtime.policy import PolicyGate
 from gateway_py3.runtime.arcmap_runtime import ArcMapRuntime
 from gateway_py3.runtime.bridge_client import RealBridgeClient
@@ -29,13 +33,12 @@ from gateway_py3.streaming.event_projection import JournalEventProjection
 from gateway_py3.paths import WEB_ROOT
 from gateway_py3.logs import write_event
 from gateway_py3.static_server import is_static_path, serve_static
+from gateway_py3.release import APP_VERSION
 
 import threading
 
 HOST = "127.0.0.1"
 PORT = 8765
-APP_VERSION = "2.0.0"
-
 # §8: fixed Origin allowlist; no wildcard CORS.
 ALLOWED_ORIGINS = (
     "http://127.0.0.1:8765",
@@ -45,25 +48,22 @@ ALLOWED_ORIGINS = (
 
 
 def _resolve_deployment_hash() -> str:
-    """Read the build hash from install.json (set by the installer/packager)."""
-    import json as _json
-    import os
-    install_path = os.path.join(
-        os.environ.get("APPDATA", ""), "ArcMapAIAssistant", "install.json"
-    )
-    try:
-        with open(install_path, "r", encoding="utf-8-sig") as f:
-            cfg = _json.load(f)
-        return cfg.get("deployment_hash") or cfg.get("version", "unknown")
-    except Exception:
-        return "unknown"
+    """Read the build hash from install.json (set by the installer/packager).
+
+    Fail fast (§0): a missing/unreadable deployment hash means the Gateway
+    cannot prove its own build identity against the Bridge/Py2 runtime, so
+    every lease fencing check would be vacuous. Never default to ``"unknown"``.
+    """
+    from gateway_py3.runtime.deployment_identity import gateway_identity_path, read_identity
+    return read_identity(gateway_identity_path())
 
 
 def build_kernel(store: JournalStore) -> tuple[GeoPilotKernel, JournalEventProjection, RealBridgeClient]:
     """Wire the production kernel with real adapters (§6).
 
-    ``MiniMaxAdapter`` is the only production model adapter; tests inject
-    fakes via ``KernelPorts``. The ``ArcMapRuntime`` uses the real bridge
+    The composition root installs every explicitly configured provider adapter;
+    the Kernel and intelligence modules only see provider-neutral ModelRuntime.
+    The ``ArcMapRuntime`` uses the real bridge
     client (C# Bridge lease protocol). ``AcceptancePublisher`` uses a staging
     directory under ``LOCALAPPDATA``.
     """
@@ -81,12 +81,13 @@ def build_kernel(store: JournalStore) -> tuple[GeoPilotKernel, JournalEventProje
     store.add_event_listener(projection.notify)
 
     catalog = OperationCatalog()
-    model_runtime = ModelRuntime(MiniMaxAdapter(), store)
+    credential_vault = DpapiCredentialVault()
+    model_configuration = ModelConfigurationStore(vault=credential_vault).load()
+    provider_registry = build_provider_registry(model_configuration, credential_vault)
+    model_runtime = ModelRuntime(provider_registry, model_configuration.plan, store)
     compiler = TaskCompiler(model_runtime)
-    engine = WorkflowEngine(catalog, model_runtime, checkpoint_path=store.path)
-
-    staging = localappdata_dir() / "staging"
-    publish = localappdata_dir() / "published"
+    engine = WorkflowEngine(catalog, model_runtime,
+                            checkpoint_path=store.path, journal=store)
 
     deployment_hash = _resolve_deployment_hash()
 
@@ -98,8 +99,9 @@ def build_kernel(store: JournalStore) -> tuple[GeoPilotKernel, JournalEventProje
         planner=engine,
         policy=PolicyGate(),
         executor=ArcMapExecutorAdapter(bridge_client, deployment_hash, store),
-        acceptance=AcceptancePublisher(staging_root=staging, publish_root=publish),
+        acceptance=AcceptancePublisher(),
         model=model_runtime,
+        bridge=bridge_client,
     )
     return GeoPilotKernel(ports), projection, bridge_client
 
@@ -108,8 +110,12 @@ class _ServerState:
     def __init__(self):
         self.store = JournalStore()
         self.kernel, self.projection, self.bridge_client = build_kernel(self.store)
+        # §7 crash recovery: reconcile runs left active by a previous process
+        # before serving traffic. Done after kernel wiring, before the adapter
+        # accepts requests.
+        self.kernel.recover_interrupted_runs()
         self.adapter = GeoPilotHttpAdapter(
-            self.kernel, self.store, self.bridge_client, ALLOWED_ORIGINS,
+            self.kernel, self.bridge_client, ALLOWED_ORIGINS,
         )
 
 
@@ -117,7 +123,7 @@ STATE = _ServerState()
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "GeoPilot/2.0"
+    server_version = "GeoPilot/" + APP_VERSION
 
     def do_OPTIONS(self):
         self.send_response(204)
@@ -195,7 +201,7 @@ class Handler(BaseHTTPRequestHandler):
         if origin in ALLOWED_ORIGINS:
             self.send_header("Access-Control-Allow-Origin", origin)
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Session-Id")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Session-Id, X-CSRF-Token")
 
     def _serve_static(self, path):
         """Serve whitelisted static files from WEB_ROOT."""
@@ -205,7 +211,15 @@ class Handler(BaseHTTPRequestHandler):
         return True
 
     def _serve_sse(self):
-        """Stream SSE events from the journal projection (§14)."""
+        """Stream SSE events from the journal projection (§14).
+
+        §5: sessions are isolation boundaries. ``EventSource`` cannot set
+        custom headers, so the session is passed via the ``session_id`` query
+        parameter; events are filtered to the caller's session.
+        """
+        parsed = urlparse(self.path)
+        qs = parse_qs(parsed.query)
+        session_id = (qs.get("session_id") or [""])[0]
         last_event_id = 0
         raw = self.headers.get("Last-Event-ID")
         if raw:
@@ -222,7 +236,8 @@ class Handler(BaseHTTPRequestHandler):
         # Initial ready event
         self._write_sse_event("ready", {"last_event_id": last_event_id})
         while True:
-            events = STATE.projection.wait_after(last_event_id, timeout=25.0)
+            events = STATE.projection.wait_after(last_event_id, timeout=25.0,
+                                                 session_id=session_id)
             if not events:
                 try:
                     self.wfile.write(b": keep-alive\n\n")

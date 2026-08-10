@@ -6,6 +6,8 @@ from typing import Any, Dict, Iterable, List
 
 from .paths import CATALOG_ROOT
 from .capability_registry import CapabilityRegistry
+from shared_runtime.operation_schema import OperationSchemaError, validate_parameter_schema
+from shared_runtime.output_contract import OutputContractError, validate_output_policy
 
 
 class CatalogError(Exception):
@@ -34,9 +36,18 @@ class OperationCatalog:
                 self._register_operation(operation)
 
     def _register_operation(self, operation: Dict[str, Any]) -> None:
-        operation_id = operation["id"]
+        operation_id = operation.get("id")
+        if not isinstance(operation_id, str) or not operation_id:
+            raise CatalogError("Operation id must be a non-empty string")
         if operation_id in self.operations:
             raise CatalogError(f"Duplicate operation id: {operation_id}")
+        try:
+            validate_parameter_schema(operation.get("parameters_schema"))
+            validate_output_policy(
+                operation.get("output_policy"), operation.get("side_effects")
+            )
+        except (OperationSchemaError, OutputContractError) as exc:
+            raise CatalogError(f"{operation_id} has an invalid executable contract: {exc}") from exc
         self.operations[operation_id] = operation
 
     def get(self, operation_id: str) -> Dict[str, Any]:

@@ -4,7 +4,24 @@ param(
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
+$repoRoot = Split-Path -Parent $root
 $project = Join-Path $root "ArcMapBridgeExternal.csproj"
+$versionPath = Join-Path $repoRoot "VERSION"
+$version = [System.IO.File]::ReadAllText($versionPath, [System.Text.Encoding]::ASCII).Trim()
+if ($version -notmatch '^\d+\.\d+\.\d+$') {
+    throw "$versionPath 必须包含三段式版本号。"
+}
+$generatedDir = Join-Path $root "obj\Generated"
+New-Item -ItemType Directory -Path $generatedDir -Force | Out-Null
+[System.IO.File]::WriteAllLines(
+    (Join-Path $generatedDir "AssemblyVersion.g.cs"),
+    @(
+        "using System.Reflection;",
+        "[assembly: AssemblyVersion(`"$version`")]",
+        "[assembly: AssemblyFileVersion(`"$version`")]"
+    ),
+    (New-Object System.Text.UTF8Encoding($false))
+)
 
 $msbuild = Get-Command MSBuild.exe -ErrorAction SilentlyContinue
 if (-not $msbuild) {

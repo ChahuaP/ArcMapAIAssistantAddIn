@@ -39,7 +39,6 @@ class JournalEventProjection:
         "authorization_auto": "run.stage_changed",
         "authorization_approved": "run.stage_changed",
         "authorization_denied": "run.stage_changed",
-        "authorization_skipped": "run.stage_changed",
         "authorization_failed": "run.stage_changed",
         "runtime_acquired": "run.stage_changed",
         "runtime_failed": "run.stage_changed",
@@ -75,19 +74,24 @@ class JournalEventProjection:
 
     # -- SSE waiters --------------------------------------------------------
 
-    def wait_after(self, last_seq: int, timeout: float = 25.0) -> List[Dict[str, Any]]:
+    def wait_after(self, last_seq: int, timeout: float = 25.0,
+                   session_id: str = "") -> List[Dict[str, Any]]:
         """Block until new journal events exist; return projected events.
 
         Events are read from the journal (source of truth), so a waiter that
-        missed in-memory state still sees them.
+        missed in-memory state still sees them. When ``session_id`` is given,
+        only events for runs in that session are projected (§5: sessions are
+        isolation boundaries).
         """
         with self._condition:
             self._condition.wait_for(lambda: self._latest_seq > last_seq, timeout=timeout)
-            return self.projection_after(last_seq, limit=self._max_history)
+            return self.projection_after(last_seq, limit=self._max_history,
+                                         session_id=session_id)
 
-    def projection_after(self, last_seq: int, limit: int = 200) -> List[Dict[str, Any]]:
+    def projection_after(self, last_seq: int, limit: int = 200,
+                         session_id: str = "") -> List[Dict[str, Any]]:
         """Project journal events after ``last_seq`` into SSE events (§14.2)."""
-        events = self.store.events_after(last_seq, limit=limit)
+        events = self.store.events_after(last_seq, limit=limit, session_id=session_id)
         return [self._project(row) for row in events]
 
     def latest_seq(self) -> int:
@@ -101,41 +105,12 @@ class JournalEventProjection:
         event_type = self._EVENT_TYPES.get(kind, "run.stage_changed")
         payload = dict(row.get("payload") or {})
         payload.setdefault("run_id", row["run_id"])
-        # Use the event KIND as the stage signal, not the event's stage field.
-        # The event's stage field is the transition checkpoint (e.g.
-        # "intent_compiled"), but for outcome events (clarification_required,
-        # plan_failed, etc.) the actual run stage is different.
-        # Map event kinds to their projected stage so the front-end gets
-        # the correct terminal/paused state.
-        kind_to_stage = {
-            "run_received": "received",
-            "user_text": "received",
-            "context_frozen": "context_frozen",
-            "context_failed": "infrastructure_failed",
-            "intent_compiled": "intent_compiled",
-            "intent_failed": "contract_failed",
-            "clarification_required": "clarification_required",
-            "plan_verified": "plan_verified",
-            "plan_failed": "contract_failed",
-            "authorization_required": "authorization_required",
-            "authorization_auto": "authorized",
-            "authorization_approved": "authorized",
-            "authorization_skipped": "authorized",
-            "authorization_denied": "policy_denied",
-            "authorization_failed": "policy_denied",
-            "runtime_acquired": "runtime_acquired",
-            "runtime_failed": "infrastructure_failed",
-            "execution_started": "executing",
-            "execution_failed": "capability_failed",
-            "executed": "executed",
-            "accepted": "accepted",
-            "acceptance_failed": "acceptance_failed",
-            "published": "published",
-            "publish_failed": "infrastructure_failed",
-            "succeeded": "succeeded",
-        }
-        stage = kind_to_stage.get(kind, row.get("stage", ""))
+        stage = payload["projected_stage"]
         payload["stage"] = stage
+        if event_type == "run.stage_changed":
+            # The journaled event carries the outcome that caused this exact
+            # transition; paused non-outcome checkpoints explicitly expose None.
+            payload.setdefault("outcome_kind", None)
         return {
             "id": row["event_seq"],
             "type": event_type,

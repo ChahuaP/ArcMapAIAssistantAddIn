@@ -177,12 +177,10 @@ def _create_polygon_output(context, arguments, spatial_reference, rows):
 
 
 def _create_feature_class(context, arguments, geometry_type, spatial_reference):
-    output = common.output_feature_dataset(
+    output = common.output_feature_class(
         context,
         arguments["output_name"],
-        arguments.get("output_workspace"),
-        arguments.get("output_folder"),
-        arguments.get("output_format")
+        arguments.get("output_workspace")
     )
     workspace = path_utils.dirname(output)
     name = path_utils.basename(output)

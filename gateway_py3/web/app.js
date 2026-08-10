@@ -1,8 +1,8 @@
-    const EXPECTED_GATEWAY_VERSION = '2.0.0';
     const API_ORIGIN = window.location.protocol === 'file:' ? 'http://127.0.0.1:8765' : '';
     
     const SESSION_STORAGE_KEY = 'geopilot.sessionId';
     let eventSource = null;
+    let csrfToken = '';
     let eventRefreshBusy = false;
     let eventRefreshTimer = 0;
     let pendingEventTypes = new Set();
@@ -16,10 +16,10 @@
     let transientAssistantMessage = '';
     let modelWait = null;
     let modelWaitTimer = null;
-    let providerOptions = [];
-    let modelOptions = [];
-    let pendingProviderKeyClears = {};
+    let modelConfigDraft = null;
+    const clearedModelKeys = new Set();
     let pendingApprovalRunId = '';
+    const approvalDocuments = new Map();
     const appState = {
       config: null,
       health: null,
@@ -42,6 +42,7 @@
 
     function resetSessionId() {
       localStorage.removeItem(SESSION_STORAGE_KEY);
+      csrfToken = '';
     }
 
     // §14.4: run stage → user-facing label (no fake timer).
@@ -60,18 +61,26 @@
       succeeded: '任务完成',
       clarification_required: '需要补充信息',
       policy_denied: '授权被拒绝',
-      contract_failed: '任务合同校验失败',
+      contract_failed: '任务检查失败',
       capability_failed: '能力执行失败',
       infrastructure_failed: '基础设施故障',
       quota_stopped: '模型额度不足',
       model_call_uncertain: '模型调用结果不确定',
       execution_indeterminate: '执行状态不确定',
+      publication_indeterminate: '发布状态不确定',
       acceptance_failed: '成果验收失败',
       cancelled: '已取消',
     };
 
     function stageLabel(stage) {
       return STAGE_LABELS[stage] || stage;
+    }
+
+    function requireAppVersion(data) {
+      if (!data || typeof data.app_version !== 'string' || !data.app_version.trim()) {
+        throw new Error('网关响应缺少 app_version，已拒绝继续。');
+      }
+      return data.app_version;
     }
 
     function isTerminalStage(stage) {
@@ -83,13 +92,19 @@
         stage === 'infrastructure_failed' ||
         stage === 'quota_stopped' ||
         stage === 'model_call_uncertain' ||
-        stage === 'execution_indeterminate' ||
         stage === 'acceptance_failed' ||
         stage === 'cancelled';
     }
 
     function isApprovalStage(stage) {
       return stage === 'authorization_required';
+    }
+
+    async function resumeIndeterminate(runId) {
+      const data = await api(`/api/v1/runs/${runId}/resume`, {method: 'POST', body: '{}'});
+      selectedRunId = runId;
+      setStatus(stageLabel(data.run.stage));
+      await refreshRuns();
     }
 
     function setState(patch) {
@@ -120,6 +135,17 @@
       const opts = options || {};
       // §8: every request carries the session token
       opts.headers = Object.assign({'X-Session-Id': getSessionId()}, opts.headers || {});
+      if (opts.method && opts.method.toUpperCase() === 'POST') {
+        if (!csrfToken) {
+          const session = await fetch(apiUrl('/api/v1/session'), {
+            headers: {'X-Session-Id': getSessionId()}
+          });
+          const sessionData = await session.json();
+          if (!session.ok) throw new Error(sessionData.error || session.statusText);
+          csrfToken = sessionData.csrf_token;
+        }
+        opts.headers['X-CSRF-Token'] = csrfToken;
+      }
       try {
         response = await fetch(apiUrl(path), opts);
       } catch (err) {
@@ -157,10 +183,6 @@
       await loadDiagnostics();
     }
 
-    function openChangelog() {
-      openModal('changelogModal');
-    }
-
     async function openLogDir() {
       try {
         await api('/open-path', {
@@ -174,32 +196,15 @@
       }
     }
 
-    async function openConfigFile() {
-      try {
-        await api('/open-path', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({target: 'config_file'})
-        });
-        setStatus('已打开配置文件。');
-      } catch (err) {
-        setStatus(err.message);
-      }
-    }
-
-    async function openPendingTools() {
-      openModal('toolsModal');
-      await loadPendingTools();
-    }
-
     async function loadDiagnostics() {
       const box = document.getElementById('diagnosticsList');
       box.innerHTML = '<div class="empty-state-card">正在检查...</div>';
       try {
         const data = await api('/api/diagnostics');
-      document.getElementById('diagnosticsSummary').textContent = data.ok
-        ? `检查通过，当前版本 ${data.app_version}。`
-          : `发现需要处理的事项，当前版本 ${data.app_version}。`;
+        const version = requireAppVersion(data);
+        document.getElementById('diagnosticsSummary').textContent = data.ok
+          ? `检查通过，当前版本 ${version}。`
+          : `发现需要处理的事项，当前版本 ${version}。`;
         renderDiagnostics(data.checks || []);
       } catch (err) {
         document.getElementById('diagnosticsSummary').textContent = '诊断失败。';
@@ -236,8 +241,9 @@
       try {
         const data = await api('/api/capabilities?detail=1');
         capabilitiesLoaded = true;
+        const version = requireAppVersion(data);
         document.getElementById('capabilitiesSummary').textContent =
-          `应用版本 ${data.app_version || EXPECTED_GATEWAY_VERSION}，${data.operation_count} 个能力。`;
+          `应用版本 ${version}，${data.operation_count} 个能力。`;
         renderCapabilities(data.operations || []);
       } catch (err) {
         box.innerHTML = `<div class="empty-state-card">${escapeHtml(err.message)}</div>`;
@@ -386,16 +392,12 @@
     }
 
     function applyHealthData(data, silent) {
-      setState({health: data || null});
-      const version = data.app_version || '旧版本';
+      const version = requireAppVersion(data);
+      setState({health: data});
       setTile('gatewayState', 'ok', `已启动，${data.operation_count} 个能力`);
       const versionNode = document.getElementById('versionInfo');
       if (versionNode) versionNode.textContent = version;
-      if (data.app_version === EXPECTED_GATEWAY_VERSION) {
-        updateModeStatus();
-      } else {
-        setTile('restartState', 'warn', '需要重启网关');
-      }
+      updateModeStatus();
       if (!silent) setStatus(`网关已连接，版本 ${version}。`);
     }
 
@@ -406,11 +408,10 @@
         applyConfig(data.config || {});
         applyArcMapBridges((data.arcmap && data.arcmap.bridges) || [], (data.arcmap && data.arcmap.error) || '');
         applyRuns(data.runs || [], true);
-        setStatus(`网关已连接，版本 ${(data.health && data.health.app_version) || EXPECTED_GATEWAY_VERSION}。`);
+        setStatus(`网关已连接，版本 ${requireAppVersion(data.health)}。`);
       } catch (renderErr) {
         console.error('loadWorkbenchState render error:', renderErr);
-        // Still set health so the UI shows connected
-        applyHealthData(data.health || {}, true);
+        throw renderErr;
       }
     }
 
@@ -420,287 +421,238 @@
     }
 
     async function saveConfig() {
-      const primaryModel = parseModelChoice(document.getElementById('primaryProvider').value);
+      const connections = collectModelConnections();
+      const agentModelPlan = collectRoleModelPlan();
       const data = await api('/config', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({
-          primary_provider: primaryModel.provider,
-          primary_model: primaryModel.model,
-          providers: collectProviderConfig()
-        })
+        body: JSON.stringify({connections, agent_model_plan: agentModelPlan})
       });
-      pendingProviderKeyClears = {};
+      clearedModelKeys.clear();
       applyConfig(data.config);
-      setStatus('模型配置已保存。');
+      setStatus(data.restart_required ? '模型配置已保存，重新启动 GeoPilot 后生效。' : '模型配置已保存。');
       closeModal('keyModal');
     }
 
     function applyConfig(config) {
-      const providers = config.providers || {};
+      if (!config || !Array.isArray(config.connections) ||
+          !Array.isArray(config.provider_options) || !config.agent_model_plan) {
+        throw new Error('模型配置数据无效，请重启 GeoPilot。');
+      }
+      for (const connection of config.connections) {
+        if (!connection || typeof connection.connection_id !== 'string' ||
+            typeof connection.provider_type !== 'string' ||
+            typeof connection.endpoint !== 'string' ||
+            !Array.isArray(connection.enabled_models) ||
+            typeof connection.has_credential !== 'boolean') {
+          throw new Error('模型连接数据无效，请重启 GeoPilot。');
+        }
+      }
       setState({config});
-      renderModelConfig(config);
-      const keyStates = providerKeyStates(providers);
-      const ok = keyStates.some(item => item.ok);
+      modelConfigDraft = JSON.parse(JSON.stringify(config));
+      const missing = config.connections.filter(item => item.credential_required && !item.has_credential);
+      const ok = config.connections.length > 0 && missing.length === 0;
       updateModeUI();
-      document.getElementById('keyBadge').textContent = providerKeyLabel(keyStates);
+      document.getElementById('keyBadge').textContent = missing.length ?
+        `${config.connections.length} 个模型连接，${missing.length} 个缺少 API Key` :
+        `${config.connections.length} 个模型连接可用`;
       document.getElementById('keyActionText').textContent = '模型配置';
-      document.getElementById('configPathHint').textContent = config.config_error
-        ? `配置文件：${config.config_path || '未知'}。旧配置无效，请重新保存模型配置：${config.config_error}`
-        : `配置文件：${config.config_path || '未知'}`;
-      renderSpeechConfigHint(config);
-      renderCurrentModelHint(config);
       setDot('keyDot', ok, !ok);
+      renderModelConfiguration();
     }
 
-    function renderModelConfig(config) {
-      providerOptions = providerList(config);
-      modelOptions = Array.isArray(config.model_options) ? config.model_options : [];
-      renderModelSelect('primaryProvider', config.primary_provider, config.primary_model);
-      renderProviderKeyFields(config.providers || {});
-      renderCurrentModelHint(config);
-    }
-
-    function renderCurrentModelHint(config) {
-      const node = document.getElementById('activeModelHint');
-      if (!node || !config) return;
-      const primary = modelOptionLabel(config.primary_provider, config.primary_model);
-      node.textContent = `当前模型：${primary}`;
-    }
-
-    function renderSpeechConfigHint(config) {
-      const speech = config.speech || {};
-      const provider = providerLabel(speech.uses_provider || 'qwen');
-      const keyState = speech.has_api_key ? '已可用' : '未配置';
-      const sourceLabel = speech.api_key_source && speech.api_key_source.label ? `，运行时使用：${speech.api_key_source.label}` : '';
-      document.getElementById('speechConfigHint').textContent =
-        `语音识别使用 ${provider} API Key 或 Token Plan API Key，模型 ${speech.model || 'qwen3-asr-flash'}，当前${keyState}${sourceLabel}。`;
-    }
-
-    function providerList(config) {
-      if (Array.isArray(config.provider_options) && config.provider_options.length) {
-        return config.provider_options.map(item => ({
-          id: String(item.id || '').trim(),
-          label: String(item.label || item.id || '').trim(),
-          env_key: String(item.env_key || '').trim(),
-          env_keys: Array.isArray(item.env_keys) ? item.env_keys.map(value => String(value || '').trim()).filter(Boolean) : [],
-          key_placeholder: String(item.key_placeholder || 'API Key').trim(),
-          key_fields: providerKeyFields(item)
-        })).filter(item => item.id);
-      }
-      return Object.entries(config.providers || {}).map(([id, item]) => ({
-        id,
-        label: String((item && item.label) || id),
-        env_key: String((item && item.env_key) || ''),
-        env_keys: [],
-        key_placeholder: 'API Key',
-        key_fields: [{field: 'api_key', label: 'API Key', placeholder: 'API Key'}]
-      }));
-    }
-
-    function renderModelSelect(id, provider, model) {
-      const select = document.getElementById(id);
-      select.innerHTML = '';
-      providerOptions.forEach(providerOption => {
-        const options = modelOptions.filter(option => option.provider === providerOption.id);
-        if (!options.length) return;
-        const group = document.createElement('optgroup');
-        group.label = providerOption.label || providerOption.id;
-        options.forEach(option => {
-          const node = document.createElement('option');
-          node.value = modelChoiceValue(option.provider, modelOptionId(option));
-          node.textContent = option.label || modelOptionId(option);
-          group.appendChild(node);
-        });
-        select.appendChild(group);
-      });
-      select.value = selectedModelValue(provider, model);
-    }
-
-    function renderProviderKeyFields(providers) {
-      const box = document.getElementById('providerKeyFields');
-      box.innerHTML = '';
-      providerOptions.forEach(provider => {
-        const settings = providers[provider.id] || {};
-        const card = document.createElement('section');
-        card.className = 'provider-card';
-        card.innerHTML = `
-          <div class="provider-card-header">
-            <strong>${escapeHtml(provider.label)}</strong>
-            <span>${settings.has_api_key ? '可用' : '未配置'}</span>
+    function renderModelConfiguration() {
+      if (!modelConfigDraft) return;
+      const list = document.getElementById('modelConnectionList');
+      const labels = Object.fromEntries(modelConfigDraft.provider_options.map(item => [item.provider_type, item.label]));
+      list.innerHTML = modelConfigDraft.connections.map(connection => `
+        <section class="model-connection-card" data-connection-id="${escapeHtml(connection.connection_id)}">
+          <div class="model-connection-header">
+            <h3>${escapeHtml(labels[connection.provider_type] || connection.provider_type)} · ${escapeHtml(connection.connection_id)}</h3>
+            <button type="button" class="btn btn-danger btn-sm" data-connection-id="${escapeHtml(connection.connection_id)}" onclick="removeModelConnection(this.dataset.connectionId)">删除</button>
           </div>
-          ${provider.key_fields.map(field => providerKeyFieldHtml(provider, field, settings)).join('')}
-          <label for="${providerBaseUrlId(provider.id)}">接口地址</label>
-          <input id="${providerBaseUrlId(provider.id)}" type="text" value="${escapeHtml(settings.base_url || '')}" autocomplete="off">
-          <p class="form-hint">运行时使用：${escapeHtml(providerRuntimeKeyLabel(settings))}</p>
-          ${providerEnvKeys(provider).length ? `<p class="form-hint">也可使用环境变量 ${escapeHtml(providerEnvKeys(provider).join('、'))}。</p>` : ''}
-        `;
-        box.appendChild(card);
+          <div class="model-connection-grid">
+            <label class="model-span-2">接口地址<input data-field="endpoint" value="${escapeHtml(connection.endpoint)}"></label>
+            <label class="model-span-2">可用模型<input data-field="models" value="${escapeHtml(connection.enabled_models.join(', '))}" onchange="updateConnectionModels(this)"></label>
+            <div class="model-span-2 model-key-row">
+              <label>API Key <span class="form-hint">${connection.has_credential ? '已配置' : '未配置'}</span>
+                <input data-field="api-key" type="password" placeholder="留空表示不修改" autocomplete="off">
+              </label>
+              <button type="button" class="btn btn-ghost btn-sm" data-connection-id="${escapeHtml(connection.connection_id)}" onclick="clearModelConnectionKey(this.dataset.connectionId)" ${connection.has_credential ? '' : 'disabled'}>清除</button>
+            </div>
+          </div>
+        </section>`).join('');
+      renderProviderOptions();
+      renderRoleModelOptions();
+    }
+
+    function renderProviderOptions() {
+      const select = document.getElementById('newProviderType');
+      const current = select.value;
+      select.innerHTML = modelConfigDraft.provider_options.map(item =>
+        `<option value="${escapeHtml(item.provider_type)}">${escapeHtml(item.label)}</option>`
+      ).join('');
+      if (current && modelConfigDraft.provider_options.some(item => item.provider_type === current)) {
+        select.value = current;
+      }
+      applyProviderPreset(false);
+    }
+
+    function applyProviderPreset(overwrite = true) {
+      if (!modelConfigDraft) return;
+      const providerType = document.getElementById('newProviderType').value;
+      const preset = modelConfigDraft.provider_options.find(item => item.provider_type === providerType);
+      if (!preset) return;
+      const endpoint = document.getElementById('newConnectionEndpoint');
+      const connectionId = document.getElementById('newConnectionId');
+      if (overwrite || !endpoint.value) endpoint.value = preset.default_endpoint;
+      if (overwrite || !connectionId.value) connectionId.value = `${providerType}-main`;
+    }
+
+    function addModelConnection() {
+      if (!modelConfigDraft) return;
+      syncRolePlanFromControls();
+      const providerType = document.getElementById('newProviderType').value;
+      const connectionId = document.getElementById('newConnectionId').value.trim();
+      const endpoint = document.getElementById('newConnectionEndpoint').value.trim();
+      const models = splitModelNames(document.getElementById('newConnectionModels').value);
+      const apiKey = document.getElementById('newConnectionKey').value.trim();
+      if (!/^[a-z0-9_-]+$/.test(connectionId) || !endpoint || !models.length) {
+        setStatus('请填写连接名称、接口地址和至少一个模型。', true);
+        return;
+      }
+      if (modelConfigDraft.connections.some(item => item.connection_id === connectionId)) {
+        setStatus('连接名称已存在。', true);
+        return;
+      }
+      const preset = modelConfigDraft.provider_options.find(item => item.provider_type === providerType);
+      modelConfigDraft.connections.push({
+        connection_id: connectionId,
+        provider_type: providerType,
+        endpoint,
+        enabled_models: models,
+        has_credential: Boolean(apiKey),
+        credential_required: Boolean(preset && preset.credential_required),
+        pending_api_key: apiKey
+      });
+      for (const role of ['compiler', 'planner', 'auditor', 'repairer']) {
+        if (!modelConfigDraft.agent_model_plan[role]) {
+          modelConfigDraft.agent_model_plan[role] = {connection_id: connectionId, model_id: models[0]};
+        }
+      }
+      document.getElementById('newConnectionModels').value = '';
+      document.getElementById('newConnectionKey').value = '';
+      renderModelConfiguration();
+    }
+
+    function removeModelConnection(connectionId) {
+      if (!modelConfigDraft || modelConfigDraft.connections.length === 1) {
+        setStatus('至少保留一个模型连接。', true);
+        return;
+      }
+      syncRolePlanFromControls();
+      modelConfigDraft.connections = modelConfigDraft.connections.filter(item => item.connection_id !== connectionId);
+      const first = modelConfigDraft.connections[0];
+      for (const role of ['compiler', 'planner', 'auditor', 'repairer']) {
+        if (modelConfigDraft.agent_model_plan[role].connection_id === connectionId) {
+          modelConfigDraft.agent_model_plan[role] = {connection_id: first.connection_id, model_id: first.enabled_models[0]};
+        }
+      }
+      clearedModelKeys.delete(connectionId);
+      renderModelConfiguration();
+    }
+
+    function clearModelConnectionKey(connectionId) {
+      if (!window.confirm('确定清除此模型连接的 API Key 吗？')) return;
+      clearedModelKeys.add(connectionId);
+      const connection = modelConfigDraft.connections.find(item => item.connection_id === connectionId);
+      if (connection) {
+        connection.has_credential = false;
+        delete connection.pending_api_key;
+      }
+      renderModelConfiguration();
+    }
+
+    function updateConnectionModels(input) {
+      const card = input.closest('.model-connection-card');
+      const connection = modelConfigDraft.connections.find(item => item.connection_id === card.dataset.connectionId);
+      const models = splitModelNames(input.value);
+      if (!connection || !models.length) {
+        setStatus('每个连接至少需要一个可用模型。', true);
+        return;
+      }
+      syncRolePlanFromControls();
+      const key = card.querySelector('[data-field="api-key"]').value.trim();
+      if (key) connection.pending_api_key = key;
+      connection.endpoint = card.querySelector('[data-field="endpoint"]').value.trim();
+      connection.enabled_models = models;
+      for (const role of ['compiler', 'planner', 'auditor', 'repairer']) {
+        const binding = modelConfigDraft.agent_model_plan[role];
+        if (binding.connection_id === connection.connection_id && !models.includes(binding.model_id)) {
+          binding.model_id = models[0];
+        }
+      }
+      renderModelConfiguration();
+    }
+
+    function renderRoleModelOptions() {
+      const options = [];
+      for (const connection of modelConfigDraft.connections) {
+        for (const model of connection.enabled_models) {
+          const value = `${encodeURIComponent(connection.connection_id)}:${encodeURIComponent(model)}`;
+          options.push({value, label: `${connection.connection_id} / ${model}`});
+        }
+      }
+      const controls = {compiler: 'roleModelCompiler', planner: 'roleModelPlanner', auditor: 'roleModelAuditor', repairer: 'roleModelRepairer'};
+      for (const [role, id] of Object.entries(controls)) {
+        const select = document.getElementById(id);
+        select.innerHTML = options.map(item => `<option value="${item.value}">${escapeHtml(item.label)}</option>`).join('');
+        const binding = modelConfigDraft.agent_model_plan[role];
+        select.value = `${encodeURIComponent(binding.connection_id)}:${encodeURIComponent(binding.model_id)}`;
+      }
+    }
+
+    function syncRolePlanFromControls() {
+      if (!modelConfigDraft) return;
+      modelConfigDraft.agent_model_plan = collectRoleModelPlan();
+    }
+
+    function collectRoleModelPlan() {
+      const controls = {compiler: 'roleModelCompiler', planner: 'roleModelPlanner', auditor: 'roleModelAuditor', repairer: 'roleModelRepairer'};
+      const plan = {};
+      for (const [role, id] of Object.entries(controls)) {
+        const value = document.getElementById(id).value;
+        const separator = value.indexOf(':');
+        if (separator < 1) throw new Error('请选择每个环节使用的模型。');
+        plan[role] = {
+          connection_id: decodeURIComponent(value.slice(0, separator)),
+          model_id: decodeURIComponent(value.slice(separator + 1))
+        };
+      }
+      return plan;
+    }
+
+    function collectModelConnections() {
+      return modelConfigDraft.connections.map(connection => {
+        const card = document.querySelector(`.model-connection-card[data-connection-id="${connection.connection_id}"]`);
+        const result = {
+          connection_id: connection.connection_id,
+          provider_type: connection.provider_type,
+          endpoint: card.querySelector('[data-field="endpoint"]').value.trim(),
+          enabled_models: splitModelNames(card.querySelector('[data-field="models"]').value)
+        };
+        const key = card.querySelector('[data-field="api-key"]').value.trim() || connection.pending_api_key || '';
+        if (key) result.api_key = key;
+        if (clearedModelKeys.has(connection.connection_id)) result.clear_api_key = true;
+        return result;
       });
     }
 
-    function providerKeyFields(provider) {
-      const fields = Array.isArray(provider.key_fields) ? provider.key_fields : [];
-      const normalized = fields.map(field => ({
-        field: String(field.field || '').trim(),
-        label: String(field.label || field.field || '').trim(),
-        placeholder: String(field.placeholder || field.label || 'API Key').trim()
-      })).filter(field => field.field);
-      return normalized.length ? normalized : [{field: 'api_key', label: 'API Key', placeholder: provider.key_placeholder || 'API Key'}];
-    }
-
-    function providerKeyFieldHtml(provider, field, settings) {
-      const keyStatus = settings.key_status || {};
-      const saved = keyStatus[field.field] ? '已保存' : '未配置';
-      const hasSavedKey = Boolean(keyStatus[field.field]);
-      return `
-        <label for="${providerInputId(provider.id, field.field)}">${escapeHtml(field.label)} <span id="${providerKeyStatusId(provider.id, field.field)}" class="form-hint">${escapeHtml(saved)}</span></label>
-        <div class="provider-key-row">
-          <input id="${providerInputId(provider.id, field.field)}" type="password" placeholder="${escapeHtml(field.placeholder)}" autocomplete="off" oninput="handleProviderKeyInput('${escapeJs(provider.id)}', '${escapeJs(field.field)}')">
-          <button id="${providerClearButtonId(provider.id, field.field)}" type="button" class="btn btn-danger btn-sm" data-saved="${hasSavedKey ? '1' : '0'}" ${hasSavedKey ? '' : 'disabled'} onclick="markProviderKeyForClear('${escapeJs(provider.id)}', '${escapeJs(field.field)}', '${escapeJs(field.label)}')">清除</button>
-        </div>
-      `;
-    }
-
-    function markProviderKeyForClear(providerId, field, label) {
-      if (!window.confirm(`确定清除 ${providerLabel(providerId)} 的 ${label} 吗？`)) return;
-      const fields = pendingProviderKeyClears[providerId] || [];
-      if (!fields.includes(field)) fields.push(field);
-      pendingProviderKeyClears[providerId] = fields;
-      const input = document.getElementById(providerInputId(providerId, field));
-      if (input) {
-        input.value = '';
-        input.placeholder = '保存后清除';
-      }
-      const status = document.getElementById(providerKeyStatusId(providerId, field));
-      if (status) status.textContent = '保存后清除';
-      const button = document.getElementById(providerClearButtonId(providerId, field));
-      if (button) {
-        button.textContent = '待清除';
-        button.disabled = true;
-      }
-      setStatus('保存模型配置后会清除这个 Key。');
-    }
-
-    function handleProviderKeyInput(providerId, field) {
-      const fields = pendingProviderKeyClears[providerId] || [];
-      pendingProviderKeyClears[providerId] = fields.filter(item => item !== field);
-      if (!pendingProviderKeyClears[providerId].length) delete pendingProviderKeyClears[providerId];
-      const input = document.getElementById(providerInputId(providerId, field));
-      const button = document.getElementById(providerClearButtonId(providerId, field));
-      const status = document.getElementById(providerKeyStatusId(providerId, field));
-      if (button) {
-        button.textContent = '清除';
-        button.disabled = button.dataset.saved !== '1';
-      }
-      if (status) {
-        status.textContent = input && input.value.trim()
-          ? '待保存'
-          : ((button && button.dataset.saved === '1') ? '已保存' : '未配置');
-      }
-    }
-
-    function providerRuntimeKeyLabel(settings) {
-      return (settings.api_key_source && settings.api_key_source.label) || (settings.has_api_key ? '已配置 Key' : '未配置');
-    }
-
-    function providerEnvKeys(provider) {
-      if (Array.isArray(provider.env_keys) && provider.env_keys.length) return provider.env_keys;
-      return provider.env_key ? [provider.env_key] : [];
-    }
-
-    function collectProviderConfig() {
-      const providers = {};
-      providerOptions.forEach(provider => {
-        const baseUrlInput = document.getElementById(providerBaseUrlId(provider.id));
-        const item = {};
-        provider.key_fields.forEach(field => {
-          const input = document.getElementById(providerInputId(provider.id, field.field));
-          if (input && input.value.trim()) item[field.field] = input.value.trim();
-        });
-        const clearSecretFields = pendingProviderKeyClears[provider.id] || [];
-        if (clearSecretFields.length) item.clear_secret_fields = clearSecretFields.slice();
-        if (baseUrlInput && baseUrlInput.value.trim()) item.base_url = baseUrlInput.value.trim();
-        if (Object.keys(item).length) providers[provider.id] = item;
-      });
-      return providers;
-    }
-
-    function providerKeyStatusId(providerId, field) {
-      return `providerKeyStatus_${providerId}_${field || 'api_key'}`;
-    }
-
-    function providerClearButtonId(providerId, field) {
-      return `providerKeyClear_${providerId}_${field || 'api_key'}`;
-    }
-
-    function providerInputId(providerId, field) {
-      return `providerKey_${providerId}_${field || 'api_key'}`;
-    }
-
-    function providerBaseUrlId(providerId) {
-      return `providerBaseUrl_${providerId}`;
-    }
-
-    function providerLabel(providerId) {
-      const provider = providerOptions.find(item => item.id === providerId);
-      return provider ? provider.label : providerId;
-    }
-
-    function parseModelChoice(value) {
-      const parts = String(value || '').split('|');
-      const first = firstModelOption();
-      return {provider: parts[0] || first.provider, model: parts[1] || modelOptionId(first)};
-    }
-
-    function modelChoiceValue(provider, model) {
-      const first = firstModelOption();
-      return `${provider || first.provider}|${model || modelOptionId(first)}`;
-    }
-
-    function selectedModelValue(provider, model) {
-      const value = modelChoiceValue(provider, model);
-      const known = new Set(modelOptions.map(option => modelChoiceValue(option.provider, modelOptionId(option))));
-      if (known.has(value)) return value;
-      const first = firstModelOption();
-      return modelChoiceValue(first.provider, modelOptionId(first));
-    }
-
-    function firstModelOption() {
-      return modelOptions[0] || {provider: 'deepseek', id: 'deepseek-v4-flash-thinking', model: 'deepseek-v4-flash-thinking'};
-    }
-
-    function modelOptionId(option) {
-      return String((option && (option.id || option.model)) || '').trim();
-    }
-
-    function modelOptionLabel(provider, model) {
-      const option = modelOptions.find(item => item.provider === provider && modelOptionId(item) === model);
-      if (option) return option.label || modelOptionId(option);
-      return `${providerLabel(provider)} ${model || ''}`.trim();
-    }
-
-    function providerKeyStates(providers) {
-      return providerOptions.map(provider => ({
-        label: provider.label,
-        ok: providers[provider.id] && providers[provider.id].has_api_key
-      }));
-    }
-
-    function providerKeyLabel(states) {
-      const saved = states.filter(item => item.ok).map(item => item.label);
-      if (saved.length > 1) return `${saved.join('、')} 已保存`;
-      if (saved.length === 1) return `${saved[0]} 已保存`;
-      return 'Key 未配置';
-    }
-
-    async function setMode(mode) {
-      // Mode system removed in 2.0 — kept as no-op for backwards compatibility
-      // with any lingering HTML onclick references.
+    function splitModelNames(value) {
+      return [...new Set(String(value || '').split(',').map(item => item.trim()).filter(Boolean))];
     }
 
     function updateModeUI() {
-      renderCurrentModelHint(appState.config);
       renderTasks(cachedRuns);
       renderConversation(cachedRuns);
     }
@@ -716,6 +668,20 @@
 
     function applyArcMapBridges(bridges, error) {
       setState({arcmapBridges: bridges || []});
+      const select = document.getElementById('arcmapTarget');
+      if (select) {
+        const saved = localStorage.getItem('geopilot.arcmapTarget') || '';
+        select.innerHTML = '<option value="">请选择 ArcMap 目标</option>';
+        (bridges || []).forEach((target, index) => {
+          const key = `${target.bridge_pid}:${target.arcmap_pid}:${target.hwnd}`;
+          const option = document.createElement('option');
+          option.value = key;
+          option.textContent = `${target.title || 'ArcMap'} (${target.arcmap_pid})${target.active ? ' - 前台' : ''}`;
+          option.selected = key === saved;
+          select.appendChild(option);
+        });
+        select.onchange = () => localStorage.setItem('geopilot.arcmapTarget', select.value);
+      }
       renderArcMapBridgeState(error || '');
     }
 
@@ -728,7 +694,9 @@
     }
 
     function activeArcMapBridge() {
-      return arcmapBridges.find(item => item.active) || arcmapBridges.find(item => item.hwnd) || arcmapBridges[0] || null;
+      const select = document.getElementById('arcmapTarget');
+      const selected = select && select.value;
+      return arcmapBridges.find(item => `${item.bridge_pid}:${item.arcmap_pid}:${item.hwnd}` === selected) || null;
     }
 
     function arcmapBridgeLabel(bridge, count) {
@@ -743,74 +711,17 @@
       return '输入 GIS 指令';
     }
 
-    async function loadPendingTools() {
-      const data = await api('/tools/pending');
-      renderPendingTools(data.tools || []);
-    }
-
-    function renderPendingTools(tools) {
-      const box = document.getElementById('pendingToolsList');
-      if (!tools.length) {
-        box.innerHTML = '<div class="empty-state-card">暂无自定义工具。</div>';
-        return;
-      }
-      box.innerHTML = '';
-      tools.forEach(tool => {
-        const statusText = {pending_review: '待审核', enabled: '已启用', rejected: '已拒绝'}[tool.status] || tool.status;
-        const card = document.createElement('div');
-        card.className = 'tool-item';
-        const revision = ((tool.payload || {}).revision || {}).number || 1;
-        card.innerHTML = `
-          <strong>${escapeHtml(tool.name)} · ${escapeHtml(statusText)}</strong>
-          <p>${escapeHtml(tool.capability)}</p>
-          <p class="form-hint">${escapeHtml((tool.payload.operation_spec || {}).id || '')} · rev ${escapeHtml(revision)}</p>
-        `;
-        if (tool.status === 'pending_review') {
-          const actions = document.createElement('div');
-          actions.className = 'tool-actions';
-          actions.innerHTML = `
-            <button class="btn btn-success btn-sm" onclick="enableTool('${escapeJs(tool.id)}')">启用</button>
-            <button class="btn btn-danger-outline btn-sm" onclick="rejectTool('${escapeJs(tool.id)}')">拒绝</button>
-            <button class="btn btn-danger btn-sm" onclick="deleteTool('${escapeJs(tool.id)}')">删除</button>
-          `;
-          card.appendChild(actions);
-        } else {
-          const actions = document.createElement('div');
-          actions.className = 'tool-actions';
-          actions.innerHTML = `<button class="btn btn-danger btn-sm" onclick="deleteTool('${escapeJs(tool.id)}')">删除</button>`;
-          card.appendChild(actions);
-        }
-        box.appendChild(card);
-      });
-    }
-
-    async function enableTool(id) {
-      await api(`/tools/${id}/enable`, {method: 'POST', body: '{}'});
-      capabilitiesLoaded = false;
-      setStatus('工具已启用，后续规划可以使用。');
-      await loadPendingTools();
-    }
-
-    async function rejectTool(id) {
-      await api(`/tools/${id}/reject`, {method: 'POST', body: '{}'});
-      setStatus('已拒绝该工具。');
-      await loadPendingTools();
-    }
-
-    async function deleteTool(id) {
-      if (!window.confirm('确定删除这个自建工具吗？删除后它会从能力范围里移除。')) return;
-      await api(`/tools/${id}/delete`, {method: 'POST', body: '{}'});
-      capabilitiesLoaded = false;
-      setStatus('自建工具已删除。');
-      await loadPendingTools();
-    }
-
     async function submitPlan() {
       if (modelWait) return;
       const input = document.getElementById('command');
       const command = input.value.trim();
       if (!command) return;
       input.value = '';
+      // Each task gets its own session (§5: sessions are isolation boundaries
+      // and a task's model context must not leak into the next). Reset the
+      // session id, then reconnect SSE so the EventSource filters to the new
+      // session.
+      resetSessionId();
       transientUserMessage = command;
       transientAssistantMessage = '';
       const execute = true;
@@ -819,14 +730,23 @@
         renderConversation(cachedRuns);
       try {
         setStatus('正在提交任务...');
-        const payload = {text: command, execute: execute};
-        // side_effect_level is not declared by the caller — the plan's
-        // risk_level determines if authorization is needed (level >= 2).
+        // side_effect_level is declared explicitly — execute=True requires it.
+        // Level 3 (isolated-workspace write) lets write plans reach the
+        // AUTHORIZATION_REQUIRED pause; the human decision + approved_scope is
+        // the real gate.
+        const target = activeArcMapBridge();
+        if (!target) throw new Error('请选择一个已连接的 ArcMap 目标。');
+        const payload = {text: command, execute: execute, side_effect_level: 3,
+          target_selector: {bridge_pid: target.bridge_pid, bridge_port: target.bridge_port,
+            arcmap_pid: target.arcmap_pid, hwnd: target.hwnd,
+            deployment_hash: target.deployment_hash}};
         const data = await api('/api/v1/runs', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify(payload)
         });
+        // Reconnect SSE to the new session.
+        if (typeof connectEventStream === 'function') connectEventStream();
         // Keep transientUserMessage alive so the modelWait bubble persists.
         // It will be cleared when the run reaches terminal state in
         // handleRunStageChanged -> stopModelWait -> refreshRuns.
@@ -864,7 +784,7 @@
       setModelWaitStage(stage);
       if (isApprovalStage(stage)) {
         pendingApprovalRunId = runId;
-        renderApprovalPrompt(runId);
+        renderApprovalPrompt(runId).catch(err => setStatus(err.message));
         return;
       }
       if (isTerminalStage(stage)) {
@@ -876,15 +796,26 @@
     }
 
     // §6.6 authorization confirmation: the user must approve before execution.
+    // The decision binds the exact plan (plan_digest) and the authorized scope
+    // (level + output_id/destination identities). If the plan changes, the decision is invalid.
     window.approveRun = async function(runId) {
       pendingApprovalRunId = '';
       removeApprovalPrompt();
       startModelWait('正在执行', 'authorized');
       try {
+        const approval = approvalDocuments.get(runId);
+        if (!approval) throw new Error('授权范围尚未加载，拒绝提交。');
+        const decideBody = {
+          approved: true,
+          decision_id: crypto.randomUUID(),
+          run_id: runId,
+          plan_digest: approval.planDigest,
+          approved_scope: {level: approval.riskLevel, inputs: approval.inputs, outputs: approval.outputs},
+        };
         const data = await api(`/api/v1/runs/${runId}/decide`, {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({approved: true})
+          body: JSON.stringify(decideBody)
         });
         setModelWaitStage(data.run.stage);
         if (isTerminalStage(data.run.stage)) {
@@ -901,10 +832,13 @@
       pendingApprovalRunId = '';
       removeApprovalPrompt();
       try {
+        const approval = approvalDocuments.get(runId);
+        if (!approval) throw new Error('授权范围尚未加载，拒绝提交。');
         await api(`/api/v1/runs/${runId}/decide`, {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({approved: false})
+          body: JSON.stringify({approved: false, decision_id: crypto.randomUUID(),
+            run_id: runId, plan_digest: approval.planDigest})
         });
         await refreshRuns();
         setStatus('已拒绝授权。');
@@ -913,7 +847,22 @@
       }
     }
 
-    function renderApprovalPrompt(runId) {
+    async function renderApprovalPrompt(runId) {
+      const runView = await api(`/api/v1/runs/${runId}`, {method: 'GET'});
+      const run = runView.run || {};
+      const steps = (run.workflow && run.workflow.steps) || [];
+      const outputs = steps.flatMap(s => (s.declared_outputs || []).map(o => ({
+        output_id: o.output_id, destination: o.destination
+      })));
+      if (!run.plan_digest || !outputs.every(o => o.output_id && o.destination)) {
+        throw new Error('封存计划缺少完整输出身份，拒绝显示授权。');
+      }
+      const inputs = (run.input_identities || []).map((identity, index) => ({input_id: `input-${index}`, identity}));
+      if (!Array.isArray(run.input_identities) || !inputs.every(item => item.identity)) {
+        throw new Error('封存计划缺少完整输入身份，拒绝显示授权。');
+      }
+      approvalDocuments.set(runId, {planDigest: run.plan_digest,
+        riskLevel: run.risk_level, inputs, outputs});
       const chat = document.getElementById('chatLog');
       const existing = document.getElementById('approvalPrompt');
       if (existing) existing.remove();
@@ -923,7 +872,9 @@
       prompt.innerHTML = `
         <div class="approval-body">
           <p class="approval-title">⚠️ 执行授权确认</p>
-          <p>该任务将对 ArcMap 地图产生操作。是否确认执行？</p>
+          <p>风险级别：${escapeHtml(String(run.risk_level))}</p>
+          <p>输入数据集：</p><ul>${inputs.map(i => `<li><code>${escapeHtml(i.identity)}</code></li>`).join('')}</ul>
+          <p>输出：</p><ul>${outputs.map(o => `<li><code>${escapeHtml(o.output_id)}</code><br><code>${escapeHtml(o.destination)}</code></li>`).join('')}</ul>
           <div class="approval-actions">
             <button class="btn-primary" onclick="approveRun('${escapeJs(runId)}')">确认执行</button>
             <button class="btn-secondary" onclick="denyRun('${escapeJs(runId)}')">拒绝</button>
@@ -949,17 +900,6 @@
       cachedRuns = [];
       renderConversation(cachedRuns);
       renderTasks(cachedRuns);
-    }
-
-    async function deleteRun(id) {
-      try {
-        await api(`/api/v1/runs/${id}/delete`, {method: 'POST', body: '{}'});
-      } catch (err) { /* ignore */ }
-      if (selectedRunId === id) selectedRunId = '';
-      cachedRuns = cachedRuns.filter(r => r.run_id !== id && r.id !== id);
-      renderTasks(cachedRuns);
-      renderConversation(cachedRuns);
-      setStatus('已删除。');
     }
 
     async function refreshRuns(renderChat = true) {

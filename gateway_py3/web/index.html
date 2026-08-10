@@ -43,6 +43,7 @@
             <div class="status-body">
               <span class="status-key">ArcMap</span>
               <strong class="status-val">未连接</strong>
+              <select id="arcmapTarget" aria-label="ArcMap 执行目标"></select>
             </div>
           </div>
         </div>
@@ -53,7 +54,6 @@
         <div class="nav-buttons">
           <button class="nav-btn" type="button" onclick="openCapabilities()">能力范围</button>
           <button class="nav-btn" type="button" onclick="openModal('contextModal')">地图快照</button>
-          <button class="nav-btn" type="button" onclick="openPendingTools()">工具管理</button>
           <button class="nav-btn" type="button" onclick="openDiagnostics()">系统诊断</button>
           <button class="nav-btn" type="button" onclick="openModal('keyModal')">
             <span id="keyActionText">模型配置</span>
@@ -64,10 +64,9 @@
       <footer class="sidebar-footer">
         <div class="footer-utils">
           <button class="btn btn-ghost btn-sm" type="button" onclick="openLogDir()">打开日志</button>
-          <button class="btn btn-ghost btn-sm" type="button" onclick="openConfigFile()">打开配置</button>
         </div>
         <span class="footer-label">版本</span>
-        <strong class="footer-val footer-link" id="versionInfo" onclick="openChangelog()">未连接</strong>
+        <strong class="footer-val" id="versionInfo">未连接</strong>
       </footer>
     </nav>
 
@@ -193,34 +192,13 @@
     </div>
   </div>
 
-  <!-- Tools Modal -->
-  <div class="overlay" id="toolsModal" hidden onclick="closeOnBackdrop(event)">
-    <div class="overlay-panel" role="dialog" aria-modal="true" aria-labelledby="toolsTitle">
-      <div class="overlay-header">
-        <div class="overlay-title-group">
-          <h2 id="toolsTitle">工具管理</h2>
-          <p id="toolsSummary" class="overlay-subtitle">新工具审核通过并启用后，会进入能力目录。</p>
-        </div>
-        <div class="overlay-actions">
-          <button class="btn btn-sm btn-ghost" type="button" onclick="loadPendingTools()">刷新</button>
-          <button class="btn btn-sm btn-ghost" type="button" onclick="closeModal('toolsModal')">关闭</button>
-        </div>
-      </div>
-      <div class="overlay-body">
-        <div id="pendingToolsList" class="tool-list">
-          <div class="empty-state-card">正在读取...</div>
-        </div>
-      </div>
-    </div>
-  </div>
-
   <!-- Config Modal -->
   <div class="overlay" id="keyModal" hidden onclick="closeOnBackdrop(event)">
     <div class="overlay-panel" role="dialog" aria-modal="true" aria-labelledby="keyTitle">
       <div class="overlay-header">
         <div class="overlay-title-group">
           <h2 id="keyTitle">模型配置</h2>
-          <p class="overlay-subtitle">选择 G0–G3 统一使用的基础模型，并保存对应供应商 Key。</p>
+          <p class="overlay-subtitle">配置 GeoPilot 使用的模型服务。</p>
         </div>
         <button class="btn btn-sm btn-ghost" type="button" onclick="closeModal('keyModal')">关闭</button>
       </div>
@@ -228,247 +206,37 @@
         <div class="config-card">
           <div class="config-status">
             <span class="config-dot" id="keyDot"></span>
-            <strong id="keyBadge">Key 检查中</strong>
+            <strong id="keyBadge">模型连接检查中</strong>
           </div>
-          <p class="form-hint" id="activeModelHint">当前使用的模型检查中。</p>
           <form onsubmit="event.preventDefault(); saveConfig();">
-            <label for="primaryProvider">统一基础模型</label>
-            <select id="primaryProvider"></select>
-            <div id="providerKeyFields" class="provider-grid"></div>
+            <div id="modelConnectionList" class="model-connection-list"></div>
+
+            <div class="model-add-panel">
+              <h3>添加模型服务</h3>
+              <div class="model-add-grid">
+                <label>供应商<select id="newProviderType" onchange="applyProviderPreset()"></select></label>
+                <label>连接名称<input id="newConnectionId" placeholder="例如 deepseek-main"></label>
+                <label class="model-span-2">接口地址<input id="newConnectionEndpoint" placeholder="https://..."></label>
+                <label class="model-span-2">可用模型<input id="newConnectionModels" placeholder="多个模型用逗号分隔"></label>
+                <label class="model-span-2">API Key（本地服务可留空）<input id="newConnectionKey" type="password" autocomplete="off"></label>
+              </div>
+              <button type="button" class="btn btn-ghost btn-sm" onclick="addModelConnection()">添加连接</button>
+            </div>
+
+            <div class="role-model-panel">
+              <h3>各环节使用的模型</h3>
+              <div class="role-model-grid">
+                <label>任务理解<select id="roleModelCompiler"></select></label>
+                <label>方案规划<select id="roleModelPlanner"></select></label>
+                <label>结果复核<select id="roleModelAuditor"></select></label>
+                <label>错误修复<select id="roleModelRepairer"></select></label>
+              </div>
+            </div>
             <div class="form-actions">
               <button type="submit" class="btn btn-primary btn-sm">保存</button>
               <button type="button" class="btn btn-ghost btn-sm" onclick="openHealth()">检查网关</button>
             </div>
           </form>
-          <p class="form-hint" id="speechConfigHint">语音识别使用阿里百炼 API Key 或 Token Plan API Key。</p>
-          <p class="form-hint" id="configPathHint">配置路径检查中。</p>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Changelog Modal -->
-  <div class="overlay" id="changelogModal" hidden onclick="closeOnBackdrop(event)">
-    <div class="overlay-panel" role="dialog" aria-modal="true" aria-labelledby="changelogTitle">
-      <div class="overlay-header">
-        <div class="overlay-title-group">
-          <h2 id="changelogTitle">版本日志</h2>
-          <p class="overlay-subtitle">GeoPilot 完整发布历史。</p>
-        </div>
-        <button class="btn btn-sm btn-ghost" type="button" onclick="closeModal('changelogModal')">关闭</button>
-      </div>
-      <div class="overlay-body">
-        <div class="changelog-list">
-
-          <section class="changelog-version">
-            <div class="changelog-version-header">
-              <strong class="changelog-tag">2.0.0</strong>
-              <span class="changelog-date">2026-08-07</span>
-            </div>
-            <ul>
-              <li>确定性 GIS 内核 + 受约束 AI 决策层 + Pydantic v2 + LangGraph</li>
-              <li>三端 lease 协议、SSE 事实表投影、前端授权确认交互</li>
-              <li>删除旧规划、旧恢复、旧供应商选择和生产 ToolBuilder 链路</li>
-            </ul>
-          </section>
-
-          <section class="changelog-version">
-            <div class="changelog-version-header">
-              <strong class="changelog-tag">1.1.4</strong>
-              <span class="changelog-date">2026-08-01</span>
-            </div>
-            <ul>
-              <li>Bridge 执行心跳覆盖异步 COM 分发后的完整 ArcPy 生命周期</li>
-              <li>执行完成后由 Gateway 权威状态自动终止心跳</li>
-            </ul>
-          </section>
-
-          <section class="changelog-version">
-            <div class="changelog-version-header">
-              <strong class="changelog-tag">1.1.3</strong>
-              <span class="changelog-date">2026-08-01</span>
-            </div>
-            <ul>
-              <li>长时 ArcPy 操作由独立 Bridge 维持执行租约心跳，避免误判为失联</li>
-              <li>Gateway、Bridge 与 ArcMap runtime 共享同一执行 owner_id</li>
-            </ul>
-          </section>
-
-          <section class="changelog-version">
-            <div class="changelog-version-header">
-              <strong class="changelog-tag">1.1.2</strong>
-              <span class="changelog-date">2026-08-01</span>
-            </div>
-            <ul>
-              <li>正式实验复位改为 Gateway 确定性控制工作流，不再受模型输出波动影响</li>
-              <li>模型供应商错误在运行轨迹中保留可诊断消息</li>
-            </ul>
-          </section>
-
-          <section class="changelog-version">
-            <div class="changelog-version-header">
-              <strong class="changelog-tag">1.1.1</strong>
-              <span class="changelog-date">2026-07-31</span>
-            </div>
-            <ul>
-              <li>修复 ArcMap 按钮回调与 Bridge 目标扫描相互等待导致的控制台启动超时</li>
-            </ul>
-          </section>
-
-          <section class="changelog-version">
-            <div class="changelog-version-header">
-              <strong class="changelog-tag">1.1.0</strong>
-              <span class="changelog-date">2026-07-31</span>
-            </div>
-            <ul>
-              <li>新增智谱 Coding Plan GLM-5.2 与 Anthropic Messages 协议</li>
-              <li>G0–G3 各角色统一基础模型，G3 保留独立 Agent 客户端</li>
-              <li>模型规划改为强类型工具调用并持久化原始响应证据</li>
-            </ul>
-          </section>
-
-          <section class="changelog-version">
-            <div class="changelog-version-header">
-              <strong class="changelog-tag">1.0.3</strong>
-              <span class="changelog-date">2026-07-31</span>
-            </div>
-            <ul>
-              <li>工作流计算与 ArcMap 图层发布分离，移除逐步骤界面刷新</li>
-              <li>成果发布计划持久化，同一 ArcMap 目标内可幂等恢复并严格隔离其他窗口</li>
-              <li>同轮地图导出使用隔离 MXD，连续业务成果完整保留</li>
-            </ul>
-          </section>
-
-          <section class="changelog-version">
-            <div class="changelog-version-header">
-              <strong class="changelog-tag">1.0.2</strong>
-              <span class="changelog-date">2026-07-31</span>
-            </div>
-            <ul>
-              <li>G3 改为确定性校验优先，并分离校验与审计修订预算</li>
-              <li>规划与审计使用独立 Agent，增加循环停滞检测</li>
-              <li>统一成果引用协议，区分地图图层与 CSV、PNG 等文件输出</li>
-            </ul>
-          </section>
-
-          <section class="changelog-version">
-            <div class="changelog-version-header">
-              <strong class="changelog-tag">1.0.1</strong>
-              <span class="changelog-date">2026-06-03 ~ 06-04</span>
-            </div>
-            <ul>
-              <li>重构 Web 控制台为"指令工作台"布局，移除多 ArcMap 选择 UI</li>
-              <li>拆分语音识别与指令校验为独立流程</li>
-              <li>前端全面重设计：OKLCH 色彩体系、新排版与组件样式</li>
-            </ul>
-          </section>
-
-          <section class="changelog-version">
-            <div class="changelog-version-header">
-              <strong class="changelog-tag">0.21.x</strong>
-              <span class="changelog-date">2026-06-02</span>
-            </div>
-            <ul>
-              <li>支持阿里百炼 Token Plan API Key</li>
-              <li>新增 Provider Key 清除功能</li>
-              <li>修复旧配置无法通过网页保存的问题</li>
-              <li>统一路径处理，增强自定义工具 Unicode 路径与网络错误提示</li>
-            </ul>
-          </section>
-
-          <section class="changelog-version">
-            <div class="changelog-version-header">
-              <strong class="changelog-tag">0.20.x</strong>
-              <span class="changelog-date">2026-06-02</span>
-            </div>
-            <ul>
-              <li>新增阿里百炼模型支持及多版本 ArcMap 插件安装</li>
-              <li>增强卸载功能</li>
-              <li>移除项目系统，全代理模式改为会话模式</li>
-              <li>新增空要素图层和矩形面创建操作</li>
-              <li>重构 workflow 工具接口为 JSON 字符串格式</li>
-            </ul>
-          </section>
-
-          <section class="changelog-version">
-            <div class="changelog-version-header">
-              <strong class="changelog-tag">0.14.x</strong>
-              <span class="changelog-date">2026-06-01</span>
-            </div>
-            <ul>
-              <li>简化 ArcMap Add-in 工具栏为单一控制台按钮</li>
-              <li>添加语音识别功能并重构为事件流架构</li>
-              <li>支持批量创建几何要素和向已有图层追加要素</li>
-            </ul>
-          </section>
-
-          <section class="changelog-version">
-            <div class="changelog-version-header">
-              <strong class="changelog-tag">0.13.x</strong>
-              <span class="changelog-date">2026-05-23 ~ 05-31</span>
-            </div>
-            <ul>
-              <li>新增几何创建、版面导出和数据管理操作集</li>
-              <li>完善 Agent 诊断能力</li>
-              <li>新增制图操作包与 KML 导出，增强栅格图层加载</li>
-              <li>重构 KML 导出功能，移除 cartography 模块</li>
-            </ul>
-          </section>
-
-          <section class="changelog-version">
-            <div class="changelog-version-header">
-              <strong class="changelog-tag">0.12.x</strong>
-              <span class="changelog-date">2026-05-23 ~ 05-30</span>
-            </div>
-            <ul>
-              <li>简化发布流程，改用纯安装器交付，重构运行时路径配置</li>
-              <li>新增外部 ArcMap Bridge 和外部 Agent API 支持</li>
-              <li>添加智谱模型支持及多项改进</li>
-              <li>增强自定义工具验证与修复反馈机制</li>
-              <li>支持多格式输出策略、KMZ 拆分导出、输出文件夹解析</li>
-              <li>支持中文 output_name，移除时间戳后缀</li>
-              <li>强制 AI 模型在写数据步骤中自行决定 output_name</li>
-            </ul>
-          </section>
-
-          <section class="changelog-version">
-            <div class="changelog-version-header">
-              <strong class="changelog-tag">0.11.x</strong>
-              <span class="changelog-date">2026-05-22</span>
-            </div>
-            <ul>
-              <li>发布 GeoPilot 0.11.13</li>
-              <li>完成全代理后端</li>
-              <li>新增完整用户安装包构建与卸载系统</li>
-              <li>校验属性查询操作符</li>
-            </ul>
-          </section>
-
-          <section class="changelog-version">
-            <div class="changelog-version-header">
-              <strong class="changelog-tag">0.10.x</strong>
-              <span class="changelog-date">2026-05-20 ~ 05-21</span>
-            </div>
-            <ul>
-              <li>重构网关为 Agentic Planner，支持 DeepSeek 工具调用</li>
-              <li>新增底图能力、属性表直接编辑、结构化条件查询</li>
-              <li>重构上下文同步策略，支持显式输出位置和通用追问逻辑</li>
-              <li>新增按字段唯一值拆分导出功能</li>
-              <li>新增诊断与安装自检功能</li>
-              <li>Windows 安装脚本兼容性修复</li>
-            </ul>
-          </section>
-
-          <section class="changelog-version">
-            <div class="changelog-version-header">
-              <strong class="changelog-tag">初始版本</strong>
-              <span class="changelog-date">2026-05-19</span>
-            </div>
-            <ul>
-              <li>初始提交 ArcMap AI Assistant 完整项目</li>
-            </ul>
-          </section>
-
         </div>
       </div>
     </div>

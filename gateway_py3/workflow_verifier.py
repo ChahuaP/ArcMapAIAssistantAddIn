@@ -5,7 +5,7 @@ from copy import deepcopy
 from dataclasses import dataclass, replace
 import ntpath
 from typing import Any, Dict, Iterable
-from arcmap_runtime_py2.capability_contract_protocol import (
+from shared_runtime.capability_contract import (
     resolve_lowest_dimension_geometry,
     resolve_output_cardinality,
 )
@@ -365,7 +365,7 @@ class WorkflowVerifier:
         geometry = self._geometry(geometry_descriptor, geometry_inputs, step)
         spatial = self._spatial(spatial_descriptor, spatial_inputs, step, obligations)
         name = step["arguments"].get("output_name") if isinstance(step["arguments"].get("output_name"), str) else None
-        fmt = self._format(output["format"], step)
+        fmt = self._format(output["format"])
         artifact_kind = output["kind"] if output["kind"] != "none" else "map_state"
         cardinality = resolve_output_cardinality(
             output["cardinality"], step["arguments"], contract["parameters_schema"],
@@ -401,14 +401,12 @@ class WorkflowVerifier:
         raise RuntimeError("unhandled output selection state: %s" % selection_state)
 
     @staticmethod
-    def _format(descriptor, step):
+    def _format(descriptor):
         rule = descriptor["rule"]
         if rule == "not_applicable":
             return "not_applicable"
         if rule == "fixed":
             return descriptor["value"]
-        if rule == "from_parameter":
-            return step["arguments"].get(descriptor["parameter"], descriptor["default"])
         raise RuntimeError("unhandled output format rule: %s" % rule)
 
     @staticmethod
@@ -416,7 +414,7 @@ class WorkflowVerifier:
         if contract["side_effects"] != "writes_data":
             return "not_applicable"
         arguments = step["arguments"]
-        return arguments.get("output_folder") or arguments.get("output_workspace") or "default"
+        return arguments.get("output_workspace") or "default"
 
     @staticmethod
     def _semantic_facts(step, contract, artifact, inputs):
@@ -467,27 +465,6 @@ class WorkflowVerifier:
         explicitly declares ``preserves`` and binds a single ``source`` edge.
         """
         result = list(semantic_facts)
-        selected_exports = {
-            fact["subject"]: fact
-            for fact in semantic_facts
-            if fact.get("kind") == "artifact_export"
-            and fact.get("action") == "export_selected_features"
-            and fact.get("selected_only") is True
-            and isinstance(fact.get("subject"), str)
-            and fact["subject"].startswith("from_step:")
-        }
-        for fact in semantic_facts:
-            if (fact.get("kind") != "artifact_export"
-                    or fact.get("action") != "table_csv"
-                    or fact.get("selected_only") is not False):
-                continue
-            predecessor = selected_exports.get(fact.get("target"))
-            if predecessor is None:
-                continue
-            derived = dict(fact)
-            derived["target"] = predecessor["target"]
-            derived["selected_only"] = True
-            result.append(derived)
         transformers_by_source = {}
         for transformer in result:
             source = transformer.get("source")
@@ -683,7 +660,10 @@ class WorkflowVerifier:
         outputs = {output["output_id"]: output for output in task["outputs"]}
         inputs = {item["entity_id"]: item for item in task.get("input_entities", [])}
         produced = list(artifacts)
-        entity_references = {}
+        entity_references = {
+            entity["entity_id"]: entity["reference"]
+            for entity in task.get("input_entities", [])
+        }
         for entity in task.get("input_entities", []):
             fact = next((item for item in produced if item.reference == entity["reference"]), None)
             if fact is None:

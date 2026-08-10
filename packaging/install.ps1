@@ -37,16 +37,19 @@ function Get-ArcMapDesktopVersions {
     if ($DesktopVersion) {
         return @($DesktopVersion)
     }
-    $addinRoot = Join-Path $HOME "Documents\ArcGIS\AddIns"
+    if (-not $env:USERPROFILE) {
+        throw "USERPROFILE is required to locate ArcMap Add-Ins."
+    }
+    $addinRoot = Join-Path $env:USERPROFILE "Documents\ArcGIS\AddIns"
     if (-not (Test-Path -LiteralPath $addinRoot)) {
-        return @("Desktop10.1")
+        throw "ArcMap Add-Ins directory does not exist: $addinRoot"
     }
     $versions = Get-ChildItem -LiteralPath $addinRoot -Directory -ErrorAction SilentlyContinue |
         Where-Object { $_.Name -match "^Desktop10\.\d+$" } |
         Sort-Object Name |
         Select-Object -ExpandProperty Name
     if (-not $versions) {
-        return @("Desktop10.1")
+        throw "No installed ArcMap Desktop Add-Ins version directory was found."
     }
     return @($versions)
 }
@@ -55,10 +58,20 @@ function Test-InstallHealth {
     param([string]$TargetRoot, [string[]]$AddinTargetDirs)
     $required = @(
         (Join-Path $TargetRoot "arcmap_runtime_py2\runtime.py"),
+        (Join-Path $TargetRoot "shared_runtime\platform_paths.py"),
+        (Join-Path $TargetRoot "shared_runtime\operation_schema.py"),
+        (Join-Path $TargetRoot "shared_runtime\output_contract.py"),
+        (Join-Path $TargetRoot "shared_runtime\capability_contract.py"),
+        (Join-Path $TargetRoot "shared_runtime\condition_contract.py"),
+        (Join-Path $TargetRoot "shared_runtime\context_fingerprint.py"),
         (Join-Path $TargetRoot "operation_catalog\catalog.json"),
         (Join-Path $TargetRoot "gateway\ArcMapAIAssistantGateway.exe"),
         (Join-Path $TargetRoot "bridge\ArcMapBridge.exe"),
+        (Join-Path $TargetRoot "bridge\Newtonsoft.Json.dll"),
         (Join-Path $TargetRoot "bridge\ArcMapBridge.build"),
+        (Join-Path $TargetRoot "bridge\deployment_identity.json"),
+        (Join-Path $TargetRoot "gateway\deployment_identity.json"),
+        (Join-Path $TargetRoot "arcmap_runtime_py2\deployment_identity.json"),
         (Join-Path $TargetRoot "OpenAssistantWeb.cmd"),
         (Join-Path $TargetRoot "StartGateway.cmd"),
         (Join-Path $TargetRoot "uninstall.ico"),
@@ -83,8 +96,11 @@ $appSource = Join-Path $packageRoot "app"
 $addin = Join-Path $packageRoot "ArcMapAIAssistantAddIn\ArcMapAIAssistantAddIn.esriaddin"
 $gatewayExe = Join-Path $appSource "gateway\ArcMapAIAssistantGateway.exe"
 $bridgeExe = Join-Path $appSource "bridge\ArcMapBridge.exe"
+$bridgeJsonAssembly = Join-Path $appSource "bridge\Newtonsoft.Json.dll"
 $bridgeIdentity = Join-Path $appSource "bridge\ArcMapBridge.build"
+$deploymentIdentity = Join-Path $appSource "gateway\deployment_identity.json"
 $runtimeSource = Join-Path $appSource "arcmap_runtime_py2"
+$sharedRuntimeSource = Join-Path $appSource "shared_runtime"
 $catalogSource = Join-Path $appSource "operation_catalog"
 $openCmd = Join-Path $appSource "OpenAssistantWeb.cmd"
 $startCmd = Join-Path $appSource "StartGateway.cmd"
@@ -94,14 +110,24 @@ $versionFile = Join-Path $appSource "VERSION"
 Require-File $addin "缺少 ArcMap 插件包：$addin"
 Require-File $gatewayExe "缺少 Python3 网关 EXE：$gatewayExe。请先用 packaging\build_release.ps1 生成发布包。"
 Require-File $bridgeExe "缺少 ArcMapBridge.exe：$bridgeExe"
+Require-File $bridgeJsonAssembly "缺少 ArcMapBridge 运行依赖：$bridgeJsonAssembly"
 Require-File $bridgeIdentity "缺少 ArcMapBridge.build：$bridgeIdentity"
+Require-File $deploymentIdentity "缺少统一 deployment_identity.json：$deploymentIdentity"
 Require-File (Join-Path $runtimeSource "runtime.py") "缺少 ArcMap runtime：$runtimeSource"
+Require-File (Join-Path $sharedRuntimeSource "platform_paths.py") "缺少共享运行时合同：$sharedRuntimeSource"
+Require-File (Join-Path $sharedRuntimeSource "operation_schema.py") "缺少操作 ABI 合同：$sharedRuntimeSource"
+Require-File (Join-Path $sharedRuntimeSource "output_contract.py") "缺少输出 ABI 合同：$sharedRuntimeSource"
+Require-File (Join-Path $sharedRuntimeSource "capability_contract.py") "缺少能力合同：$sharedRuntimeSource"
+Require-File (Join-Path $sharedRuntimeSource "condition_contract.py") "缺少条件合同：$sharedRuntimeSource"
+Require-File (Join-Path $sharedRuntimeSource "context_fingerprint.py") "缺少上下文指纹合同：$sharedRuntimeSource"
 Require-File (Join-Path $catalogSource "catalog.json") "缺少操作目录：$catalogSource"
 Require-File $openCmd "缺少打开控制台脚本：$openCmd"
 Require-File $startCmd "缺少启动后台脚本：$startCmd"
 Require-File $uninstallIcon "缺少卸载图标：$uninstallIcon"
 Require-File $versionFile "缺少版本文件：$versionFile"
 $appVersion = (Get-Content -Encoding UTF8 -LiteralPath $versionFile -Raw).Trim()
+$deploymentHash = (Get-Content -Encoding UTF8 -LiteralPath $deploymentIdentity -Raw | ConvertFrom-Json).deployment_hash
+if ($deploymentHash -notmatch '^[0-9a-f]{64}$') { throw "deployment_identity.json 不含合法 lowercase sha256。" }
 
 if (-not $InstallDir) {
     throw "InstallDir is required. Please run GeoPilotSetup-$appVersion.exe."
@@ -116,7 +142,13 @@ Write-Host ""
 Write-Host "正在安装到：$targetRoot"
 New-Item -ItemType Directory -Path $targetRoot -Force | Out-Null
 
+$readyFile = Join-Path $env:LOCALAPPDATA "ArcMapAIAssistant\bridge.ready"
+if (Test-Path -LiteralPath $readyFile) {
+    Remove-Item -LiteralPath $readyFile -Force
+}
+
 Copy-CleanDirectory $runtimeSource (Join-Path $targetRoot "arcmap_runtime_py2")
+Copy-CleanDirectory $sharedRuntimeSource (Join-Path $targetRoot "shared_runtime")
 Copy-CleanDirectory $catalogSource (Join-Path $targetRoot "operation_catalog")
 Copy-CleanDirectory (Join-Path $appSource "gateway") (Join-Path $targetRoot "gateway")
 Copy-CleanDirectory (Join-Path $appSource "bridge") (Join-Path $targetRoot "bridge")
@@ -131,7 +163,7 @@ $addinId = "{7f42eea1-1f17-4cf4-9d4f-c0c8d28c0a23}"
 $desktopVersions = @(Get-ArcMapDesktopVersions)
 $addinTargetDirs = @()
 foreach ($version in $desktopVersions) {
-    $addinTargetDirs += (Join-Path $HOME "Documents\ArcGIS\AddIns\$version\$addinId")
+    $addinTargetDirs += (Join-Path $env:USERPROFILE "Documents\ArcGIS\AddIns\$version\$addinId")
 }
 $installConfig = @{
     install_dir = $targetRoot
@@ -142,6 +174,7 @@ $installConfig = @{
     desktop_versions = $desktopVersions
     desktop_version = $desktopVersions[0]
     installed_at = (Get-Date).ToString("s")
+    deployment_hash = $deploymentHash
 }
 $installConfig | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $configDir "install.json") -Encoding UTF8
 

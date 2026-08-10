@@ -2,11 +2,7 @@
 from __future__ import absolute_import
 
 import arcpy
-
-try:
-    import context_fingerprint
-except ImportError:
-    from . import context_fingerprint
+from shared_runtime import context_fingerprint
 
 try:
     import path_utils
@@ -30,10 +26,6 @@ except NameError:
     INTEGER_TYPES = (int,)
 
 
-VALUE_PROFILE_EXCLUDED_TYPES = set(["Geometry", "Raster", "Blob"])
-MAX_VALUE_PROFILE_FIELDS = 30
-MAX_VALUE_PROFILE_ROWS = 250
-MAX_FIELD_VALUE_SAMPLES = 20
 MAX_VALUE_TEXT_LENGTH = 120
 ARCPY_EXECUTE_ERROR = getattr(arcpy, "ExecuteError", RuntimeError)
 
@@ -41,7 +33,11 @@ ARCPY_EXECUTE_ERROR = getattr(arcpy, "ExecuteError", RuntimeError)
 def read_context():
     mxd = arcpy.mapping.MapDocument("CURRENT")
     data_frames = arcpy.mapping.ListDataFrames(mxd)
-    data_frame = data_frames[0] if data_frames else None
+    data_frame = getattr(mxd, "activeDataFrame", None)
+    if data_frames and data_frame is None:
+        raise RuntimeError("ArcMap has data frames but no active data frame.")
+    if data_frame is not None and data_frame not in data_frames:
+        raise RuntimeError("ArcMap active data frame is not in this document.")
     layers = []
     if data_frame is not None:
         for index, layer in enumerate(arcpy.mapping.ListLayers(mxd, "", data_frame)):
@@ -57,12 +53,52 @@ def read_context():
         "extent": _extent(data_frame),
         "layers": layers
     }
-    context["context_hash"] = context_hash(context)
+    context["edit_session_state"] = _edit_session_state(layers)
+    context["content_hash"] = context_hash(context)
     return context
 
 
 def context_hash(context):
     return context_fingerprint.context_hash(context)
+
+
+def sample_values(layer_ref, field_names, max_rows, max_samples):
+    if not isinstance(layer_ref, unicode) or not layer_ref.startswith(u"layer:"):
+        raise ValueError("sample layer_ref is invalid")
+    index = int(layer_ref.split(u":", 1)[1])
+    if index < 0 or not isinstance(field_names, list) or not field_names or max_rows <= 0 or max_samples <= 0:
+        raise ValueError("sample request is invalid")
+    mxd = arcpy.mapping.MapDocument("CURRENT")
+    frames = arcpy.mapping.ListDataFrames(mxd)
+    if not frames:
+        raise RuntimeError("ArcMap has no active data frame.")
+    data_frame = getattr(mxd, "activeDataFrame", None)
+    if data_frame is None:
+        raise RuntimeError("ArcMap has data frames but no active data frame.")
+    if data_frame not in frames:
+        raise RuntimeError("ArcMap active data frame is not in this document.")
+    layers = arcpy.mapping.ListLayers(mxd, "", data_frame)
+    if index >= len(layers):
+        raise RuntimeError("sample layer_ref does not exist.")
+    layer = layers[index]
+    available = set(field.name for field in arcpy.ListFields(layer))
+    if any(name not in available for name in field_names):
+        raise RuntimeError("sample field does not exist.")
+    values = dict((name, []) for name in field_names)
+    seen = dict((name, set()) for name in field_names)
+    with arcpy.da.SearchCursor(layer, field_names) as cursor:
+        for row_number, row in enumerate(cursor):
+            if row_number >= max_rows:
+                break
+            for number, raw in enumerate(row):
+                if raw is None:
+                    continue
+                name = field_names[number]
+                text = _sample_text(raw)
+                if text and text not in seen[name] and len(values[name]) < max_samples:
+                    seen[name].add(text)
+                    values[name].append(text)
+    return values
 
 
 def _mxd_path(mxd):
@@ -106,20 +142,42 @@ def _extent(data_frame):
     }
 
 
+def _edit_session_state(layers):
+    workspaces = set()
+    for layer in layers:
+        source = layer.get("data_source")
+        if source:
+            workspaces.add(path_utils.dirname(source))
+    if not workspaces:
+        return "none"
+    states = []
+    for workspace in sorted(workspaces):
+        try:
+            states.append(bool(arcpy.da.Editor(workspace).isEditing))
+        except (ARCPY_EXECUTE_ERROR, RuntimeError, AttributeError, TypeError):
+            return "unknown"
+    if all(not state for state in states):
+        return "none"
+    if all(states):
+        return "single"
+    return "mixed"
+
+
 def _layer_info(layer, index):
     info = {
         "layer_ref": "layer:%s" % index,
         "name": layer.name,
-        "longName": getattr(layer, "longName", layer.name),
+        "long_name": getattr(layer, "longName", layer.name),
         "visible": bool(getattr(layer, "visible", False)),
-        "isFeatureLayer": bool(getattr(layer, "isFeatureLayer", False)),
-        "dataSource": _safe_support(layer, "DATASOURCE", "dataSource"),
+        "is_feature_layer": bool(getattr(layer, "isFeatureLayer", False)),
+        "data_source": _safe_support(layer, "DATASOURCE", "dataSource"),
+        "layer_type": _layer_type(layer),
         "fields": [],
         "selected_count": 0,
         "geometry_type": None,
         "spatial_reference": None
     }
-    if info["isFeatureLayer"]:
+    if info["is_feature_layer"]:
         desc = arcpy.Describe(layer)
         info["geometry_type"] = getattr(desc, "shapeType", None)
         info["spatial_reference"] = _layer_spatial_reference(desc)
@@ -131,10 +189,19 @@ def _layer_info(layer, index):
             fields = arcpy.ListFields(layer)
             for field in fields:
                 info["fields"].append({"name": field.name, "type": field.type})
-            _attach_field_value_samples(layer, info, fields)
         except (ARCPY_EXECUTE_ERROR, RuntimeError, AttributeError, TypeError) as exc:
             _layer_warning(info, u"field_read_failed: %s" % _sample_text(exc))
     return info
+
+
+def _layer_type(layer):
+    if bool(getattr(layer, "isFeatureLayer", False)):
+        return "FeatureLayer"
+    if bool(getattr(layer, "isRasterLayer", False)):
+        return "RasterLayer"
+    if bool(getattr(layer, "isGroupLayer", False)):
+        return "GroupLayer"
+    return "Layer"
 
 
 def _layer_spatial_reference(description):
@@ -144,53 +211,6 @@ def _layer_spatial_reference(description):
     if isinstance(factory_code, INTEGER_TYPES) and factory_code > 0:
         return "EPSG:%d" % factory_code
     return name if name else None
-
-
-def _attach_field_value_samples(layer, layer_info, fields):
-    profiled_fields = [field for field in fields if getattr(field, "type", None) not in VALUE_PROFILE_EXCLUDED_TYPES]
-    profiled_fields = profiled_fields[:MAX_VALUE_PROFILE_FIELDS]
-    if not profiled_fields:
-        return
-    field_names = [field.name for field in profiled_fields]
-    samples = dict((field.name, []) for field in profiled_fields)
-    seen = dict((field.name, set()) for field in profiled_fields)
-    try:
-        cursor = arcpy.da.SearchCursor(layer, field_names)
-    except (ARCPY_EXECUTE_ERROR, RuntimeError, AttributeError, TypeError) as exc:
-        _layer_warning(layer_info, u"value_sample_failed: %s" % _sample_text(exc))
-        return
-    try:
-        row_count = 0
-        for row in cursor:
-            row_count += 1
-            for index, raw_value in enumerate(row):
-                if raw_value is None:
-                    continue
-                field_name = field_names[index]
-                if len(samples[field_name]) >= MAX_FIELD_VALUE_SAMPLES:
-                    continue
-                value = _sample_text(raw_value)
-                if not value or value in seen[field_name]:
-                    continue
-                seen[field_name].add(value)
-                samples[field_name].append(value)
-            if row_count >= MAX_VALUE_PROFILE_ROWS or _all_sample_lists_full(samples):
-                break
-    finally:
-        del cursor
-    for field_info in layer_info.get("fields", []):
-        values = samples.get(field_info.get("name"))
-        if values:
-            field_info["value_samples"] = values
-    if len(fields) > len(profiled_fields):
-        layer_info["value_profile_truncated"] = True
-
-
-def _all_sample_lists_full(samples):
-    for values in samples.values():
-        if len(values) < MAX_FIELD_VALUE_SAMPLES:
-            return False
-    return True
 
 
 def _sample_text(value):

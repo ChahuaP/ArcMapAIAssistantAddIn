@@ -19,6 +19,9 @@ dist/
 release/
 ArcMapBridgeExternal/bin/
 ArcMapBridgeExternal/obj/
+ArcMapBridgeExternal/packages/
+**/packages/
+/test_import.spec
 ArcMapAIAssistantAddIn/*.esriaddin
 .hallmark/
 experiments/data/

@@ -7,12 +7,10 @@ from . import common
 
 
 def _output(context, arguments):
-    return common.output_feature_dataset(
+    return common.output_feature_class(
         context,
         arguments["output_name"],
-        arguments.get("output_workspace"),
-        arguments.get("output_folder"),
-        arguments.get("output_format")
+        arguments.get("output_workspace")
     )
 
 

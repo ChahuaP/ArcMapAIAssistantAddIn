@@ -2,15 +2,7 @@
 from __future__ import annotations
 
 
-_FORMAT_SUFFIXES = {
-    "csv": (".csv",),
-    "kmz": (".kmz",),
-    "pdf": (".pdf",),
-    "png": (".png",),
-    "shp": (".shp",),
-    "tif": (".tif", ".tiff"),
-    "tiff": (".tif", ".tiff"),
-}
+_FORMAT_SUFFIXES = {}
 
 
 def canonical_artifact_name(name: str | None, artifact_format: str | None) -> str | None:

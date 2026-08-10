@@ -3,15 +3,20 @@ from __future__ import absolute_import
 
 import json
 import os
-import socket
 import subprocess
 import time
 import urllib2
 
 try:
     import path_utils
+    import deployment_identity
+    import release
+    from shared_runtime import platform_paths
 except ImportError:
     from . import path_utils
+    from . import deployment_identity
+    from . import release
+    from shared_runtime import platform_paths
 
 
 try:
@@ -21,7 +26,6 @@ except NameError:
 
 
 BASE_URL = "http://127.0.0.1:8765"
-EXPECTED_APP_VERSION = "1.1.4"
 REPO_ROOT = path_utils.abspath(path_utils.join_path(os.path.dirname(__file__), ".."))
 CREATE_NO_WINDOW = 0x08000000
 
@@ -44,6 +48,7 @@ def sync_run_context(run_id, context, lease_id, epoch, plan_hash, phase, target)
         "plan_hash": plan_hash,
         "phase": phase,
         "target": target,
+        "deployment_hash": deployment_identity.deployment_hash(),
     })
 
 
@@ -69,90 +74,9 @@ def ensure_running():
         time.sleep(0.5)
     payload = _health_payload(timeout=2)
     if payload and not _is_expected_version(payload):
-        raise RuntimeError(u"本地网关版本不匹配：当前 %s，需要 %s。请重新安装最新版。" % (payload.get("app_version", u"未知"), EXPECTED_APP_VERSION))
+        raise RuntimeError(u"本地网关版本不匹配：当前 %s，需要 %s。请重新安装最新版。" % (payload.get("app_version", u"未知"), release.APP_VERSION))
     raise RuntimeError(u"本地网关启动失败。请双击 StartGateway.cmd 查看错误。")
 
-
-def ensure_bridge_running():
-    """Scan 8766-8789 for a live Bridge; start ArcMapBridge.exe if none found.
-
-    The Bridge EXE path comes from install.json (bridge_exe key). This
-    replaces the deleted gateway_py3/arcmap_bridge_client.ensure_running.
-    """
-    for port in [8766] + list(range(8767, 8790)):
-        if not _is_local_port_open(port):
-            continue
-        try:
-            result = _get_bridge_health(port)
-            if result and result.get("ok"):
-                return
-        except Exception:
-            continue
-    exe = _bridge_exe_path()
-    subprocess.Popen(
-        [exe],
-        cwd=path_utils.dirname(exe),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        creationflags=CREATE_NO_WINDOW
-    )
-    deadline = time.time() + 5
-    while time.time() < deadline:
-        for port in [8766] + list(range(8767, 8790)):
-            if not _is_local_port_open(port):
-                continue
-            try:
-                result = _get_bridge_health(port)
-                if result and result.get("ok"):
-                    return
-            except Exception:
-                continue
-        time.sleep(0.2)
-    raise RuntimeError(u"ArcMapBridge.exe 启动后没有在 8766-8789 端口响应。")
-
-
-def _is_local_port_open(port):
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.settimeout(0.05)
-    try:
-        return sock.connect_ex(("127.0.0.1", int(port))) == 0
-    finally:
-        sock.close()
-
-
-def _get_bridge_health(port):
-    url = "http://127.0.0.1:%d/health" % int(port)
-    request = urllib2.Request(url)
-    response = urllib2.urlopen(request, timeout=2)
-    return json.loads(response.read().decode("utf-8"))
-
-
-def _bridge_exe_path():
-    install = _install_config()
-    value = install.get("bridge_exe")
-    if not isinstance(value, unicode) or not value.strip():
-        raise RuntimeError(u"install.json 缺少 bridge_exe。请重新安装 GeoPilot。")
-    exe = path_utils.abspath(value)
-    if not path_utils.isfile(exe):
-        raise RuntimeError(u"ArcMapBridge.exe 不存在：%s。请重新安装 GeoPilot。" % exe)
-    return exe
-
-
-def _install_config():
-    config_path = path_utils.join_path(
-        os.environ.get("APPDATA", os.path.expanduser("~")),
-        "ArcMapAIAssistant", "install.json"
-    )
-    if not path_utils.isfile(config_path):
-        raise RuntimeError(u"缺少安装配置：%s。请先安装 GeoPilot。" % config_path)
-    with path_utils.open_binary(config_path, "rb") as handle:
-        raw = handle.read()
-    if not isinstance(raw, unicode):
-        raw = raw.decode("utf-8-sig", "replace")
-    data = json.loads(raw.lstrip(u"\ufeff"))
-    if not isinstance(data, dict):
-        raise RuntimeError(u"install.json 必须是 JSON 对象。")
-    return data
 
 
 def is_running(timeout=2):
@@ -191,7 +115,7 @@ def stop_gateway():
 
 
 def start_gateway():
-    log_dir = path_utils.join_path(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "ArcMapAIAssistant", "logs")
+    log_dir = platform_paths.localappdata_path("logs")
     if not path_utils.isdir(log_dir):
         path_utils.makedirs(log_dir)
     stdout_path = path_utils.join_path(log_dir, "gateway_stdout.log")
@@ -221,6 +145,7 @@ def acknowledge_lease(run_id, lease_id, epoch, plan_hash, target):
         "epoch": int(epoch),
         "plan_hash": plan_hash,
         "target": target,
+        "deployment_hash": deployment_identity.deployment_hash(),
     })
 
 
@@ -232,8 +157,8 @@ def heartbeat_run(run_id, lease_id, epoch, plan_hash):
     }, timeout=10)
 
 
-def complete_run(run_id, status, result, lease_id, epoch, plan_hash, result_hash, target):
-    return _post("/runs/%s/complete" % run_id, {
+def post_execution_receipt(run_id, status, result, lease_id, epoch, plan_hash, result_hash, target):
+    return _post("/runs/%s/receipt" % run_id, {
         "status": status,
         "result": result,
         "lease_id": lease_id,
@@ -241,7 +166,29 @@ def complete_run(run_id, status, result, lease_id, epoch, plan_hash, result_hash
         "plan_hash": plan_hash,
         "result_hash": result_hash,
         "target": target,
+        "deployment_hash": deployment_identity.deployment_hash(),
     }, timeout=10)
+
+
+def complete_sample(run_id, layer_ref, values, lease_id, epoch, plan_hash):
+    return _post("/runs/%s/sample" % run_id, {
+        "layer_ref": layer_ref, "values": values, "lease_id": lease_id,
+        "epoch": int(epoch), "plan_hash": plan_hash,
+        "deployment_hash": deployment_identity.deployment_hash(),
+    }, timeout=30)
+
+
+def complete_acceptance_probe(run_id, document, lease_id, epoch, plan_hash, deployment_hash):
+    actual = deployment_identity.deployment_hash()
+    if deployment_hash != actual:
+        raise RuntimeError(u"Gateway/Bridge deployment identity does not match Py2 runtime.")
+    return _post("/runs/%s/acceptance-probe" % run_id, {
+        "document": document,
+        "lease_id": lease_id,
+        "epoch": int(epoch),
+        "plan_hash": plan_hash,
+        "deployment_hash": actual,
+    }, timeout=30)
 
 
 def current_target():
@@ -281,7 +228,7 @@ def _health_payload(timeout):
 
 
 def _is_expected_version(payload):
-    return bool(payload and payload.get("app_version") == EXPECTED_APP_VERSION)
+    return bool(payload and payload.get("app_version") == release.APP_VERSION)
 
 
 def _post(path, payload, timeout=120):

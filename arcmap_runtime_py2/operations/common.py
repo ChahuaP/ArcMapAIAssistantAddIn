@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
 from __future__ import absolute_import
 
-import csv
+import os
 import re
 import uuid
 
 import arcpy
+from shared_runtime.output_contract import OutputContractError, output_policy_type, validate_output_policy
 
 try:
     import path_utils
@@ -25,7 +26,6 @@ except NameError:
 
 ARCPY_EXECUTE_ERROR = getattr(arcpy, "ExecuteError", RuntimeError)
 INVALID_OUTPUT_NAME_RE = re.compile(u'[<>:"/\\\\|?*\\x00-\\x1f]')
-SAFE_EXTENSION_RE = re.compile(r"^\.[A-Za-z0-9]{1,12}$")
 
 
 class OperationError(Exception):
@@ -41,7 +41,12 @@ def active_data_frame(mxd=None):
     frames = arcpy.mapping.ListDataFrames(mxd)
     if not frames:
         raise OperationError("Current MXD has no data frame.")
-    return frames[0]
+    data_frame = getattr(mxd, "activeDataFrame", None)
+    if data_frame is None:
+        raise OperationError("Current MXD has no active data frame.")
+    if data_frame not in frames:
+        raise OperationError("Current MXD active data frame is not in this document.")
+    return data_frame
 
 
 def find_layer(context, layer_value, step_outputs=None):
@@ -60,7 +65,7 @@ def find_layer(context, layer_value, step_outputs=None):
 
     matches = []
     for layer in context.get("layers", []):
-        if raw in (layer.get("layer_ref"), layer.get("name"), layer.get("longName"), layer.get("dataSource")):
+        if raw in (layer.get("layer_ref"), layer.get("name"), layer.get("long_name"), layer.get("data_source")):
             matches.append(layer)
 
     if len(matches) != 1:
@@ -92,8 +97,8 @@ def _context_layer_by_ref(context, layer_ref):
 
 def _find_live_snapshot_layer(snapshot_layer):
     for identity in (
-        snapshot_layer.get("dataSource"),
-        snapshot_layer.get("longName"),
+        snapshot_layer.get("data_source"),
+        snapshot_layer.get("long_name"),
         snapshot_layer.get("name"),
     ):
         if identity:
@@ -113,9 +118,37 @@ def _find_layer_by_ref(layer_ref):
     return layers[index]
 
 
+def _assert_within_staging(context, path):
+    """Reject output paths that escape the task staging directory (§6.8).
+
+    Py2 execution must only stage outputs; writing to a user-named absolute
+    path outside staging would bypass Gateway acceptance + atomic publish.
+    When staging_dir is set, any explicit output path must resolve under it.
+    Uses a separator-aware prefix check so ``/foo/bar`` does not allow
+    ``/foo/bar-evil`` (a plain ``startswith`` would).
+    """
+    staging_dir = context.get("staging_dir")
+    if not staging_dir:
+        raise OperationError(u"缺少任务 staging 目录，拒绝输出。请确认运行租约已签发。")
+    try:
+        resolved = path_utils.abspath(path)
+        staging_abs = path_utils.abspath(staging_dir)
+        sep = os.sep
+        inside = (
+            resolved.lower() == staging_abs.lower()
+            or resolved.lower().startswith(staging_abs.lower() + sep)
+        )
+        if not inside:
+            raise OperationError(
+                u"输出路径必须在任务 staging 目录内（%s），拒绝写入：%s" % (staging_abs, resolved))
+    except (TypeError, ValueError):
+        raise OperationError(u"输出路径无效：%s" % path)
+
+
 def output_gdb(context, output_workspace=None):
     if output_workspace:
         workspace = _resolve_output_workspace(context, output_workspace)
+        _assert_within_staging(context, workspace)
         if workspace.lower().endswith(u".gdb"):
             gdb = workspace
         else:
@@ -131,29 +164,18 @@ def output_gdb(context, output_workspace=None):
         return gdb
 
     mxd_path = context.get("mxd_path")
-    if not mxd_path:
-        raise OperationError(u"当前 MXD 未保存。请指定输出 GDB，或先保存 MXD。")
-    folder = path_utils.dirname(mxd_path)
-    gdb = path_utils.join_path(folder, "ArcMapAI_Output.gdb")
+    # Outputs must land in the per-run staging directory (§6.8): fail closed
+    # if it is missing — writing to the MXD folder would bypass Gateway
+    # acceptance + atomic publish.
+    staging_dir = context.get("staging_dir")
+    if not staging_dir:
+        raise OperationError(u"缺少任务 staging 目录，拒绝输出。请确认运行租约已签发。")
+    if not path_utils.isdir(staging_dir):
+        path_utils.makedirs(staging_dir)
+    gdb = path_utils.join_path(staging_dir, "ArcMapAI_Output.gdb")
     if not arcpy.Exists(gdb):
-        arcpy.CreateFileGDB_management(folder, "ArcMapAI_Output.gdb")
+        arcpy.CreateFileGDB_management(staging_dir, "ArcMapAI_Output.gdb")
     return gdb
-
-
-def output_directory(context, output_folder=None):
-    if output_folder:
-        folder = _path_text(output_folder)
-        if not path_utils.isdir(folder):
-            raise OperationError(u"Output folder not found: %s" % folder)
-        return folder
-
-    mxd_path = context.get("mxd_path")
-    if not mxd_path:
-        raise OperationError(u"当前 MXD 未保存。请指定输出文件夹，或先保存 MXD。")
-    folder = path_utils.join_path(path_utils.dirname(mxd_path), "ArcMapAI_Output")
-    if not path_utils.isdir(folder):
-        path_utils.makedirs(folder)
-    return folder
 
 
 def safe_output_name(name):
@@ -178,124 +200,13 @@ def output_feature_class(context, output_name, output_workspace=None):
     return path
 
 
-def output_shapefile(context, output_name, output_folder=None):
-    folder = output_directory(context, output_folder)
-    name = safe_output_name(output_name)
-    path = path_utils.join_path(folder, name + ".shp")
-    if arcpy.Exists(path) or path_utils.exists(path):
-        raise OperationError("Output already exists: %s" % path)
-    return path
-
-
-def output_feature_dataset(context, output_name, output_workspace=None, output_folder=None, output_format=None):
-    fmt = _normalize_output_format(output_format)
-    if not fmt and output_folder:
-        fmt = "shp"
-    if fmt in ("", "gdb"):
-        return output_feature_class(context, output_name, output_workspace)
-    if fmt == "shp":
-        folder = output_folder or _folder_workspace(output_workspace)
-        return output_shapefile(context, output_name, folder)
-    raise OperationError(u"Unsupported feature output format: %s" % output_format)
-
-
-def output_dataset(context, output_name, output_policy, output_workspace=None, output_folder=None, output_format=None):
-    policy = output_policy if isinstance(output_policy, dict) else {}
-    output_type = _output_policy_type(policy)
-    if output_type == "feature_class":
-        fmt = output_format or (None if output_folder else policy.get("default_format"))
-        return output_feature_dataset(context, output_name, output_workspace, output_folder, fmt)
-    if output_type == "file":
-        return output_file(context, output_name, _policy_extension(policy, output_format), output_folder)
-    if output_type == "raster":
-        return output_file(context, output_name, _raster_extension(policy, output_format), output_folder)
-    raise OperationError(u"Unsupported output_policy.type: %s" % output_type)
-
-
-def output_file(context, output_name, extension, output_folder=None):
-    folder = output_directory(context, output_folder)
-    name = safe_output_name(output_name)
-    extension = _normalize_extension(extension)
-    path = path_utils.join_path(folder, name + extension)
-    if path_utils.exists(path):
-        raise OperationError("Output already exists: %s" % path)
-    return path
-
-
-def _folder_workspace(output_workspace):
-    if not output_workspace:
-        return None
-    workspace = _path_text(output_workspace)
-    if workspace.lower().endswith(u".gdb"):
-        raise OperationError(u"Shapefile output requires an output folder, not a geodatabase: %s" % workspace)
-    return workspace
-
-
-def _output_policy_type(policy):
-    value = policy.get("type")
-    if not value:
-        return "feature_class"
-    text = _text(value).strip().lower()
-    if text in ("vector", "feature", "featureclass"):
-        return "feature_class"
-    return text
-
-
-def _policy_extension(policy, output_format=None):
-    extension = policy.get("extension")
-    if extension:
-        return _normalize_extension(extension)
-    fmt = _normalize_output_format(output_format or policy.get("default_format"))
-    if fmt:
-        return _normalize_extension("." + fmt)
-    raise OperationError("File output_policy requires extension.")
-
-
-def _raster_extension(policy, output_format=None):
-    fmt = _normalize_output_format(output_format or policy.get("default_format") or "tif")
-    if fmt == "tiff":
-        fmt = "tif"
-    if fmt not in ("tif",):
-        raise OperationError(u"Unsupported raster output format: %s" % fmt)
-    return "." + fmt
-
-
-def _normalize_output_format(value):
-    if not value:
-        return ""
-    text = _text(value).strip().lower().lstrip(".")
-    if text == "shapefile":
-        return "shp"
-    if text in ("geodatabase", "file_gdb", "feature_class"):
-        return "gdb"
-    return text
-
-
-def _normalize_extension(extension):
-    text = _text(extension).strip()
-    if not text.startswith("."):
-        text = "." + text
-    if not SAFE_EXTENSION_RE.match(text):
-        raise OperationError(u"Invalid output extension: %s" % extension)
-    return text.lower()
-
-
-def export_table_to_csv(layer, path, selected_only):
-    temporary = path_utils.temporary_sibling(path)
+def output_dataset(context, output_name, output_policy, output_workspace=None):
     try:
-        with path_utils.open_binary(temporary, "wb") as f:
-            writer = csv.writer(f)
-            with read_layer(layer, selected_only) as cursor_layer:
-                fields = [f.name for f in arcpy.ListFields(cursor_layer) if f.type not in ("Geometry", "Raster", "Blob")]
-                writer.writerow([field.encode("utf-8") for field in fields])
-                with arcpy.da.SearchCursor(cursor_layer, fields) as cursor:
-                    for row in cursor:
-                        writer.writerow([_csv_value(value) for value in row])
-        path_utils.publish_new_file(temporary, path)
-    except Exception:
-        if path_utils.exists(temporary):
-            path_utils.remove(temporary)
-        raise
+        policy = validate_output_policy(output_policy, "writes_data")
+        output_policy_type(policy)
+    except OutputContractError as exc:
+        raise OperationError(str(exc))
+    return output_feature_class(context, output_name, output_workspace)
 
 
 def read_layer(layer, selected_only=False, where_clause=None):
@@ -350,14 +261,6 @@ def delete_layer(layer):
         arcpy.Delete_management(layer)
     except (ARCPY_EXECUTE_ERROR, RuntimeError):
         pass
-
-
-def _csv_value(value):
-    if value is None:
-        return ""
-    if isinstance(value, unicode):
-        return value.encode("utf-8")
-    return value
 
 
 def _text(value):

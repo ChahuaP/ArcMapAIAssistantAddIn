@@ -9,7 +9,7 @@ from __future__ import annotations
 from copy import deepcopy
 import math
 import re
-from arcmap_runtime_py2.condition_protocol import (
+from shared_runtime.condition_contract import (
     LOGICAL_CONDITION_OPERATORS,
     normalize_condition_tree,
 )
@@ -23,10 +23,7 @@ ARCMAP_SELECTION_TYPES = {
     "SUBSET_SELECTION": "select_subset",
 }
 OVERLAP_TYPES = frozenset(("intersect", "contain", "within", "touch", "overlap", "cross", "within_a_distance"))
-ARTIFACT_EXPORT_ACTIONS = frozenset((
-    "export_pdf", "export_png", "export_selected_features", "layer_kml",
-    "map_pdf", "map_png", "split_by_field", "table_csv", "write_file",
-))
+ARTIFACT_EXPORT_ACTIONS = frozenset(("export_selected_features",))
 
 # Required fields are intentionally variant-specific where an operation has
 # genuinely different behaviour.  `action` prevents map/layout/export facts
@@ -54,9 +51,6 @@ _SPECS = {
  "define_projection": (({"subject", "target", "spatial_reference"}, {"spatial_reference":"string"}),),
  "add_xy": (({"subject", "target"}, {}),),
  "artifact_export": (
-     ({"subject", "action"}, {"action":"artifact_export_action"}),
-     ({"subject", "action", "output_format"}, {"action":"artifact_export_action", "output_format":"string"}),
-     ({"subject", "action", "target", "selected_only"}, {"action":"artifact_export_action", "selected_only":"boolean"}),
      ({"subject", "action", "target", "selected_only", "output_format"}, {"action":"artifact_export_action", "selected_only":"boolean", "output_format":"string"}),
  ),
 }
@@ -82,26 +76,9 @@ _TASK_SPECS["spatial_filter"] = (
     ),
 )
 _TASK_SPECS["artifact_export"] = (
-    ({"subject", "action"}, {"action": "const:map_png"}),
-    ({"subject", "action"}, {"action": "const:map_pdf"}),
-    ({"subject", "action"}, {"action": "const:export_png"}),
-    ({"subject", "action"}, {"action": "const:export_pdf"}),
-    ({"subject", "action"}, {"action": "const:write_file"}),
-    (
-        {"subject", "target", "action", "selected_only"},
-        {"action": "const:table_csv", "selected_only": "boolean"},
-    ),
-    (
-        {"subject", "target", "action", "selected_only"},
-        {"action": "const:layer_kml", "selected_only": "boolean"},
-    ),
     (
         {"subject", "target", "action", "selected_only"},
         {"action": "const:export_selected_features", "selected_only": "const:true"},
-    ),
-    (
-        {"subject", "target", "action", "selected_only"},
-        {"action": "const:split_by_field", "selected_only": "boolean"},
     ),
 )
 KINDS = frozenset(_SPECS)
@@ -294,9 +271,6 @@ def _task_predicate_defaults(value, path, error):
     result = deepcopy(value)
     if result.get("kind") != "artifact_export":
         return result
-    action = result.get("action")
-    if action in {"table_csv", "layer_kml", "split_by_field"} and "target" in result:
-        result.setdefault("selected_only", False)
     return result
 
 def canonicalize_semantic_fact(value, path="semantic_fact", error=ValueError):
@@ -463,11 +437,6 @@ def predicate_schema():
                         props[field]["description"] = (
                             "The existing input entity being filtered; it must equal subject when subject is an input."
                         )
-                    if kind == "artifact_export" and field == "subject":
-                        props[field]["description"] = (
-                            "The declared output entity created by this export. For current-map PNG/PDF exports, "
-                            "use the PNG/PDF output here and do not invent a current-map input."
-                        )
                     if kind == "artifact_export" and field == "target":
                         props[field]["description"] = (
                             "The declared input or prior output being exported; never put the exported output here."
@@ -579,6 +548,12 @@ def effect_schema():
         "properties": {"const": {"type": "string", "enum": sorted(ARTIFACT_EXPORT_ACTIONS)}},
         "required": ["const"],
     }
+    export_format_binding = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {"const": {"const": "gdb"}},
+        "required": ["const"],
+    }
     variants=[]
     for kind, specs in _SPECS.items():
         for required, types in specs:
@@ -592,6 +567,8 @@ def effect_schema():
             for field in required - {"subject"}:
                 if types.get(field) == "artifact_export_action":
                     props[field] = export_action_binding
+                elif kind == "artifact_export" and field == "output_format":
+                    props[field] = export_format_binding
                 else:
                     props[field]={"type":"array","minItems":1,"items":binding} if field == "sources" else binding
             variants.append({"type":"object","properties":props,"required":sorted({"kind"}|(required-{"subject"})),"additionalProperties":False})

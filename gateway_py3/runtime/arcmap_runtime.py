@@ -64,20 +64,24 @@ class ArcMapRuntime:
 
     # -- §6.7 acquire --------------------------------------------------------
 
-    def acquire(self, run_id: str, plan: VerifiedPlan,
-                target_selector: Dict[str, int]) -> RuntimeLease:
-        """Bind one ArcMap window precisely and return a fencing lease.
+    def acquire_lease(self, run_id: str, target_selector: contracts.TargetSelector) -> RuntimeLease:
+        """Acquire a context lease binding the ArcMap target before planning.
 
-        ``target_selector`` must carry arcmap_pid / bridge_pid / bridge_port /
-        hwnd — all positive ints. There is no port scanning and no
-        "first healthy bridge" fallback (§2).
+        No plan is bound yet; plan_digest uses a non-empty sentinel so the
+        Bridge lease fencing (which requires a non-empty plan_hash) and the
+        Py2 context callback (which rejects empty plan_hash) both accept it.
+        The real plan binding is enforced via AuthorizationGrant at execution.
         """
-        identity = self._target_identity(target_selector)
+        from .bridge_discovery import discover_bridge_target
+        target = discover_bridge_target(target_selector)
+        if target.get("source_sha256") != self.deployment_hash:
+            raise RuntimeError("Bridge deployment identity does not match the installed Gateway manifest.")
+        identity = self._target_identity(target)
         now = time.time()
-        lease = RuntimeLease(
+        return RuntimeLease(
             lease_id=str(uuid.uuid4()),
             run_id=run_id,
-            plan_digest=plan.digest,
+            plan_digest="context-lease",
             gateway_pid=self.gateway_pid,
             arcmap_pid=identity["arcmap_pid"],
             bridge_pid=identity["bridge_pid"],
@@ -88,7 +92,6 @@ class ArcMapRuntime:
             acquired_at=now,
             last_heartbeat=now,
         )
-        return lease
 
     # -- §6.7 capture (incremental, §4.2) -----------------------------------
 
@@ -120,6 +123,9 @@ class ArcMapRuntime:
                 coordinate_system=layer.get("coordinate_system"),
                 geometry_type=layer.get("geometry_type"),
                 selection_count=int(layer.get("selection_count", 0) or 0),
+                long_name=layer.get("long_name"),
+                visible=bool(layer.get("visible", False)),
+                selection_hash=layer.get("selection_hash"),
                 value_summary=None,
             )
             for layer in structural_layers
@@ -133,14 +139,14 @@ class ArcMapRuntime:
             document_identity=dict(document_identity),
             layers=layers,
             active_data_frame=document_identity.get("active_data_frame"),
-            edit_session_active=bool(document_identity.get("edit_session_active", False)),
+            edit_session_state=str(document_identity.get("edit_session_state", "unknown")),
             view_state=document_identity.get("view_state"),
             captured_at=float(captured_at if captured_at is not None else time.time()),
             deployment_hash=lease.deployment_hash,
             content_hash=str(content_hash or ""),
         )
 
-    def sample_values(self, context: ContextSnapshot,
+    def sample_values(self, lease: RuntimeLease, context: ContextSnapshot,
                       layer_refs: List[str],
                       field_names: List[str],
                       max_rows: int = 250, max_samples: int = 20) -> ContextSnapshot:
@@ -159,13 +165,12 @@ class ArcMapRuntime:
             if layer.identity.layer_ref not in wanted:
                 layers.append(layer)
                 continue
-            # Fake bridge supplies samples via the bridge hook; production
-            # reads them with a bounded SearchCursor. Stage D uses the bridge
-            # hook so offline tests stay deterministic.
             samples = self.bridge.sample_values(
-                layer.identity.layer_ref, sorted(wanted_fields), max_rows, max_samples
-            ) if hasattr(self.bridge, "sample_values") else {}
-            layers.append(layer.model_copy(update={"value_summary": samples or None}))
+                lease, layer.identity.layer_ref, sorted(wanted_fields), max_rows, max_samples
+            )
+            if not isinstance(samples, dict) or not isinstance(samples.get("values"), dict):
+                raise RuntimeError("Bridge returned no authoritative lazy samples.")
+            layers.append(layer.model_copy(update={"value_summary": samples["values"]}))
         return context.model_copy(update={"layers": tuple(layers)})
 
     # -- §6.7 execute --------------------------------------------------------
@@ -193,6 +198,29 @@ class ArcMapRuntime:
             return outcome_failed(
                 INFRASTRUCTURE_FAILED, "execution", "deployment_mismatch",
                 "部署哈希不匹配，拒绝执行。",
+            )
+        # Bind the planning-time ArcMap identity to the execution-time lease
+        # (§6.7): the context was captured before the lease was signed, so the
+        # two must describe the same ArcMap window. Any drift means the user
+        # switched windows between planning and execution — execution must not
+        # proceed against a different instance.
+        for field in ("arcmap_pid", "bridge_pid", "bridge_port", "target_hwnd"):
+            lease_val = getattr(lease, field)
+            snap_val = getattr(context_snapshot, field)
+            if lease_val != snap_val:
+                return outcome_failed(
+                    INFRASTRUCTURE_FAILED, "execution", "pre_dispatch_identity_drift",
+                    "规划与执行的 ArcMap 身份不一致（%s: 规划=%s 执行=%s）；"
+                    "禁止跨实例执行。" % (field, snap_val, lease_val),
+                )
+        # Map content binding: the planning-time content_hash must be present
+        # and is forwarded to the Bridge in the dispatch payload. The Bridge
+        # (which has ArcMap access) must reject execution if the current map
+        # content no longer matches — Python cannot re-capture it (no arcpy).
+        if not context_snapshot.content_hash:
+            return outcome_failed(
+                INFRASTRUCTURE_FAILED, "execution", "missing_content_hash",
+                "上下文缺少 content_hash，无法绑定地图内容。",
             )
         receipt_token = self.bridge.dispatch(lease, plan, grant, context_snapshot)
         receipt = self.bridge.wait_for_receipt(receipt_token, timeout=600.0)

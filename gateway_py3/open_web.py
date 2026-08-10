@@ -10,10 +10,10 @@ import urllib.request
 from pathlib import Path
 
 from gateway_py3.paths import REPO_ROOT, localappdata_dir
+from gateway_py3.release import APP_VERSION
 
 
 BASE_URL = "http://127.0.0.1:8765"
-EXPECTED_APP_VERSION = "1.1.4"
 WEB_URL = BASE_URL
 CREATE_NO_WINDOW = 0x08000000
 
@@ -49,7 +49,7 @@ def health_payload() -> dict | None:
 
 
 def is_expected_version(payload: dict | None) -> bool:
-    return bool(payload and payload.get("app_version") == EXPECTED_APP_VERSION)
+    return bool(payload and payload.get("app_version") == APP_VERSION)
 
 
 def stop_gateway() -> None:

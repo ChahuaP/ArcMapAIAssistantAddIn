@@ -5,3 +5,4 @@ langgraph==1.0.10
 langgraph-checkpoint==4.1.1
 langgraph-checkpoint-sqlite==3.1.1
 aiosqlite==0.22.1
+pywin32==311

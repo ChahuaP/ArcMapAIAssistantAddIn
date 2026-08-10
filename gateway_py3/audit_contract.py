@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from .llm_providers import StructuredOutputContract
+from .model_runtime.contracts import StructuredOutputContract
 
 
 class AuditContractError(ValueError):

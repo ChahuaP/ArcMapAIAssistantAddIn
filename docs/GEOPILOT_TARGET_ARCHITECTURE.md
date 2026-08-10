@@ -43,7 +43,7 @@ AI 只负责理解用户意图、提出计划和发现计划缺陷；上下文�
 4. 未通过独立验收的成果不能发布到用户正式位置。
 5. 执行是否发生无法确定时，禁止自动重放，状态必须是 `ExecutionIndeterminate`。
 6. 已持久化成功的相同模型调用可以零调用复用；不确定、失败、额度错误的模型调用不能缓存。
-7. MiniMax 额度不足时立即进入 `QuotaStopped`，不重试、不切换供应商。
+7. 当前角色绑定的模型额度不足时立即进入 `QuotaStopped`，不重试、不切换供应商。
 8. 新任务拥有全新对话上下文；历史任务不得自动进入模型输入。
 9. 模型不能创建并启用生产代码。自建工具只能通过独立管理员流程审核、测试、签名和部署。
 10. 所有正式成果都能追溯到用户请求、上下文、能力版本、业务规则、模型调用、计划、授权、执行回执和验收报告。
@@ -62,8 +62,10 @@ flowchart LR
     AR --> AP["AcceptancePublisher\n验收与发布"]
     AP --> GK
 
-    MR["ModelRuntime\nMiniMax、缓存、调用账本"] --> TC
+    MR["ModelRuntime\n角色绑定、缓存、调用账本"] --> TC
     MR --> WE
+    MR --> PR["ProviderRegistry\n精确连接解析"]
+    PR --> PA["ProviderAdapter\nMiniMax / 后续 Provider"]
     CR["CapabilityRegistry\n能力与业务规则"] --> TC
     CR --> WE
     JS["JournalStore\n事件与检查点"] <--> GK
@@ -316,27 +318,49 @@ G3 审计只能指出具体、非重复、可验证的问题；不能改写用�
 
 生产 G3 中，TaskCompiler 结果必须复用；审计计划时不得无条件重新进行完整语义编译。实验比较时，G3 必须建立在同一封存基线和同一上下文上，只增加审计变量。
 
-### 6.4 ModelRuntime
+### 6.4 ModelRuntime 与 Provider 边界
 
 接口：
 
 ```python
-invoke(model_request) -> ModelOutcome
+invoke(model_request, output_contract) -> ModelResult
 ```
 
-它唯一拥有：
+调用链固定为：
 
-- MiniMax Adapter
+```text
+Agent / Workflow
+  -> ModelRuntime
+  -> ProviderRegistry
+  -> ProviderAdapter
+```
+
+Kernel、TaskCompiler、WorkflowEngine 和 Agent 只依赖 `ModelRuntime`，不导入任何供应商客户端。Provider 网络协议、错误转换和流式响应解析全部封装在 Adapter 内。
+
+`ModelRuntime` 唯一拥有：
+
+- `AgentModelPlan` 的角色绑定解析
+- `ProviderRegistry` 的精确连接查找
 - Prompt 的确定性渲染和版本管理
 - 本地精确结果缓存
-- 供应商前缀缓存布局
 - 模型调用 reserve/call/validate/commit 状态
-- 额度停止策略
-- Token、延迟和缓存指标
+- `TokenPlan` 预算、并发、速率和费用限制
+- Token、延迟、费用和缓存指标
 - 结构化响应验证（Pydantic `model_validate`，§13.1）
 - 流式输出（§14）：支持流式的 Adapter 启用 `stream=True`，逐 token 推送 `model.token` 事件；不支持流式的 Adapter 静默跳过，不阻塞
 
-当前正式实现只有 MiniMax-M3 Adapter 和离线测试 Fake Adapter。不得保留 GLM、智谱、DeepSeek、自动选模或运行时 fallback。语音识别是独立输入 Adapter，不得借语音链路形成第二个规划模型。
+当前安装 MiniMax Adapter，离线测试安装 Fake Adapter。这不是架构白名单；新增 DeepSeek API、Ollama、本地 vLLM 或 OpenAI-compatible 时，必须新增 Adapter 与显式连接，不修改 Kernel 和 Workflow。任何连接不可用都明确失败，不得自动选模、自动换连接或 fallback。
+
+#### Provider 与角色合同
+
+- `ProviderConnection`：`connection_id`、`provider_type`、`endpoint`、`credential_ref`、`enabled_models`、`deployment_fingerprint`。
+- `ModelBinding`：`connection_id`、`model_id`、`role`、`temperature`、`max_output_tokens`、`budget_policy`。
+- `AgentModelPlan`：分别绑定 `compiler`、`planner`、`auditor`、`repairer`，可使用不同 Provider 和模型。
+- `TokenPlan`：调用预算、上下文上限、输出上限、并发限制、请求/令牌速率和费用上限。
+
+凭据由 DPAPI 凭据库保存。连接、计划、任务和调用证据只保存 `credential_ref`，不保存明文密钥。每次调用记录实际 provider、model、connection、endpoint fingerprint、deployment fingerprint、role、采样参数、TokenPlan 和 credential_ref。
+
+第三章正式实验另有 `ExperimentSpec` 和 `ExperimentSupervisor` 锁：`provider=minimax`、`model=MiniMax-M3`。实验锁不进入普通任务的 `AgentModelPlan`。
 
 ### 精确缓存键
 
@@ -346,6 +370,9 @@ SHA256(
   + security_scope_hash
   + provider
   + model
+  + connection_id
+  + endpoint_fingerprint
+  + deployment_fingerprint
   + role
   + prompt_version
   + system_prompt_hash
@@ -355,6 +382,8 @@ SHA256(
   + context_projection_hash
   + domain_rule_hash
   + generation_parameter_hash
+  + model_binding_hash
+  + token_plan_hash
 )
 ```
 
@@ -484,7 +513,7 @@ publish(staged_artifacts, acceptance_report, authorization_grant) -> Publication
 sessions
 runs
 run_events
-context_snapshots
+planning_context_snapshots / captured_context_snapshots
 capability_snapshots
 intent_specs
 verified_plans
@@ -535,9 +564,16 @@ gateway_py3/
   intelligence/
     task_compiler.py
     workflow_engine.py
-    planning_graph.py
-    model_runtime.py
-    prompts.py
+    structured_outputs.py
+  model_runtime/
+    contracts.py
+    adapter.py
+    registry.py
+    runtime.py
+    credentials.py
+    configuration.py
+    adapters/
+      minimax.py
   capabilities/
     registry.py
     validation.py
@@ -547,10 +583,6 @@ gateway_py3/
     context_capture.py
     acceptance_publisher.py
     policy.py
-  adapters/
-    minimax.py
-    sqlite.py
-    arcmap_bridge.py
   streaming/
     event_projection.py
     sse_channel.py
@@ -576,7 +608,7 @@ experiments/
 |---|---|
 | `planning_engine.py`、`planning_state_machine.py` | 逻辑收进 WorkflowEngine，迁移完成后删除 |
 | `task_contract.py`、`semantic_domain.py` | 逻辑收进 TaskCompiler，迁移完成后删除 |
-| `llm_providers.py` | 拆出 MiniMax Adapter 和 ModelRuntime；删除其他规划供应商和自动选模 |
+| `minimax_client.py` | 删除旧路径；MiniMax 网络细节进入 `model_runtime/adapters/minimax.py` |
 | `run_controller.py`、`gateway_state.py` | 由 GeoPilotKernel 替换，迁移完成后删除 |
 | `run_store.py`、`run_store_schema.py` | 新 JournalStore/SQLite Adapter 替换；旧数据库不兼容 |
 | `routes/*` | 变成只调用 GeoPilotKernel 的 HTTP Adapter |
@@ -620,8 +652,8 @@ experiments/
 - 模型输出验证用 `model_validate` 替代手写校验；`tools` JSON Schema 用 `model_json_schema()` 自动生成。
 - `digest()` 规范哈希输入改用 `model_dump(mode='json')`。
 - 实现规范 Prompt、调用账本、single-flight 和精确结果缓存。
-- 只接 MiniMax-M3 Adapter 与离线 Fake Adapter。
-- 删除规划链路中的直接 provider 调用和自动供应商选择。
+- 建立严格 ProviderConnection、ModelBinding、AgentModelPlan、TokenPlan、ProviderRegistry 和 ProviderAdapter 合同。
+- 当前只安装 MiniMax Adapter 与离线 Fake Adapter；删除规划链路中的直接 provider 调用、自动选模和 fallback。
 - ModelRuntime 的 `invoke()` 支持流式输出接口（§14），支持流式的 Adapter 启用 `stream=True`。
 
 ### 阶段 C：TaskCompiler 与 WorkflowEngine（LangGraph）
@@ -642,7 +674,7 @@ experiments/
 - 实现独立验收和原子发布。
 - 删除端口扫描、静默切换和旧权限链路。
 - 实现 §4.2 增量上下文捕获：结构层全量、值摘要层惰性；执行后复核只捕获声明输出图层。
-- 执行等待从 0.2s 轮询改为回调事件驱动（ArcMap 回调 `complete_execution` 时通知等待线程），保留 30s 慢心跳兜底。
+- 执行等待由 ArcMap 权威回执事件驱动；30s 心跳只证明租约存活，不推断执行结果，也不形成第二条完成路径。
 
 ### 阶段 E：能力、安全、流式输出与 UI 切换
 
@@ -683,7 +715,7 @@ experiments/
 - 在每个状态转换后强制终止进程，恢复不得重复已提交模型调用。
 - 已封存计划在执行前恢复时不再调用模型。
 - 执行分发后断开必须 reconcile；无法证明时进入 `ExecutionIndeterminate`。
-- MiniMax 额度错误立即停止，没有第二供应商调用。
+- 当前角色绑定的 Provider 额度错误立即停止，没有第二连接调用。
 
 ### ArcMap
 

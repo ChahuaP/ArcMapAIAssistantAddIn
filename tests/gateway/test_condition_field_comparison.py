@@ -1,7 +1,7 @@
 import unittest
 
 from gateway_py3.catalog_loader import OperationCatalog
-from gateway_py3.validators import prepare_workflow
+from gateway_py3.validators import ValidationError, prepare_workflow
 from gateway_py3.workflow_protocol import workflow_protocol
 
 
@@ -65,6 +65,31 @@ class ConditionFieldComparisonTests(unittest.TestCase):
             ["eq", "ne", "gt", "gte", "lt", "lte"],
         )
         self.assertIn("value_field", protocol["rule"])
+
+    def test_legacy_condition_operator_fields_and_aliases_are_rejected(self):
+        base_step = {
+            "id": "select_mismatch",
+            "operation": "selection.select_by_attribute",
+            "reason": "select mismatches",
+        }
+        for where in (
+            {"field": "PLAN_USE", "operator": "ne", "value_field": "ACT_USE"},
+            {"field": "PLAN_USE", "op": "!=", "value_field": "ACT_USE"},
+            {"and": [
+                {"field": "PLAN_USE", "op": "ne", "value_field": "ACT_USE"},
+                {"field": "PLAN_USE", "op": "is_not_null"},
+            ]},
+        ):
+            step = dict(base_step)
+            step["arguments"] = {"layer": "layer:parcels", "where": where}
+            workflow = {
+                "action": "execute",
+                "summary": "reject legacy condition",
+                "steps": [step],
+            }
+            with self.subTest(where=where):
+                with self.assertRaises(ValidationError):
+                    prepare_workflow(workflow, self.catalog, self.context)
 
 
 if __name__ == "__main__":

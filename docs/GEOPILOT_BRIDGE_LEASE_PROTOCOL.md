@@ -39,9 +39,11 @@
 
 | 端点 | 方法 | 请求 | 响应 | 说明 |
 |---|---|---|---|---|
-| `/health` | GET | - | `{ok, bridge_pid, bridge_port, summary{targets[]}}` | 不变，用于目标发现 |
+| `/health` | GET | - | `{ok, bridge_pid, bridge_port, deployment_hash}` | 纯进程存活检查，不访问 ArcMap COM |
+| `/targets` | GET | - | `{ok, targets[]}` | 独立枚举 ArcMap 目标；不得影响 Bridge 存活判断 |
 | `/dispatch` | POST | `{lease_id, epoch, plan_hash, run_id, allow_edits, context_snapshot}` | `{ok, run_id}` | 替换旧 `/runs/:id/execute`。Bridge 把 lease 三元组 + context 写 silent command 文件，触发 Py2 执行 |
 | `/capture-context` | POST | `{lease_id, epoch, run_id, phase}` | `{ok, run_id}` | 替换旧 `/sync-context`。Bridge 触发 Py2 读 ArcMap 上下文并回调 gateway |
+| `/acceptance-probe` | POST | `{lease_id, epoch, plan_hash, run_id, deployment_hash, output_id, kind, staged_path}` | `{ok, run_id}` | Bridge 触发 Py2 用 ArcPy 重新读取 sealed staging 输出；不复用执行回执观测。 |
 
 ### 3.2 Bridge → gateway（Py2 runtime 回调）
 
@@ -51,6 +53,7 @@
 | `/runs/:id/heartbeat` | POST | `{lease_id, epoch, plan_hash}` | 替换旧 heartbeat（旧带 owner_id，新带 lease 三元组） |
 | `/runs/:id/context` | POST | `{lease_id, epoch, plan_hash, phase, context}` | 上下文回调（旧带 sync_token，新带 lease 三元组） |
 | `/runs/:id/reconcile` | POST | `{lease_id, epoch, plan_hash}` | Bridge/Py2 主动查询执行状态（分发中断后） |
+| `/runs/:id/acceptance-probe` | POST | `{lease_id, epoch, plan_hash, deployment_hash, document}` | 独立验收探针回调。`document` 必须绑定 `output_id` 和 `manifest_digest`。 |
 
 ### 3.3 Bridge 内部（C# ↔ Py2，silent command file）
 

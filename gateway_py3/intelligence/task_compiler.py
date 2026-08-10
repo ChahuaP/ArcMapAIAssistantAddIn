@@ -7,7 +7,7 @@ output format, layer type, selection derivatives or default workspace; those
 are server-derived.
 
 Stage C wraps the existing ``task_contract`` validation logic (task_contract,
-semantic_domain, condition_protocol) behind the new deep-module boundary. The
+semantic_domain, condition_contract) behind the new deep-module boundary. The
 full validated task contract is retained in ``IntentSpec.derived_facts`` so
 WorkflowEngine can consume it without a second semantic model call (§6.3).
 """
@@ -18,11 +18,10 @@ from typing import Any, Dict, List, Tuple
 
 from ..kernel import contracts
 from ..kernel.contracts import (
-    CapabilitySnapshot, ContextSnapshot, IntentSpec, EntityBinding,
+    CapabilitySnapshot, ContextSnapshot, IntentSpec, EntityBinding, context_verifier_view,
     Outcome, RequestEnvelope, outcome_succeeded, outcome_paused, outcome_failed,
 )
-from .model_runtime import ModelRuntime, ModelRequest
-from ..llm_providers import StructuredOutputContract
+from ..model_runtime import ModelRuntime, ModelRequest, StructuredOutputContract
 from ..task_contract import (
     TaskContractError,
     bind_model_task_contract,
@@ -65,16 +64,16 @@ class TaskCompiler:
         )
 
     def compile(self, request: RequestEnvelope, context: ContextSnapshot,
-                capabilities: CapabilitySnapshot) -> Outcome:
-        legacy_context = _project_context(context)
-        contract = task_contract_for_context(legacy_context, request.text)
+                capabilities: CapabilitySnapshot, run_id: str = "") -> Outcome:
+        verifier_context = context_verifier_view(context)
+        contract = task_contract_for_context(verifier_context, request.text)
         model_request = self._build_model_request(request, context, capabilities,
-                                                   legacy_context, contract)
-        result = self.model_runtime.invoke(model_request, contract)
+                                                   verifier_context, contract, run_id)
+        result = self.model_runtime.invoke(model_request, contract, on_token=lambda _token: None)
         if result.status == "quota_stopped":
             return outcome_failed(
                 contracts.QUOTA_STOPPED, "intent", "model_quota_stopped",
-                "MiniMax 额度不足，已停止。不重试、不切换供应商。",
+                "当前角色的模型预算已耗尽。不重试、不切换供应商。",
             )
         if result.status == "uncertain":
             return outcome_failed(
@@ -100,7 +99,7 @@ class TaskCompiler:
                 )
         try:
             task_contract = self._bind_and_parse(
-                result.response, request.text, legacy_context,
+                result.response, request.text, verifier_context,
             )
         except TaskContractError as exc:
             return outcome_failed(
@@ -123,8 +122,9 @@ class TaskCompiler:
 
     def _build_model_request(self, request: RequestEnvelope, context: ContextSnapshot,
                             capabilities: CapabilitySnapshot,
-                            legacy_context: Dict[str, Any],
-                            contract: StructuredOutputContract) -> ModelRequest:
+                            verifier_context: Dict[str, Any],
+                            contract: StructuredOutputContract,
+                            run_id: str = "") -> ModelRequest:
         context_projection = {
             "layers": [
                 {
@@ -137,16 +137,14 @@ class TaskCompiler:
                 }
                 for layer in context.layers
             ],
-            "is_saved": bool(legacy_context.get("is_saved", False)),
+            "is_saved": bool(verifier_context.get("is_saved", False)),
             "active_data_frame": context.active_data_frame,
         }
         tool_contract = contract.schema
         return ModelRequest(
             tenant_id=request.caller.tenant_id,
             security_scope_hash=_security_scope_hash(request),
-            provider=self.model_runtime.adapter.provider,
-            model=self.model_runtime.adapter.model,
-            role="semantic",
+            role="compiler",
             prompt_version=PROMPT_VERSION,
             system_prompt=SYSTEM_PROMPT,
             user_input=request.text,
@@ -157,13 +155,13 @@ class TaskCompiler:
             generation_params={
                 "predicate_catalog": self._catalog_text,
             },
-            run_id="",
+            run_id=run_id,
         )
 
     # -- server-side binding + validation ---------------------------------
 
     def _bind_and_parse(self, response: Dict[str, Any], request_text: str,
-                        legacy_context: Dict[str, Any]) -> Dict[str, Any]:
+                        verifier_context: Dict[str, Any]) -> Dict[str, Any]:
         """Bind model response to the canonical task_contract format.
 
         The server is the authority: the model never decides output format,
@@ -171,19 +169,25 @@ class TaskCompiler:
         to the caller as a CONTRACT_FAILED outcome.
         """
         inner = response.get("task_contract") if isinstance(response.get("task_contract"), dict) else response
-        bound = bind_model_task_contract(inner, request_text, legacy_context)
-        return parse_task_contract(bound, request_text, legacy_context)
+        bound = bind_model_task_contract(inner, request_text, verifier_context)
+        return parse_task_contract(bound, request_text, verifier_context)
 
     # -- IntentSpec construction -------------------------------------------
 
     def _build_intent(self, request: RequestEnvelope, task_contract: Dict[str, Any],
                       context: ContextSnapshot,
                       capabilities: CapabilitySnapshot) -> IntentSpec:
+        live_layers = {}
+        for layer in context.layers:
+            live_layers[layer.identity.layer_ref] = layer.identity.layer_ref
+            live_layers[layer.identity.name] = layer.identity.layer_ref
         bound_inputs = tuple(
             EntityBinding(
                 name=entity.get("entity_id", ""),
                 kind=entity.get("kind") or "input",
-                layer_ref=entity.get("reference"),
+                path=(entity.get("reference")
+                      if entity.get("reference") not in live_layers else None),
+                layer_ref=live_layers.get(entity.get("reference")),
             )
             for entity in task_contract.get("input_entities", [])
         )
@@ -215,15 +219,17 @@ class TaskCompiler:
                 "task_contract": task_contract,
                 "context_digest": context.digest,
                 "capability_digest": capabilities.digest,
+                "security_scope": {
+                    "tenant_id": request.caller.tenant_id,
+                    "role": request.caller.role,
+                    "data_scope": tuple(request.caller.data_scope),
+                },
+                "publication_targets": tuple(request.outputs),
+                "declared_outputs": tuple(task_contract.get("outputs", [])),
             },
-            model_identity=self.model_runtime.adapter.model,
+            model_identity=self.model_runtime.model_identity("compiler"),
             prompt_version=PROMPT_VERSION,
         )
-
-
-def _project_context(context: ContextSnapshot) -> Dict[str, Any]:
-    """Delegate to ContextSnapshot.to_legacy_dict (single source of truth)."""
-    return context.to_legacy_dict()
 
 
 def _security_scope_hash(request: RequestEnvelope) -> str:

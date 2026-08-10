@@ -281,27 +281,19 @@
         ${failedMessage(item)}
         ${writesData(item.workflow) ? '<div class="task-note warn">这个任务会写出新数据。若当前 MXD 未保存，需要在对话中说明输出文件夹或 GDB。</div>' : ''}
       `;
-      const actions = document.createElement('div');
-      actions.className = 'task-actions';
-      const undeletableStages = new Set([
-        'received', 'context_frozen', 'intent_compiled', 'plan_verified',
-        'authorization_required', 'authorized', 'runtime_acquired',
-        'executing', 'executed', 'accepted', 'published',
-        'execution_indeterminate',
-      ]);
-      if (!undeletableStages.has(item.stage)) {
-        const deleteButton = document.createElement('button');
-        deleteButton.className = 'btn btn-danger btn-sm';
-        deleteButton.textContent = '删除';
-        deleteButton.onclick = () => deleteRun(item.id);
-        actions.appendChild(deleteButton);
-      }
-      card.appendChild(actions);
 
       const steps = document.createElement('details');
       restoreTaskDetailsState(steps, item.id, 'steps', item.stage === 'plan_verified');
       steps.innerHTML = `<summary>执行步骤</summary><ol class="task-steps">${stepItems(item.workflow)}</ol>`;
       card.appendChild(steps);
+
+      if (item.stage === 'execution_indeterminate' || item.stage === 'publication_indeterminate') {
+        const resume = document.createElement('button');
+        resume.className = 'btn btn-sm btn-warn';
+        resume.textContent = '人工确认后继续核对';
+        resume.addEventListener('click', () => resumeIndeterminate(item.id).catch(err => setStatus(err.message)));
+        card.appendChild(resume);
+      }
 
       const tech = document.createElement('details');
       restoreTaskDetailsState(tech, item.id, 'tech', false);
@@ -344,16 +336,12 @@
         'analysis.project',
         'analysis.spatial_join',
         'selection.export_selected_features',
-        'export.map_png',
-        'export.map_pdf',
-        'export.table_csv',
-        'export.layer_kml',
-        'export.split_by_field'
       ].includes(step.operation));
     }
 
     function failedMessage(item) {
-      if (item.stage === 'execution_indeterminate') return '<div class="task-note error">ArcMap 执行后的权威结果无法判定；该审计记录不可删除，但可以重新运行此任务。</div>';
+      if (item.stage === 'execution_indeterminate') return '<div class="task-note error">ArcMap 执行后的权威结果无法判定；请人工确认后继续核对，系统不会重跑。</div>';
+      if (item.stage === 'publication_indeterminate') return '<div class="task-note error">发布结果无法判定；请人工确认后继续核对，系统不会重跑。</div>';
       if (item.stage === 'infrastructure_failed') return '<div class="task-note error">基础设施故障。</div>';
       if (item.outcome && item.outcome.kind !== 'Succeeded' && item.outcome.message) {
         return `<div class="task-note error">${escapeHtml(item.outcome.message)}</div>`;

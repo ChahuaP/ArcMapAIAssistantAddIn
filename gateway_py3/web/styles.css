@@ -227,62 +227,6 @@ label {
   min-height: 28px;
 }
 
-.footer-link {
-  cursor: pointer;
-  transition: color var(--dur-fast) var(--ease-out);
-}
-.footer-link:hover {
-  color: var(--color-accent);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
-/* ── Changelog ── */
-
-.changelog-list {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.changelog-version {
-  padding: 12px 14px;
-  border: 1px solid var(--color-rule);
-  border-radius: var(--radius-md);
-  background: var(--color-surface);
-}
-
-.changelog-version-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 6px;
-}
-
-.changelog-tag {
-  font-size: var(--text-md);
-  font-weight: 700;
-  color: var(--color-accent);
-  letter-spacing: -0.01em;
-}
-
-.changelog-date {
-  font-size: var(--text-xs);
-  color: var(--color-muted);
-}
-
-.changelog-version ul {
-  margin: 0;
-  padding-left: 18px;
-  list-style: disc;
-}
-
-.changelog-version li {
-  font-size: var(--text-sm);
-  color: var(--color-ink);
-  line-height: 1.6;
-}
-
 /* ── Workspace (center) ── */
 
 .workspace {

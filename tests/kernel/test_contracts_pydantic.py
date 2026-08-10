@@ -13,10 +13,12 @@ from pydantic import ValidationError
 
 from gateway_py3.kernel.contracts import (
     CallerIdentity, CapabilitySnapshot, CapabilitySpec, ContextSnapshot,
+    DeclaredOutput,
     IntentSpec, LayerRef, LayerSnapshot, RequestEnvelope, SideEffectScope,
     VerifiedPlan, WorkflowStep,
     EMPTY,
 )
+from gateway_py3.kernel.coordinator import _runtime_step_document
 
 
 def _caller(user="u1", tenant="t1", role="analyst"):
@@ -29,7 +31,39 @@ def _envelope(session_id="00000000-0000-0000-0000-000000000001",
     return RequestEnvelope(
         session_id=session_id, request_id=request_id, text=text,
         caller=_caller(), execute=execute, side_effects=side_effects,
+        target_selector={"bridge_pid": 2001, "bridge_port": 8766,
+                         "arcmap_pid": 2000, "hwnd": 3000,
+                         "deployment_hash": "a" * 64},
     )
+
+
+class RuntimeStagingContractTest(unittest.TestCase):
+    def test_execution_uses_staging_without_overwriting_sealed_destination(self):
+        step = WorkflowStep(
+            id="buffer",
+            operation="analysis.buffer",
+            arguments={
+                "input_layer": "layer:roads",
+                "output_name": "roads_buffer",
+                "output_workspace": r"D:\published\results.gdb",
+            },
+            reason="buffer roads",
+            declared_outputs=(DeclaredOutput(
+                output_id="output:buffer",
+                name="roads_buffer",
+                kind="feature_class",
+                destination=r"D:\published\results.gdb\roads_buffer",
+            ),),
+        )
+
+        runtime_document = _runtime_step_document(step)
+
+        self.assertNotIn("output_workspace", runtime_document["arguments"])
+        self.assertEqual(step.arguments["output_workspace"], r"D:\published\results.gdb")
+        self.assertEqual(
+            step.declared_outputs[0].destination,
+            r"D:\published\results.gdb\roads_buffer",
+        )
 
 
 class FrozenImmutabilityTest(unittest.TestCase):
@@ -60,6 +94,9 @@ class FieldPathInErrorTest(unittest.TestCase):
                 request_id="00000000-0000-0000-0000-000000000002",
                 text="",
                 caller=_caller(),
+                target_selector={"bridge_pid": 2001, "bridge_port": 8766,
+                                 "arcmap_pid": 2000, "hwnd": 3000,
+                                 "deployment_hash": "a" * 64},
             )
             self.fail("empty text should fail")
         except ValidationError as exc:
@@ -74,6 +111,14 @@ class FieldPathInErrorTest(unittest.TestCase):
     def test_execute_without_side_effects_raises(self):
         with self.assertRaises(ValidationError):
             _envelope(execute=True)
+
+    def test_target_selector_is_required_for_plan_only_requests(self):
+        with self.assertRaises(ValidationError):
+            RequestEnvelope(
+                session_id="00000000-0000-0000-0000-000000000001",
+                request_id="00000000-0000-0000-0000-000000000002",
+                text="select cities", caller=_caller(),
+            )
 
 
 class JsonSchemaSameSourceTest(unittest.TestCase):
@@ -105,7 +150,7 @@ class DigestStabilityTest(unittest.TestCase):
 
     def test_changed_snapshot_different_digest(self):
         s1 = self._snapshot()
-        s2 = self._snapshot().model_copy(update={"edit_session_active": True})
+        s2 = self._snapshot().model_copy(update={"edit_session_state": "single"})
         self.assertNotEqual(s1.digest, s2.digest)
 
     @staticmethod

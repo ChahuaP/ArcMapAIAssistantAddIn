@@ -51,13 +51,26 @@ class RuntimeUnicodePathTests(unittest.TestCase):
         self.assertEqual(custom_os.path.basename(path), "农房三维模型.obj")
         self.assertTrue(custom_os.path.join(r"C:\Users\于佳民", "Desktop").endswith("Desktop"))
 
+    def test_custom_tool_normalizes_only_schema_declared_paths(self):
+        schema = {"properties": {
+            "source": {"type": "string", "x-geopilot-kind": "path"},
+            "folder_label": {"type": "string"},
+        }}
+        with patch.object(self.path_utils, "to_unicode_path",
+                          side_effect=lambda value: "normalized:" + value):
+            result = self.workflow_executor._normalize_declared_path_arguments(
+                {"source": "input", "folder_label": "not-a-path"}, schema
+            )
+        self.assertEqual(result["source"], "normalized:input")
+        self.assertEqual(result["folder_label"], "not-a-path")
+
     def test_layer_reference_keeps_snapshot_identity_after_map_mutation(self):
         context = {
             "layers": [{
                 "layer_ref": "layer:3",
                 "name": "suspect_projects",
-                "longName": "suspect_projects",
-                "dataSource": r"D:\\experiment\\suspect_projects.shp",
+                "long_name": "suspect_projects",
+                "data_source": r"D:\\experiment\\suspect_projects.shp",
             }]
         }
         expected = object()

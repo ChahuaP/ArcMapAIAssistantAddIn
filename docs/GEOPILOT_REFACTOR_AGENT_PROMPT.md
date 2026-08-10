@@ -47,8 +47,8 @@ resume(run_id) -> RunView
 3. 使用 PowerShell 7。读取中文前执行 `chcp 65001` 并使用 `Get-Content -Encoding UTF8`。
 4. 文件编辑使用 `apply_patch`。不得用脚本覆盖用户文件。
 5. 当前禁止任何真实模型调用和第三章实验。所有规划测试使用离线 Fake Model Adapter。
-6. 后续若用户单独授权真实模型调用，必须显式为 `provider=minimax`、`model=MiniMax-M3`；MiniMax 额度不足立即停止，不重试、不切换。
-7. 删除 GLM、智谱、DeepSeek 等规划供应商、隐式选模和自动切换。语音能力不能形成第二条规划模型链路。
+6. 普通生产调用必须由 `AgentModelPlan` 显式绑定 provider/model/role；不可用就明确失败，不重试、不自动切换。第三章实验单独锁定 `provider=minimax`、`model=MiniMax-M3`。
+7. 删除旧 `llm_providers.py` 松散框架、隐式选模和自动切换；保留小而严格的 Provider Adapter 扩展边界。语音能力不能形成第二条规划模型链路。
 8. 不放宽验证器、不修改评分器、不制作案例专用 Prompt、不伪造结果。
 9. 不执行打包、安装或正式实验。常规 Python/JavaScript/离线测试属于允许的验证；除非用户明确要求，不执行发布构建。
 10. 所有临时检查脚本在验证后删除。
@@ -98,7 +98,7 @@ resume(run_id) -> RunView
 8. 只缓存 `succeeded + schema_validated`。失败、额度、协议错误和 uncertain 不能复用。
 9. 实现相同 call_key 的 single-flight。
 10. 崩溃后成功记录直接复用；uncertain 不自动重试。
-11. 正式 Adapter 只保留 MiniMax-M3；测试使用 Fake Adapter。删除旧规划代码中的直接 provider 调用、自动选模和 fallback。
+11. 建立 ProviderConnection、ModelBinding、AgentModelPlan、TokenPlan、ProviderRegistry 和 ProviderAdapter 的严格合同。当前仅安装 MiniMax Adapter，测试使用 Fake Adapter；删除旧规划代码中的直接 provider 调用、自动选模和 fallback。
 12. ModelRuntime 的 `invoke()` 支持流式输出接口（§14）：支持流式的 Adapter 启用 `stream=True`，逐 token 推送 `model.token` 事件；Fake Adapter 静默跳过。
 
 必须增加以下接口测试：完全相同调用零第二次模型请求；任一哈希变化 miss；并发相同调用只有一次 Adapter 调用；跨机构不命中；失败/额度/uncertain 不命中；重启后成功记录复用；Pydantic `ValidationError` 带字段路径；`model_json_schema()` 与验证器同源不漂移。
@@ -130,7 +130,7 @@ resume(run_id) -> RunView
 6. 数据写操作进入 staging；运行结果经独立 AcceptancePublisher 验收后才发布。
 7. 分发后连接中断必须通过 outbox/receipt reconcile；无法确定则 `ExecutionIndeterminate`，禁止自动重放。
 8. 实现增量上下文捕获（§4.2）：结构层（图层引用、字段名、坐标系、几何类型、选择计数）全量捕获，值摘要层惰性（TaskCompiler 判定需要时才采样）。执行后复核只捕获 workflow 声明的输出图层。
-9. 执行等待从 0.2s 轮询改为回调事件驱动：ArcMap 回调 `complete_execution` 时通知等待线程，保留 30s 慢心跳兜底。
+9. 执行等待由 ArcMap 权威回执事件驱动；30s 心跳只证明租约存活，不推断执行结果，也不形成第二条完成路径。
 
 ### 阶段 E：能力、安全、流式输出与 UI 切换
 
@@ -172,7 +172,7 @@ resume(run_id) -> RunView
 - 显式导入成果及来源审计。
 - 精确缓存、single-flight、缓存失效和租户隔离。
 - 每个状态转换后进程退出的恢复。
-- MiniMax 额度停止且无第二供应商。
+- 任意角色绑定的 Provider 额度停止且不调用第二连接。
 - Bridge 死亡、旧 epoch、旧 plan_hash、重复回调和上下文漂移。
 - 执行成功但成果缺失时验收失败且不发布。
 - 未授权副作用拒绝。

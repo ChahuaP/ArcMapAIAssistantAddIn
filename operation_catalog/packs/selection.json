@@ -26,7 +26,8 @@
         ],
         "properties": {
           "layer": {
-            "type": "string"
+            "type": "string",
+            "x-geopilot-kind": "layer"
           },
           "where": {
             "type": "object"
@@ -83,7 +84,14 @@
               "polygon"
             ],
             "required_fields": [],
-            "selection": {"rule": "parameter_values_require_selected", "parameter": "selection_type", "values": ["REMOVE_FROM_SELECTION", "SUBSET_SELECTION"]}
+            "selection": {
+              "rule": "parameter_values_require_selected",
+              "parameter": "selection_type",
+              "values": [
+                "REMOVE_FROM_SELECTION",
+                "SUBSET_SELECTION"
+              ]
+            }
           }
         ],
         "parameters_schema": {
@@ -94,7 +102,8 @@
           ],
           "properties": {
             "layer": {
-              "type": "string"
+              "type": "string",
+              "x-geopilot-kind": "layer"
             },
             "where": {
               "type": "object"
@@ -214,13 +223,15 @@
         ],
         "properties": {
           "target_layer": {
-            "type": "string"
+            "type": "string",
+            "x-geopilot-kind": "layer"
           },
           "overlap_type": {
             "type": "string"
           },
           "select_layer": {
-            "type": "string"
+            "type": "string",
+            "x-geopilot-kind": "layer"
           },
           "selection_type": {
             "type": "string",
@@ -268,7 +279,14 @@
               "polygon"
             ],
             "required_fields": [],
-            "selection": {"rule": "parameter_values_require_selected", "parameter": "selection_type", "values": ["REMOVE_FROM_SELECTION", "SUBSET_SELECTION"]}
+            "selection": {
+              "rule": "parameter_values_require_selected",
+              "parameter": "selection_type",
+              "values": [
+                "REMOVE_FROM_SELECTION",
+                "SUBSET_SELECTION"
+              ]
+            }
           },
           {
             "parameter": "select_layer",
@@ -282,7 +300,9 @@
               "polygon"
             ],
             "required_fields": [],
-            "selection": {"rule": "any"}
+            "selection": {
+              "rule": "any"
+            }
           }
         ],
         "parameters_schema": {
@@ -294,13 +314,15 @@
           ],
           "properties": {
             "target_layer": {
-              "type": "string"
+              "type": "string",
+              "x-geopilot-kind": "layer"
             },
             "overlap_type": {
               "type": "string"
             },
             "select_layer": {
-              "type": "string"
+              "type": "string",
+              "x-geopilot-kind": "layer"
             },
             "selection_type": {
               "type": "string",
@@ -415,7 +437,8 @@
         ],
         "properties": {
           "layer": {
-            "type": "string"
+            "type": "string",
+            "x-geopilot-kind": "layer"
           }
         },
         "additionalProperties": false
@@ -450,7 +473,9 @@
               "polygon"
             ],
             "required_fields": [],
-            "selection": {"rule": "any"}
+            "selection": {
+              "rule": "any"
+            }
           }
         ],
         "parameters_schema": {
@@ -460,7 +485,8 @@
           ],
           "properties": {
             "layer": {
-              "type": "string"
+              "type": "string",
+              "x-geopilot-kind": "layer"
             }
           },
           "additionalProperties": false
@@ -556,24 +582,15 @@
         ],
         "properties": {
           "layer": {
-            "type": "string"
+            "type": "string",
+            "x-geopilot-kind": "layer"
           },
           "output_name": {
             "type": "string"
           },
           "output_workspace": {
-            "type": "string"
-          },
-          "output_folder": {
-            "type": "string"
-          },
-          "output_format": {
             "type": "string",
-            "default": "gdb",
-            "enum": [
-              "gdb",
-              "shp"
-            ]
+            "x-geopilot-kind": "path"
           }
         },
         "additionalProperties": false
@@ -587,11 +604,10 @@
         "writes_output": true,
         "type": "feature_class",
         "formats": [
-          "gdb",
-          "shp"
+          "gdb"
         ],
         "default_format": "gdb",
-        "workspace": "mxd_default_or_output_workspace_or_output_folder",
+        "workspace": "mxd_default_or_output_workspace",
         "overwrite": false,
         "add_to_map": true
       },
@@ -619,7 +635,9 @@
               "polygon"
             ],
             "required_fields": [],
-            "selection": {"rule": "requires_selected"}
+            "selection": {
+              "rule": "requires_selected"
+            }
           }
         ],
         "parameters_schema": {
@@ -630,24 +648,15 @@
           ],
           "properties": {
             "layer": {
-              "type": "string"
+              "type": "string",
+              "x-geopilot-kind": "layer"
             },
             "output_name": {
               "type": "string"
             },
             "output_workspace": {
-              "type": "string"
-            },
-            "output_folder": {
-              "type": "string"
-            },
-            "output_format": {
               "type": "string",
-              "default": "gdb",
-              "enum": [
-                "gdb",
-                "shp"
-              ]
+              "x-geopilot-kind": "path"
             }
           },
           "additionalProperties": false
@@ -719,7 +728,7 @@
               "const": true
             },
             "output_format": {
-              "parameter": "output_format"
+              "const": "gdb"
             },
             "result": {
               "output": true

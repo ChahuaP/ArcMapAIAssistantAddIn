@@ -5,7 +5,7 @@
       "id": "data.copy_features",
       "version": "1.0",
       "category": "data_management",
-      "summary": "复制图层要素为新的要素类或 Shapefile。",
+      "summary": "复制图层要素为新的 FileGDB 要素类。",
       "keywords": [
         "copy features",
         "复制要素",
@@ -27,17 +27,8 @@
             "type": "string"
           },
           "output_workspace": {
-            "type": "string"
-          },
-          "output_folder": {
-            "type": "string"
-          },
-          "output_format": {
             "type": "string",
-            "enum": [
-              "gdb",
-              "shp"
-            ]
+            "x-geopilot-kind": "path"
           }
         },
         "additionalProperties": false
@@ -51,22 +42,20 @@
         "writes_output": true,
         "type": "feature_class",
         "formats": [
-          "gdb",
-          "shp"
+          "gdb"
         ],
         "default_format": "gdb",
-        "workspace": "mxd_default_or_output_workspace_or_output_folder",
+        "workspace": "mxd_default_or_output_workspace",
         "overwrite": false,
         "add_to_map": true
       },
       "executor": "operations.data_management_ops.copy_features",
       "examples": [
         {
-          "user": "把 roads 复制成一个新的 shp",
+          "user": "把 roads 复制成一个新的要素类",
           "arguments": {
             "input_layer": "roads",
-            "output_name": "roads_copy",
-            "output_format": "shp"
+            "output_name": "roads_copy"
           }
         }
       ],
@@ -88,7 +77,9 @@
               "not_applicable"
             ],
             "required_fields": [],
-            "selection": {"rule": "any"}
+            "selection": {
+              "rule": "any"
+            }
           }
         ],
         "parameters_schema": {
@@ -106,17 +97,8 @@
               "type": "string"
             },
             "output_workspace": {
-              "type": "string"
-            },
-            "output_folder": {
-              "type": "string"
-            },
-            "output_format": {
               "type": "string",
-              "enum": [
-                "gdb",
-                "shp"
-              ]
+              "x-geopilot-kind": "path"
             }
           },
           "additionalProperties": false
@@ -218,17 +200,8 @@
             "type": "string"
           },
           "output_workspace": {
-            "type": "string"
-          },
-          "output_folder": {
-            "type": "string"
-          },
-          "output_format": {
             "type": "string",
-            "enum": [
-              "gdb",
-              "shp"
-            ]
+            "x-geopilot-kind": "path"
           }
         },
         "additionalProperties": false
@@ -242,11 +215,10 @@
         "writes_output": true,
         "type": "feature_class",
         "formats": [
-          "gdb",
-          "shp"
+          "gdb"
         ],
         "default_format": "gdb",
-        "workspace": "mxd_default_or_output_workspace_or_output_folder",
+        "workspace": "mxd_default_or_output_workspace",
         "overwrite": false,
         "add_to_map": true
       },
@@ -278,7 +250,9 @@
               "not_applicable"
             ],
             "required_fields": [],
-            "selection": {"rule": "any"}
+            "selection": {
+              "rule": "any"
+            }
           }
         ],
         "parameters_schema": {
@@ -296,17 +270,8 @@
               "type": "string"
             },
             "output_workspace": {
-              "type": "string"
-            },
-            "output_folder": {
-              "type": "string"
-            },
-            "output_format": {
               "type": "string",
-              "enum": [
-                "gdb",
-                "shp"
-              ]
+              "x-geopilot-kind": "path"
             }
           },
           "additionalProperties": false
@@ -446,7 +411,9 @@
               "not_applicable"
             ],
             "required_fields": [],
-            "selection": {"rule": "any"}
+            "selection": {
+              "rule": "any"
+            }
           }
         ],
         "parameters_schema": {
@@ -598,7 +565,9 @@
               "not_applicable"
             ],
             "required_fields": [],
-            "selection": {"rule": "any"}
+            "selection": {
+              "rule": "any"
+            }
           }
         ],
         "parameters_schema": {
@@ -746,7 +715,9 @@
               "not_applicable"
             ],
             "required_fields": [],
-            "selection": {"rule": "any"}
+            "selection": {
+              "rule": "any"
+            }
           }
         ],
         "parameters_schema": {

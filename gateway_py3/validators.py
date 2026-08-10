@@ -5,7 +5,7 @@ from pathlib import Path
 import re
 from typing import Any, Dict, List
 
-from arcmap_runtime_py2.condition_protocol import (
+from shared_runtime.condition_contract import (
     CONDITION_OPERATOR_HELP,
     FIELD_COMPARISON_OPERATORS,
     LEAF_CONDITION_OPERATORS,
@@ -18,45 +18,14 @@ from arcmap_runtime_py2.condition_protocol import (
     normalize_condition_tree,
     validate_condition_tree,
 )
-from arcmap_runtime_py2.context_fingerprint import context_hash
+from shared_runtime.context_fingerprint import context_hash
 
-from .capability_registry import CapabilityContractError
 from .catalog_loader import CatalogError, OperationCatalog
-from .output_policy import OutputPolicyError, canonical_output_policy, output_policy_type, validate_output_policy
+from shared_runtime.output_contract import output_policy_type, validate_output_policy
 
 
 class ValidationError(Exception):
     pass
-
-
-def validate_catalog(catalog: OperationCatalog) -> None:
-    required = [
-        "id",
-        "version",
-        "category",
-        "summary",
-        "parameters_schema",
-        "context_requirements",
-        "side_effects",
-        "output_policy",
-        "executor",
-        "examples"
-    ]
-    for operation in catalog.all_operations():
-        missing = [key for key in required if key not in operation]
-        if missing:
-            raise ValidationError(f"{operation.get('id', '<unknown>')} missing fields: {missing}")
-        try:
-            catalog.capabilities.get(operation["id"])
-        except CapabilityContractError as exc:
-            raise ValidationError(str(exc))
-        if operation["side_effects"] not in ("read_only", "changes_map", "writes_data", "edits_data"):
-            raise ValidationError(f"{operation['id']} has invalid side_effects")
-        try:
-            policy = canonical_output_policy(operation["output_policy"], operation["side_effects"])
-            validate_output_policy(policy, operation["side_effects"])
-        except OutputPolicyError as exc:
-            raise ValidationError("%s has invalid output_policy: %s" % (operation["id"], exc))
 
 
 def prepare_workflow(
@@ -122,22 +91,13 @@ def _validate_unique_output_destinations(
         arguments = step["arguments"]
         if operation.get("side_effects") != "writes_data" or not arguments.get("output_name"):
             continue
-        policy = canonical_output_policy(
+        policy = validate_output_policy(
             operation.get("output_policy"), operation.get("side_effects", ""),
         )
         output_type = output_policy_type(policy)
-        output_format = str(arguments.get("output_format") or "").strip().lower().lstrip(".")
-        if output_format == "shapefile":
-            output_format = "shp"
-        if not output_format and output_type == "feature_class" and arguments.get("output_folder"):
-            output_format = "shp"
-        if not output_format:
-            output_format = str(
-                policy.get("extension") or policy.get("default_format") or output_type
-            ).strip().lower().lstrip(".")
+        output_format = policy["default_format"]
         container = str(
-            arguments.get("output_folder")
-            or arguments.get("output_workspace")
+            arguments.get("output_workspace")
             or "<default>"
         ).strip().replace("/", "\\").rstrip("\\").casefold()
         key = (
@@ -180,18 +140,9 @@ def normalize_workflow_arguments(workflow: Dict[str, Any], catalog: OperationCat
         for name, value in declared_defaults.get(operation_id, {}).items():
             arguments.setdefault(name, value)
         operation = catalog.get(operation_id)
-        policy = canonical_output_policy(
+        policy = validate_output_policy(
             operation.get("output_policy"), operation.get("side_effects", ""),
         )
-        if (
-            operation.get("side_effects") == "writes_data"
-            and output_policy_type(policy) == "feature_class"
-            and "output_format" not in arguments
-        ):
-            if arguments.get("output_folder"):
-                arguments["output_format"] = "shp"
-            elif arguments.get("output_workspace"):
-                arguments["output_format"] = "gdb"
         properties = (catalog.operations[operation_id].get("parameters_schema") or {}).get("properties") or {}
         if "where" in properties and isinstance(arguments.get("where"), dict):
             arguments["where"] = normalize_condition_tree(arguments["where"])
@@ -225,7 +176,7 @@ def normalize_internal_output_references(
                     "step_id": step["id"], "argument": name,
                     "original": value, "canonical": canonical,
                 })
-        policy = canonical_output_policy(operation.get("output_policy"), operation.get("side_effects", ""))
+        policy = validate_output_policy(operation.get("output_policy"), operation.get("side_effects", ""))
         output_name = arguments.get("output_name")
         if (
             isinstance(output_name, str) and output_name
@@ -236,13 +187,6 @@ def normalize_internal_output_references(
                 "output_type": output_policy_type(policy),
             })
     return events
-
-
-def _existing_directory(value: Any) -> bool:
-    if not isinstance(value, str) or not value.strip():
-        return False
-    path = Path(value.strip())
-    return path.exists() and path.is_dir()
 
 
 def _valid_output_workspace(value: Any) -> bool:
@@ -379,12 +323,12 @@ def friendly_validation_message(error: Exception) -> str:
         return message + " 对象参数必须写成 JSON 对象。请修正 workflow_json 后继续，不要向用户追问。"
     if "has unknown arguments:" in message:
         if "folder_path" in message:
-            return "workflow operation 里不能使用 folder_path；folder_path 只属于 file_resolve。导出到文件夹时，请按 operation schema 使用 output_folder。请修正 workflow，不要向用户追问。"
+            return "workflow operation 里不能使用 folder_path；folder_path 只属于 file_resolve。请按 operation schema 使用 output_workspace。请修正 workflow，不要向用户追问。"
         return message
     if "属性条件缺少 op" in message:
         return "属性条件 where 缺少 op。布尔条件必须写成 {\"op\":\"and\",\"conditions\":[...]} 或 {\"op\":\"or\",\"conditions\":[...]}，不能写 {\"and\":[...]}；叶子条件必须写 op，例如 {\"field\":\"NAME\",\"op\":\"like\",\"value\":\"%南京%\"}。请修正 workflow，不要向用户追问。"
     if "输出文件夹不存在" in message or "输出工作空间不可用" in message:
-        return message + " 如果这是用户指定的位置，请先调用 output_folder_resolve 核实并向用户追问；如果用户没有指定输出位置，请移除输出位置参数，让系统使用 MXD 默认输出目录。"
+        return message + " 如果这是用户指定的位置，请向用户确认一个现有 geodatabase；如果用户没有指定输出位置，请移除 output_workspace，让系统使用任务 staging。"
     if "Unknown operation" in message:
         return "当前版本还不支持这个操作。请换成已有能力，或告诉我你想完成的 GIS 处理目标。"
     if message:
@@ -422,7 +366,7 @@ def _validate_arguments(step_id: str, operation_id: str, arguments: Dict[str, An
             if "output_path" in extra:
                 raise ValidationError(
                     "%s 不要传 output_path。output_path 只由 GeoPilot 执行时根据 output_name 和输出位置生成；"
-                    "workflow 只允许传 operation schema 里声明的 output_name、output_folder 或 output_workspace，"
+                    "workflow 只允许传 operation schema 里声明的 output_name 或 output_workspace，"
                     "不要为了 output_path 修订自建工具。"
                     % step_id
                 )
@@ -737,25 +681,10 @@ def _validate_output_location(
 ) -> None:
     if operation.get("side_effects") != "writes_data":
         return
-    output_format = str(arguments.get("output_format") or "").strip().lower()
-    policy = canonical_output_policy(
+    policy = validate_output_policy(
         operation.get("output_policy"), operation.get("side_effects", ""),
     )
-    if output_policy_type(policy) == "feature_class":
-        if output_format in ("shp", "shapefile") and arguments.get("output_workspace"):
-            raise ValidationError("shp 输出必须使用 output_folder，不能使用 output_workspace。")
-        if output_format == "gdb" and arguments.get("output_folder"):
-            raise ValidationError("gdb 输出必须使用 output_workspace，不能使用 output_folder。")
-    if arguments.get("output_folder") and arguments.get("output_workspace"):
-        raise ValidationError("输出位置不能同时使用 output_folder 和 output_workspace。请只保留一个。")
-    if arguments.get("output_folder"):
-        if not _existing_directory(arguments["output_folder"]):
-            raise ValidationError(
-                "输出文件夹不存在：%s。请使用已存在的文件夹，"
-                "或在已保存 MXD 中省略输出位置使用默认输出位置。"
-                % arguments["output_folder"]
-            )
-        return
+    output_policy_type(policy)
     if arguments.get("output_workspace"):
         if not _valid_output_workspace(arguments["output_workspace"]):
             raise ValidationError(
@@ -820,7 +749,7 @@ def _register_step_output(
     names = []
     if step.get("operation") == "layer.add_layer" and arguments.get("path"):
         names.append((Path(arguments["path"]).stem, "live"))
-    policy = canonical_output_policy(
+    policy = validate_output_policy(
         operation.get("output_policy"),
         operation.get("side_effects", ""),
     )
@@ -865,10 +794,6 @@ def layer_argument_names(operation: Dict[str, Any]) -> List[str]:
     for name, property_schema in properties.items():
         if isinstance(property_schema, dict) and property_schema.get("x-geopilot-kind") == "layer":
             names.append(name)
-            continue
-        lowered = name.lower()
-        if "layer" in lowered and "output" not in lowered:
-            names.append(name)
     return names
 
 
@@ -889,9 +814,6 @@ def _matching_layers_exact(value: str, layers: List[Dict[str, Any]]) -> List[Dic
 
 
 def _primary_layer_value(operation: Dict[str, Any], arguments: Dict[str, Any]) -> str | None:
-    for name in ("layer", "input_layer", "target_layer"):
-        if isinstance(arguments.get(name), str):
-            return arguments[name]
     names = layer_argument_names(operation)
     if names and isinstance(arguments.get(names[0]), str):
         return arguments[names[0]]

@@ -32,8 +32,11 @@ class _KernelWithProjection:
 
     def submit(self, request):
         view = self.kernel.submit(request)
+        # submit drives the state machine in a background thread; wait for it
+        # to settle before reading the projection (tests assert terminal state).
+        fakes.wait_for_terminal(self.kernel, view.run_id)
         self._notify_all()
-        return view
+        return self.kernel.inspect(view.run_id)
 
     def _notify_all(self):
         events = self.store.events_after(0, limit=1000)
@@ -57,6 +60,9 @@ class EventProjectionTest(unittest.TestCase):
             request_id="00000000-0000-0000-0000-000000000002",
             text=text,
             caller=contracts.CallerIdentity(user_id="u1", tenant_id="t1", role="analyst"),
+            target_selector={"bridge_pid": 2001, "bridge_port": 8766,
+                             "arcmap_pid": 2000, "hwnd": 3000,
+                             "deployment_hash": "a" * 64},
         )
 
     def test_events_project_to_sse_types(self):
@@ -68,7 +74,14 @@ class EventProjectionTest(unittest.TestCase):
         for event in events:
             self.assertIn("run_id", event["payload"])
             self.assertIn("stage", event["payload"])
-        self.assertEqual(view.stage, "succeeded")
+            if event["type"] == "run.stage_changed":
+                self.assertIn("outcome_kind", event["payload"])
+        paused = next(event for event in events
+                      if event["payload"]["stage"] == "clarification_required")
+        self.assertEqual(contracts.CLARIFICATION_REQUIRED,
+                         paused["payload"]["outcome_kind"])
+        # execute=False pauses at plan_verified (plan_only review).
+        self.assertEqual(view.stage, "clarification_required")
 
     def test_reconnect_from_last_event_id_no_loss(self):
         view = self.harness.submit(self._envelope())
@@ -81,7 +94,23 @@ class EventProjectionTest(unittest.TestCase):
         self.assertGreater(resumed[0]["id"], last_id)
         # terminal state is readable via the journal regardless of SSE
         run = self.store.get_run(view2.run_id)
-        self.assertEqual(run["stage"], "succeeded")
+        self.assertEqual(run["stage"], "clarification_required")
+
+    def test_terminal_stage_changed_carries_its_journaled_outcome_kind(self):
+        request = self._envelope("fail context")
+        self.store.create_session(SID, "t1")
+        run_id = self.store.create_run(request)["run_id"]
+        self.store.append_event(
+            run_id, "context_failed", "context", {"reason": "bridge unavailable"},
+            outcome=contracts.outcome_failed(
+                contracts.INFRASTRUCTURE_FAILED, "context", "bridge_down", "bridge unavailable"),
+        )
+
+        event = self.projection.projection_after(0)[-1]
+
+        self.assertEqual("run.stage_changed", event["type"])
+        self.assertEqual("infrastructure_failed", event["payload"]["stage"])
+        self.assertEqual(contracts.INFRASTRUCTURE_FAILED, event["payload"]["outcome_kind"])
 
     def test_wait_after_wakes_on_new_event(self):
         import threading
@@ -100,6 +129,74 @@ class EventProjectionTest(unittest.TestCase):
         self.assertFalse(thread.is_alive())
         self.assertTrue(results)
         self.assertGreater(len(results[0]), 0)
+
+
+class PublicationTransactionTest(unittest.TestCase):
+    @staticmethod
+    def _artifact():
+        return contracts.ArtifactIdentity(
+            output_id="out", kind="feature_class",
+            logical_dataset_path="C:\\staging\\run\\out.gdb\\roads",
+            source_publish_unit_path="C:\\staging\\run\\out.gdb",
+            destination_dataset_path="C:\\publish\\out.gdb\\roads",
+            destination_publish_unit_path="C:\\publish\\out.gdb")
+
+    def _accepted_run(self, store):
+        request = contracts.RequestEnvelope(
+            session_id=SID, request_id="00000000-0000-0000-0000-000000000009",
+            text="test", caller=contracts.CallerIdentity(user_id="u", tenant_id="t", role="analyst"),
+            target_selector={"bridge_pid": 2001, "bridge_port": 8766,
+                             "arcmap_pid": 2000, "hwnd": 3000,
+                             "deployment_hash": "a" * 64})
+        store.create_session(SID, "t")
+        run_id = store.create_run(request)["run_id"]
+        for kind, stage in (("context_leased", "context_leased"), ("context_frozen", "context_frozen"),
+                            ("intent_compiled", "intent_compiled"), ("plan_verified", "plan_verified"),
+                            ("authorization_required", "authorization_required"), ("authorization_approved", "authorized"),
+                            ("runtime_acquired", "runtime_acquired"), ("execution_started", "executing"),
+                            ("executed", "executed"), ("accepted", "accepted")):
+            store.append_event(run_id, kind, stage, {})
+        return run_id
+
+    def test_finalize_publication_marks_exact_staged_artifact_published(self):
+        store = JournalStore(path=Path(tempfile.mkdtemp()) / "gp.sqlite")
+        run_id = self._accepted_run(store)
+        artifact = self._artifact()
+        store.store_artifact(run_id, artifact)
+        store.finalize_publication(run_id, "grant", {"publication_id": "pub", "artifacts": [{"output_id": "out"}]})
+        self.assertEqual(store.list_staged_artifacts(run_id), [])
+        with store._connection() as conn:
+            self.assertEqual(conn.execute("SELECT staged, published FROM artifacts WHERE run_id=? AND output_id='out'", (run_id,)).fetchone(), (0, 1))
+
+    def test_finalize_publication_rolls_back_receipt_when_event_write_fails(self):
+        store = JournalStore(path=Path(tempfile.mkdtemp()) / "gp.sqlite")
+        run_id = self._accepted_run(store)
+        original = store._append_event_locked
+        store._append_event_locked = lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("fault"))
+        with self.assertRaisesRegex(RuntimeError, "fault"):
+            store.finalize_publication(run_id, "grant", {"publication_id": "pub"})
+        store._append_event_locked = original
+        with store._connection() as conn:
+            self.assertIsNone(conn.execute("SELECT 1 FROM publication_receipts WHERE run_id=?", (run_id,)).fetchone())
+        self.assertEqual(store.get_run(run_id)["stage"], "accepted")
+
+    def test_listener_failure_after_commit_does_not_reverse_publication(self):
+        store = JournalStore(path=Path(tempfile.mkdtemp()) / "gp.sqlite")
+        run_id = self._accepted_run(store)
+        artifact = self._artifact()
+        store.store_artifact(run_id, artifact)
+        store.add_event_listener(lambda *args: (_ for _ in ()).throw(RuntimeError("listener fault")))
+
+        store.finalize_publication(run_id, "grant", {
+            "publication_id": "pub", "artifacts": [{"output_id": "out"}],
+        })
+
+        self.assertEqual(store.get_run(run_id)["stage"], "published")
+        self.assertEqual(store.list_staged_artifacts(run_id), [])
+        with store._connection() as conn:
+            self.assertEqual(conn.execute(
+                "SELECT staged, published FROM artifacts WHERE run_id=? AND output_id='out'",
+                (run_id,)).fetchone(), (0, 1))
 
 
 if __name__ == "__main__":

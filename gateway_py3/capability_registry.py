@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from typing import Any, Dict
-from arcmap_runtime_py2.capability_contract_protocol import (
+from shared_runtime.capability_contract import (
     CARDINALITY_DESCRIPTOR_SCHEMA,
     validate_output_cardinality,
 )
@@ -65,7 +65,7 @@ _CARDINALITIES = {"one", "many"}
 _DATA_KINDS = {"feature_layer", "raster_layer", "table_view", "coordinate_sequence", "feature_definition"}
 _GEOMETRIES = {"point", "polyline", "polygon", "raster", "not_applicable"}
 _SELECTION_RULES = {"any", "requires_selected", "parameter_values_require_selected"}
-_OUTPUT_KINDS = {"none", "map_state", "file", "file_collection", "feature_class", "raster", "table"}
+_OUTPUT_KINDS = {"none", "map_state", "feature_class", "raster", "table"}
 _GEOMETRY_RULES = {"fixed", "inherit", "lowest_dimension", "not_applicable"}
 _FIELD_EFFECTS = {"not_applicable", "inherit_input", "inherit_tabular_fields", "inherit_target_merge_join", "merge_inputs", "aggregate_by_parameter_fields", "static_generated", "add_static_fields", "add_parameter_field", "delete_parameter_field", "in_place_update"}
 _SPATIAL_REFERENCE_RULES = {"inherit", "from_parameter", "from_parameter_or_map", "not_applicable"}
@@ -133,20 +133,13 @@ class CapabilityRegistry:
         policy = operation.get("output_policy")
         if not isinstance(policy, dict):
             raise CapabilityContractError(operation_id + ".output_policy must describe its declared output.")
-        properties = operation["parameters_schema"].get("properties", {})
-        if "output_format" in properties:
-            schema = properties["output_format"]
-            default = schema.get("default") or policy.get("default_format")
-            if not isinstance(default, str) or not default:
-                raise CapabilityContractError(operation_id + ".output_format requires one executable default.")
-            allowed = schema.get("enum")
-            if not isinstance(allowed, list) or default not in allowed:
-                raise CapabilityContractError(operation_id + ".output_format default must belong to its enum.")
-            return {"rule": "from_parameter", "parameter": "output_format", "default": default}
-        extension = policy.get("extension")
-        if isinstance(extension, str) and extension.startswith(".") and len(extension) > 1:
-            return {"rule": "fixed", "value": extension[1:].lower()}
-        raise CapabilityContractError(operation_id + ".output_policy cannot prove an exact output format.")
+        formats = policy.get("formats")
+        default = policy.get("default_format")
+        if formats != ["gdb"] or default != "gdb":
+            raise CapabilityContractError(
+                operation_id + ".output_policy must declare the single server-derived gdb format."
+            )
+        return {"rule": "fixed", "value": "gdb"}
 
     @staticmethod
     def _validate_semantic_effects(effects: Any, operation_id: str, parameters: Dict[str, Any], outputs: Dict[str, Any], output_format: Dict[str, Any]) -> None:
@@ -157,8 +150,7 @@ class CapabilityRegistry:
         for index, effect in enumerate(effects):
             validate_capability_effect(effect, parameters, outputs["kind"], "%s.semantic_effects[%d]" % (operation_id, index), CapabilityContractError)
             if effect["kind"] == "artifact_export" and output_format["rule"] != "not_applicable":
-                expected = ({"const": output_format["value"]} if output_format["rule"] == "fixed"
-                            else {"parameter": output_format["parameter"]})
+                expected = {"const": output_format["value"]}
                 if effect.get("output_format") != expected:
                     raise CapabilityContractError(
                         "%s.semantic_effects[%d].output_format must bind the exact executable output format."
@@ -201,6 +193,11 @@ class CapabilityRegistry:
             seen.add(item["parameter"])
             if item["parameter"] not in parameters:
                 raise CapabilityContractError("%s.inputs[%d].parameter is not executable." % (operation_id, index))
+            if parameter_specs[item["parameter"]].get("x-geopilot-kind") != "layer":
+                raise CapabilityContractError(
+                    "%s.inputs[%d].parameter must declare x-geopilot-kind=layer."
+                    % (operation_id, index)
+                )
             _enum(item["cardinality"], _CARDINALITIES, "%s.inputs[%d].cardinality" % (operation_id, index))
             for key, allowed in (("data_kind", _DATA_KINDS), ("geometry", _GEOMETRIES)):
                 values = item[key]

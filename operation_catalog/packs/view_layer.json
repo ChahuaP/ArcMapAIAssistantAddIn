@@ -18,7 +18,8 @@
         ],
         "properties": {
           "path": {
-            "type": "string"
+            "type": "string",
+            "x-geopilot-kind": "path"
           }
         },
         "additionalProperties": false
@@ -48,7 +49,8 @@
           ],
           "properties": {
             "path": {
-              "type": "string"
+              "type": "string",
+              "x-geopilot-kind": "path"
             }
           },
           "additionalProperties": false
@@ -116,6 +118,9 @@
             "result": {
               "output": true
             },
+            "target": {
+              "parameter": "path"
+            },
             "action": {
               "const": "add_layer"
             }
@@ -143,7 +148,8 @@
         ],
         "properties": {
           "layer": {
-            "type": "string"
+            "type": "string",
+            "x-geopilot-kind": "layer"
           },
           "visible": {
             "type": "boolean"
@@ -186,7 +192,9 @@
               "not_applicable"
             ],
             "required_fields": [],
-            "selection": {"rule": "any"}
+            "selection": {
+              "rule": "any"
+            }
           }
         ],
         "parameters_schema": {
@@ -197,7 +205,8 @@
           ],
           "properties": {
             "layer": {
-              "type": "string"
+              "type": "string",
+              "x-geopilot-kind": "layer"
             },
             "visible": {
               "type": "boolean"
@@ -295,7 +304,8 @@
         ],
         "properties": {
           "layer": {
-            "type": "string"
+            "type": "string",
+            "x-geopilot-kind": "layer"
           }
         },
         "additionalProperties": false
@@ -334,7 +344,9 @@
               "not_applicable"
             ],
             "required_fields": [],
-            "selection": {"rule": "any"}
+            "selection": {
+              "rule": "any"
+            }
           }
         ],
         "parameters_schema": {
@@ -344,7 +356,8 @@
           ],
           "properties": {
             "layer": {
-              "type": "string"
+              "type": "string",
+              "x-geopilot-kind": "layer"
             }
           },
           "additionalProperties": false
@@ -435,7 +448,8 @@
       "parameters_schema": {
         "type": "object",
         "properties": {},
-        "additionalProperties": false
+        "additionalProperties": false,
+        "required": []
       },
       "context_requirements": {
         "requires_layers": true
@@ -456,7 +470,8 @@
         "parameters_schema": {
           "type": "object",
           "properties": {},
-          "additionalProperties": false
+          "additionalProperties": false,
+          "required": []
         },
         "outputs": {
           "kind": "map_state",
@@ -549,7 +564,8 @@
         ],
         "properties": {
           "layer": {
-            "type": "string"
+            "type": "string",
+            "x-geopilot-kind": "layer"
           },
           "position": {
             "type": "string",
@@ -611,7 +627,9 @@
               "not_applicable"
             ],
             "required_fields": [],
-            "selection": {"rule": "any"}
+            "selection": {
+              "rule": "any"
+            }
           }
         ],
         "parameters_schema": {
@@ -622,7 +640,8 @@
           ],
           "properties": {
             "layer": {
-              "type": "string"
+              "type": "string",
+              "x-geopilot-kind": "layer"
             },
             "position": {
               "type": "string",
@@ -732,7 +751,8 @@
         ],
         "properties": {
           "layer": {
-            "type": "string"
+            "type": "string",
+            "x-geopilot-kind": "layer"
           }
         },
         "additionalProperties": false
@@ -771,7 +791,9 @@
               "not_applicable"
             ],
             "required_fields": [],
-            "selection": {"rule": "any"}
+            "selection": {
+              "rule": "any"
+            }
           }
         ],
         "parameters_schema": {
@@ -781,7 +803,8 @@
           ],
           "properties": {
             "layer": {
-              "type": "string"
+              "type": "string",
+              "x-geopilot-kind": "layer"
             }
           },
           "additionalProperties": false
@@ -876,7 +899,8 @@
         ],
         "properties": {
           "layer": {
-            "type": "string"
+            "type": "string",
+            "x-geopilot-kind": "layer"
           }
         },
         "additionalProperties": false
@@ -915,7 +939,9 @@
               "not_applicable"
             ],
             "required_fields": [],
-            "selection": {"rule": "any"}
+            "selection": {
+              "rule": "any"
+            }
           }
         ],
         "parameters_schema": {
@@ -925,7 +951,8 @@
           ],
           "properties": {
             "layer": {
-              "type": "string"
+              "type": "string",
+              "x-geopilot-kind": "layer"
             }
           },
           "additionalProperties": false

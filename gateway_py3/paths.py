@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
+
+from shared_runtime.platform_paths import appdata_root, localappdata_root
 
 
 def _frozen_root():
@@ -20,21 +21,19 @@ WEB_ROOT = _BASE / "gateway_py3" / "web" if getattr(sys, '_MEIPASS', None) else 
 
 
 def appdata_dir() -> Path:
-    root = os.environ.get("APPDATA")
-    if root:
-        return Path(root) / "ArcMapAIAssistant"
-    return Path.home() / ".arcmap_ai_assistant"
+    return Path(appdata_root())
 
 
 def localappdata_dir() -> Path:
-    root = os.environ.get("LOCALAPPDATA")
-    if root:
-        return Path(root) / "ArcMapAIAssistant"
-    return Path.home() / ".arcmap_ai_assistant"
+    return Path(localappdata_root())
 
 
-def config_path() -> Path:
-    return appdata_dir() / "config.json"
+def credential_store_path() -> Path:
+    return appdata_dir() / "credentials.json"
+
+
+def model_configuration_path() -> Path:
+    return appdata_dir() / "model_configuration.json"
 
 
 def data_dir() -> Path:

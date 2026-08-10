@@ -58,7 +58,12 @@
         return;
       }
       if (eventSource) eventSource.close();
-      eventSource = new EventSource(apiUrl('/events'));
+      // §5: sessions are isolation boundaries. EventSource cannot set custom
+      // headers, so the session id is passed via query string and events are
+      // filtered server-side to this session only.
+      const sessionId = (typeof getSessionId === 'function') ? getSessionId() : '';
+      const eventsUrl = apiUrl('/events') + (sessionId ? '?session_id=' + encodeURIComponent(sessionId) : '');
+      eventSource = new EventSource(eventsUrl);
       eventSource.addEventListener('open', () => {
         if (appState.health) {
           applyHealthData(appState.health, true);
@@ -115,7 +120,6 @@
           if (!document.getElementById('capabilitiesModal').hidden) await loadCapabilities();
         }
         if (types.has('arcmap')) await loadArcMapBridges();
-        if (types.has('tools') && !document.getElementById('toolsModal').hidden) await loadPendingTools();
         if (types.has('runs')) await refreshRuns(!transientUserMessage);
       } catch (err) {
         setTile('gatewayState', 'bad', '未连接');

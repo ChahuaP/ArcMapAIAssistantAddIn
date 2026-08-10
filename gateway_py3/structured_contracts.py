@@ -12,7 +12,7 @@ from typing import Any, Dict, List
 
 from .audit_contract import AUDIT_CONTRACT
 from .task_contract import TASK_CONTRACT
-from .llm_providers import StructuredOutputContract
+from .model_runtime.contracts import StructuredOutputContract
 
 
 def _wrapper(properties, required):

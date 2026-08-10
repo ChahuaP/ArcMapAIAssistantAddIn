@@ -2,6 +2,7 @@
 from __future__ import absolute_import
 
 import os
+import json
 import re
 import shutil
 import sys
@@ -32,15 +33,17 @@ class _Layer(object):
 class _Mapping(object):
     def __init__(self):
         self.layers = []
+        self.data_frame = type("DataFrame", (object,), {"name": "df"})()
+        self.mxd = type("MapDocument", (object,), {"activeDataFrame": self.data_frame, "activeView": "Layers"})()
 
     def Layer(self, path):
         return _Layer(path)
 
     def MapDocument(self, value):
-        return "mxd"
+        return self.mxd
 
     def ListDataFrames(self, mxd):
-        return ["df"]
+        return [self.data_frame]
 
     def ListLayers(self, mxd, wildcard, data_frame):
         return list(self.layers)
@@ -107,12 +110,34 @@ FAKE_ARCPY.MakeRasterLayer_management = lambda path, name: type(
     "RasterLayerResult", (object,), {"getOutput": lambda self, index: _Layer(path)}
 )()
 FAKE_ARCPY.Delete_management = lambda name: None
+
+
+def _parameter_schema(properties, required):
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": required,
+        "additionalProperties": False,
+    }
+
+
+def _feature_output_policy():
+    return {
+        "writes_output": True,
+        "type": "feature_class",
+        "formats": ["gdb"],
+        "default_format": "gdb",
+        "workspace": "mxd_default_or_output_workspace",
+        "overwrite": False,
+        "add_to_map": True,
+    }
+
+
 PY2 = sys.version_info[0] == 2
 if PY2:
     sys.modules["arcpy"] = FAKE_ARCPY
     from arcmap_runtime_py2 import execution_session
     from arcmap_runtime_py2 import exception_text
-    from arcmap_runtime_py2 import output_publisher
     from arcmap_runtime_py2 import workflow_executor
     from arcmap_runtime_py2 import arcmap_desktop_selection
     from arcmap_runtime_py2 import artifact_observation
@@ -127,7 +152,6 @@ if PY2:
     sys.modules["operations"] = _OPERATIONS
     sys.modules["operations.common"] = runtime_common
     sys.modules["operations.condition_utils"] = runtime_condition_utils
-    from arcmap_runtime_py2.operations import export_ops
     from arcmap_runtime_py2.operations import layer_ops
     from arcmap_runtime_py2.operations import layout_ops
     from arcmap_runtime_py2.operations import map_ops
@@ -140,6 +164,39 @@ if PY2:
 
 @unittest.skipUnless(PY2, "ArcMap Python 2.7 runtime test")
 class ExecutionSessionPython27Tests(unittest.TestCase):
+    def test_builtin_catalog_rejects_legacy_output_contract(self):
+        root = tempfile.mkdtemp(prefix="geopilot_invalid_catalog_")
+        original_root = workflow_executor.CATALOG_ROOT
+        try:
+            with open(os.path.join(root, "catalog.json"), "w") as handle:
+                json.dump({"packs": ["pack.json"]}, handle)
+            operation = {
+                "id": "analysis.invalid",
+                "executor": "invalid",
+                "parameters_schema": _parameter_schema({}, []),
+                "context_requirements": {},
+                "side_effects": "writes_data",
+                "output_policy": {
+                    "writes_output": True,
+                    "type": "vector",
+                    "formats": ["gdb"],
+                    "default_format": "gdb",
+                    "workspace": "mxd_default_or_output_workspace",
+                    "overwrite": False,
+                    "add_to_map": True,
+                },
+            }
+            with open(os.path.join(root, "pack.json"), "w") as handle:
+                json.dump({"operations": [operation]}, handle)
+            workflow_executor.CATALOG_ROOT = root
+
+            with self.assertRaises(workflow_executor.WorkflowExecutionError) as caught:
+                workflow_executor._load_operations()
+            self.assertIn("output_policy.type must be feature_class", unicode(caught.exception))
+        finally:
+            workflow_executor.CATALOG_ROOT = original_root
+            shutil.rmtree(root)
+
     def setUp(self):
         FAKE_ARCPY.mapping.layers = []
         FAKE_ARCPY.env.addOutputsToMap = True
@@ -165,7 +222,7 @@ class ExecutionSessionPython27Tests(unittest.TestCase):
             workflow_executor._load_operations = lambda: {
                 "legacy.map_change": {
                     "executor": "legacy",
-                    "parameters_schema": {"type": "object", "properties": {}},
+                    "parameters_schema": _parameter_schema({}, []),
                     "side_effects": "changes_map",
                     "output_policy": {"writes_output": False},
                     "capability_contract": {
@@ -249,7 +306,9 @@ class ExecutionSessionPython27Tests(unittest.TestCase):
             3553679.5060510547,
         )
         data_frame = DataFrame(normalized_extent)
-        mxd = type("MapDocument", (object,), {"activeView": "Layers"})()
+        mxd = type("MapDocument", (object,), {
+            "activeView": "Layers", "activeDataFrame": data_frame,
+        })()
         layer = _Layer(u"D:\\data\\final_sites.shp")
         layer.name = "final_sites"
         layer.longName = "final_sites"
@@ -345,7 +404,7 @@ class ExecutionSessionPython27Tests(unittest.TestCase):
 
     def test_set_visibility_executes_through_public_workflow_and_verifies_map_state(self):
         data_frame = type("DataFrame", (object,), {"name": "Layers"})()
-        mxd = type("MapDocument", (object,), {"activeView": "Layers"})()
+        mxd = type("MapDocument", (object,), {"activeView": "Layers", "activeDataFrame": data_frame})()
         layer = _Layer(u"D:\\data\\final_sites.shp")
         layer.name = "final_sites"
         layer.longName = "final_sites"
@@ -396,7 +455,7 @@ class ExecutionSessionPython27Tests(unittest.TestCase):
 
     def test_move_layer_executes_through_public_workflow_and_verifies_requested_position(self):
         data_frame = type("DataFrame", (object,), {"name": "Layers"})()
-        mxd = type("MapDocument", (object,), {"activeView": "Layers"})()
+        mxd = type("MapDocument", (object,), {"activeView": "Layers", "activeDataFrame": data_frame})()
         roads = _Layer(u"D:\\data\\roads.shp")
         rivers = _Layer(u"D:\\data\\rivers.shp")
         boundary = _Layer(u"D:\\data\\boundary.shp")
@@ -408,8 +467,8 @@ class ExecutionSessionPython27Tests(unittest.TestCase):
             "layers": [{
                 "layer_ref": "layer:%d" % index,
                 "name": layer.name,
-                "longName": layer.longName,
-                "dataSource": layer.dataSource,
+                "long_name": layer.longName,
+                "data_source": layer.dataSource,
             } for index, layer in enumerate(layers)],
             "is_saved": True,
         }
@@ -475,7 +534,7 @@ class ExecutionSessionPython27Tests(unittest.TestCase):
             "name": "Layers",
             "extent": Extent(0, 0, 1, 1),
         })()
-        mxd = type("MapDocument", (object,), {"activeView": "Layers"})()
+        mxd = type("MapDocument", (object,), {"activeView": "Layers", "activeDataFrame": data_frame})()
         layer = _Layer(u"D:\\data\\final_sites.shp")
         layer.name = "final_sites"
         layer.longName = "final_sites"
@@ -604,7 +663,7 @@ class ExecutionSessionPython27Tests(unittest.TestCase):
             "name": "Layers", "extent": extent, "spatialReference": spatial_reference,
         })()
         mxd = type("MapDocument", (object,), {
-            "activeView": "Layers", "filePath": "", "defaultGeodatabase": "",
+            "activeView": "Layers", "activeDataFrame": data_frame, "filePath": "", "defaultGeodatabase": "",
         })()
         context = {"layers": [], "is_saved": True}
         row = {
@@ -660,7 +719,8 @@ class ExecutionSessionPython27Tests(unittest.TestCase):
             "name": "Layers", "extent": None, "spatialReference": spatial_reference,
         })()
         mxd = type("MapDocument", (object,), {
-            "activeView": "Layers", "filePath": "", "defaultGeodatabase": "",
+            "activeView": "Layers", "activeDataFrame": data_frame,
+            "filePath": "", "defaultGeodatabase": "",
         })()
         layer = _Layer(u"D:\\data\\parcels.shp")
         layer.name = "parcels"
@@ -674,8 +734,8 @@ class ExecutionSessionPython27Tests(unittest.TestCase):
             "layers": [{
                 "layer_ref": "layer:0",
                 "name": layer.name,
-                "longName": layer.longName,
-                "dataSource": layer.dataSource,
+                "long_name": layer.longName,
+                "data_source": layer.dataSource,
             }],
             "is_saved": True,
         }
@@ -741,7 +801,7 @@ class ExecutionSessionPython27Tests(unittest.TestCase):
 
     def test_clear_selection_executes_through_public_workflow_and_verifies_live_count(self):
         data_frame = type("DataFrame", (object,), {"name": "Layers"})()
-        mxd = type("MapDocument", (object,), {"activeView": "Layers"})()
+        mxd = type("MapDocument", (object,), {"activeView": "Layers", "activeDataFrame": data_frame})()
         layer = _Layer(u"D:\\data\\parcels.shp")
         layer.name = "parcels"
         layer.longName = "parcels"
@@ -796,7 +856,7 @@ class ExecutionSessionPython27Tests(unittest.TestCase):
 
     def test_layer_membership_mutations_execute_through_public_workflow_and_verify_live_map(self):
         data_frame = type("DataFrame", (object,), {"name": "Layers"})()
-        mxd = type("MapDocument", (object,), {"activeView": "Layers"})()
+        mxd = type("MapDocument", (object,), {"activeView": "Layers", "activeDataFrame": data_frame})()
         roads = _Layer(u"D:\\data\\roads.shp")
         boundary = _Layer(u"D:\\data\\boundary.shp")
         for layer, name in ((roads, "roads"), (boundary, "boundary")):
@@ -865,64 +925,6 @@ class ExecutionSessionPython27Tests(unittest.TestCase):
                 delattr(FAKE_ARCPY, "Exists")
             else:
                 FAKE_ARCPY.Exists = original_exists
-
-    def test_nonempty_spaced_fid_set_is_captured_and_restored_on_live_layer(self):
-        with execution_session.ExecutionSession() as session:
-            session.register_output("s1", r"D:\out\intermediate.shp")
-            session.register_output("s2", r"D:\out\final.shp")
-            layer = session.layer_for_output("s1", r"D:\out\intermediate.shp")
-            layer.visible = False
-            layer._selection = set([3, 1])
-            paths = session.publication_plan().paths
-            records = session.publication_plan().records
-            self.assertEqual(FAKE_ARCPY.mapping.layers, [layer])
-            self.assertFalse(FAKE_ARCPY.env.addOutputsToMap)
-
-        self.assertEqual(paths, [r"D:\out\intermediate.shp", r"D:\out\final.shp"])
-        self.assertTrue(FAKE_ARCPY.env.addOutputsToMap)
-        output_publisher.publish(execution_session.PublicationPlan.from_records(records))
-        self.assertEqual([item.dataSource for item in FAKE_ARCPY.mapping.layers], paths)
-        self.assertTrue(FAKE_ARCPY.mapping.layers[0].visible)
-        self.assertEqual(FAKE_ARCPY.mapping.layers[0]._selection, set([1, 3]))
-        self.assertIsNot(FAKE_ARCPY.mapping.layers[0], layer)
-        self.assertEqual(FAKE_ARCPY.delimiter_calls[0], (r"D:\out\intermediate.shp", "OBJECTID"))
-
-    def test_empty_selection_is_cleared_and_verified(self):
-        layer = _Layer(r"D:\out\empty.shp")
-        layer._selection = set([7])
-        output_publisher._apply_state(
-            layer, execution_session.PublicationItem(layer.dataSource, selection_oids=[]))
-        self.assertEqual(layer._selection, set())
-
-    def test_selection_restore_is_batched_with_new_then_add(self):
-        layer = _Layer(r"D:\out\many.shp")
-        expected = list(range(arcmap_desktop_selection.OID_BATCH_SIZE + 1))
-
-        def recording_select(*args):
-            FAKE_ARCPY.selection_calls.append(args[1])
-            return _select(*args)
-
-        FAKE_ARCPY.SelectLayerByAttribute_management = recording_select
-        output_publisher._apply_state(
-            layer, execution_session.PublicationItem(layer.dataSource, selection_oids=expected))
-        self.assertEqual(FAKE_ARCPY.selection_calls, ["NEW_SELECTION", "ADD_TO_SELECTION"])
-        self.assertEqual(layer._selection, set(expected))
-
-    def test_selection_restore_verification_failure_aborts(self):
-        layer = _Layer(r"D:\out\incorrect.shp")
-        FAKE_ARCPY.SelectLayerByAttribute_management = lambda *args: None
-        self.assertRaises(
-            RuntimeError,
-            output_publisher._apply_state,
-            layer,
-            execution_session.PublicationItem(layer.dataSource, selection_oids=[1]))
-
-    def test_publication_replay_is_idempotent(self):
-        item = execution_session.PublicationItem(r"D:\out\replay.shp", visible=False, selection_oids=[2])
-        plan = execution_session.PublicationPlan([item])
-        self.assertEqual(output_publisher.publish(plan)["published"], 1)
-        self.assertEqual(output_publisher.publish(plan), {"published": 0, "already_visible": 1})
-        self.assertEqual(len(FAKE_ARCPY.mapping.layers), 1)
 
     def test_registered_path_query_uses_only_runtime_layer_identity(self):
         source = u"D:\\成果\\final_sites.shp"
@@ -1104,36 +1106,6 @@ class ExecutionSessionPython27Tests(unittest.TestCase):
             else: FAKE_ARCPY.GetCount_management = original_count
             FAKE_ARCPY.Describe = original_describe
 
-    def test_csv_observation_proves_inherited_header_fields(self):
-        folder = tempfile.mkdtemp(prefix="arcmap_csv_observation_")
-        output = os.path.join(folder, "roads.csv")
-        try:
-            with open(output, "wb") as stream:
-                stream.write(b"RID,CLASS\r\n1,A\r\n")
-            names = ("kind", "geometry", "fields", "spatial_reference", "cardinality", "selection_state", "map_publication")
-            operation = {"capability_contract": {
-                "outputs": {
-                    "kind": "file", "geometry": {"rule": "not_applicable"},
-                    "fields": {"effect": "inherit_tabular_fields", "target": "layer", "static_fields": [], "parameter_field": "not_applicable"},
-                    "spatial_reference": {"rule": "not_applicable"},
-                    "cardinality": {"rule": "fixed", "value": "one"},
-                    "selection_state": "not_applicable", "map_publication": "none",
-                },
-                "postconditions": [{"expectation": dict((name, {"ref": "outputs." + name}) for name in names)}],
-            }}
-            snapshot = {"inputs": {"layer": {
-                "fields": ["RID", "Shape", "CLASS"],
-                "field_types": {"RID": "OID", "Shape": "Geometry", "CLASS": "String"},
-            }}}
-
-            observed = artifact_observation.observe_and_verify(
-                operation, {"layer": "roads"}, {"output": output}, {}, {}, "none", snapshot)
-
-            self.assertEqual(["RID", "CLASS"], observed["fields"])
-            self.assertEqual("passed", observed["contract"]["verdict"])
-        finally:
-            shutil.rmtree(folder)
-
     def test_failed_postcondition_stops_workflow_and_removes_only_registered_output(self):
         folder = tempfile.mkdtemp(prefix="arcmap_observation_")
         output = os.path.join(folder, "only_this.txt")
@@ -1144,7 +1116,21 @@ class ExecutionSessionPython27Tests(unittest.TestCase):
         calls = []
         try:
             contract = {"outputs": {"kind": "feature_class", "geometry": {"rule": "not_applicable"}, "fields": {"effect": "not_applicable"}, "spatial_reference": {"rule": "not_applicable"}, "cardinality": {"rule": "fixed", "value": "one"}, "selection_state": "not_applicable", "map_publication": "none"}, "postconditions": [{"expectation": {"kind": {"ref": "outputs.kind"}, "geometry": {"ref": "outputs.geometry"}, "fields": {"ref": "outputs.fields"}, "spatial_reference": {"ref": "outputs.spatial_reference"}, "cardinality": {"ref": "outputs.cardinality"}, "selection_state": {"ref": "outputs.selection_state"}, "map_publication": {"ref": "outputs.map_publication"}}}]}
-            workflow_executor._load_operations = lambda: {"bad": {"executor": "bad", "parameters_schema": {}, "side_effects": "writes_data", "output_policy": {"type": "file"}, "capability_contract": contract}, "later": {"executor": "later", "parameters_schema": {}, "side_effects": "read_only", "output_policy": {}}}
+            workflow_executor._load_operations = lambda: {
+                "bad": {
+                    "executor": "bad",
+                    "parameters_schema": _parameter_schema({}, []),
+                    "side_effects": "writes_data",
+                    "output_policy": _feature_output_policy(),
+                    "capability_contract": contract,
+                },
+                "later": {
+                    "executor": "later",
+                    "parameters_schema": _parameter_schema({}, []),
+                    "side_effects": "read_only",
+                    "output_policy": {"writes_output": False},
+                },
+            }
             def call(executor, context, arguments, outputs):
                 calls.append(executor)
                 if executor == "bad": open(output, "w").close(); return {"output": output}
@@ -1324,12 +1310,12 @@ class ExecutionSessionPython27Tests(unittest.TestCase):
         original_select = FAKE_ARCPY.SelectLayerByAttribute_management
         original_compile = getattr(selection_ops.condition_utils, "compile_where", None)
         output_folder = tempfile.mkdtemp(prefix="arcmap_from_step_")
-        runtime_state = {"layer": None, "valid": True}
+        runtime_state = {"layer": None, "valid": True, "created": set()}
         count_sources = []
         existing_paths = set([
             source.dataSource,
             boundary.dataSource,
-            u"D:\\out\\shelters_in_service_area.shp",
+            u"D:\\out\\ArcMapAI_Output.gdb\\shelters_in_service_area",
         ])
         try:
             class _CopyResult(object):
@@ -1342,10 +1328,11 @@ class ExecutionSessionPython27Tests(unittest.TestCase):
 
             def copy_features(layer, output):
                 copied.append((layer, output))
+                runtime_state["created"].add(output)
                 return _CopyResult(output)
             FAKE_ARCPY.CopyFeatures_management = copy_features
             FAKE_ARCPY.Exists = lambda value: (
-                runtime_state["valid"] if value is runtime_state["layer"] else value in existing_paths
+                runtime_state["valid"] if value is runtime_state["layer"] else value in existing_paths or value in runtime_state["created"]
             )
             FAKE_ARCPY.MakeFeatureLayer_management = lambda *args: (_ for _ in ()).throw(
                 RuntimeError("transient feature layers are forbidden"))
@@ -1368,6 +1355,7 @@ class ExecutionSessionPython27Tests(unittest.TestCase):
             FAKE_ARCPY.ListFields = lambda value: [
                 type("Field", (object,), {"name": "OBJECTID", "type": "OID"})(),
             ]
+            FAKE_ARCPY.CreateFileGDB_management = lambda *args: None
 
             def get_count(value):
                 count_sources.append(value)
@@ -1384,26 +1372,51 @@ class ExecutionSessionPython27Tests(unittest.TestCase):
             FAKE_ARCPY.SelectLayerByAttribute_management = select
             selection_ops.condition_utils.compile_where = lambda layer, where: "OBJECTID IN (1)"
             operations = {
-                "analysis.clip": {"executor": "clip", "parameters_schema": {}, "side_effects": "writes_data", "output_policy": {"type": "feature_class", "add_to_map": True}},
-                "selection.select_by_attribute": {"executor": "select", "parameters_schema": {"type": "object", "properties": {"layer": {"type": "string", "x-geopilot-kind": "layer"}}}, "side_effects": "read_only", "output_policy": {}},
-                "selection.export_selected_features": {"executor": "export", "parameters_schema": {"type": "object", "properties": {"layer": {"type": "string", "x-geopilot-kind": "layer"}}}, "side_effects": "writes_data", "output_policy": {"type": "feature_class", "add_to_map": True}},
+                "analysis.clip": {
+                    "executor": "clip",
+                    "parameters_schema": _parameter_schema({}, []),
+                    "side_effects": "writes_data",
+                    "output_policy": _feature_output_policy(),
+                },
+                "selection.select_by_attribute": {
+                    "executor": "select",
+                    "parameters_schema": _parameter_schema({
+                        "layer": {"type": "string", "x-geopilot-kind": "layer"},
+                        "where": {"type": "object"},
+                    }, ["layer", "where"]),
+                    "side_effects": "read_only",
+                    "output_policy": {"writes_output": False},
+                },
+                "selection.export_selected_features": {
+                    "executor": "export",
+                    "parameters_schema": _parameter_schema({
+                        "layer": {"type": "string", "x-geopilot-kind": "layer"},
+                        "output_name": {"type": "string"},
+                        "output_workspace": {
+                            "type": "string",
+                            "x-geopilot-kind": "path",
+                        },
+                    }, ["layer", "output_name"]),
+                    "side_effects": "writes_data",
+                    "output_policy": _feature_output_policy(),
+                },
             }
             workflow_executor._load_operations = lambda: operations
             def call(executor, context, arguments, outputs):
                 if executor == "clip":
-                    return {"output": u"D:\\out\\shelters_in_service_area.shp"}
+                    return {"output": u"D:\\out\\ArcMapAI_Output.gdb\\shelters_in_service_area"}
                 if executor == "select":
                     return selection_ops.select_by_attribute(context, arguments, outputs)
                 return selection_ops.export_selected_features(context, arguments, outputs)
             workflow_executor._call_executor = call
-            context = {"layers": [
+            context = {"staging_dir": output_folder, "layers": [
                 {"layer_ref": "shelters", "name": source.name, "longName": source.longName, "dataSource": source.dataSource},
                 {"layer_ref": "service_area", "name": boundary.name, "longName": boundary.longName, "dataSource": boundary.dataSource},
             ], "is_saved": True, "document_path": u"D:\\map.mxd"}
             workflow = {"summary": "chain", "steps": [
                 {"id": "clip", "operation": "analysis.clip", "arguments": {}},
                 {"id": "select", "operation": "selection.select_by_attribute", "arguments": {"layer": "from_step:clip", "where": {}}},
-                {"id": "export", "operation": "selection.export_selected_features", "arguments": {"layer": "from_step:clip", "output_name": "selected", "output_folder": output_folder, "output_format": "shp"}},
+                {"id": "export", "operation": "selection.export_selected_features", "arguments": {"layer": "from_step:clip", "output_name": "selected", "output_workspace": output_folder + u"\\ArcMapAI_Output.gdb"}},
             ]}
             result = workflow_executor.execute({"workflow": workflow, "context_hash": context_reader.context_hash(context)}, context)
             self.assertTrue(result.result["ok"])
@@ -1531,18 +1544,19 @@ class ExecutionSessionPython27Tests(unittest.TestCase):
             workflow_executor._load_operations = lambda: {
                 "analysis.intersect": {
                     "executor": "intersect",
-                    "parameters_schema": {
-                        "type": "object",
-                        "properties": {
+                    "parameters_schema": _parameter_schema(
+                        {
                             "input_layers": {
                                 "type": "array",
                                 "items": {"type": "string"},
                                 "minItems": 2,
+                                "x-geopilot-kind": "layer",
                             }
                         },
-                    },
+                        ["input_layers"],
+                    ),
                     "side_effects": "writes_data",
-                    "output_policy": {"type": "feature_class", "add_to_map": False},
+                    "output_policy": _feature_output_policy(),
                     "capability_contract": {
                         "inputs": [{"parameter": "input_layers", "cardinality": "many"}],
                         "postconditions": [],
@@ -1631,15 +1645,20 @@ class ExecutionSessionPython27Tests(unittest.TestCase):
             workflow_executor._load_operations = lambda: {
                 "analysis.intersect": {
                     "executor": "intersect",
-                    "parameters_schema": {
-                        "type": "object",
-                        "properties": {
-                            "input_layers": {"type": "array", "items": {"type": "string"}, "minItems": 2},
+                    "parameters_schema": _parameter_schema(
+                        {
+                            "input_layers": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "minItems": 2,
+                                "x-geopilot-kind": "layer",
+                            },
                             "output_name": {"type": "string"},
                         },
-                    },
+                        ["input_layers", "output_name"],
+                    ),
                     "side_effects": "writes_data",
-                    "output_policy": {"type": "feature_class", "add_to_map": False},
+                    "output_policy": _feature_output_policy(),
                     "capability_contract": {
                         "inputs": [{"parameter": "input_layers", "cardinality": "many"}],
                         "outputs": {
@@ -1775,8 +1794,8 @@ class ExecutionSessionPython27Tests(unittest.TestCase):
                     {
                         "layer_ref": "layer:parcels",
                         "name": "parcels",
-                        "longName": "parcels",
-                        "dataSource": layer.dataSource,
+                        "long_name": "parcels",
+                        "data_source": layer.dataSource,
                     }
                 ],
                 "is_saved": True,
@@ -1805,8 +1824,7 @@ class ExecutionSessionPython27Tests(unittest.TestCase):
             FAKE_ARCPY.Describe = original_describe
             FAKE_ARCPY.SelectLayerByAttribute_management = original_select
 
-    def test_execute_resolves_raster_from_step_with_raster_layer_handle(self):
-        calls = []
+    def test_execute_rejects_removed_raster_output_contract(self):
         original_load = workflow_executor._load_operations
         original_call = workflow_executor._call_executor
         original_feature = FAKE_ARCPY.MakeFeatureLayer_management
@@ -1815,7 +1833,7 @@ class ExecutionSessionPython27Tests(unittest.TestCase):
         try:
             FAKE_ARCPY.MakeFeatureLayer_management = lambda *args: (_ for _ in ()).throw(RuntimeError("wrong maker"))
             FAKE_ARCPY.MakeRasterLayer_management = lambda *args: (_ for _ in ()).throw(RuntimeError("wrong maker"))
-            FAKE_ARCPY.mapping.Layer = lambda path: (calls.append(path) or _Layer(path))
+            FAKE_ARCPY.mapping.Layer = lambda path: _Layer(path)
             workflow_executor._load_operations = lambda: {
                 "make.raster": {"executor": "make", "parameters_schema": {}, "side_effects": "writes_data", "output_policy": {"type": "raster", "add_to_map": True}},
                 "use.raster": {"executor": "use", "parameters_schema": {}, "side_effects": "read_only", "output_policy": {}},
@@ -1831,8 +1849,9 @@ class ExecutionSessionPython27Tests(unittest.TestCase):
                 {"id": "make", "operation": "make.raster", "arguments": {}},
                 {"id": "use", "operation": "use.raster", "arguments": {"layer": "from_step:make"}},
             ]}}
-            self.assertTrue(workflow_executor.execute(row, context).result["ok"])
-            self.assertEqual(calls, [r"D:\\out\\surface.tif"])
+            with self.assertRaises(workflow_executor.WorkflowExecutionError) as caught:
+                workflow_executor.execute(row, context)
+            self.assertIn("output_policy.type must be feature_class", unicode(caught.exception))
         finally:
             workflow_executor._load_operations = original_load
             workflow_executor._call_executor = original_call
@@ -1859,167 +1878,89 @@ class ExecutionSessionPython27Tests(unittest.TestCase):
             u"步骤 export_final_sites_csv 执行失败：%s" % exception_text.exception_text(cause))
         self.assertIn(u"FIDSet", workflow_executor._exception_text(wrapped))
 
-    def test_from_step_detached_layer_exports_csv_from_registered_unicode_path(self):
-        output_folder = tempfile.mkdtemp(prefix="arcmap_csv_repro_")
-        temp_layers = {}
-        make_sources = []
-        field_sources = []
-        cursor_sources = []
-        detached_layer = None
-        original_describe = FAKE_ARCPY.Describe
-        original_list_fields = getattr(FAKE_ARCPY, "ListFields", None)
-        original_make_layer = getattr(FAKE_ARCPY, "MakeFeatureLayer_management", None)
-        original_select = FAKE_ARCPY.SelectLayerByAttribute_management
-        original_delete = getattr(FAKE_ARCPY, "Delete_management", None)
+
+@unittest.skipUnless(PY2, "ArcMap Python 2.7 runtime test")
+class ActiveDataFramePython27Tests(unittest.TestCase):
+    def setUp(self):
+        self.original_document = FAKE_ARCPY.mapping.MapDocument
+        self.original_frames = FAKE_ARCPY.mapping.ListDataFrames
+        self.original_layers = FAKE_ARCPY.mapping.ListLayers
+
+    def tearDown(self):
+        FAKE_ARCPY.mapping.MapDocument = self.original_document
+        FAKE_ARCPY.mapping.ListDataFrames = self.original_frames
+        FAKE_ARCPY.mapping.ListLayers = self.original_layers
+
+    def test_context_and_operations_use_real_active_data_frame(self):
+        first = type("DataFrame", (object,), {"name": "first"})()
+        active = type("DataFrame", (object,), {"name": "active"})()
+        mxd = type("MapDocument", (object,), {
+            "activeDataFrame": active, "activeView": "Layers",
+            "filePath": "", "defaultGeodatabase": "",
+        })()
+        observed = []
+        FAKE_ARCPY.mapping.MapDocument = lambda value: mxd
+        FAKE_ARCPY.mapping.ListDataFrames = lambda value: [first, active]
+        FAKE_ARCPY.mapping.ListLayers = lambda document, wildcard, frame: observed.append(frame) or []
+
+        context = context_reader.read_context()
+
+        self.assertEqual("active", context["data_frame"])
+        self.assertEqual([active], observed)
+        self.assertIs(active, runtime_common.active_data_frame(mxd))
+
+    def test_missing_or_foreign_active_data_frame_fails_fast(self):
+        listed = type("DataFrame", (object,), {"name": "listed"})()
+        foreign = type("DataFrame", (object,), {"name": "foreign"})()
+        FAKE_ARCPY.mapping.ListDataFrames = lambda value: [listed]
+        for active in (None, foreign):
+            mxd = type("MapDocument", (object,), {"activeDataFrame": active})()
+            FAKE_ARCPY.mapping.MapDocument = lambda value: mxd
+            self.assertRaises(RuntimeError, context_reader.read_context)
+            self.assertRaises(runtime_common.OperationError, runtime_common.active_data_frame, mxd)
+
+
+class FileGdbInventoryPython27Tests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.mkdtemp(prefix="geopilot-gdb-")
+        self.gdb = os.path.join(self.directory, u"成果.gdb")
+        os.makedirs(os.path.join(self.gdb, u"专题"))
+        for name in (u"道路", u"属性表", u"影像", u"关联", u"拓扑", u"网络", u"专题/建筑", u"transient.lock"):
+            handle = open(os.path.join(self.gdb, name), "wb")
+            handle.write("x")
+            handle.close()
+
+    def tearDown(self):
+        shutil.rmtree(self.directory)
+
+    def test_filegdb_walk_is_complete_stable_and_excludes_locks(self):
+        from arcmap_runtime_py2 import acceptance_probe
         original_da = getattr(FAKE_ARCPY, "da", None)
-
-        class _Cursor(object):
-            def __init__(self, source, fields):
-                cursor_sources.append(source)
-                self.rows = [(u"实验学校",)]
-
-            def __enter__(self):
-                return iter(self.rows)
-
-            def __exit__(self, exc_type, exc, tb):
-                return False
-
-        def describe(value):
-            if isinstance(value, basestring) and value in temp_layers:
-                source = temp_layers[value]
-                return type("TemporaryDescription", (object,), {
-                    "FIDSet": None if source is detached_layer else "",
-                    "OIDFieldName": "OBJECTID",
-                    "catalogPath": source if isinstance(source, unicode) else source.dataSource,
-                })()
-            return original_describe(value)
-
-        def make_feature_layer(source, name, where_clause=None):
-            temp_layers[name] = source
-            make_sources.append(source)
-            return type("FeatureLayerResult", (object,), {
-                "getOutput": lambda self, index: _Layer(source)
-            })()
-
-        def list_fields(layer):
-            field_sources.append(layer)
-            if not (isinstance(layer, basestring) and layer in temp_layers):
-                raise IOError(u"“final_sites”不存在")
-            return [type("Field", (object,), {"name": u"学校名称", "type": "String"})()]
-
-        def select(layer, selection_type, where_clause=None):
-            source_layer = temp_layers.get(layer, layer)
-            if isinstance(source_layer, basestring):
-                return None
-            return original_select(source_layer, selection_type, where_clause)
-
         try:
-            FAKE_ARCPY.Describe = describe
-            FAKE_ARCPY.ListFields = list_fields
-            FAKE_ARCPY.MakeFeatureLayer_management = make_feature_layer
-            FAKE_ARCPY.SelectLayerByAttribute_management = select
-            FAKE_ARCPY.Delete_management = lambda layer: temp_layers.pop(layer, None)
-            FAKE_ARCPY.da = type("DataAccess", (object,), {"SearchCursor": _Cursor})()
-            source = u"D:\\成果\\final_sites.shp"
-            live_layer = _Layer(source)
-            runtime_common.export_table_to_csv(live_layer, os.path.join(output_folder, "live.csv"), False)
-            with execution_session.ExecutionSession() as session:
-                session.register_output("export_final_sites", source)
-                detached_layer = session.layer_for_output("export_final_sites", source)
-                result = export_ops.export_table_csv(
-                    {},
-                    {"layer": "from_step:export_final_sites", "output_name": "final_sites", "output_folder": output_folder},
-                    {"export_final_sites": {"output": source}})
-            self.assertTrue(os.path.exists(result["output"]))
-            self.assertIs(make_sources[0], live_layer)
-            self.assertEqual(make_sources[1], source)
-            self.assertTrue(isinstance(make_sources[1], unicode))
-            self.assertEqual(field_sources, cursor_sources)
-            self.assertEqual(len(field_sources), 2)
+            FAKE_ARCPY.da = type("Da", (object,), {})()
+            FAKE_ARCPY.da.Walk = lambda root, datatype=None: iter([
+                (self.gdb, [u"专题"], [u"道路", u"属性表", u"影像", u"关联", u"拓扑", u"网络"]),
+                (os.path.join(self.gdb, u"专题"), [], [u"建筑"]),
+            ])
+            first = acceptance_probe.probe_unit(self.gdb)
+            second = acceptance_probe.probe_unit(self.gdb)
         finally:
-            FAKE_ARCPY.Describe = original_describe
-            if original_list_fields is None:
-                delattr(FAKE_ARCPY, "ListFields")
-            else:
-                FAKE_ARCPY.ListFields = original_list_fields
-            if original_make_layer is None:
-                delattr(FAKE_ARCPY, "MakeFeatureLayer_management")
-            else:
-                FAKE_ARCPY.MakeFeatureLayer_management = original_make_layer
-            FAKE_ARCPY.SelectLayerByAttribute_management = original_select
-            if original_delete is None:
-                delattr(FAKE_ARCPY, "Delete_management")
-            else:
-                FAKE_ARCPY.Delete_management = original_delete
-            if original_da is None:
-                delattr(FAKE_ARCPY, "da")
-            else:
-                FAKE_ARCPY.da = original_da
-            shutil.rmtree(output_folder)
+            FAKE_ARCPY.da = original_da
+        self.assertEqual(first["datasets"], [u"专题", u"专题/建筑", u"关联", u"属性表", u"影像", u"拓扑", u"网络", u"道路"])
+        self.assertEqual(first["manifest_digest"], second["manifest_digest"])
+        self.assertFalse(any(member["relative_path"].endswith(".lock") for member in first["members"]))
 
-    def test_csv_cursor_failure_leaves_no_final_or_temporary_file(self):
-        output_folder = tempfile.mkdtemp(prefix="arcmap_csv_atomic_")
-        target = os.path.join(output_folder, "final.csv")
-        temporary_layers = {}
-        original_describe = FAKE_ARCPY.Describe
-        original_list_fields = getattr(FAKE_ARCPY, "ListFields", None)
-        original_make_layer = getattr(FAKE_ARCPY, "MakeFeatureLayer_management", None)
-        original_select = FAKE_ARCPY.SelectLayerByAttribute_management
-        original_delete = getattr(FAKE_ARCPY, "Delete_management", None)
+    def test_unlisted_filegdb_member_changes_sealed_manifest(self):
+        from arcmap_runtime_py2 import acceptance_probe
         original_da = getattr(FAKE_ARCPY, "da", None)
-
-        class _FailingCursor(object):
-            def __init__(self, source, fields):
-                self.rows = iter([(u"first",)])
-
-            def __enter__(self):
-                return self
-
-            def __iter__(self):
-                return self
-
-            def next(self):
-                try:
-                    return self.rows.next()
-                except StopIteration:
-                    raise RuntimeError("cursor failed")
-
-            __next__ = next
-
-            def __exit__(self, *args):
-                return False
-
         try:
-            FAKE_ARCPY.MakeFeatureLayer_management = lambda source, name, where=None: temporary_layers.update({name: source})
-            FAKE_ARCPY.Describe = lambda value: type("Description", (object,), {"FIDSet": "", "OIDFieldName": "OBJECTID", "catalogPath": u"D:\\data.shp"})()
-            FAKE_ARCPY.ListFields = lambda value: [type("Field", (object,), {"name": u"名称", "type": "String"})()]
-            FAKE_ARCPY.SelectLayerByAttribute_management = lambda *args: None
-            FAKE_ARCPY.Delete_management = lambda value: temporary_layers.pop(value, None)
-            FAKE_ARCPY.da = type("DataAccess", (object,), {"SearchCursor": _FailingCursor})()
-            self.assertRaises(RuntimeError, runtime_common.export_table_to_csv, _Layer(u"D:\\data.shp"), target, False)
-            self.assertFalse(os.path.exists(target))
-            self.assertEqual(os.listdir(output_folder), [])
+            FAKE_ARCPY.da = type("Da", (object,), {})()
+            FAKE_ARCPY.da.Walk = lambda root, datatype=None: iter([(self.gdb, [], [u"道路"])])
+            sealed = acceptance_probe.probe_unit(self.gdb)
+            handle = open(os.path.join(self.gdb, u"夹带对象"), "wb")
+            handle.write("x")
+            handle.close()
+            observed = acceptance_probe.probe_unit(self.gdb)
         finally:
-            FAKE_ARCPY.Describe = original_describe
-            if original_list_fields is None:
-                delattr(FAKE_ARCPY, "ListFields")
-            else:
-                FAKE_ARCPY.ListFields = original_list_fields
-            if original_make_layer is None:
-                delattr(FAKE_ARCPY, "MakeFeatureLayer_management")
-            else:
-                FAKE_ARCPY.MakeFeatureLayer_management = original_make_layer
-            FAKE_ARCPY.SelectLayerByAttribute_management = original_select
-            if original_delete is None:
-                delattr(FAKE_ARCPY, "Delete_management")
-            else:
-                FAKE_ARCPY.Delete_management = original_delete
-            if original_da is None:
-                delattr(FAKE_ARCPY, "da")
-            else:
-                FAKE_ARCPY.da = original_da
-            shutil.rmtree(output_folder)
-
-
-if __name__ == "__main__":
-    unittest.main()
+            FAKE_ARCPY.da = original_da
+        self.assertNotEqual(sealed["manifest_digest"], observed["manifest_digest"])

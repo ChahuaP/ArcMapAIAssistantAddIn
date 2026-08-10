@@ -2,12 +2,11 @@
 from __future__ import absolute_import
 
 import arcpy
+from shared_runtime import condition_contract
 
 try:
-    import condition_protocol
     from operations import common
 except ImportError:
-    from .. import condition_protocol
     from . import common
 
 
@@ -17,22 +16,22 @@ except NameError:
     unicode = str
 
 
-TEXT_TYPES = condition_protocol.TEXT_FIELD_TYPES
-NUMBER_TYPES = condition_protocol.NUMBER_FIELD_TYPES
+TEXT_TYPES = condition_contract.TEXT_FIELD_TYPES
+NUMBER_TYPES = condition_contract.NUMBER_FIELD_TYPES
 ARCPY_EXECUTE_ERROR = getattr(arcpy, "ExecuteError", RuntimeError)
 
 
 def compile_where(layer, condition):
     if not isinstance(condition, dict) or not condition:
         raise common.OperationError(u"where 条件必须是结构化对象。")
-    condition = condition_protocol.normalize_condition_tree(condition)
+    condition = condition_contract.normalize_condition_tree(condition)
     return _compile_node(layer, condition)
 
 
 def condition_fields(condition):
     if not isinstance(condition, dict):
         return []
-    condition = condition_protocol.normalize_condition_tree(condition)
+    condition = condition_contract.normalize_condition_tree(condition)
     op = _operator(condition)
     if op in ("and", "or"):
         fields = []
@@ -120,7 +119,7 @@ def _compile_node(layer, condition):
 
 
 def _operator(condition):
-    return condition_protocol.canonical_operator(condition, error_cls=common.OperationError, missing_message=u"条件缺少 op。")
+    return condition_contract.canonical_operator(condition, error_cls=common.OperationError, missing_message=u"条件缺少 op。")
 
 
 def _value(condition):
@@ -136,11 +135,11 @@ def _comparison_operand(layer, left_field, condition, op):
         raise common.OperationError(u"%s 条件必须且只能提供 value 或 value_field 其中一个。" % op)
     if has_value:
         return _literal(left_field, condition["value"])
-    if op not in condition_protocol.FIELD_COMPARISON_OPERATORS:
+    if op not in condition_contract.FIELD_COMPARISON_OPERATORS:
         raise common.OperationError(u"%s 条件不能使用 value_field。" % op)
     right_field = _field(layer, condition["value_field"])
-    left_family = condition_protocol.field_type_family(getattr(left_field, "type", ""))
-    right_family = condition_protocol.field_type_family(getattr(right_field, "type", ""))
+    left_family = condition_contract.field_type_family(getattr(left_field, "type", ""))
+    right_family = condition_contract.field_type_family(getattr(right_field, "type", ""))
     if left_family and right_family and left_family != right_family:
         raise common.OperationError(
             u"字段比较类型不兼容：%s(%s) 与 %s(%s)。"
@@ -178,7 +177,7 @@ def _literal(field, value):
     if value is None:
         return "NULL"
     if field_type in NUMBER_TYPES:
-        if not condition_protocol.is_number_value(value):
+        if not condition_contract.is_number_value(value):
             raise common.OperationError(u"数值字段条件值不是数字：%s" % common._text(value))
         return common._text(value)
     text = common._text(value).replace("'", "''")

@@ -2,19 +2,16 @@
 """Measured ArcMap artifacts and CapabilityContract postconditions."""
 from __future__ import absolute_import
 
-import csv
-
 import arcpy
+from shared_runtime import capability_contract
 
 try:
     import arcmap_desktop_selection
-    import capability_contract_protocol
     import execution_session
     import map_state_observation
     import path_utils
 except ImportError:
     from . import arcmap_desktop_selection
-    from . import capability_contract_protocol
     from . import execution_session
     from . import map_state_observation
     from . import path_utils
@@ -83,7 +80,7 @@ def observe_and_verify(operation, arguments, result, context, step_outputs, publ
             expected = _expected(outputs, expectation.get(name), name)
             if name == "cardinality":
                 try:
-                    expected = capability_contract_protocol.resolve_output_cardinality(
+                    expected = capability_contract.resolve_output_cardinality(
                         expected, arguments, contract.get("parameters_schema") or {},
                     )
                 except ValueError as exc:
@@ -135,17 +132,7 @@ def _observe(target, expected_kind):
                    "feature_count": None, "spatial_reference": None, "selection_count": None}
     if target is None:
         return observation
-    if isinstance(target, list):
-        paths = [_path(item) for item in target]
-        observation.update({"path": paths, "kind": "file_collection", "exists": bool(paths) and all(path and path_utils.isfile(path) for path in paths), "extensions": [path_utils.splitext(path)[1].lower() for path in paths]})
-        return observation
     observation["path"] = _path(target)
-    if expected_kind in ("file", "file_collection"):
-        extension = path_utils.splitext(observation["path"])[1].lower() if observation["path"] else ""
-        observation.update({"kind": expected_kind, "exists": bool(observation["path"] and path_utils.isfile(observation["path"])), "extension": extension})
-        if expected_kind == "file" and observation["exists"] and extension == ".csv":
-            observation["fields"] = _csv_header(observation["path"])
-        return observation
     dataset_target = _dataset_target(target)
     # In-place edits have output kind none but still require full dataset observation.
     if not _exists(dataset_target):
@@ -199,7 +186,7 @@ def _check(name, expected, observation, arguments, verifier_proof):
         return check
     if name == "kind":
         check["actual"] = {"kind": actual, "exists": observation.get("exists")}
-        check["verdict"] = "passed" if actual == expected and (expected not in ("file", "file_collection") or observation.get("exists")) else "failed"
+        check["verdict"] = "passed" if actual == expected else "failed"
     elif name in ("geometry", "spatial_reference"):
         rule = expected.get("rule") if isinstance(expected, dict) else None
         if rule == "inherit":
@@ -211,7 +198,7 @@ def _check(name, expected, observation, arguments, verifier_proof):
             sources = _inputs(before, expected.get("value"))
             input_geometries = [source.get("geometry") for source in sources]
             try:
-                resolved = capability_contract_protocol.resolve_lowest_dimension_geometry(input_geometries)
+                resolved = capability_contract.resolve_lowest_dimension_geometry(input_geometries)
             except ValueError as exc:
                 check["actual"] = {
                     "output": actual,
@@ -334,20 +321,6 @@ def _path(value):
         return path_utils.to_unicode_path(getattr(value, "dataSource", value))
     except (TypeError, ValueError):
         return None
-
-
-def _csv_header(path):
-    with path_utils.open_binary(path, "rb") as stream:
-        rows = csv.reader(stream)
-        for row in rows:
-            return [_decode_csv_name(value) for value in row]
-    return []
-
-
-def _decode_csv_name(value):
-    if isinstance(value, unicode):
-        return value.lstrip(u"\ufeff")
-    return value.decode("utf-8-sig")
 
 
 def _kind(data_type, declared_kind):

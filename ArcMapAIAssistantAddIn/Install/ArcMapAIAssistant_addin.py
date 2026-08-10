@@ -54,10 +54,13 @@ def show_message(text):
 
 
 def load_runtime_module():
+    install_dir = installed_app_dir()
     runtime_path = installed_runtime_path()
     runtime_file = os.path.join(runtime_path, RUNTIME_FILE)
     if not os.path.isfile(runtime_file):
         raise RuntimeError("Runtime file not found: %s" % runtime_file)
+    if install_dir not in sys.path:
+        sys.path.insert(0, install_dir)
     if runtime_path not in sys.path:
         sys.path.insert(0, runtime_path)
     return imp.load_source(RUNTIME_MODULE, runtime_file)

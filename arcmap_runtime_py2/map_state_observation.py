@@ -270,12 +270,12 @@ def _live_layer_info(arguments, context, step_outputs):
     live_layers = context_reader.read_context().get("layers", [])
     matches = [
         item for item in live_layers
-        if item.get("dataSource") == getattr(layer, "dataSource", None)
+        if item.get("data_source") == getattr(layer, "dataSource", None)
     ]
     if len(matches) != 1:
         matches = [
             item for item in live_layers
-            if item.get("longName") == getattr(layer, "longName", getattr(layer, "name", None))
+            if item.get("long_name") == getattr(layer, "longName", getattr(layer, "name", None))
         ]
     if len(matches) != 1:
         raise ValueError("live layer metadata is missing or ambiguous")

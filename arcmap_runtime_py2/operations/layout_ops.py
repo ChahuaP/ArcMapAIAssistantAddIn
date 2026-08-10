@@ -5,11 +5,6 @@ import arcpy
 
 from . import common
 
-try:
-    import map_exporter
-except ImportError:
-    from .. import map_exporter
-
 
 ELEMENT_TYPES = (
     "TEXT_ELEMENT",
@@ -55,22 +50,6 @@ def set_active_view(context, arguments, step_outputs):
     else:
         raise common.OperationError(u"Unsupported view_mode: %s" % view_mode)
     return {"active_view": view_mode}
-
-
-def export_pdf(context, arguments, step_outputs):
-    output = common.output_file(context, arguments["output_name"], ".pdf", arguments.get("output_folder"))
-    resolution = int(arguments.get("resolution", 300))
-    image_quality = arguments.get("image_quality") or "BEST"
-    map_exporter.export_pdf(output, resolution=resolution, image_quality=image_quality)
-    return {"output": output, "resolution": resolution, "image_quality": image_quality}
-
-
-def export_png(context, arguments, step_outputs):
-    output = common.output_file(context, arguments["output_name"], ".png", arguments.get("output_folder"))
-    resolution = int(arguments.get("resolution", 300))
-    world_file = bool(arguments.get("world_file", False))
-    map_exporter.export_png(output, resolution=resolution, world_file=world_file)
-    return {"output": output, "resolution": resolution, "world_file": world_file}
 
 
 def _element_items(mxd, element_type):

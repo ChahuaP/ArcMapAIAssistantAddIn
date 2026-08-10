@@ -7,13 +7,13 @@ import ntpath
 from typing import Any, Dict
 
 from .artifact_identity import artifact_filename_is_mentioned, artifact_format_is_mentioned
-from .llm_providers import StructuredOutputContract
+from .model_runtime.contracts import StructuredOutputContract
 from .kernel.contracts import digest as canonical_hash
 from .semantic_domain import (
     bind_condition_field_types,
     parse_task_predicate,
 )
-from arcmap_runtime_py2.condition_protocol import (
+from shared_runtime.condition_contract import (
     LEAF_CONDITION_OPERATORS, LOGICAL_CONDITION_OPERATORS, VALUE_CONDITION_OPERATORS,
     FIELD_COMPARISON_OPERATORS, normalize_condition_tree, canonical_operator,
     validate_condition_tree,
@@ -38,7 +38,7 @@ _MODEL_REQUIREMENT = {"requirement_id", "predicate_json"}
 _KINDS = {"feature_layer", "raster_layer", "table", "file", "map_state", "feature_class", "raster"}
 _GEOMETRY = {"point", "polyline", "polygon", "raster", "not_applicable"}
 _EFFECTS = {"read_only", "changes_map", "writes_data", "edits_data"}
-_FORMATS = {"not_applicable", "map", "gdb", "shp", "tif", "tiff", "csv", "kmz", "png", "pdf", "file"}
+_FORMATS = {"not_applicable", "map", "gdb"}
 _NON_SPATIAL_OUTPUT_KINDS = {"file", "table", "map_state"}
 _OUTPUT_PRODUCER_KINDS = {
     "buffer", "overlay", "spatial_join", "aggregate", "project", "merge", "append",
@@ -148,18 +148,9 @@ def _parse_requirement(
         raise TaskContractError(predicate_path + ".subject must be the declared exported output entity.")
     if predicate["kind"] == "artifact_export":
         output_format = outputs_by_id[predicate["subject"]]["format"]
-        fixed_formats = {
-            "map_png": "png", "map_pdf": "pdf", "export_png": "png",
-            "export_pdf": "pdf", "table_csv": "csv", "layer_kml": "kmz",
-        }
-        expected_format = fixed_formats.get(predicate["action"])
-        if expected_format is not None and output_format != expected_format:
+        if predicate["action"] == "export_selected_features" and output_format != "gdb":
             raise TaskContractError(
-                predicate_path + ".action requires output format " + expected_format + "."
-            )
-        if predicate["action"] in {"export_selected_features", "split_by_field"} and output_format not in {"gdb", "shp"}:
-            raise TaskContractError(
-                predicate_path + ".action requires a gdb or shp output."
+                predicate_path + ".action requires a gdb output."
             )
         predicate["output_format"] = output_format
     if predicate["kind"] == "source_preserved" and predicate["subject"] not in input_ids:
@@ -330,14 +321,6 @@ def parse_task_contract(value: Dict[str, Any], request: str, context: Dict[str, 
                 "outputs[%d].required_fields contains fields the passthrough export source cannot supply: %s."
                 % (output_indexes[predicate["subject"]], ", ".join(unavailable))
             )
-    for item in result["requirements"]:
-        predicate = item["predicate"]
-        if predicate["kind"] != "artifact_export" or predicate["action"] not in {"table_csv", "layer_kml"}:
-            continue
-        output = outputs_by_id[predicate["subject"]]
-        source_output = outputs_by_id.get(predicate.get("target"))
-        if source_output is not None and output["name"] not in request:
-            output["name"] = source_output["name"]
     produced_outputs = {
         item["predicate"]["subject"]
         for item in result["requirements"]
@@ -521,39 +504,78 @@ def bind_model_task_contract(
     _bind_input_entity_kinds(result, context)
     _bind_model_requirements(result, request)
     _bind_section_evidence(result, "clarifications", _MODEL_CLARIFICATION, request)
-    _bind_output_destinations(result)
+    _bind_map_state_contract(result)
     return result
 
 
-def _bind_output_destinations(result):
-    """Derive ``destination`` for non-persisted outputs.
+def _bind_map_state_contract(result):
+    """Bind non-persisted map changes from closed task facts.
 
-    When a requirement is ``map_change`` (e.g. "add layer"), the output is a
-    transient map state — the model may classify it as ``feature_layer`` but
-    the destination must be ``not_applicable`` because nothing is written to
-    disk.  The server reconciles this instead of forcing the model to guess.
+    A file-backed feature/raster input, one transient layer output and the
+    sole ``changes_map`` effect form the exact ``layer.add_layer`` domain
+    contract.  The server owns that binding; provider wording such as
+    ``source_preserved`` cannot turn a map mutation into a persisted artifact.
     """
     requirements = result.get("requirements") or []
-    has_map_change = any(
-        isinstance(r.get("predicate"), dict)
-        and r["predicate"].get("kind") == "map_change"
-        for r in requirements
-    )
     has_export = any(
         isinstance(r.get("predicate"), dict)
         and r["predicate"].get("kind") == "artifact_export"
         for r in requirements
     )
-    if not has_map_change or has_export:
+    if has_export:
         return
-    for output in result.get("outputs", []):
-        if not isinstance(output, dict):
-            continue
-        if output.get("destination") == "not_applicable":
-            output["kind"] = "map_state"
-            output["format"] = "not_applicable"
-            output["geometry"] = "not_applicable"
-            output["spatial_reference"] = "not_applicable"
+    _bind_external_layer_addition(result)
+    map_state_outputs = {
+        requirement["predicate"].get("subject")
+        for requirement in requirements
+        if isinstance(requirement.get("predicate"), dict)
+        and requirement["predicate"].get("kind") == "map_change"
+    }
+    for output in result.get("outputs", ()):
+        if (
+            isinstance(output, dict)
+            and output.get("output_id") in map_state_outputs
+            and output.get("destination") == "not_applicable"
+        ):
+            output.update({
+                "kind": "map_state",
+                "format": "not_applicable",
+                "geometry": "not_applicable",
+                "spatial_reference": "not_applicable",
+            })
+
+
+def _bind_external_layer_addition(result):
+    inputs = result.get("input_entities") or []
+    outputs = result.get("outputs") or []
+    requirements = result.get("requirements") or []
+    if (
+        set(result.get("allowed_side_effects") or ()) != {"changes_map"}
+        or len(inputs) != 1
+        or len(outputs) != 1
+        or len(requirements) != 1
+    ):
+        return
+    source, output, requirement = inputs[0], outputs[0], requirements[0]
+    predicate = requirement.get("predicate")
+    if (
+        not isinstance(source, dict)
+        or _file_reference_kind(source.get("reference")) not in {"feature_class", "raster"}
+        or source.get("kind") not in {"feature_class", "raster"}
+        or not isinstance(output, dict)
+        or output.get("kind") not in {"feature_layer", "raster_layer", "map_state"}
+        or output.get("format") != "not_applicable"
+        or output.get("destination") != "not_applicable"
+        or not isinstance(predicate, dict)
+        or predicate != {"kind": "source_preserved", "subject": source.get("entity_id")}
+    ):
+        return
+    requirement["predicate"] = {
+        "kind": "map_change",
+        "subject": output["output_id"],
+        "target": source["entity_id"],
+        "action": "add_layer",
+    }
 
 
 def _bind_section_evidence(result, section, fields, request):
@@ -683,6 +705,3 @@ def task_contract_model_view(value: Dict[str, Any]) -> Dict[str, Any]:
         })
     result["requirements"] = model_requirements
     return result
-
-
-

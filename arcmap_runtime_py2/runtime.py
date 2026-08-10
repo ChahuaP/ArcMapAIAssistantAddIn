@@ -13,25 +13,29 @@ import pythonaddins
 
 try:
     import arcmap_ui_dispatch
+    import acceptance_probe
+    import bridge_process
+    import deployment_identity
     import context_reader
     import execution_session
     import execution_outbox
     import exception_text
     import gateway_client
-    import map_exporter
-    import output_publisher
     import path_utils
+    from shared_runtime import platform_paths
     import workflow_executor
 except ImportError:
     from . import arcmap_ui_dispatch
+    from . import acceptance_probe
+    from . import bridge_process
+    from . import deployment_identity
     from . import context_reader
     from . import execution_session
     from . import execution_outbox
     from . import exception_text
     from . import gateway_client
-    from . import map_exporter
-    from . import output_publisher
     from . import path_utils
+    from shared_runtime import platform_paths
     from . import workflow_executor
 
 
@@ -43,20 +47,17 @@ except NameError:
 
 REPO_ROOT = path_utils.abspath(path_utils.join_path(os.path.dirname(__file__), ".."))
 OPEN_WEB_CMD = path_utils.join_path(REPO_ROOT, "OpenAssistantWeb.cmd")
+BRIDGE_EXE = path_utils.join_path(REPO_ROOT, "bridge", "ArcMapBridge.exe")
 CREATE_NO_WINDOW = 0x08000000
 SILENT_COMMAND_FILE = path_utils.join_path(
-    os.environ.get("LOCALAPPDATA", os.path.expanduser("~")),
-    "ArcMapAIAssistant",
-    "bridge_command.json"
+    platform_paths.localappdata_path("bridge_command.json")
 )
 _LAST_COMMAND_WAS_SILENT = False
 _LAST_SILENT_COMMAND = {}
 _DELIVERY_WORKERS = {}
 _DELIVERY_LOCK = threading.Lock()
 EXECUTION_OUTBOX = execution_outbox.ExecutionOutbox(path_utils.join_path(
-    os.environ.get("LOCALAPPDATA", os.path.expanduser("~")),
-    "ArcMapAIAssistant",
-    "execution_outbox",
+    platform_paths.localappdata_path("execution_outbox"),
 ))
 
 
@@ -66,7 +67,7 @@ def show_message(text):
 
 def open_web():
     subprocess.Popen(
-        [os.environ.get("COMSPEC", "cmd.exe"), "/c", OPEN_WEB_CMD],
+        [platform_paths.command_shell(), "/c", OPEN_WEB_CMD],
         cwd=REPO_ROOT,
         creationflags=CREATE_NO_WINDOW
     )
@@ -83,8 +84,7 @@ def open_or_handle_bridge_command():
 def open_assistant():
     _clear_silent_state()
     gateway_client.ensure_running()
-    # Bridge startup is handled by the gateway (HTTP adapter _bridge_list).
-    map_exporter.cleanup_stale()
+    bridge_process.ensure_running(BRIDGE_EXE)
     _sync_current_context()
     open_web()
 
@@ -94,7 +94,6 @@ def _run_silent_command(command):
     _LAST_SILENT_COMMAND = command
     _LAST_COMMAND_WAS_SILENT = True
     gateway_client.ensure_running()
-    map_exporter.cleanup_stale()
     _drain_execution_outbox(command.get("target"))
     action = command.get("action")
     if action == "sync":
@@ -123,13 +122,72 @@ def _run_silent_command(command):
                 run_id, target, lease_id, epoch, plan_hash, context, row, heartbeat,
             ))
         except Exception as exc:
-            _persist_claimed_failure(
+            _persist_execution_failure(
                 run_id, target, lease_id, epoch, plan_hash, heartbeat, exc, u"arcmap_ui_dispatch",
             )
             raise
         _log_event(u"execution.deferred_to_arcmap_ui", run_id)
         return
+    if action == "acceptance_probe":
+        _run_acceptance_probe(command)
+        return
+    if action == "reconcile":
+        _run_reconcile(command)
+        return
+    if action == "sample":
+        _run_sample(command)
+        return
     raise RuntimeError(u"未知 Bridge 指令：%s" % _unicode_text(action))
+
+
+def _run_acceptance_probe(command):
+    run_id = command.get("run_id")
+    lease_id = command.get("lease_id")
+    epoch = command.get("epoch") or 0
+    plan_hash = command.get("plan_hash") or u""
+    request = command.get("context") if isinstance(command.get("context"), dict) else {}
+    deployment_hash = request.get("deployment_hash") or u""
+    _validate_lease_identity(run_id, lease_id, epoch, plan_hash)
+    if deployment_hash != deployment_identity.deployment_hash():
+        raise RuntimeError(u"Bridge deployment identity does not match installed Py2 runtime.")
+    if request.get("source_publish_unit_path"):
+        document = acceptance_probe.probe_unit(request.get("source_publish_unit_path"))
+        document["probe_type"] = "unit"
+        document["manifest_digest"] = acceptance_probe._digest(dict(
+            (key, value) for key, value in document.items() if key != "manifest_digest"))
+    elif request.get("probe_type") == "map_state":
+        document = acceptance_probe.probe_map_state(
+            request.get("output_id"), request.get("postcondition"), request.get("arguments"))
+    else:
+        document = acceptance_probe.probe(request.get("output_id"), request.get("kind"), request.get("staged_path"))
+    gateway_client.complete_acceptance_probe(run_id, document, lease_id, epoch, plan_hash, deployment_hash)
+
+
+def _run_reconcile(command):
+    run_id = command.get("run_id")
+    lease_id = command.get("lease_id")
+    epoch = command.get("epoch") or 0
+    plan_hash = command.get("plan_hash") or u""
+    target = command.get("target")
+    _validate_lease_identity(run_id, lease_id, epoch, plan_hash)
+    entry = EXECUTION_OUTBOX.reconcile(run_id, target, gateway_client)
+    if entry["lease_id"] != lease_id or entry["epoch"] != epoch or entry["plan_hash"] != plan_hash:
+        raise RuntimeError(u"Reconcile receipt fencing does not match the requested lease.")
+
+
+def _run_sample(command):
+    run_id = command.get("run_id")
+    lease_id = command.get("lease_id")
+    epoch = command.get("epoch") or 0
+    plan_hash = command.get("plan_hash") or u""
+    request = command.get("context")
+    if not isinstance(request, dict):
+        raise RuntimeError(u"Bridge sample command lacks a request document.")
+    _validate_lease_identity(run_id, lease_id, epoch, plan_hash)
+    values = context_reader.sample_values(request.get("layer_ref"), request.get("fields"),
+                                          request.get("max_rows"), request.get("max_samples"))
+    gateway_client.complete_sample(run_id, request.get("layer_ref"), values,
+                                  lease_id, epoch, plan_hash)
 
 
 def _acknowledge_lease(run_id, lease_id, epoch, plan_hash, target):
@@ -165,7 +223,7 @@ def _start_execution_heartbeat(run_id, lease_id, epoch, plan_hash):
 
 def _run_deferred_execution(run_id, target, lease_id, epoch, plan_hash, context, row, heartbeat):
     try:
-        _execute_claimed_run(
+        _execute_dispatched_run(
             run_id, target, lease_id, epoch, plan_hash, context, row, heartbeat, silent=True,
         )
     except Exception as exc:
@@ -176,16 +234,19 @@ def _execute_run(run_id, target, lease_id, epoch, plan_hash, context, silent=Fal
     _validate_lease_identity(run_id, lease_id, epoch, plan_hash)
     row = _acknowledge_lease(run_id, lease_id, epoch, plan_hash, target)
     heartbeat = _start_execution_heartbeat(run_id, lease_id, epoch, plan_hash)
-    return _execute_claimed_run(
+    return _execute_dispatched_run(
         run_id, target, lease_id, epoch, plan_hash, context, row, heartbeat, silent=silent,
     )
 
 
-def _execute_claimed_run(run_id, target, lease_id, epoch, plan_hash, context, row, heartbeat, silent=False):
+def _execute_dispatched_run(run_id, target, lease_id, epoch, plan_hash, context, row, heartbeat, silent=False):
     try:
-        if not isinstance(context, dict) or not context:
-            context = context_reader.read_context()
-        outcome = workflow_executor.execute(row, context, confirm_callback=_confirm_direct_edit)
+        if not isinstance(context, dict) or not context.get("sealed_content_hash"):
+            raise RuntimeError(u"执行命令缺少封存的 content_hash。")
+        live_context = context_reader.read_context()
+        if live_context.get("content_hash") != context["sealed_content_hash"]:
+            raise RuntimeError(u"地图上下文已漂移，拒绝执行封存计划。")
+        outcome = workflow_executor.execute(row, live_context, confirm_callback=_confirm_direct_edit)
         result = outcome.result
     except Exception as exc:
         result = {
@@ -196,12 +257,11 @@ def _execute_claimed_run(run_id, target, lease_id, epoch, plan_hash, context, ro
         }
         _persist_publish_and_deliver(
             run_id, target, "failed", result, lease_id, epoch, plan_hash, heartbeat,
-            execution_session.PublicationPlan([]),
         )
         raise
 
     acknowledged = _persist_publish_and_deliver(
-        run_id, target, "executed", result, lease_id, epoch, plan_hash, heartbeat, outcome.publication_plan,
+        run_id, target, "executed", result, lease_id, epoch, plan_hash, heartbeat,
     )
     if not silent:
         if acknowledged:
@@ -210,7 +270,7 @@ def _execute_claimed_run(run_id, target, lease_id, epoch, plan_hash, context, ro
             show_message(u"工作流已执行完成，权威结果正在重试提交到本地网关。")
 
 
-def _persist_claimed_failure(run_id, target, lease_id, epoch, plan_hash, heartbeat, exc, phase):
+def _persist_execution_failure(run_id, target, lease_id, epoch, plan_hash, heartbeat, exc, phase):
     result = {
         "ok": False,
         "error": _exception_text(exc),
@@ -220,33 +280,20 @@ def _persist_claimed_failure(run_id, target, lease_id, epoch, plan_hash, heartbe
     }
     _persist_publish_and_deliver(
         run_id, target, "failed", result, lease_id, epoch, plan_hash, heartbeat,
-        execution_session.PublicationPlan([]),
     )
 
 
-def _persist_publish_and_deliver(run_id, target, status, result, lease_id, epoch, plan_hash, heartbeat, publication_plan):
+def _persist_publish_and_deliver(run_id, target, status, result, lease_id, epoch, plan_hash, heartbeat):
     try:
         entry = EXECUTION_OUTBOX.enqueue(
-            run_id, lease_id, epoch, plan_hash, status, result, target, publication_plan.records,
+            run_id, lease_id, epoch, plan_hash, status, result, target,
         )
     except Exception as exc:
         heartbeat.stop()
         _log_event(u"execution.outbox_persist_failed", _exception_text(exc))
         raise
-    if not entry["publication_complete"]:
-        try:
-            with EXECUTION_OUTBOX.publication_lease(entry) as acquired:
-                if not acquired:
-                    raise RuntimeError("execution output publication is already active.")
-                output_publisher.publish(publication_plan)
-                _mark_publication_observed(result, publication_plan)
-                if hasattr(EXECUTION_OUTBOX, "replace_result"):
-                    entry = EXECUTION_OUTBOX.replace_result(entry, result)
-                entry = EXECUTION_OUTBOX.mark_publication_complete(entry)
-        except Exception as exc:
-            heartbeat.stop()
-            _log_event(u"execution.output_publication_failed", _exception_text(exc))
-            raise
+    # Py2 only stages outputs to disk.  The Gateway independently accepts and
+    # publishes them after the receipt is delivered.
     try:
         acknowledged = EXECUTION_OUTBOX.deliver(entry, gateway_client)
     except Exception as exc:
@@ -269,21 +316,7 @@ def _drain_execution_outbox(target=None):
     for entry in entries:
         if not _same_target(entry["target"], target):
             continue
-        try:
-            plan = execution_session.PublicationPlan.from_records(entry["publication_items"])
-            with EXECUTION_OUTBOX.publication_lease(entry) as acquired:
-                if not acquired:
-                    continue
-                output_publisher.publish(plan)
-                if not entry["publication_complete"]:
-                    if isinstance(entry.get("result"), dict):
-                        _mark_publication_observed(entry["result"], plan)
-                    if hasattr(EXECUTION_OUTBOX, "replace_result") and isinstance(entry.get("result"), dict):
-                        entry = EXECUTION_OUTBOX.replace_result(entry, entry["result"])
-                    entry = EXECUTION_OUTBOX.mark_publication_complete(entry)
-        except Exception as exc:
-            _log_event(u"execution.output_publication_retry_failed", _exception_text(exc))
-            continue
+        # Drain only retries delivery — there is no publish step on Py2.
         try:
             acknowledged = EXECUTION_OUTBOX.deliver(entry, gateway_client)
         except Exception as exc:
@@ -397,7 +430,7 @@ def _consume_silent_command():
         if float(payload.get("expires_at") or 0) < time.time():
             return {}
         action = payload.get("action")
-        if action not in ("sync", "execute"):
+        if action not in ("sync", "execute", "acceptance_probe", "reconcile", "sample"):
             return {}
         try:
             path_utils.remove(SILENT_COMMAND_FILE)
@@ -421,7 +454,7 @@ def _clear_silent_state():
 
 def _log_event(kind, detail=None):
     try:
-        log_dir = path_utils.join_path(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "ArcMapAIAssistant", "logs")
+        log_dir = platform_paths.localappdata_path("logs")
         if not path_utils.isdir(log_dir):
             path_utils.makedirs(log_dir)
         path = path_utils.join_path(log_dir, "arcmap_runtime.log")
@@ -435,24 +468,6 @@ def _log_event(kind, detail=None):
 def _exception_text(exc):
     return exception_text.exception_text(exc)
 
-
-def _mark_publication_observed(result, publication_plan):
-    """Publication is confirmed by output_publisher before this durable update."""
-    published_paths = set(item.path for item in publication_plan.items)
-    for step in result.get("steps", []):
-        payload = step.get("result") or {}
-        observation = payload.get("observation") or {}
-        if observation.get("path") not in published_paths:
-            continue
-        observation["map_publication"] = "published"
-        contract = observation.get("contract") or {}
-        for check in contract.get("checks") or []:
-            if check.get("name") == "map_publication" and check.get("expected") == "published":
-                check["actual"] = "published"
-                check["verdict"] = "passed"
-                check.pop("proof", None)
-        if contract:
-            contract["verdict"] = "passed"
 
 
 def _postcondition_failure(exc):
@@ -495,3 +510,4 @@ try:
     _drain_execution_outbox()
 except Exception as exc:
     _log_event(u"execution.startup_drain_failed", _exception_text(exc))
+    raise

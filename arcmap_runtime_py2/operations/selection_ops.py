@@ -53,12 +53,10 @@ def clear_selection(context, arguments, step_outputs):
 
 def export_selected_features(context, arguments, step_outputs):
     layer = common.find_layer(context, arguments["layer"], step_outputs)
-    output = common.output_feature_dataset(
+    output = common.output_feature_class(
         context,
         arguments["output_name"],
-        arguments.get("output_workspace"),
-        arguments.get("output_folder"),
-        arguments.get("output_format")
+        arguments.get("output_workspace")
     )
     copy_result = arcpy.CopyFeatures_management(layer, output)
     materialized_output = path_utils.to_unicode_path(copy_result.getOutput(0))
