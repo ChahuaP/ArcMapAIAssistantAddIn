@@ -61,10 +61,17 @@ function Write-TextFile {
     [System.IO.File]::WriteAllText($Path, $text, $encoding)
 }
 
-function Copy-PowerShellFile {
-    param([string]$Source, [string]$Destination)
-    $text = [System.IO.File]::ReadAllText($Source, [System.Text.Encoding]::UTF8)
-    Write-TextFile $Destination $text $true
+function Get-TreeManifest {
+    param([string]$Root)
+    $rootPath = (Resolve-Path -LiteralPath $Root).Path
+    $files = Get-ChildItem -LiteralPath $rootPath -File -Recurse -Force |
+        Sort-Object FullName | ForEach-Object {
+            [ordered]@{
+                path = $_.FullName.Substring($rootPath.Length).TrimStart('\').Replace('\', '/')
+                sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            }
+        }
+    return @($files)
 }
 
 function Write-AppCommandFiles {
@@ -263,6 +270,7 @@ Copy-Item -LiteralPath (Join-Path $repoRoot "packaging\uninstall.ico") -Destinat
 Copy-Item -LiteralPath $externalBridgeExe -Destination (Join-Path $stageRoot "app\bridge\ArcMapBridge.exe") -Force
 Copy-Item -LiteralPath (Join-Path (Split-Path -Parent $externalBridgeExe) "ArcMapBridge.build") -Destination (Join-Path $stageRoot "app\bridge\ArcMapBridge.build") -Force
 Copy-Item -LiteralPath (Join-Path (Split-Path -Parent $externalBridgeExe) "Newtonsoft.Json.dll") -Destination (Join-Path $stageRoot "app\bridge\Newtonsoft.Json.dll") -Force
+Copy-Item -LiteralPath (Join-Path $repoRoot "shared_runtime\runtime_gate.schema.json") -Destination (Join-Path $stageRoot "app\bridge\runtime_gate.schema.json") -Force
 $identitySources = @(
     (Join-Path $repoRoot "VERSION"),
     (Join-Path $repoRoot "shared_runtime"),
@@ -295,8 +303,20 @@ foreach ($component in @('gateway','bridge','arcmap_runtime_py2')) {
     Set-Content -LiteralPath (Join-Path $stageRoot "app\$component\deployment_identity.json") -Value $identityJson -Encoding UTF8
 }
 Copy-Item -LiteralPath $addinPackage -Destination (Join-Path $stageRoot "ArcMapAIAssistantAddIn\ArcMapAIAssistantAddIn.esriaddin") -Force
-Copy-PowerShellFile (Join-Path $repoRoot "packaging\install.ps1") (Join-Path $stageRoot "packaging\install.ps1")
-Copy-PowerShellFile (Join-Path $repoRoot "packaging\uninstall.ps1") (Join-Path $stageRoot "packaging\uninstall.ps1")
+Copy-Item -LiteralPath (Join-Path $repoRoot "packaging\install.ps1") -Destination (Join-Path $stageRoot "packaging\install.ps1") -Force
+Copy-Item -LiteralPath (Join-Path $repoRoot "packaging\uninstall.ps1") -Destination (Join-Path $stageRoot "packaging\uninstall.ps1") -Force
+$releaseManifest = [ordered]@{
+    schema_version = 1
+    app_version = $appVersion
+    deployment_hash = $identityHash
+    files = Get-TreeManifest (Join-Path $stageRoot "app")
+    installed_package_files = @([ordered]@{
+        path = 'packaging/uninstall.ps1'
+        sha256 = (Get-FileHash -LiteralPath (Join-Path $stageRoot "packaging\uninstall.ps1") -Algorithm SHA256).Hash.ToLowerInvariant()
+    })
+    addin_sha256 = (Get-FileHash -LiteralPath (Join-Path $stageRoot "ArcMapAIAssistantAddIn\ArcMapAIAssistantAddIn.esriaddin") -Algorithm SHA256).Hash.ToLowerInvariant()
+}
+$releaseManifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $stageRoot "release_manifest.json") -Encoding UTF8
 
 if (Test-Path -LiteralPath $ReleaseRoot) {
     Assert-UnderRepo $ReleaseRoot

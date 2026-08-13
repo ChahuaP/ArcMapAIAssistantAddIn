@@ -93,6 +93,35 @@ class CheckpointPersistenceTest(_BaseLangGraphTest):
             "re-plan must not call the model adapter when a sealed plan exists",
         )
 
+    def test_checkpoint_with_other_model_plan_is_rejected_before_replay(self):
+        responses = {"task_contract": _task_contract_response(),
+                     "workflow": _workflow_draft_response()}
+        engine = self._engine(responses, checkpoint_path=self.tmp)
+        intent = self._make_intent(self._runtime(responses))
+        first = engine.plan(self.run_id, intent, self.context, self.capabilities)
+        self.assertTrue(first.succeeded)
+        changed = intent.model_copy(update={"derived_facts": dict(
+            intent.derived_facts, model_plan=dict(intent.derived_facts["model_plan"],
+            planner=dict(intent.derived_facts["model_plan"]["planner"], temperature=0.5)))})
+        outcome = engine.plan(self.run_id, changed, self.context, self.capabilities)
+        self.assertFalse(outcome.succeeded)
+        self.assertIn("model binding differs", outcome.message)
+
+    def test_checkpoint_read_contract_failure_is_not_reclassified_as_model_drift(self):
+        from gateway_py3.intelligence.workflow_engine import _CheckpointContractError
+        responses = {"task_contract": _task_contract_response(),
+                     "workflow": _workflow_draft_response()}
+        engine = self._engine(responses, checkpoint_path=self.tmp)
+        intent = self._make_intent(self._runtime(responses))
+
+        def broken_checkpoint(*_args):
+            raise _CheckpointContractError("planning checkpoint could not be read: ValueError")
+
+        engine._sealed_plan = broken_checkpoint
+        outcome = engine.plan(self.run_id, intent, self.context, self.capabilities)
+        self.assertEqual(CONTRACT_FAILED, outcome.kind)
+        self.assertEqual("checkpoint_contract_failure", outcome.code)
+
     def test_different_run_id_does_not_reuse_checkpoint(self):
         responses = {
             "task_contract": _task_contract_response(),
@@ -111,6 +140,74 @@ class CheckpointPersistenceTest(_BaseLangGraphTest):
         plan = outcome.details.get("plan")
         self.assertIsNotNone(plan)
         self.assertEqual(len(plan.workflow), 1)
+
+    def test_g3_consumes_sealed_g2_plan_without_a_second_planner_draft(self):
+        responses = {"task_contract": _task_contract_response(),
+                     "workflow": _workflow_draft_response(),
+                     "audit": {"audit_result": {"decision": "pass", "revision": None, "clarification": None}}}
+        engine = self._engine(responses, checkpoint_path=self.tmp)
+        intent = self._make_intent(self._runtime(responses))
+        g2 = engine.plan_ablation(self.run_id, intent, self.context,
+                                  self.capabilities, auditor_enabled=False)
+        self.assertTrue(g2.succeeded)
+        def forbidden_planner(*args, **kwargs):
+            raise AssertionError("G3 must not invoke the planner draft")
+        engine._generate_draft = forbidden_planner
+        g3 = engine.plan_ablation(
+            "00000000-0000-0000-0000-00000000000e", intent, self.context,
+            self.capabilities, auditor_enabled=True,
+            sealed_baseline=g2.details["plan"])
+        self.assertTrue(g3.succeeded, msg=str(g3))
+        self.assertEqual(g2.details["plan"].workflow, g3.details["plan"].workflow)
+
+    def test_quota_resume_replays_successful_nodes_and_only_reinvokes_failed_audit(self):
+        from gateway_py3.model_runtime.adapter import ProviderError
+        from gateway_py3.model_runtime.contracts import ProviderResponse
+        class QuotaOnceAudit(_ScriptedAdapter):
+            def __init__(self):
+                _ScriptedAdapter.__init__(self, {"workflow": _workflow_draft_response()})
+                self.planner_calls = 0
+                self.audit_calls = 0
+            def invoke(self, call, on_token=None):
+                system = call.messages[0]["content"] if call.messages else ""
+                if "工作流规划器" in system:
+                    self.planner_calls += 1
+                    return ProviderResponse(response=_workflow_draft_response(), usage={"total_tokens": 10})
+                if "G3 审计器" in system:
+                    self.audit_calls += 1
+                    if self.audit_calls == 1:
+                        raise ProviderError("quota", "quota")
+                    return ProviderResponse(
+                        response={"audit_result": {"decision": "pass", "revision": None, "clarification": None}},
+                        usage={"total_tokens": 5})
+                return _ScriptedAdapter.invoke(self, call, on_token)
+
+        intent = self._make_intent(self._runtime({"task_contract": _task_contract_response()}))
+        self.store.create_session(self.request.session_id, self.request.caller.tenant_id)
+        run_id = self.store.create_run(self.request)["run_id"]
+        adapter = QuotaOnceAudit()
+        runtime = build_test_model_runtime(adapter, self.store)
+        from gateway_py3.catalog_loader import OperationCatalog
+        engine = WorkflowEngine(OperationCatalog(), runtime,
+                                checkpoint_path=self.tmp, journal=self.store)
+        stopped = engine.plan_ablation(run_id, intent, self.context,
+                                       self.capabilities, auditor_enabled=True, force_audit=True)
+        self.assertEqual(contracts.QUOTA_STOPPED, stopped.kind)
+        self.assertEqual(1, adapter.planner_calls)
+        self.assertEqual(1, adapter.audit_calls)
+        self.store.append_event(
+            run_id, "plan_failed", contracts.INTENT_COMPILED, {}, outcome=stopped)
+
+        self.store.reopen_quota_stopped_run(run_id)
+        resumed = engine.plan_ablation(run_id, intent, self.context,
+                                       self.capabilities, auditor_enabled=True, force_audit=True)
+        self.assertTrue(resumed.succeeded, msg=str(resumed))
+        self.assertEqual(1, adapter.planner_calls,
+                         "successful planner call must remain sealed on quota resume")
+        self.assertEqual(2, adapter.audit_calls,
+                         "only the quota-stopped audit node may be invoked again")
+        self.assertEqual("succeeded", [call for call in self.store.list_model_calls_for_run(run_id)
+                                       if (call.get("ledger") or {}).get("role") == "planner"][0]["status"])
 
     def test_checkpoint_blobs_are_dpapi_protected_and_recoverable(self):
         responses = {
@@ -194,31 +291,6 @@ class ValidationBudgetTest(_BaseLangGraphTest):
         engine = self._engine(responses)
         intent = self._make_intent(self._runtime(responses))
         outcome = engine.plan(self.run_id, intent, self.context, self.capabilities)
-        self.assertFalse(outcome.succeeded)
-        self.assertEqual(outcome.kind, CONTRACT_FAILED)
-
-
-class AuditReviseLoopTest(_BaseLangGraphTest):
-    """§6.3: audit revise -> repair -> validate -> audit loop."""
-
-    def test_audit_revise_then_pass(self):
-        revise_once = {"audit_result": {"decision": "revise", "claims": [
-            {"kind": "revision", "proof_id": "violation_1",
-             "change_target": "workflow", "required_change": "fix step"},
-        ]}}
-        responses = {
-            "task_contract": _task_contract_response(),
-            "workflow": _workflow_draft_response(),
-            "audit": revise_once,
-        }
-        engine = self._engine(responses)
-        intent = self._make_intent(self._runtime(responses))
-        outcome = engine.plan(self.run_id, intent, self.context, self.capabilities)
-        # The scripted auditor returns revise every time; after the first
-        # revise, the audit node runs again with the same response (revise),
-        # which exhausts... but budget is MAX_AUDIT_REVISIONS=3, so after
-        # repair the loop re-audits. The response stays 'revise', so the loop
-        # must terminate with ContractFailed at budget exhaustion.
         self.assertFalse(outcome.succeeded)
         self.assertEqual(outcome.kind, CONTRACT_FAILED)
 

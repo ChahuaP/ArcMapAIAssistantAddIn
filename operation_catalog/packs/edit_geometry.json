@@ -38,10 +38,6 @@
           },
           "wkid": {
             "type": "integer"
-          },
-          "output_workspace": {
-            "type": "string",
-            "x-geopilot-kind": "path"
           }
         },
         "additionalProperties": false
@@ -59,7 +55,7 @@
           "gdb"
         ],
         "default_format": "gdb",
-        "workspace": "mxd_default_or_output_workspace",
+        "workspace": "server_managed_gdb",
         "overwrite": false,
         "add_to_map": true
       },
@@ -117,10 +113,6 @@
             },
             "wkid": {
               "type": "integer"
-            },
-            "output_workspace": {
-              "type": "string",
-              "x-geopilot-kind": "path"
             }
           },
           "additionalProperties": false
@@ -230,10 +222,6 @@
           },
           "wkid": {
             "type": "integer"
-          },
-          "output_workspace": {
-            "type": "string",
-            "x-geopilot-kind": "path"
           }
         },
         "additionalProperties": false
@@ -251,7 +239,7 @@
           "gdb"
         ],
         "default_format": "gdb",
-        "workspace": "mxd_default_or_output_workspace",
+        "workspace": "server_managed_gdb",
         "overwrite": false,
         "add_to_map": true
       },
@@ -330,10 +318,6 @@
             },
             "wkid": {
               "type": "integer"
-            },
-            "output_workspace": {
-              "type": "string",
-              "x-geopilot-kind": "path"
             }
           },
           "additionalProperties": false
@@ -642,10 +626,6 @@
           },
           "wkid": {
             "type": "integer"
-          },
-          "output_workspace": {
-            "type": "string",
-            "x-geopilot-kind": "path"
           }
         },
         "additionalProperties": false
@@ -663,7 +643,7 @@
           "gdb"
         ],
         "default_format": "gdb",
-        "workspace": "mxd_default_or_output_workspace",
+        "workspace": "server_managed_gdb",
         "overwrite": false,
         "add_to_map": true
       },
@@ -803,10 +783,6 @@
             },
             "wkid": {
               "type": "integer"
-            },
-            "output_workspace": {
-              "type": "string",
-              "x-geopilot-kind": "path"
             }
           },
           "additionalProperties": false
@@ -1149,10 +1125,6 @@
           },
           "wkid": {
             "type": "integer"
-          },
-          "output_workspace": {
-            "type": "string",
-            "x-geopilot-kind": "path"
           }
         },
         "additionalProperties": false
@@ -1170,7 +1142,7 @@
           "gdb"
         ],
         "default_format": "gdb",
-        "workspace": "mxd_default_or_output_workspace",
+        "workspace": "server_managed_gdb",
         "overwrite": false,
         "add_to_map": true
       },
@@ -1334,10 +1306,6 @@
             },
             "wkid": {
               "type": "integer"
-            },
-            "output_workspace": {
-              "type": "string",
-              "x-geopilot-kind": "path"
             }
           },
           "additionalProperties": false
@@ -1690,10 +1658,6 @@
           },
           "wkid": {
             "type": "integer"
-          },
-          "output_workspace": {
-            "type": "string",
-            "x-geopilot-kind": "path"
           }
         },
         "additionalProperties": false
@@ -1711,7 +1675,7 @@
           "gdb"
         ],
         "default_format": "gdb",
-        "workspace": "mxd_default_or_output_workspace",
+        "workspace": "server_managed_gdb",
         "overwrite": false,
         "add_to_map": true
       },
@@ -1782,10 +1746,6 @@
             },
             "wkid": {
               "type": "integer"
-            },
-            "output_workspace": {
-              "type": "string",
-              "x-geopilot-kind": "path"
             }
           },
           "additionalProperties": false
@@ -1884,21 +1844,77 @@
             "type": "number"
           },
           "radius": {
-            "type": "number"
-          },
-          "radius_unit": {
-            "type": "string",
-            "enum": [
-              "map_units",
-              "meters",
-              "degrees"
-            ]
+            "type": "object",
+            "x-geopilot-semantic": "quantity",
+            "properties": {
+              "value": {
+                "type": "number",
+                "minimum": 0
+              },
+              "unit": {
+                "type": "string",
+                "enum": [
+                  "meters",
+                  "kilometers",
+                  "map_units",
+                  "degrees"
+                ]
+              },
+              "dimension": {
+                "const": "length"
+              },
+              "tolerance": {
+                "type": "number",
+                "minimum": 0
+              },
+              "crs": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "value",
+              "unit",
+              "dimension",
+              "tolerance",
+              "crs"
+            ],
+            "additionalProperties": false
           },
           "sides": {
             "type": "integer"
           },
           "start_angle_degrees": {
-            "type": "number"
+            "type": "object",
+            "x-geopilot-semantic": "angle",
+            "properties": {
+              "value": {
+                "type": "number"
+              },
+              "unit": {
+                "const": "degrees"
+              },
+              "dimension": {
+                "const": "angle"
+              },
+              "tolerance": {
+                "type": "number",
+                "minimum": 0
+              },
+              "crs": {
+                "const": null
+              }
+            },
+            "required": [
+              "value",
+              "unit",
+              "dimension",
+              "tolerance",
+              "crs"
+            ],
+            "additionalProperties": false
           },
           "features": {
             "type": "array",
@@ -1920,10 +1936,6 @@
           },
           "wkid": {
             "type": "integer"
-          },
-          "output_workspace": {
-            "type": "string",
-            "x-geopilot-kind": "path"
           }
         },
         "additionalProperties": false
@@ -1941,7 +1953,7 @@
           "gdb"
         ],
         "default_format": "gdb",
-        "workspace": "mxd_default_or_output_workspace",
+        "workspace": "server_managed_gdb",
         "overwrite": false,
         "add_to_map": true
       },
@@ -1952,8 +1964,13 @@
           "arguments": {
             "center_x": 500000,
             "center_y": 3500000,
-            "radius": 100,
-            "radius_unit": "meters",
+            "radius": {
+              "value": 100,
+              "unit": "meters",
+              "dimension": "length",
+              "tolerance": 0.0,
+              "crs": null
+            },
             "sides": 5,
             "output_name": "regular_pentagon"
           }
@@ -1978,8 +1995,13 @@
                 "name": "pentagon_3"
               }
             ],
-            "radius": 100,
-            "radius_unit": "meters",
+            "radius": {
+              "value": 100,
+              "unit": "meters",
+              "dimension": "length",
+              "tolerance": 0.0,
+              "crs": null
+            },
             "sides": 5,
             "output_name": "pentagons"
           }
@@ -2032,21 +2054,77 @@
               "type": "number"
             },
             "radius": {
-              "type": "number"
-            },
-            "radius_unit": {
-              "type": "string",
-              "enum": [
-                "map_units",
-                "meters",
-                "degrees"
-              ]
+              "type": "object",
+              "x-geopilot-semantic": "quantity",
+              "properties": {
+                "value": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "unit": {
+                  "type": "string",
+                  "enum": [
+                    "meters",
+                    "kilometers",
+                    "map_units",
+                    "degrees"
+                  ]
+                },
+                "dimension": {
+                  "const": "length"
+                },
+                "tolerance": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "crs": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "value",
+                "unit",
+                "dimension",
+                "tolerance",
+                "crs"
+              ],
+              "additionalProperties": false
             },
             "sides": {
               "type": "integer"
             },
             "start_angle_degrees": {
-              "type": "number"
+              "type": "object",
+              "x-geopilot-semantic": "angle",
+              "properties": {
+                "value": {
+                  "type": "number"
+                },
+                "unit": {
+                  "const": "degrees"
+                },
+                "dimension": {
+                  "const": "angle"
+                },
+                "tolerance": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "crs": {
+                  "const": null
+                }
+              },
+              "required": [
+                "value",
+                "unit",
+                "dimension",
+                "tolerance",
+                "crs"
+              ],
+              "additionalProperties": false
             },
             "features": {
               "type": "array",
@@ -2068,10 +2146,6 @@
             },
             "wkid": {
               "type": "integer"
-            },
-            "output_workspace": {
-              "type": "string",
-              "x-geopilot-kind": "path"
             }
           },
           "additionalProperties": false
@@ -2173,21 +2247,77 @@
             "type": "number"
           },
           "radius": {
-            "type": "number"
-          },
-          "radius_unit": {
-            "type": "string",
-            "enum": [
-              "map_units",
-              "meters",
-              "degrees"
-            ]
+            "type": "object",
+            "x-geopilot-semantic": "quantity",
+            "properties": {
+              "value": {
+                "type": "number",
+                "minimum": 0
+              },
+              "unit": {
+                "type": "string",
+                "enum": [
+                  "meters",
+                  "kilometers",
+                  "map_units",
+                  "degrees"
+                ]
+              },
+              "dimension": {
+                "const": "length"
+              },
+              "tolerance": {
+                "type": "number",
+                "minimum": 0
+              },
+              "crs": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "value",
+              "unit",
+              "dimension",
+              "tolerance",
+              "crs"
+            ],
+            "additionalProperties": false
           },
           "sides": {
             "type": "integer"
           },
           "start_angle_degrees": {
-            "type": "number"
+            "type": "object",
+            "x-geopilot-semantic": "angle",
+            "properties": {
+              "value": {
+                "type": "number"
+              },
+              "unit": {
+                "const": "degrees"
+              },
+              "dimension": {
+                "const": "angle"
+              },
+              "tolerance": {
+                "type": "number",
+                "minimum": 0
+              },
+              "crs": {
+                "const": null
+              }
+            },
+            "required": [
+              "value",
+              "unit",
+              "dimension",
+              "tolerance",
+              "crs"
+            ],
+            "additionalProperties": false
           },
           "features": {
             "type": "array",
@@ -2220,8 +2350,13 @@
             "target_layer": "parcels",
             "center_x": 500000,
             "center_y": 3500000,
-            "radius": 100,
-            "radius_unit": "meters",
+            "radius": {
+              "value": 100,
+              "unit": "meters",
+              "dimension": "length",
+              "tolerance": 0.0,
+              "crs": null
+            },
             "sides": 5,
             "name": "new_pentagon"
           }
@@ -2278,21 +2413,77 @@
               "type": "number"
             },
             "radius": {
-              "type": "number"
-            },
-            "radius_unit": {
-              "type": "string",
-              "enum": [
-                "map_units",
-                "meters",
-                "degrees"
-              ]
+              "type": "object",
+              "x-geopilot-semantic": "quantity",
+              "properties": {
+                "value": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "unit": {
+                  "type": "string",
+                  "enum": [
+                    "meters",
+                    "kilometers",
+                    "map_units",
+                    "degrees"
+                  ]
+                },
+                "dimension": {
+                  "const": "length"
+                },
+                "tolerance": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "crs": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "value",
+                "unit",
+                "dimension",
+                "tolerance",
+                "crs"
+              ],
+              "additionalProperties": false
             },
             "sides": {
               "type": "integer"
             },
             "start_angle_degrees": {
-              "type": "number"
+              "type": "object",
+              "x-geopilot-semantic": "angle",
+              "properties": {
+                "value": {
+                  "type": "number"
+                },
+                "unit": {
+                  "const": "degrees"
+                },
+                "dimension": {
+                  "const": "angle"
+                },
+                "tolerance": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "crs": {
+                  "const": null
+                }
+              },
+              "required": [
+                "value",
+                "unit",
+                "dimension",
+                "tolerance",
+                "crs"
+              ],
+              "additionalProperties": false
             },
             "features": {
               "type": "array",
@@ -2402,32 +2593,120 @@
             "type": "number"
           },
           "outer_radius": {
-            "type": "number"
-          },
-          "outer_radius_unit": {
-            "type": "string",
-            "enum": [
-              "map_units",
-              "meters",
-              "degrees"
-            ]
+            "type": "object",
+            "x-geopilot-semantic": "quantity",
+            "properties": {
+              "value": {
+                "type": "number",
+                "minimum": 0
+              },
+              "unit": {
+                "type": "string",
+                "enum": [
+                  "meters",
+                  "kilometers",
+                  "map_units",
+                  "degrees"
+                ]
+              },
+              "dimension": {
+                "const": "length"
+              },
+              "tolerance": {
+                "type": "number",
+                "minimum": 0
+              },
+              "crs": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "value",
+              "unit",
+              "dimension",
+              "tolerance",
+              "crs"
+            ],
+            "additionalProperties": false
           },
           "inner_radius": {
-            "type": "number"
-          },
-          "inner_radius_unit": {
-            "type": "string",
-            "enum": [
-              "map_units",
-              "meters",
-              "degrees"
-            ]
+            "type": [
+              "object",
+              "null"
+            ],
+            "x-geopilot-semantic": "quantity",
+            "properties": {
+              "value": {
+                "type": "number",
+                "minimum": 0
+              },
+              "unit": {
+                "type": "string",
+                "enum": [
+                  "meters",
+                  "kilometers",
+                  "map_units",
+                  "degrees"
+                ]
+              },
+              "dimension": {
+                "const": "length"
+              },
+              "tolerance": {
+                "type": "number",
+                "minimum": 0
+              },
+              "crs": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "value",
+              "unit",
+              "dimension",
+              "tolerance",
+              "crs"
+            ],
+            "additionalProperties": false
           },
           "point_count": {
             "type": "integer"
           },
           "start_angle_degrees": {
-            "type": "number"
+            "type": "object",
+            "x-geopilot-semantic": "angle",
+            "properties": {
+              "value": {
+                "type": "number"
+              },
+              "unit": {
+                "const": "degrees"
+              },
+              "dimension": {
+                "const": "angle"
+              },
+              "tolerance": {
+                "type": "number",
+                "minimum": 0
+              },
+              "crs": {
+                "const": null
+              }
+            },
+            "required": [
+              "value",
+              "unit",
+              "dimension",
+              "tolerance",
+              "crs"
+            ],
+            "additionalProperties": false
           },
           "features": {
             "type": "array",
@@ -2449,10 +2728,6 @@
           },
           "wkid": {
             "type": "integer"
-          },
-          "output_workspace": {
-            "type": "string",
-            "x-geopilot-kind": "path"
           }
         },
         "additionalProperties": false
@@ -2470,7 +2745,7 @@
           "gdb"
         ],
         "default_format": "gdb",
-        "workspace": "mxd_default_or_output_workspace",
+        "workspace": "server_managed_gdb",
         "overwrite": false,
         "add_to_map": true
       },
@@ -2481,8 +2756,13 @@
           "arguments": {
             "center_x": 118.78,
             "center_y": 32.04,
-            "outer_radius": 0.01,
-            "outer_radius_unit": "degrees",
+            "outer_radius": {
+              "value": 0.01,
+              "unit": "degrees",
+              "dimension": "length",
+              "tolerance": 0.0,
+              "crs": null
+            },
             "point_count": 5,
             "wkid": 4326,
             "output_name": "star_feature"
@@ -2503,8 +2783,13 @@
                 "name": "star_2"
               }
             ],
-            "outer_radius": 0.01,
-            "outer_radius_unit": "degrees",
+            "outer_radius": {
+              "value": 0.01,
+              "unit": "degrees",
+              "dimension": "length",
+              "tolerance": 0.0,
+              "crs": null
+            },
             "point_count": 5,
             "wkid": 4326,
             "output_name": "stars"
@@ -2558,32 +2843,120 @@
               "type": "number"
             },
             "outer_radius": {
-              "type": "number"
-            },
-            "outer_radius_unit": {
-              "type": "string",
-              "enum": [
-                "map_units",
-                "meters",
-                "degrees"
-              ]
+              "type": "object",
+              "x-geopilot-semantic": "quantity",
+              "properties": {
+                "value": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "unit": {
+                  "type": "string",
+                  "enum": [
+                    "meters",
+                    "kilometers",
+                    "map_units",
+                    "degrees"
+                  ]
+                },
+                "dimension": {
+                  "const": "length"
+                },
+                "tolerance": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "crs": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "value",
+                "unit",
+                "dimension",
+                "tolerance",
+                "crs"
+              ],
+              "additionalProperties": false
             },
             "inner_radius": {
-              "type": "number"
-            },
-            "inner_radius_unit": {
-              "type": "string",
-              "enum": [
-                "map_units",
-                "meters",
-                "degrees"
-              ]
+              "type": [
+                "object",
+                "null"
+              ],
+              "x-geopilot-semantic": "quantity",
+              "properties": {
+                "value": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "unit": {
+                  "type": "string",
+                  "enum": [
+                    "meters",
+                    "kilometers",
+                    "map_units",
+                    "degrees"
+                  ]
+                },
+                "dimension": {
+                  "const": "length"
+                },
+                "tolerance": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "crs": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "value",
+                "unit",
+                "dimension",
+                "tolerance",
+                "crs"
+              ],
+              "additionalProperties": false
             },
             "point_count": {
               "type": "integer"
             },
             "start_angle_degrees": {
-              "type": "number"
+              "type": "object",
+              "x-geopilot-semantic": "angle",
+              "properties": {
+                "value": {
+                  "type": "number"
+                },
+                "unit": {
+                  "const": "degrees"
+                },
+                "dimension": {
+                  "const": "angle"
+                },
+                "tolerance": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "crs": {
+                  "const": null
+                }
+              },
+              "required": [
+                "value",
+                "unit",
+                "dimension",
+                "tolerance",
+                "crs"
+              ],
+              "additionalProperties": false
             },
             "features": {
               "type": "array",
@@ -2605,10 +2978,6 @@
             },
             "wkid": {
               "type": "integer"
-            },
-            "output_workspace": {
-              "type": "string",
-              "x-geopilot-kind": "path"
             }
           },
           "additionalProperties": false
@@ -2711,32 +3080,120 @@
             "type": "number"
           },
           "outer_radius": {
-            "type": "number"
-          },
-          "outer_radius_unit": {
-            "type": "string",
-            "enum": [
-              "map_units",
-              "meters",
-              "degrees"
-            ]
+            "type": "object",
+            "x-geopilot-semantic": "quantity",
+            "properties": {
+              "value": {
+                "type": "number",
+                "minimum": 0
+              },
+              "unit": {
+                "type": "string",
+                "enum": [
+                  "meters",
+                  "kilometers",
+                  "map_units",
+                  "degrees"
+                ]
+              },
+              "dimension": {
+                "const": "length"
+              },
+              "tolerance": {
+                "type": "number",
+                "minimum": 0
+              },
+              "crs": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "value",
+              "unit",
+              "dimension",
+              "tolerance",
+              "crs"
+            ],
+            "additionalProperties": false
           },
           "inner_radius": {
-            "type": "number"
-          },
-          "inner_radius_unit": {
-            "type": "string",
-            "enum": [
-              "map_units",
-              "meters",
-              "degrees"
-            ]
+            "type": [
+              "object",
+              "null"
+            ],
+            "x-geopilot-semantic": "quantity",
+            "properties": {
+              "value": {
+                "type": "number",
+                "minimum": 0
+              },
+              "unit": {
+                "type": "string",
+                "enum": [
+                  "meters",
+                  "kilometers",
+                  "map_units",
+                  "degrees"
+                ]
+              },
+              "dimension": {
+                "const": "length"
+              },
+              "tolerance": {
+                "type": "number",
+                "minimum": 0
+              },
+              "crs": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "value",
+              "unit",
+              "dimension",
+              "tolerance",
+              "crs"
+            ],
+            "additionalProperties": false
           },
           "point_count": {
             "type": "integer"
           },
           "start_angle_degrees": {
-            "type": "number"
+            "type": "object",
+            "x-geopilot-semantic": "angle",
+            "properties": {
+              "value": {
+                "type": "number"
+              },
+              "unit": {
+                "const": "degrees"
+              },
+              "dimension": {
+                "const": "angle"
+              },
+              "tolerance": {
+                "type": "number",
+                "minimum": 0
+              },
+              "crs": {
+                "const": null
+              }
+            },
+            "required": [
+              "value",
+              "unit",
+              "dimension",
+              "tolerance",
+              "crs"
+            ],
+            "additionalProperties": false
           },
           "features": {
             "type": "array",
@@ -2779,8 +3236,13 @@
                 "name": "star_2"
               }
             ],
-            "outer_radius": 0.01,
-            "outer_radius_unit": "degrees",
+            "outer_radius": {
+              "value": 0.01,
+              "unit": "degrees",
+              "dimension": "length",
+              "tolerance": 0.0,
+              "crs": null
+            },
             "point_count": 5
           }
         }
@@ -2836,32 +3298,120 @@
               "type": "number"
             },
             "outer_radius": {
-              "type": "number"
-            },
-            "outer_radius_unit": {
-              "type": "string",
-              "enum": [
-                "map_units",
-                "meters",
-                "degrees"
-              ]
+              "type": "object",
+              "x-geopilot-semantic": "quantity",
+              "properties": {
+                "value": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "unit": {
+                  "type": "string",
+                  "enum": [
+                    "meters",
+                    "kilometers",
+                    "map_units",
+                    "degrees"
+                  ]
+                },
+                "dimension": {
+                  "const": "length"
+                },
+                "tolerance": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "crs": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "value",
+                "unit",
+                "dimension",
+                "tolerance",
+                "crs"
+              ],
+              "additionalProperties": false
             },
             "inner_radius": {
-              "type": "number"
-            },
-            "inner_radius_unit": {
-              "type": "string",
-              "enum": [
-                "map_units",
-                "meters",
-                "degrees"
-              ]
+              "type": [
+                "object",
+                "null"
+              ],
+              "x-geopilot-semantic": "quantity",
+              "properties": {
+                "value": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "unit": {
+                  "type": "string",
+                  "enum": [
+                    "meters",
+                    "kilometers",
+                    "map_units",
+                    "degrees"
+                  ]
+                },
+                "dimension": {
+                  "const": "length"
+                },
+                "tolerance": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "crs": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "value",
+                "unit",
+                "dimension",
+                "tolerance",
+                "crs"
+              ],
+              "additionalProperties": false
             },
             "point_count": {
               "type": "integer"
             },
             "start_angle_degrees": {
-              "type": "number"
+              "type": "object",
+              "x-geopilot-semantic": "angle",
+              "properties": {
+                "value": {
+                  "type": "number"
+                },
+                "unit": {
+                  "const": "degrees"
+                },
+                "dimension": {
+                  "const": "angle"
+                },
+                "tolerance": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "crs": {
+                  "const": null
+                }
+              },
+              "required": [
+                "value",
+                "unit",
+                "dimension",
+                "tolerance",
+                "crs"
+              ],
+              "additionalProperties": false
             },
             "features": {
               "type": "array",

@@ -37,6 +37,8 @@ def _envelope(session_id, text="select cities", execute=False, side_effects=None
         target_selector={"bridge_pid": 2001, "bridge_port": 8766,
                          "arcmap_pid": 2000, "hwnd": 3000,
                          "deployment_hash": "a" * 64},
+        model_plan=fakes.fake_agent_model_plan().model_dump(mode="json"),
+        model_binding_summary=fakes.fake_model_binding_summary(),
     )
 
 
@@ -204,19 +206,69 @@ class SessionIsolationTest(_KernelTestBase):
 class ResumeTest(_KernelTestBase):
     """§7: resume drives a paused run forward."""
 
-    def test_resume_after_clarification_not_implemented_yet(self):
-        # A clarification pause is recoverable; resume should attempt to
-        # re-advance. With the fake model still requiring clarification,
-        # it pauses again at the same stage.
+    def test_answer_clarification_is_journaled_and_recompiles(self):
         adapter = fakes.FakeModelAdapter(require_clarification=True)
         ports = fakes.build_fake_ports(self.store, adapter=adapter)
         kernel = GeoPilotKernel(ports)
         view = kernel.submit(_envelope(_sid("09")))
         view = fakes.wait_for_terminal(kernel, view.run_id)
         self.assertEqual(view.stage, "clarification_required")
-        resumed = kernel.resume(view.run_id)
-        resumed = fakes.wait_for_terminal(kernel, resumed.run_id)
-        self.assertEqual(resumed.stage, "clarification_required")
+        request = kernel.get_run(view.run_id)
+        pending = [event for event in self.store.run_events(view.run_id)
+                   if event["kind"] == "clarification_required"][-1]["payload"]["clarifications"][0]
+        answer = contracts.ClarificationAnswer(
+            run_id=view.run_id, session_id=request["session_id"],
+            caller=contracts.CallerIdentity(user_id="u1", tenant_id="t1", role="analyst"),
+            clarification_id=pending["clarification_id"], answer="new_selection",
+        )
+        answered = kernel.answer_clarification(view.run_id, answer)
+        answered = fakes.wait_for_terminal(kernel, answered.run_id)
+        self.assertEqual(answered.stage, "clarification_required")
+        self.assertEqual(1, len([event for event in self.store.run_events(view.run_id)
+                                 if event["kind"] == "clarification_answered"]))
+        with self.assertRaises(ValueError):
+            kernel.resume(view.run_id)
+
+    def test_clarification_recompile_retains_sealed_model_digest(self):
+        adapter = fakes.FakeModelAdapter(require_clarification=True)
+        kernel = GeoPilotKernel(fakes.build_fake_ports(self.store, adapter=adapter))
+        view = fakes.wait_for_terminal(kernel, kernel.submit(_envelope(_sid("18"))).run_id)
+        initial = next(event["payload"] for event in self.store.run_events(view.run_id)
+                       if event["kind"] == "run_received")
+        pending = [event for event in self.store.run_events(view.run_id)
+                   if event["kind"] == "clarification_required"][-1]["payload"]["clarifications"][0]
+        request = kernel.get_run(view.run_id)
+        kernel.answer_clarification(view.run_id, contracts.ClarificationAnswer(
+            run_id=view.run_id, session_id=request["session_id"],
+            caller=contracts.CallerIdentity(user_id="u1", tenant_id="t1", role="analyst"),
+            clarification_id=pending["clarification_id"], answer="new_selection"))
+        reconstructed = kernel._reconstruct_request(kernel.get_run(view.run_id))
+        self.assertEqual(contracts.digest(initial["model_plan"]), reconstructed.model_plan_digest)
+        self.assertEqual(initial["model_binding_summary"], reconstructed.model_binding_summary)
+
+    def test_typed_clarification_rejects_unrelated_wrong_type_and_stale_context(self):
+        adapter = fakes.FakeModelAdapter(require_clarification=True)
+        kernel = GeoPilotKernel(fakes.build_fake_ports(self.store, adapter=adapter))
+        view = fakes.wait_for_terminal(kernel, kernel.submit(_envelope(_sid("19"))).run_id)
+        request = kernel.get_run(view.run_id)
+        pending = [event for event in self.store.run_events(view.run_id)
+                   if event["kind"] == "clarification_required"][-1]["payload"]["clarifications"][0]
+        caller = contracts.CallerIdentity(user_id="u1", tenant_id="t1", role="analyst")
+        with self.assertRaises(ValueError):
+            kernel.answer_clarification(view.run_id, contracts.ClarificationAnswer(
+                run_id=view.run_id, session_id=request["session_id"], caller=caller,
+                clarification_id="clarification:unrelated", answer="new_selection"))
+        with self.assertRaises(ValueError):
+            kernel.answer_clarification(view.run_id, contracts.ClarificationAnswer(
+                run_id=view.run_id, session_id=request["session_id"], caller=caller,
+                clarification_id=pending["clarification_id"], answer=123))
+        original = kernel._load_context
+        kernel._load_context = lambda run_id: original(run_id).model_copy(
+            update={"active_data_frame": "drifted"})
+        with self.assertRaisesRegex(ValueError, "context has drifted"):
+            kernel.answer_clarification(view.run_id, contracts.ClarificationAnswer(
+                run_id=view.run_id, session_id=request["session_id"], caller=caller,
+                clarification_id=pending["clarification_id"], answer="new_selection"))
 
 
 class ModelRuntimeWiringTest(_KernelTestBase):

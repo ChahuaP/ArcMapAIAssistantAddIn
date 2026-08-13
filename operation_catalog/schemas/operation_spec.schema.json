@@ -2924,7 +2924,9 @@
                       "const": {
                         "type": "string",
                         "enum": [
-                          "export_selected_features"
+                          "export_map",
+                          "export_selected_features",
+                          "export_table"
                         ]
                       }
                     },
@@ -2937,7 +2939,11 @@
                     "additionalProperties": false,
                     "properties": {
                       "const": {
-                        "const": "gdb"
+                      "enum": [
+                        "csv",
+                        "gdb",
+                        "png"
+                      ]
                       }
                     },
                     "required": [

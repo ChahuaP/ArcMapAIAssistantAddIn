@@ -84,6 +84,7 @@ class OpenAssistantButton(object):
         runtime = None
         try:
             runtime = load_runtime()
+            runtime.bind_ui_thread()
             runtime.open_or_handle_bridge_command()
         except Exception as exc:
             if not runtime or not getattr(runtime, "suppress_last_error_popup", lambda: False)():

@@ -8,6 +8,7 @@ from shared_runtime.capability_contract import (
     validate_output_cardinality,
 )
 from .semantic_domain import validate_capability_effect, effect_schema
+from shared_runtime.semantic_abi import FieldSpec
 
 
 class CapabilityContractError(ValueError):
@@ -65,7 +66,7 @@ _CARDINALITIES = {"one", "many"}
 _DATA_KINDS = {"feature_layer", "raster_layer", "table_view", "coordinate_sequence", "feature_definition"}
 _GEOMETRIES = {"point", "polyline", "polygon", "raster", "not_applicable"}
 _SELECTION_RULES = {"any", "requires_selected", "parameter_values_require_selected"}
-_OUTPUT_KINDS = {"none", "map_state", "feature_class", "raster", "table"}
+_OUTPUT_KINDS = {"none", "map_state", "file", "feature_class", "raster", "table"}
 _GEOMETRY_RULES = {"fixed", "inherit", "lowest_dimension", "not_applicable"}
 _FIELD_EFFECTS = {"not_applicable", "inherit_input", "inherit_tabular_fields", "inherit_target_merge_join", "merge_inputs", "aggregate_by_parameter_fields", "static_generated", "add_static_fields", "add_parameter_field", "delete_parameter_field", "in_place_update"}
 _SPATIAL_REFERENCE_RULES = {"inherit", "from_parameter", "from_parameter_or_map", "not_applicable"}
@@ -119,6 +120,12 @@ class CapabilityRegistry:
         )
         registered = deepcopy(contract)
         registered["outputs"]["format"] = output_format
+        # Bind the capability to a closed AcceptanceProfile at load: a capability
+        # whose primary semantic effect has no independently provable acceptance
+        # profile is rejected before it can reach authorization.
+        from shared_runtime.acceptance_profile import validate_capability_binding, bound_effect_kinds
+        bound_profiles = validate_capability_binding(registered)
+        registered["acceptance_profiles"] = bound_effect_kinds(bound_profiles)
         self._operations[operation_id] = registered
 
     @staticmethod
@@ -135,11 +142,11 @@ class CapabilityRegistry:
             raise CapabilityContractError(operation_id + ".output_policy must describe its declared output.")
         formats = policy.get("formats")
         default = policy.get("default_format")
-        if formats != ["gdb"] or default != "gdb":
+        if formats not in (["gdb"], ["csv"], ["png"]) or default != formats[0]:
             raise CapabilityContractError(
-                operation_id + ".output_policy must declare the single server-derived gdb format."
+                operation_id + ".output_policy must declare one server-derived supported format."
             )
-        return {"rule": "fixed", "value": "gdb"}
+        return {"rule": "fixed", "value": default}
 
     @staticmethod
     def _validate_semantic_effects(effects: Any, operation_id: str, parameters: Dict[str, Any], outputs: Dict[str, Any], output_format: Dict[str, Any]) -> None:
@@ -237,8 +244,11 @@ class CapabilityRegistry:
                         "%s.inputs[%d].selection.values must match the string parameter."
                         % (operation_id, index)
                     )
-            if not isinstance(item["required_fields"], list) or any(not isinstance(value, str) for value in item["required_fields"]):
+            if not isinstance(item["required_fields"], list):
                 raise CapabilityContractError("%s.inputs[%d].required_fields is invalid." % (operation_id, index))
+            CapabilityRegistry._validate_field_specs(
+                item["required_fields"], "%s.inputs[%d].required_fields" % (operation_id, index),
+            )
 
     @staticmethod
     def _validate_outputs(outputs: Any, operation_id: str, parameters_schema: Dict[str, Any], input_specs: Dict[str, Dict[str, Any]]) -> None:
@@ -268,6 +278,7 @@ class CapabilityRegistry:
         fields = _exact(raw_fields, field_keys, operation_id + ".outputs.fields")
         if not isinstance(fields["parameter_field"], str) or not fields["parameter_field"] or not isinstance(fields["static_fields"], list):
             raise CapabilityContractError(operation_id + ".outputs.fields is invalid.")
+        CapabilityRegistry._validate_field_specs(fields["static_fields"], operation_id + ".outputs.fields.static_fields")
         if fields["effect"] == "merge_inputs":
             sources = fields["sources"]
             if (not isinstance(sources, list) or not sources or len(set(sources)) != len(sources)
@@ -297,6 +308,26 @@ class CapabilityRegistry:
         )
         _enum(outputs["selection_state"], _SELECTION_OUTPUTS, operation_id + ".outputs.selection_state")
         _enum(outputs["map_publication"], _PUBLICATIONS, operation_id + ".outputs.map_publication")
+
+    @staticmethod
+    def _validate_field_specs(values: list, path: str) -> None:
+        names = set()
+        for index, value in enumerate(values):
+            if not isinstance(value, dict):
+                raise CapabilityContractError("%s[%d] must be a FieldSpec." % (path, index))
+            try:
+                spec = FieldSpec(
+                    name=value["name"], type=value["type"], nullable=value["nullable"],
+                    length=value["length"], precision=value["precision"],
+                    scale=value["scale"], domain=tuple(value["domain"]),
+                )
+            except (KeyError, TypeError, ValueError) as exc:
+                raise CapabilityContractError("%s[%d] is invalid: %s" % (path, index, exc))
+            if set(value) != {"name", "type", "nullable", "length", "precision", "scale", "domain"}:
+                raise CapabilityContractError("%s[%d] has legacy or unknown fields." % (path, index))
+            if spec.name.casefold() in names:
+                raise CapabilityContractError("%s contains duplicate field names." % path)
+            names.add(spec.name.casefold())
 
     @staticmethod
     def _validate_postconditions(postconditions: Any, operation_id: str, parameters: set[str], outputs: Dict[str, Any]) -> None:

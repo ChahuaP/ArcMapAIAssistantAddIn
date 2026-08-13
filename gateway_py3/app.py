@@ -89,6 +89,9 @@ def build_kernel(store: JournalStore) -> tuple[GeoPilotKernel, JournalEventProje
     engine = WorkflowEngine(catalog, model_runtime,
                             checkpoint_path=store.path, journal=store)
 
+    # Deployment identity is process-owned evidence.  No caller may supply it:
+    # accepting an override would let a source checkout impersonate an installed
+    # ArcMap runtime.
     deployment_hash = _resolve_deployment_hash()
 
     ports = KernelPorts(
@@ -119,7 +122,7 @@ class _ServerState:
         )
 
 
-STATE = _ServerState()
+STATE = None
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -201,7 +204,7 @@ class Handler(BaseHTTPRequestHandler):
         if origin in ALLOWED_ORIGINS:
             self.send_header("Access-Control-Allow-Origin", origin)
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Session-Id, X-CSRF-Token")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Session-Id, X-Session-Epoch, X-CSRF-Token")
 
     def _serve_static(self, path):
         """Serve whitelisted static files from WEB_ROOT."""
@@ -220,6 +223,10 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         qs = parse_qs(parsed.query)
         session_id = (qs.get("session_id") or [""])[0]
+        epoch = (qs.get("epoch") or [""])[0]
+        if not STATE.store.is_active_session(session_id, epoch):
+            self._json({"error": "ContractFailed: 会话已归档或会话世代已过期。"}, 409)
+            return
         last_event_id = 0
         raw = self.headers.get("Last-Event-ID")
         if raw:
@@ -265,6 +272,8 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
+    global STATE
+    STATE = _ServerState()
     WEB_ROOT.mkdir(parents=True, exist_ok=True)
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     print("GeoPilot gateway listening on http://%s:%s" % (HOST, PORT))

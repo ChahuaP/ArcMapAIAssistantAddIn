@@ -25,14 +25,47 @@
             "x-geopilot-kind": "layer"
           },
           "distance": {
-            "type": "string"
+            "type": "object",
+            "x-geopilot-semantic": "quantity",
+            "properties": {
+              "value": {
+                "type": "number",
+                "minimum": 0
+              },
+              "unit": {
+                "type": "string",
+                "enum": [
+                  "meters",
+                  "kilometers",
+                  "map_units",
+                  "degrees"
+                ]
+              },
+              "dimension": {
+                "const": "length"
+              },
+              "tolerance": {
+                "type": "number",
+                "minimum": 0
+              },
+              "crs": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "value",
+              "unit",
+              "dimension",
+              "tolerance",
+              "crs"
+            ],
+            "additionalProperties": false
           },
           "output_name": {
             "type": "string"
-          },
-          "output_workspace": {
-            "type": "string",
-            "x-geopilot-kind": "path"
           }
         },
         "additionalProperties": false
@@ -49,7 +82,7 @@
           "gdb"
         ],
         "default_format": "gdb",
-        "workspace": "mxd_default_or_output_workspace",
+        "workspace": "server_managed_gdb",
         "overwrite": false,
         "add_to_map": true
       },
@@ -59,7 +92,13 @@
           "user": "给 roads 做100米缓冲区",
           "arguments": {
             "input_layer": "roads",
-            "distance": "100 Meters",
+            "distance": {
+              "value": 100,
+              "unit": "meters",
+              "dimension": "length",
+              "tolerance": 0.0,
+              "crs": null
+            },
             "output_name": "roads_buffer_100m"
           }
         }
@@ -96,14 +135,47 @@
               "x-geopilot-kind": "layer"
             },
             "distance": {
-              "type": "string"
+              "type": "object",
+              "x-geopilot-semantic": "quantity",
+              "properties": {
+                "value": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "unit": {
+                  "type": "string",
+                  "enum": [
+                    "meters",
+                    "kilometers",
+                    "map_units",
+                    "degrees"
+                  ]
+                },
+                "dimension": {
+                  "const": "length"
+                },
+                "tolerance": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "crs": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "value",
+                "unit",
+                "dimension",
+                "tolerance",
+                "crs"
+              ],
+              "additionalProperties": false
             },
             "output_name": {
               "type": "string"
-            },
-            "output_workspace": {
-              "type": "string",
-              "x-geopilot-kind": "path"
             }
           },
           "additionalProperties": false
@@ -118,7 +190,15 @@
             "effect": "add_static_fields",
             "target": "input_layer",
             "static_fields": [
-              "BUFF_DIST"
+              {
+                "name": "BUFF_DIST",
+                "type": "double",
+                "nullable": true,
+                "length": null,
+                "precision": null,
+                "scale": null,
+                "domain": []
+              }
             ],
             "parameter_field": "not_applicable"
           },
@@ -210,10 +290,6 @@
           },
           "output_name": {
             "type": "string"
-          },
-          "output_workspace": {
-            "type": "string",
-            "x-geopilot-kind": "path"
           }
         },
         "additionalProperties": false
@@ -230,7 +306,7 @@
           "gdb"
         ],
         "default_format": "gdb",
-        "workspace": "mxd_default_or_output_workspace",
+        "workspace": "server_managed_gdb",
         "overwrite": false,
         "add_to_map": true
       },
@@ -298,10 +374,6 @@
             },
             "output_name": {
               "type": "string"
-            },
-            "output_workspace": {
-              "type": "string",
-              "x-geopilot-kind": "path"
             }
           },
           "additionalProperties": false
@@ -411,10 +483,6 @@
           },
           "output_name": {
             "type": "string"
-          },
-          "output_workspace": {
-            "type": "string",
-            "x-geopilot-kind": "path"
           }
         },
         "additionalProperties": false
@@ -431,7 +499,7 @@
           "gdb"
         ],
         "default_format": "gdb",
-        "workspace": "mxd_default_or_output_workspace",
+        "workspace": "server_managed_gdb",
         "overwrite": false,
         "add_to_map": true
       },
@@ -484,10 +552,6 @@
             },
             "output_name": {
               "type": "string"
-            },
-            "output_workspace": {
-              "type": "string",
-              "x-geopilot-kind": "path"
             }
           },
           "additionalProperties": false
@@ -599,10 +663,6 @@
             "items": {
               "type": "string"
             }
-          },
-          "output_workspace": {
-            "type": "string",
-            "x-geopilot-kind": "path"
           }
         },
         "additionalProperties": false
@@ -619,7 +679,7 @@
           "gdb"
         ],
         "default_format": "gdb",
-        "workspace": "mxd_default_or_output_workspace",
+        "workspace": "server_managed_gdb",
         "overwrite": false,
         "add_to_map": true
       },
@@ -675,10 +735,6 @@
               "items": {
                 "type": "string"
               }
-            },
-            "output_workspace": {
-              "type": "string",
-              "x-geopilot-kind": "path"
             }
           },
           "additionalProperties": false
@@ -788,10 +844,6 @@
           },
           "spatial_reference": {
             "type": "string"
-          },
-          "output_workspace": {
-            "type": "string",
-            "x-geopilot-kind": "path"
           }
         },
         "additionalProperties": false
@@ -808,7 +860,7 @@
           "gdb"
         ],
         "default_format": "gdb",
-        "workspace": "mxd_default_or_output_workspace",
+        "workspace": "server_managed_gdb",
         "overwrite": false,
         "add_to_map": true
       },
@@ -859,10 +911,6 @@
             },
             "spatial_reference": {
               "type": "string"
-            },
-            "output_workspace": {
-              "type": "string",
-              "x-geopilot-kind": "path"
             }
           },
           "additionalProperties": false
@@ -967,10 +1015,6 @@
           },
           "output_name": {
             "type": "string"
-          },
-          "output_workspace": {
-            "type": "string",
-            "x-geopilot-kind": "path"
           }
         },
         "additionalProperties": false
@@ -987,7 +1031,7 @@
           "gdb"
         ],
         "default_format": "gdb",
-        "workspace": "mxd_default_or_output_workspace",
+        "workspace": "server_managed_gdb",
         "overwrite": false,
         "add_to_map": true
       },
@@ -1055,10 +1099,6 @@
             },
             "output_name": {
               "type": "string"
-            },
-            "output_workspace": {
-              "type": "string",
-              "x-geopilot-kind": "path"
             }
           },
           "additionalProperties": false
@@ -1073,8 +1113,24 @@
             "effect": "inherit_target_merge_join",
             "target": "target_layer",
             "static_fields": [
-              "Join_Count",
-              "TARGET_FID"
+              {
+                "name": "Join_Count",
+                "type": "integer",
+                "nullable": true,
+                "length": null,
+                "precision": null,
+                "scale": null,
+                "domain": []
+              },
+              {
+                "name": "TARGET_FID",
+                "type": "integer",
+                "nullable": true,
+                "length": null,
+                "precision": null,
+                "scale": null,
+                "domain": []
+              }
             ],
             "parameter_field": "not_applicable"
           },
@@ -1167,10 +1223,6 @@
           },
           "output_name": {
             "type": "string"
-          },
-          "output_workspace": {
-            "type": "string",
-            "x-geopilot-kind": "path"
           }
         },
         "additionalProperties": false
@@ -1187,7 +1239,7 @@
           "gdb"
         ],
         "default_format": "gdb",
-        "workspace": "mxd_default_or_output_workspace",
+        "workspace": "server_managed_gdb",
         "overwrite": false,
         "add_to_map": true
       },
@@ -1255,10 +1307,6 @@
             },
             "output_name": {
               "type": "string"
-            },
-            "output_workspace": {
-              "type": "string",
-              "x-geopilot-kind": "path"
             }
           },
           "additionalProperties": false
@@ -1369,10 +1417,6 @@
           },
           "output_name": {
             "type": "string"
-          },
-          "output_workspace": {
-            "type": "string",
-            "x-geopilot-kind": "path"
           }
         },
         "additionalProperties": false
@@ -1389,7 +1433,7 @@
           "gdb"
         ],
         "default_format": "gdb",
-        "workspace": "mxd_default_or_output_workspace",
+        "workspace": "server_managed_gdb",
         "overwrite": false,
         "add_to_map": true
       },
@@ -1457,10 +1501,6 @@
             },
             "output_name": {
               "type": "string"
-            },
-            "output_workspace": {
-              "type": "string",
-              "x-geopilot-kind": "path"
             }
           },
           "additionalProperties": false
@@ -1573,10 +1613,6 @@
           },
           "output_name": {
             "type": "string"
-          },
-          "output_workspace": {
-            "type": "string",
-            "x-geopilot-kind": "path"
           }
         },
         "additionalProperties": false
@@ -1593,7 +1629,7 @@
           "gdb"
         ],
         "default_format": "gdb",
-        "workspace": "mxd_default_or_output_workspace",
+        "workspace": "server_managed_gdb",
         "overwrite": false,
         "add_to_map": true
       },
@@ -1646,10 +1682,6 @@
             },
             "output_name": {
               "type": "string"
-            },
-            "output_workspace": {
-              "type": "string",
-              "x-geopilot-kind": "path"
             }
           },
           "additionalProperties": false
@@ -1760,10 +1792,6 @@
           },
           "output_name": {
             "type": "string"
-          },
-          "output_workspace": {
-            "type": "string",
-            "x-geopilot-kind": "path"
           }
         },
         "additionalProperties": false
@@ -1780,7 +1808,7 @@
           "gdb"
         ],
         "default_format": "gdb",
-        "workspace": "mxd_default_or_output_workspace",
+        "workspace": "server_managed_gdb",
         "overwrite": false,
         "add_to_map": true
       },
@@ -1848,10 +1876,6 @@
             },
             "output_name": {
               "type": "string"
-            },
-            "output_workspace": {
-              "type": "string",
-              "x-geopilot-kind": "path"
             }
           },
           "additionalProperties": false
@@ -1962,10 +1986,6 @@
           },
           "output_name": {
             "type": "string"
-          },
-          "output_workspace": {
-            "type": "string",
-            "x-geopilot-kind": "path"
           }
         },
         "additionalProperties": false
@@ -1982,7 +2002,7 @@
           "gdb"
         ],
         "default_format": "gdb",
-        "workspace": "mxd_default_or_output_workspace",
+        "workspace": "server_managed_gdb",
         "overwrite": false,
         "add_to_map": true
       },
@@ -2050,10 +2070,6 @@
             },
             "output_name": {
               "type": "string"
-            },
-            "output_workspace": {
-              "type": "string",
-              "x-geopilot-kind": "path"
             }
           },
           "additionalProperties": false
@@ -2166,10 +2182,6 @@
           },
           "output_name": {
             "type": "string"
-          },
-          "output_workspace": {
-            "type": "string",
-            "x-geopilot-kind": "path"
           }
         },
         "additionalProperties": false
@@ -2186,7 +2198,7 @@
           "gdb"
         ],
         "default_format": "gdb",
-        "workspace": "mxd_default_or_output_workspace",
+        "workspace": "server_managed_gdb",
         "overwrite": false,
         "add_to_map": true
       },
@@ -2239,10 +2251,6 @@
             },
             "output_name": {
               "type": "string"
-            },
-            "output_workspace": {
-              "type": "string",
-              "x-geopilot-kind": "path"
             }
           },
           "additionalProperties": false
@@ -2309,9 +2317,11 @@
         "semantic_effects": [
           {
             "kind": "merge",
-            "sources": {
-              "parameter": "input_layers"
-            },
+            "sources": [
+              {
+                "parameter": "input_layers"
+              }
+            ],
             "result": {
               "output": true
             }
@@ -2506,9 +2516,11 @@
         "semantic_effects": [
           {
             "kind": "append",
-            "sources": {
-              "parameter": "input_layers"
-            },
+            "sources": [
+              {
+                "parameter": "input_layers"
+              }
+            ],
             "target": {
               "parameter": "target_layer"
             },

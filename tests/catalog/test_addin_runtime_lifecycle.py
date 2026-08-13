@@ -23,11 +23,20 @@ class AddInRuntimeLifecycleTests(unittest.TestCase):
 
         runtime = mock.Mock()
         module.load_runtime_module = mock.Mock(return_value=runtime)
-        button = module.OpenAssistantButton()
-        button.onClick()
-        button.onClick()
 
+        # Construction does not activate the interaction runtime.  The public
+        # lifecycle begins only when the user clicks the Add-in button.
+        button = module.OpenAssistantButton()
+        module.load_runtime_module.assert_not_called()
+        runtime.bind_ui_thread.assert_not_called()
+        self.assertEqual(runtime.open_or_handle_bridge_command.call_count, 0)
+
+        # Each click binds the active ArcMap UI thread and publishes a command;
+        # the runtime module itself remains process-scoped and is loaded once.
+        button.onClick()
+        button.onClick()
         module.load_runtime_module.assert_called_once_with()
+        self.assertEqual(runtime.bind_ui_thread.call_count, 2)
         self.assertEqual(runtime.open_or_handle_bridge_command.call_count, 2)
 
     def test_runtime_does_not_hot_reload_arcmap_modules(self):

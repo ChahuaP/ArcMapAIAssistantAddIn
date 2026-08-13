@@ -514,18 +514,21 @@ def task_cases(expected_ids: Mapping[str, Sequence[str]]) -> Dict[str, Any]:
                     "prompt": "进入防汛研判第一轮：从当前淹没区中提取风险等级不低于4级的区域，再找出这些区域内人口不少于800且脆弱性为HIGH的社区，分别生成 flood_high 和 affected_comm；不要修改源数据。",
                     "expected_outputs": ["flood_high", "affected_comm"],
                     "expected_id_keys": ["flood_high", "flood_affected_comm"],
+                    "truth_bindings": [{"output_id": "flood_high", "truth_key": "flood_high", "id_field": "FLOOD_ID"}, {"output_id": "affected_comm", "truth_key": "flood_affected_comm", "id_field": "COMM_ID"}],
                 },
                 {
                     "round": 2,
                     "prompt": "继续上一轮结果：以 affected_comm 为中心建立2公里应急服务区，在服务区内筛选状态为OPEN的避难场所，生成 available_shelters；保留上一轮结果供下一轮使用。",
                     "expected_outputs": ["affected_service_2km", "available_shelters"],
                     "expected_id_keys": ["flood_available_shelters"],
+                    "truth_bindings": [{"output_id": "available_shelters", "truth_key": "flood_available_shelters", "id_field": "SHLT_ID"}],
                 },
                 {
                     "round": 3,
                     "prompt": "完成应急调度成果：从 available_shelters 中筛选容量不少于1000人的场所，生成 priority_shelters，并导出其属性表和当前应急分布图。",
                     "expected_outputs": ["priority_shelters", "priority_shelters.csv", "flood_response_map.png"],
                     "expected_id_keys": ["flood_priority_shelters"],
+                    "truth_bindings": [{"output_id": "priority_shelters", "truth_key": "flood_priority_shelters", "id_field": "SHLT_ID"}],
                 },
             ],
         },
@@ -562,18 +565,21 @@ def task_cases(expected_ids: Mapping[str, Sequence[str]]) -> Dict[str, Any]:
                     "prompt": "开始建设项目合规核查：筛选未取得许可或状态为STOP的建设项目，生成 suspect_projects，源项目数据不得修改。",
                     "expected_outputs": ["suspect_projects"],
                     "expected_id_keys": ["land_suspect_projects"],
+                    "truth_bindings": [{"output_id": "suspect_projects", "truth_key": "land_suspect_projects", "id_field": "PROJ_ID"}],
                 },
                 {
                     "round": 2,
                     "prompt": "继续核查：计算 suspect_projects 与保护区的相交部分生成 protected_conflicts，同时筛选规划用途与实际用途不一致的地块生成 mismatch_parcels。",
                     "expected_outputs": ["protected_conflicts", "mismatch_parcels"],
                     "expected_id_keys": ["land_protected_conflicts", "land_mismatch_parcels"],
+                    "truth_bindings": [{"output_id": "protected_conflicts", "truth_key": "land_protected_conflicts", "id_field": "PROJ_ID"}, {"output_id": "mismatch_parcels", "truth_key": "land_mismatch_parcels", "id_field": "PARCEL_ID"}],
                 },
                 {
                     "round": 3,
                     "prompt": "形成重点违规清单：从 suspect_projects 中找出位于 protected_conflicts 或 mismatch_parcels 范围内的项目，生成 priority_violations，并导出属性表和合规核查图。",
                     "expected_outputs": ["priority_violations", "priority_violations.csv", "land_compliance_map.png"],
                     "expected_id_keys": ["land_priority_projects"],
+                    "truth_bindings": [{"output_id": "priority_violations", "truth_key": "land_priority_projects", "id_field": "PROJ_ID"}],
                 },
             ],
         },
@@ -719,15 +725,15 @@ def transform_layers(
 
 
 def _generate_into(
-    staging_dir: Path,
+    build_root: Path,
     final_output_dir: Path,
     *,
     seed: int,
     scale: float,
     city_bounds: tuple[float, float, float, float],
 ) -> None:
-    source_dir = staging_dir / "source"
-    truth_dir = staging_dir / "truth"
+    source_dir = build_root / "source"
+    truth_dir = build_root / "truth"
     source_dir.mkdir(parents=True)
     truth_dir.mkdir(parents=True)
 
@@ -775,16 +781,16 @@ def _generate_into(
     }
     if not validation["ok"]:
         raise ValueError("Written layer validation failed")
-    (staging_dir / "validation.json").write_text(json.dumps(validation, ensure_ascii=False, indent=2), encoding="utf-8")
-    (staging_dir / "task_cases.json").write_text(json.dumps(task_cases(expected_ids), ensure_ascii=False, indent=2), encoding="utf-8")
+    (build_root / "validation.json").write_text(json.dumps(validation, ensure_ascii=False, indent=2), encoding="utf-8")
+    (build_root / "task_cases.json").write_text(json.dumps(task_cases(expected_ids), ensure_ascii=False, indent=2), encoding="utf-8")
     (truth_dir / "expected_ids.json").write_text(json.dumps(expected_ids, ensure_ascii=False, indent=2), encoding="utf-8")
-    write_data_dictionary(layers, staging_dir / "data_dictionary.csv")
+    write_data_dictionary(layers, build_root / "data_dictionary.csv")
 
     load_order = [str((final_output_dir / "source" / f"{name}.shp").resolve()) for name in layers]
-    (staging_dir / "load_order.json").write_text(json.dumps(load_order, ensure_ascii=False, indent=2), encoding="utf-8")
+    (build_root / "load_order.json").write_text(json.dumps(load_order, ensure_ascii=False, indent=2), encoding="utf-8")
     file_records = [
-        {"path": str(path.relative_to(staging_dir)).replace("\\", "/"), "bytes": path.stat().st_size, "sha256": sha256(path)}
-        for path in sorted(staging_dir.rglob("*"))
+        {"path": str(path.relative_to(build_root)).replace("\\", "/"), "bytes": path.stat().st_size, "sha256": sha256(path)}
+        for path in sorted(build_root.rglob("*"))
         if path.is_file()
     ]
     manifest = {
@@ -800,7 +806,7 @@ def _generate_into(
         "rounds_per_case": 3,
         "files": file_records,
     }
-    (staging_dir / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    (build_root / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def generate(
@@ -819,16 +825,16 @@ def generate(
         prefix=f".{output_dir.name}.tmp-",
         dir=output_dir.parent,
     ) as temporary:
-        staging_dir = Path(temporary) / "dataset"
-        staging_dir.mkdir()
+        build_root = Path(temporary) / "dataset"
+        build_root.mkdir()
         _generate_into(
-            staging_dir,
+            build_root,
             output_dir,
             seed=seed,
             scale=scale,
             city_bounds=bounds,
         )
-        os.replace(staging_dir, output_dir)
+        os.replace(build_root, output_dir)
 
 
 def parse_args() -> argparse.Namespace:

@@ -18,6 +18,7 @@ from ..kernel.contracts import canonical_json
 from ..kernel.store import JournalStore, QuotaStoppedError, UncertainCallError
 from .adapter import ProviderError
 from .contracts import (
+    AGENT_ROLES,
     AgentModelPlan,
     ModelRequest,
     ModelResult,
@@ -102,8 +103,47 @@ class ModelRuntime:
         except KeyError:
             raise KeyError("unbound agent role: %s" % role)
 
+    def seal_task_plan(self, selections: Dict[str, Dict[str, str]]) -> AgentModelPlan:
+        """Expand one caller-selected role map into an immutable task plan.
+
+        No implicit role, provider or model selection is permitted.  The
+        current runtime contributes only operational limits for a selected
+        binding; registry resolution proves each chosen route is registered.
+        """
+        if set(selections) != {"compiler", "planner", "auditor", "repairer"}:
+            raise ValueError("model_bindings must bind every agent role exactly once.")
+        bindings = {}
+        for role, selected in selections.items():
+            if not isinstance(selected, dict) or set(selected) != {"provider", "model"}:
+                raise ValueError("each model binding requires provider and model.")
+            baseline = self.model_plan.binding_for(role)
+            connection = self.registry.resolve_selection(selected["provider"], selected["model"])
+            binding = type(baseline)(
+                connection_id=connection.connection_id, model_id=selected["model"],
+                role=role, temperature=baseline.temperature,
+                max_output_tokens=baseline.max_output_tokens,
+                budget_policy=baseline.budget_policy,
+            )
+            self.registry.resolve(binding)
+            bindings[role] = binding
+        return AgentModelPlan(**bindings)
+
+    def binding_summary(self, plan: AgentModelPlan) -> Dict[str, Dict[str, Any]]:
+        summary: Dict[str, Dict[str, Any]] = {}
+        for role in AGENT_ROLES:
+            binding = plan.binding_for(role)
+            summary[role] = model_binding_evidence(
+                self.registry.resolve(binding).connection, binding,
+            )
+        return summary
+
     def model_identity(self, role: str) -> str:
-        identity = self.identity_for(role)
+        return self.model_identity_for(self.model_plan, role)
+
+    def model_identity_for(self, plan: AgentModelPlan, role: str) -> str:
+        binding = plan.binding_for(role)
+        route = self.registry.resolve(binding)
+        identity = model_binding_evidence(route.connection, binding)
         return "%s/%s@%s" % (
             identity["provider"], identity["model"],
             identity["endpoint_fingerprint"],
@@ -165,8 +205,10 @@ class ModelRuntime:
         return result
 
     def _resolve(self, request: ModelRequest) -> Tuple[ProviderRoute, ResolvedModelCall]:
-        binding = self.model_plan.binding_for(request.role)
+        binding = request.model_plan.binding_for(request.role)
         route = self.registry.resolve(binding)
+        if request.model_binding_summary.get(request.role) != model_binding_evidence(route.connection, binding):
+            raise RuntimeError("sealed model binding differs from the active provider registry.")
         return route, ResolvedModelCall(
             request=request, connection=route.connection, binding=binding,
         )
@@ -296,7 +338,12 @@ class ModelRuntime:
             max_output_tokens=resolved.binding.max_output_tokens,
             context_token_limit=resolved.binding.budget_policy.context_token_limit,
         )
-        semaphore = self._concurrency[self._binding_key(resolved.binding)]
+        with self._lock:
+            semaphore = self._concurrency.get(self._binding_key(resolved.binding))
+            if semaphore is None:
+                semaphore = threading.BoundedSemaphore(
+                    resolved.binding.budget_policy.concurrency_limit)
+                self._concurrency[self._binding_key(resolved.binding)] = semaphore
         with semaphore:
             provider_response = route.adapter.invoke(
                 invocation,

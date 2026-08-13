@@ -59,16 +59,23 @@ class HttpAdapterTest(unittest.TestCase):
         self.adapter = GeoPilotHttpAdapter(self.kernel, self.bridge)
 
     def _headers(self, session_id=SID):
-        session = self.adapter.handle_get("/api/v1/session", headers={"X-Session-Id": session_id})
-        return {"X-Session-Id": session_id, "Origin": "http://127.0.0.1:8765",
+        session = self.adapter.handle_get("/api/v1/active-session")
+        return {"X-Session-Id": session["session_id"], "X-Session-Epoch": str(session["epoch"]), "Origin": "http://127.0.0.1:8765",
                 "X-CSRF-Token": session["csrf_token"]}
 
     def _wait(self, run_id):
         return fakes.wait_for_terminal(self.kernel, run_id)
 
     @staticmethod
+    def _model_bindings():
+        return {role: {"provider": "fake", "model": "Fake"}
+                for role in ("compiler", "planner", "auditor", "repairer")}
+
+    @staticmethod
     def _submit_payload(text):
-        return {"text": text, "target_selector": {
+        return {"text": text, "model_bindings": {
+            role: {"provider": "fake", "model": "Fake"}
+            for role in ("compiler", "planner", "auditor", "repairer")}, "target_selector": {
             "bridge_pid": 2001, "bridge_port": 8766, "arcmap_pid": 2000,
             "hwnd": 3000, "deployment_hash": "a" * 64,
         }}
@@ -98,17 +105,33 @@ class HttpAdapterTest(unittest.TestCase):
             self.adapter.handle_post("/api/v1/runs", {}, self._headers())
         self.assertEqual(ctx.exception.status, 400)
 
+    def test_submit_requires_explicit_model_plan(self):
+        payload = self._submit_payload("select cities")
+        del payload["model_bindings"]
+        with self.assertRaises(HttpError) as ctx:
+            self.adapter.handle_post("/api/v1/runs", payload,
+                                     self._headers())
+        self.assertEqual(ctx.exception.status, 400)
+
+    def test_submit_seals_expanded_model_binding_in_run_view(self):
+        run = self.adapter.handle_post("/api/v1/runs", self._submit_payload("select cities"),
+                                       self._headers())["run"]
+        self.assertTrue(run["model_plan_digest"])
+        self.assertEqual("fake", run["model_binding_summary"]["planner"]["provider"])
+        self.assertEqual("Fake", run["model_binding_summary"]["planner"]["model"])
+
     def test_post_rejects_missing_csrf_token(self):
+        active = self.adapter.handle_get("/api/v1/active-session")
         with self.assertRaises(HttpError) as ctx:
             self.adapter.handle_post("/api/v1/runs", {"text": "a"},
-                                     {"X-Session-Id": SID, "Origin": "http://127.0.0.1:8765"})
+                                     {"X-Session-Id": active["session_id"], "X-Session-Epoch": str(active["epoch"]), "Origin": "http://127.0.0.1:8765"})
         self.assertEqual(ctx.exception.status, 403)
 
     def test_post_rejects_cross_origin(self):
-        session = self.adapter.handle_get("/api/v1/session", headers={"X-Session-Id": SID})
+        session = self.adapter.handle_get("/api/v1/active-session")
         with self.assertRaises(HttpError) as ctx:
             self.adapter.handle_post("/api/v1/runs", {"text": "a"},
-                                     {"X-Session-Id": SID, "Origin": "https://evil.example",
+                                     {"X-Session-Id": session["session_id"], "X-Session-Epoch": str(session["epoch"]), "Origin": "https://evil.example",
                                       "X-CSRF-Token": session["csrf_token"]})
         self.assertEqual(ctx.exception.status, 403)
 
@@ -217,17 +240,23 @@ class DecideHttpTest(unittest.TestCase):
         self.adapter = GeoPilotHttpAdapter(self.kernel, self.bridge)
 
     def _headers(self, session_id=SID):
-        session = self.adapter.handle_get("/api/v1/session", headers={"X-Session-Id": session_id})
-        return {"X-Session-Id": session_id, "Origin": "http://127.0.0.1:8765",
+        session = self.adapter.handle_get("/api/v1/active-session")
+        return {"X-Session-Id": session["session_id"], "X-Session-Epoch": str(session["epoch"]), "Origin": "http://127.0.0.1:8765",
                 "X-CSRF-Token": session["csrf_token"]}
 
     def _wait(self, run_id):
         return fakes.wait_for_terminal(self.kernel, run_id)
 
+    @staticmethod
+    def _model_bindings():
+        return {role: {"provider": "fake", "model": "Fake"}
+                for role in ("compiler", "planner", "auditor", "repairer")}
+
     def test_submit_execute_pauses_then_decide_approved(self):
         result = self.adapter.handle_post("/api/v1/runs",
                                           {"text": "buffer", "execute": True,
                                            "side_effect_level": 2,
+                                           "model_bindings": self._model_bindings(),
                                            "target_selector": {"bridge_pid": 2001, "bridge_port": 8766, "arcmap_pid": 2000, "hwnd": 3000, "deployment_hash": "a" * 64}},
                                           self._headers())
         run = result["run"]
@@ -249,6 +278,7 @@ class DecideHttpTest(unittest.TestCase):
         result = self.adapter.handle_post("/api/v1/runs",
                                           {"text": "buffer", "execute": True,
                                            "side_effect_level": 2,
+                                           "model_bindings": self._model_bindings(),
                                            "target_selector": {"bridge_pid": 2001, "bridge_port": 8766, "arcmap_pid": 2000, "hwnd": 3000, "deployment_hash": "a" * 64}},
                                           self._headers())
         run = result["run"]

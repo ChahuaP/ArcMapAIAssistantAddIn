@@ -11,6 +11,8 @@ using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using System.Linq;
 
 namespace GeoPilot.ArcMapBridgeExternal
 {
@@ -24,13 +26,18 @@ namespace GeoPilot.ArcMapBridgeExternal
         private const string SilentCommandFileName = "bridge_command.json";
         private const string DeploymentIdentityFileName = "deployment_identity.json";
         private const string ReadyFileName = "bridge.ready";
+        private const string RuntimeGateProtocol = "geopilot-runtime-gate-v1";
+        private const string RuntimeGateSchemaSha256 = "56e77790386f4a6710e361b508edc0be7b6d600a98237bf9f7ec949f99141c88";
+        private const string RuntimeGateSchemaFileName = "runtime_gate.schema.json";
         private static readonly Encoding Utf8NoBom = new UTF8Encoding(false, true);
+        private static JObject _runtimeGateSchema;
 
         [STAThread]
         private static int Main(string[] args)
         {
             try
             {
+                ValidateRuntimeGateSchema();
                 BindArcGisRuntime();
                 using (var bridge = new BridgeServer(ReadDeploymentIdentity()))
                 {
@@ -53,6 +60,47 @@ namespace GeoPilot.ArcMapBridgeExternal
             if (!RuntimeManager.Bind(ProductCode.Desktop))
             {
                 throw new InvalidOperationException("ArcGIS Desktop runtime bind failed.");
+            }
+        }
+
+        private static void ValidateRuntimeGateSchema()
+        {
+            string path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, RuntimeGateSchemaFileName);
+            byte[] bytes = File.ReadAllBytes(path);
+            string actual;
+            using (SHA256 sha = SHA256.Create())
+            {
+                actual = BitConverter.ToString(sha.ComputeHash(bytes)).Replace("-", "").ToLowerInvariant();
+            }
+            JObject schema = JObject.Parse(Utf8NoBom.GetString(bytes));
+            if (actual != RuntimeGateSchemaSha256 || (string)schema["protocol"] != RuntimeGateProtocol)
+            {
+                throw new InvalidOperationException("runtime-gate schema identity mismatch.");
+            }
+            _runtimeGateSchema = schema;
+        }
+
+        private static void ValidateRuntimeGateFields(JObject document, string direction, string mode)
+        {
+            JArray common = _runtimeGateSchema[direction + "_common_required"] as JArray;
+            JObject modes = _runtimeGateSchema[direction + "_mode_required"] as JObject;
+            JArray selected = modes == null ? null : modes[mode] as JArray;
+            if (common == null || selected == null)
+            {
+                throw new InvalidOperationException("runtime-gate schema has no fields for mode " + mode + ".");
+            }
+            foreach (JToken field in common.Concat(selected))
+            {
+                string name = (string)field;
+                if (string.IsNullOrWhiteSpace(name) || document[name] == null || document[name].Type == JTokenType.Null)
+                {
+                    throw new InvalidOperationException("runtime-gate document lacks required field: " + name);
+                }
+            }
+            int expectedCount = common.Count + selected.Count;
+            if (document.Properties().Count() != expectedCount)
+            {
+                throw new InvalidOperationException("runtime-gate document has unknown fields.");
             }
         }
         private sealed class BridgeServer : IDisposable
@@ -219,6 +267,10 @@ namespace GeoPilot.ArcMapBridgeExternal
                     {
                         WriteJson(client, SampleValues(request.Body));
                     }
+                    else if (request.Method == "POST" && request.Path == "/runtime-gate")
+                    {
+                        WriteJson(client, RuntimeGate(request.Body));
+                    }
                     else
                     {
                         WriteJson(client, ErrorJson("Not found."), 404);
@@ -326,12 +378,14 @@ namespace GeoPilot.ArcMapBridgeExternal
                 {
                     string outputId = ExtractString(request.Body, "output_id");
                     string kind = ExtractString(request.Body, "kind");
+                    string outputFormat = ExtractString(request.Body, "output_format");
                     string stagedPath = ExtractString(request.Body, "staged_path");
                     string sourceUnitPath = ExtractString(request.Body, "source_publish_unit_path");
                     string deploymentHash = ExtractString(request.Body, "deployment_hash");
                     bool unitProbe = !string.IsNullOrWhiteSpace(sourceUnitPath);
                     if (!IsCanonicalGuid(runId) || (!unitProbe && (string.IsNullOrWhiteSpace(outputId) ||
-                        string.IsNullOrWhiteSpace(kind) || string.IsNullOrWhiteSpace(stagedPath))) ||
+                        string.IsNullOrWhiteSpace(kind) || string.IsNullOrWhiteSpace(outputFormat) ||
+                        string.IsNullOrWhiteSpace(stagedPath))) ||
                         string.IsNullOrWhiteSpace(deploymentHash))
                     {
                         return ErrorJson("run_id, deployment_hash and either source_publish_unit_path or output_id/kind/staged_path are required.");
@@ -339,6 +393,7 @@ namespace GeoPilot.ArcMapBridgeExternal
                     string probeJson = unitProbe
                         ? "{\"source_publish_unit_path\":\"" + JsonEscape(sourceUnitPath) + "\",\"deployment_hash\":\"" + JsonEscape(deploymentHash) + "\"}"
                         : "{\"output_id\":\"" + JsonEscape(outputId) + "\",\"kind\":\"" + JsonEscape(kind) +
+                          "\",\"output_format\":\"" + JsonEscape(outputFormat) +
                           "\",\"staged_path\":\"" + JsonEscape(stagedPath) + "\",\"deployment_hash\":\"" + JsonEscape(deploymentHash) + "\"}";
                     ExecuteArcMapCommand(hwnd, "acceptance_probe", false, leaseId, epoch, planHash, runId, probeJson, null);
                     return "{\"ok\":true,\"run_id\":\"" + JsonEscape(runId) + "\"}";
@@ -399,6 +454,72 @@ namespace GeoPilot.ArcMapBridgeExternal
                     return ErrorJson("fully fenced sample request with positive limits is required.");
                 }
                 return EnqueueAndWait("sample", body);
+            }
+
+            private string RuntimeGate(string body)
+            {
+                string mode = ExtractString(body, "mode");
+                int hwnd = ExtractInt(body, "hwnd");
+                int arcmapPid = ExtractInt(body, "arcmap_pid");
+                int bridgePid = ExtractInt(body, "bridge_pid");
+                int bridgePort = ExtractInt(body, "bridge_port");
+                string deploymentHash = ExtractString(body, "deployment_hash");
+                string lifecycleId = ExtractString(body, "lifecycle_lease_id");
+                string resultPath = ExtractString(body, "result_path");
+                string protocol = ExtractString(body, "protocol");
+                string schemaHash = ExtractString(body, "schema_hash");
+                if ((mode != "prepare" && mode != "restore" && mode != "evaluate") || hwnd <= 0 ||
+                    bridgePid != CurrentProcessId() || bridgePort != Port ||
+                    arcmapPid != ArcMapProcessId(hwnd) || deploymentHash != _deploymentHash ||
+                    !IsCanonicalGuid(lifecycleId) || !IsRuntimeGateResultPath(resultPath) ||
+                    protocol != RuntimeGateProtocol || schemaHash != RuntimeGateSchemaSha256)
+                {
+                    return ErrorJson("runtime-gate target identity or lifecycle fence is invalid.");
+                }
+                JObject document = JObject.Parse(body);
+                ValidateRuntimeGateFields(document, "request", mode);
+                if (mode == "prepare" && (document["source_layers"] == null ||
+                    document["source_layers"].Type != JTokenType.Array ||
+                    !document["source_layers"].HasValues))
+                {
+                    return ErrorJson("runtime-gate prepare requires source_layers.");
+                }
+                ExecuteArcMapCommand(hwnd, "runtime_gate", false, "", 0, "", "", body, null);
+                return ReadRuntimeGateResult(resultPath, lifecycleId);
+            }
+
+            private static bool IsRuntimeGateResultPath(string path)
+            {
+                if (string.IsNullOrWhiteSpace(path)) return false;
+                string root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "ArcMapAIAssistant", "runtime_gate");
+                try
+                {
+                    string full = Path.GetFullPath(path);
+                    string prefix = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+                    return full.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) &&
+                        full.EndsWith(".json", StringComparison.OrdinalIgnoreCase);
+                }
+                catch { return false; }
+            }
+
+            private static string ReadRuntimeGateResult(string path, string lifecycleId)
+            {
+                if (!File.Exists(path)) throw new InvalidOperationException("runtime-gate did not produce a fenced result.");
+                JObject result = JObject.Parse(File.ReadAllText(path, Utf8NoBom));
+                string mode = result["truth_ids"] != null ? "evaluate" :
+                    (result["staging_gdb"] != null ? "prepare" : "restore");
+                ValidateRuntimeGateFields(result, "result", mode);
+                if ((string)result["lifecycle_lease_id"] != lifecycleId ||
+                    (string)result["protocol"] != RuntimeGateProtocol ||
+                    (string)result["schema_hash"] != RuntimeGateSchemaSha256 ||
+                    !(result["context_hash"] is JValue) || string.IsNullOrWhiteSpace((string)result["context_hash"]))
+                {
+                    throw new InvalidOperationException("runtime-gate result does not match its lifecycle fence.");
+                }
+                File.Delete(path);
+                result["ok"] = true;
+                return result.ToString(Newtonsoft.Json.Formatting.None);
             }
 
             private void ExecuteArcMapCommand(int hwnd, string silentAction, bool allowEdits,

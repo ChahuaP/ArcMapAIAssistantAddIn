@@ -55,6 +55,7 @@
           <button class="nav-btn" type="button" onclick="openCapabilities()">能力范围</button>
           <button class="nav-btn" type="button" onclick="openModal('contextModal')">地图快照</button>
           <button class="nav-btn" type="button" onclick="openDiagnostics()">系统诊断</button>
+          <button class="nav-btn" type="button" onclick="openArchivedSessions()">已归档对话</button>
           <button class="nav-btn" type="button" onclick="openModal('keyModal')">
             <span id="keyActionText">模型配置</span>
           </button>
@@ -112,6 +113,13 @@
         <div class="empty-state-card">暂无任务。</div>
       </div>
     </aside>
+  </div>
+
+  <div class="overlay" id="archivesModal" hidden onclick="closeOnBackdrop(event)">
+    <div class="overlay-panel" role="dialog" aria-modal="true" aria-labelledby="archivesTitle">
+      <div class="overlay-header"><div class="overlay-title-group"><h2 id="archivesTitle">已归档对话</h2><p class="overlay-subtitle">归档仅供查看，不能恢复为当前对话。</p></div><button class="btn btn-sm btn-ghost" type="button" onclick="closeModal('archivesModal')">关闭</button></div>
+      <div class="overlay-body" id="archivesList"></div>
+    </div>
   </div>
 
   <!-- ═══ Modals ═══ -->

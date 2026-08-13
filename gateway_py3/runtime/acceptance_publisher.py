@@ -24,6 +24,7 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from shared_runtime.file_semantics import inspect_file, FileSemanticError
 
 from ..kernel import contracts
 from ..kernel.contracts import (
@@ -48,16 +49,6 @@ def _canonical_json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
-def _sealed_map_postcondition(step: Any) -> Optional[Dict[str, Any]]:
-    """Return the sole catalog postcondition bound to a sealed map step."""
-    if step is None:
-        return None
-    from ..catalog_loader import OperationCatalog
-    conditions = (OperationCatalog().get(step.operation).get("capability_contract") or {}).get("postconditions") or []
-    supported = [item for item in conditions if isinstance(item, dict) and item.get("kind")]
-    return supported[0] if len(supported) == 1 else None
-
-
 class AcceptancePublisher:
     """§6.8 independent acceptance + atomic publication.
 
@@ -69,7 +60,8 @@ class AcceptancePublisher:
     # -- §6.8 accept ---------------------------------------------------------
 
     def accept(self, intent: IntentSpec, plan: VerifiedPlan,
-               probe_documents: Any, staged_artifacts: Any) -> Outcome:
+               probe_documents: Any, staged_artifacts: Any,
+               acceptance_contract: Any = None) -> Outcome:
         """Accept only independent ArcPy probe documents, never receipts.
 
         A receipt proves dispatch/execution happened; it is not GIS evidence.
@@ -83,6 +75,9 @@ class AcceptancePublisher:
         probes = probe_documents if isinstance(probe_documents, list) else []
         staged = staged_artifacts if isinstance(staged_artifacts, list) else []
         checks = []
+        contract = acceptance_contract if isinstance(acceptance_contract, dict) else {}
+        required_proofs = {item.get("proof_id") for item in contract.get("rules", [])
+                           if isinstance(item, dict) and item.get("required") is True}
         by_output = {}
         for probe in probes:
             if isinstance(probe, dict) and isinstance(probe.get("output_id"), str):
@@ -90,12 +85,14 @@ class AcceptancePublisher:
                     checks.append({"name": "unique_probe", "ok": False, "detail": probe["output_id"]})
                 by_output[probe["output_id"]] = probe
         unit_probes = [probe for probe in probes if isinstance(probe, dict) and probe.get("probe_type") == "unit"]
-        if file_outputs and len(unit_probes) != 1:
-            checks.append({"name": "unit_probe", "ok": False, "detail": "exactly one unit probe required"})
-        if not file_outputs and unit_probes:
-            checks.append({"name": "unit_probe", "ok": False, "detail": "map-state acceptance has no FileGDB unit"})
         staged_by_output = {item.output_id: item for item in staged
                             if isinstance(item, contracts.ArtifactIdentity)}
+        has_gdb_outputs = any(item.publication_kind == "file_gdb"
+                              for item in staged_by_output.values())
+        if has_gdb_outputs and len(unit_probes) != 1:
+            checks.append({"name": "unit_probe", "ok": False, "detail": "exactly one unit probe required"})
+        if not has_gdb_outputs and unit_probes:
+            checks.append({"name": "unit_probe", "ok": False, "detail": "acceptance has no FileGDB unit"})
         expected_ids = set(output.output_id for output in declared)
         if set(by_output) != expected_ids:
             checks.append({"name": "sealed_outputs_probed", "ok": False,
@@ -110,15 +107,39 @@ class AcceptancePublisher:
             if probe is None or artifact is None:
                 continue
             checks.extend(self._check_probe(output, probe, artifact))
+        if required_proofs:
+            proof_status = {}
+            for probe in probes:
+                for proof in probe.get("acceptance_proofs", []) if isinstance(probe, dict) else []:
+                    if isinstance(proof, dict) and isinstance(proof.get("proof_id"), str):
+                        proof_status[proof["proof_id"]] = proof.get("status")
+            for proof_id in sorted(required_proofs):
+                checks.append({"name": "semantic_proof", "ok": proof_status.get(proof_id) == "Proven",
+                               "detail": "%s=%s" % (proof_id, proof_status.get(proof_id, "Unresolved"))})
         for output in map_outputs:
+            # Map/layout outputs are accepted through the single semantic
+            # proof path: their rule runs through ``probe_contract`` on the
+            # runtime side and surfaces here as an ``acceptance_proofs`` entry
+            # checked by ``required_proofs`` below.  There is no parallel
+            # map-state judgment chain and no receipt-based map check; the only
+            # publisher-side check is transport integrity of the probe document.
             probe = by_output.get(output.output_id)
-            if probe is not None:
-                checks.extend(self._check_map_state_probe(output, probe, plan))
-        if file_outputs and len(unit_probes) == 1:
+            if probe is None:
+                checks.append({"name": "sealed_outputs_probed", "ok": False,
+                               "detail": "missing map probe for %s" % output.output_id})
+                continue
+            canonical = _canonical_json({key: value for key, value in probe.items()
+                                         if key != "manifest_digest"})
+            checks.append({"name": "map_probe_digest", "ok": probe.get("manifest_digest") ==
+                           hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+                           "detail": output.output_id})
+        if has_gdb_outputs and len(unit_probes) == 1:
             unit = unit_probes[0]
-            source_units = {item.source_publish_unit_path for item in staged_by_output.values()}
-            expected_members = next(iter(by_output.values())).get("members") if by_output else None
-            checks.append({"name": "unit_source", "ok": len(source_units) == 1 and unit.get("source_publish_unit_path") in source_units,
+            gdb_items = [item for item in staged_by_output.values()
+                         if item.publication_kind == "file_gdb"]
+            source_gdbs = {_containing_gdb(Path(item.logical_dataset_path)) for item in gdb_items}
+            expected_members = by_output[gdb_items[0].output_id].get("members") if gdb_items else None
+            checks.append({"name": "unit_source", "ok": len(source_gdbs) == 1 and Path(unit.get("source_publish_unit_path", "")) in source_gdbs,
                            "detail": str(unit.get("source_publish_unit_path"))})
             checks.append({"name": "unit_manifest", "ok": bool(expected_members) and unit.get("members") == expected_members,
                            "detail": "unit physical manifest"})
@@ -142,17 +163,6 @@ class AcceptancePublisher:
             details={"report": report},
         )
 
-    def _check_map_state_probe(self, output: Any, probe: Dict[str, Any], plan: VerifiedPlan) -> List[Dict[str, Any]]:
-        canonical = _canonical_json({key: value for key, value in probe.items() if key != "manifest_digest"})
-        step = next((item for item in plan.workflow if output in item.declared_outputs), None)
-        postcondition = _sealed_map_postcondition(step)
-        return [
-            {"name": "map_probe_digest", "ok": probe.get("manifest_digest") == hashlib.sha256(canonical.encode("utf-8")).hexdigest(), "detail": output.output_id},
-            {"name": "map_probe_identity", "ok": probe.get("probe_type") == "map_state" and probe.get("output_id") == output.output_id and probe.get("kind") == "map_state", "detail": output.output_id},
-            {"name": "map_probe_postcondition", "ok": postcondition is not None and probe.get("postcondition") == postcondition and probe.get("arguments") == (step.arguments if step else None), "detail": output.output_id},
-            {"name": "map_state_postcondition", "ok": probe.get("passed") is True and (probe.get("map_state_check") or {}).get("verdict") == "passed", "detail": output.output_id},
-        ]
-
     def _check_probe(self, output: Any, probe: Dict[str, Any], artifact: contracts.ArtifactIdentity) -> List[Dict[str, Any]]:
         checks = []
         canonical = _canonical_json(dict((key, value) for key, value in probe.items()
@@ -170,6 +180,15 @@ class AcceptancePublisher:
                        "detail": artifact.output_id})
         checks.append({"name": "probe_exists", "ok": probe.get("exists") is True, "detail": output.output_id})
         checks.append({"name": "probe_members", "ok": bool(probe.get("members")), "detail": output.output_id})
+        if output.kind == "file":
+            try:
+                file_semantics = inspect_file(artifact.logical_dataset_path, output.output_format)
+                semantics_ok = probe.get("file_semantics") == file_semantics
+            except FileSemanticError as exc:
+                file_semantics = {"error": str(exc)}
+                semantics_ok = False
+            checks.append({"name": "file_semantics", "ok": semantics_ok,
+                           "detail": file_semantics})
         observed = dict(probe)
         observed["path"] = probe.get("canonical_path")
         checks.extend(self._check_one_output("output %s" % output.output_id, output, observed))
@@ -203,7 +222,7 @@ class AcceptancePublisher:
             # never called) — fail closed rather than recording a fake success.
             checks = report.get("checks") if isinstance(report.get("checks"), list) else []
             has_observation_checks = any(
-                isinstance(c, dict) and c.get("name", "").startswith(("artifact_exists", "geometry_valid"))
+                isinstance(c, dict) and c.get("name", "") == "artifact_exists"
                 for c in checks
             )
             if has_observation_checks:
@@ -239,7 +258,14 @@ class AcceptancePublisher:
                 "授权已过期，拒绝发布。",
             )
         authorized = dict(grant.output_identities)
-        publication_unit: Optional[Tuple[Path, List[Tuple[Dict[str, Any], Dict[str, Any]]]]] = None
+        destination_roots = {Path(item.destination_publish_unit_path) for item in artifacts}
+        source_roots = {Path(item.source_publish_unit_path) for item in artifacts}
+        if len(destination_roots) != 1 or len(source_roots) != 1:
+            return outcome_failed(CONTRACT_FAILED, "publish", "publication_bundle_required",
+                                  "一个运行的全部成果必须属于同一原子发布目录。")
+        destination_root = next(iter(destination_roots))
+        source_root = next(iter(source_roots))
+        items = []
         for artifact in artifacts:
             output_id = artifact.output_id
             destination = artifact.destination_dataset_path
@@ -253,28 +279,15 @@ class AcceptancePublisher:
             if not isinstance(probe, dict):
                 return outcome_failed(ACCEPTANCE_FAILED, "publish", "probe_missing",
                                       "发布缺少独立验收 probe。")
-            source_unit = Path(artifact.source_publish_unit_path)
-            destination_unit = Path(artifact.destination_publish_unit_path)
-            if source_unit is None or destination_unit is None:
-                return outcome_failed(CONTRACT_FAILED, "publish", "atomic_publish_unit_required",
-                                      "仅支持以完整 FileGDB 为原子发布单元的成果。")
-            if publication_unit is None:
-                publication_unit = (destination_unit, [])
-            if publication_unit[0] != destination_unit:
-                return outcome_failed(CONTRACT_FAILED, "publish", "multiple_publish_units",
-                                      "一个运行只能发布到一个目标 FileGDB。")
-            publication_unit[1].append((artifact, probe))
-        if publication_unit is None:
-            return outcome_failed(ACCEPTANCE_FAILED, "publish", "publish_unit_missing", "发布单元缺失。")
-        destination_unit, items = publication_unit
-        source = Path(items[0][0].source_publish_unit_path)
-        expected = _manifest(source)
-        if any(expected != probe.get("members") for _artifact, probe in items):
-            return outcome_failed(ACCEPTANCE_FAILED, "publish", "manifest_changed", "验收后的 staging 清单发生变化。")
-        if destination_unit.exists():
+            if _manifest_for_artifact(artifact) != probe.get("members"):
+                return outcome_failed(ACCEPTANCE_FAILED, "publish", "manifest_changed",
+                                      "验收后的 staging 成果发生变化。")
+            items.append((artifact, probe))
+        expected = _bundle_manifest(items, destination_root)
+        if destination_root.exists():
             return outcome_failed(CONTRACT_FAILED, "publish", "target_exists_without_prepared",
                                   "正式目标已存在且没有本运行 prepared 事实，拒绝覆盖。")
-        temporary = _temporary_sibling(destination_unit, publication_id)
+        temporary = _temporary_sibling(destination_root, publication_id)
         publication = {
             "publication_id": publication_id,
             "run_id": grant.run_id,
@@ -282,10 +295,19 @@ class AcceptancePublisher:
             "plan_digest": grant.plan_digest,
             "lease_id": grant.lease_id,
             "epoch": grant.lease_epoch,
+            "publication_kind": "artifact_bundle",
             "artifacts": [{"output_id": artifact.output_id,
+                           "source": artifact.logical_dataset_path,
                            "destination": artifact.destination_dataset_path,
-                           "kind": artifact.kind} for artifact, _probe in items],
-            "target_unit_path": str(destination_unit), "temporary_unit_path": str(temporary),
+                           "destination_publish_unit": artifact.destination_publish_unit_path,
+                           "publication_kind": artifact.publication_kind,
+                           "kind": artifact.kind,
+                           "output_format": artifact.output_format,
+                           "semantic_evidence": _semantic_evidence(probe),
+                           "acceptance_evidence_hash": probe["manifest_digest"]}
+                          for artifact, probe in items],
+            "source_unit_path": str(source_root),
+            "target_unit_path": str(destination_root), "temporary_unit_path": str(temporary),
             "expected_manifest": expected,
             "receipt_timestamp": time.time(),
         }
@@ -310,7 +332,7 @@ class AcceptancePublisher:
                 return outcome_succeeded("publish", "prepared 临时发布单元已存在。")
             return outcome_failed(INFRASTRUCTURE_FAILED, "publish", "prepared_temp_conflict",
                                   "prepared 临时发布单元已存在但清单不匹配。")
-        self._materialize(next(iter(sources)), temporary, expected)
+        self._materialize_bundle(artifacts, Path(prepared["target_unit_path"]), temporary, expected)
         return outcome_succeeded("publish", "prepared 临时发布单元已验真。")
 
     def commit(self, prepared: Dict[str, Any]) -> Outcome:
@@ -335,6 +357,10 @@ class AcceptancePublisher:
         receipt = dict(prepared)
         receipt["published_at"] = prepared["receipt_timestamp"]
         receipt["manifest"] = expected
+        receipt["published_artifacts"] = [
+            item.model_dump(mode="json")
+            for item in _published_artifact_manifests(prepared, target)
+        ]
         return outcome_succeeded("publish", "成果已发布。", details={"publication": receipt})
 
     def recover(self, prepared: Dict[str, Any], staged_artifacts: Any,
@@ -379,13 +405,26 @@ class AcceptancePublisher:
             "detail": "%s: path=%s" % (prefix, observation.get("path")),
         })
         kind = observation.get("kind", "")
-        # Geometry validity (feature outputs only).
+        if kind == "file":
+            return checks
+        # Geometry validity requires independent geometry evidence.  A
+        # populated ``shapeType`` only names a geometry family; it says
+        # nothing about null, empty, or self-intersecting features.
         if output.geometry_type or kind in ("feature_class",):
             geometry = observation.get("geometry")
-            geom_ok = bool(geometry) and geometry not in ("not_applicable", "Unknown", None)
+            evidence = observation.get("geometry_evidence")
+            geom_ok = (
+                isinstance(evidence, dict)
+                and evidence.get("status") == "Proven"
+                and evidence.get("geometry_type") == geometry
+                and geometry not in ("not_applicable", "Unknown", None)
+                and evidence.get("null_count") == 0
+                and evidence.get("empty_count") == 0
+                and evidence.get("invalid_count") == 0
+            )
             checks.append({
-                "name": "geometry_valid", "ok": geom_ok,
-                "detail": "%s: geometry=%s" % (prefix, geometry),
+                "name": "geometry_integrity", "ok": geom_ok,
+                "detail": "%s: geometry_evidence=%s" % (prefix, evidence),
             })
         # Coordinate system (feature/raster outputs).
         if output.coordinate_system or kind in ("feature_class", "raster"):
@@ -398,7 +437,8 @@ class AcceptancePublisher:
                 "detail": "%s: spatial_reference=%s" % (prefix, crs),
             })
         # Fields.
-        fields = observation.get("fields") or []
+        raw_fields = observation.get("fields") or []
+        fields = [item.get("name") if isinstance(item, dict) else item for item in raw_fields]
         fields_ok = bool(fields)
         if output.expected_fields:
             present = set(str(f) for f in fields)
@@ -406,8 +446,21 @@ class AcceptancePublisher:
             fields_ok = required.issubset(present)
         checks.append({
             "name": "fields_present", "ok": fields_ok,
-            "detail": "%s: fields=%s" % (prefix, fields),
+            "detail": "%s: fields=%s" % (prefix, raw_fields),
         })
+        if kind in ("feature_class", "table"):
+            specs_ok = bool(raw_fields) and all(
+                isinstance(item, dict)
+                and isinstance(item.get("name"), str)
+                and isinstance(item.get("type"), str)
+                and isinstance(item.get("nullable"), bool)
+                and "length" in item and "precision" in item and "scale" in item and "domain" in item
+                for item in raw_fields
+            )
+            checks.append({
+                "name": "field_specs", "ok": specs_ok,
+                "detail": "%s: field specifications=%s" % (prefix, raw_fields),
+            })
         # Record count.
         count = observation.get("feature_count")
         count_ok = isinstance(count, int) and count >= output.min_record_count
@@ -415,6 +468,18 @@ class AcceptancePublisher:
             "name": "record_count", "ok": count_ok,
             "detail": "%s: feature_count=%s (min %d)" % (prefix, count, output.min_record_count),
         })
+        if kind in ("feature_class", "table"):
+            content = observation.get("record_content")
+            content_ok = (
+                isinstance(content, dict)
+                and content.get("status") == "Proven"
+                and isinstance(content.get("record_hash"), str)
+                and isinstance(content.get("attribute_hashes"), dict)
+            )
+            checks.append({
+                "name": "record_content_evidence", "ok": content_ok,
+                "detail": "%s: record_content=%s" % (prefix, content),
+            })
         return checks
 
     def _resolve_staged(self, staged_artifacts: Any) -> List[Dict[str, Any]]:
@@ -433,13 +498,30 @@ class AcceptancePublisher:
         return result
 
     @staticmethod
-    def _materialize(source: Path, temporary: Path, expected: List[Dict[str, Any]]) -> None:
-        if not source.is_dir():
-            raise ValueError("staging publication unit is missing")
+    def _materialize_bundle(artifacts, target: Path, temporary: Path,
+                            expected: List[Dict[str, Any]]) -> None:
         if temporary.exists():
             raise ValueError("prepared temporary path already exists")
         temporary.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(source, temporary, ignore=_ignore_arcgis_locks)
+        temporary.mkdir()
+        copied_gdbs = set()
+        for artifact in artifacts:
+            destination = Path(artifact.destination_dataset_path)
+            relative = destination.relative_to(target)
+            if artifact.publication_kind == "file_gdb":
+                source_gdb = _containing_gdb(Path(artifact.logical_dataset_path))
+                destination_gdb = _containing_gdb(destination)
+                if source_gdb is None or destination_gdb is None:
+                    raise ValueError("FileGDB bundle mapping is invalid")
+                relative_gdb = destination_gdb.relative_to(target)
+                if relative_gdb not in copied_gdbs:
+                    shutil.copytree(source_gdb, temporary / relative_gdb,
+                                    ignore=_ignore_arcgis_locks)
+                    copied_gdbs.add(relative_gdb)
+            else:
+                target_file = temporary / relative
+                target_file.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(Path(artifact.logical_dataset_path), target_file)
         if _manifest(temporary) != expected:
             raise ValueError("prepared temporary manifest mismatch")
 
@@ -453,6 +535,97 @@ def _manifest(path: Path) -> List[Dict[str, Any]]:
             result.append({"relative_path": child.relative_to(path).as_posix(),
                            "size": child.stat().st_size, "sha256": sha256_file(child)})
     return result
+
+
+def _containing_gdb(path: Path) -> Optional[Path]:
+    """Return the concrete FileGDB containing *path*, if one is declared."""
+    candidate = path
+    while True:
+        if candidate.suffix.lower() == ".gdb":
+            return candidate
+        if candidate.parent == candidate:
+            return None
+        candidate = candidate.parent
+
+
+def _manifest_for_artifact(artifact: contracts.ArtifactIdentity) -> List[Dict[str, Any]]:
+    source = Path(artifact.logical_dataset_path)
+    if artifact.publication_kind == "file_gdb":
+        source = _containing_gdb(source)
+        if source is None:
+            raise ValueError("FileGDB artifact is not inside a .gdb container")
+    return _manifest(source)
+
+
+def _semantic_evidence(probe: Dict[str, Any]) -> Dict[str, Any]:
+    """Seal only deterministic, independently observed artifact semantics."""
+    keys = (
+        "kind", "geometry", "geometry_evidence", "fields", "feature_count",
+        "spatial_reference", "extent", "record_content", "file_semantics", "members",
+    )
+    return {key: probe.get(key) for key in keys if key in probe}
+
+
+def _published_artifact_manifests(
+        prepared: Dict[str, Any], target_root: Path,
+) -> List[contracts.PublishedArtifactManifest]:
+    actual_bundle = _manifest(target_root)
+    if actual_bundle != prepared.get("expected_manifest"):
+        raise ValueError("published artifact bundle differs from prepared manifest")
+    result = []
+    for item in prepared.get("artifacts", ()):
+        destination = Path(item["destination"])
+        if item["publication_kind"] == "file_gdb":
+            unit = _containing_gdb(destination)
+            if unit is None or not unit.is_dir():
+                raise ValueError("published FileGDB unit is missing")
+        elif not destination.is_file():
+            raise ValueError("published file artifact is missing")
+        document = {
+            "output_id": item["output_id"], "kind": item["kind"],
+            "output_format": item["output_format"],
+            "destination_dataset_path": str(destination),
+            "destination_publish_unit_path": item["destination_publish_unit"],
+            "publication_kind": item["publication_kind"],
+            "members": actual_bundle,
+            "semantic_evidence": item["semantic_evidence"],
+            "acceptance_evidence_hash": item["acceptance_evidence_hash"],
+        }
+        document["evidence_hash"] = contracts.digest(document)
+        result.append(contracts.PublishedArtifactManifest.model_validate(document))
+    return result
+
+
+def _bundle_manifest(items: List[Tuple[contracts.ArtifactIdentity, Dict[str, Any]]],
+                     destination_root: Path) -> List[Dict[str, Any]]:
+    """Translate accepted source manifests to the atomic destination bundle."""
+    result: Dict[str, Dict[str, Any]] = {}
+    copied_gdbs = set()
+    for artifact, probe in items:
+        destination = Path(artifact.destination_dataset_path)
+        members = probe.get("members")
+        if not isinstance(members, list) or not members:
+            raise ValueError("accepted artifact has no content manifest")
+        if artifact.publication_kind == "file_gdb":
+            destination_gdb = _containing_gdb(destination)
+            if destination_gdb is None:
+                raise ValueError("FileGDB destination is not inside a .gdb container")
+            prefix = destination_gdb.relative_to(destination_root).as_posix()
+            if prefix in copied_gdbs:
+                continue
+            copied_gdbs.add(prefix)
+            for member in members:
+                relative = "%s/%s" % (prefix, member["relative_path"])
+                result[relative] = {"relative_path": relative,
+                                    "size": member["size"], "sha256": member["sha256"]}
+        else:
+            if len(members) != 1:
+                raise ValueError("file artifact must have exactly one manifest member")
+            relative = destination.relative_to(destination_root).as_posix()
+            member = members[0]
+            result[relative] = {"relative_path": relative,
+                                "size": member["size"], "sha256": member["sha256"]}
+    return [result[key] for key in sorted(result)]
 
 
 def _is_arcgis_lock(path: Path) -> bool:

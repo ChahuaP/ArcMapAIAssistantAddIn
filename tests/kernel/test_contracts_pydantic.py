@@ -19,6 +19,7 @@ from gateway_py3.kernel.contracts import (
     EMPTY,
 )
 from gateway_py3.kernel.coordinator import _runtime_step_document
+from tests.kernel import fakes
 
 
 def _caller(user="u1", tenant="t1", role="analyst"):
@@ -34,34 +35,36 @@ def _envelope(session_id="00000000-0000-0000-0000-000000000001",
         target_selector={"bridge_pid": 2001, "bridge_port": 8766,
                          "arcmap_pid": 2000, "hwnd": 3000,
                          "deployment_hash": "a" * 64},
+        model_plan=fakes.fake_agent_model_plan().model_dump(mode="json"),
+        model_binding_summary=fakes.fake_model_binding_summary(),
     )
 
 
 class RuntimeStagingContractTest(unittest.TestCase):
-    def test_execution_uses_staging_without_overwriting_sealed_destination(self):
+    def test_execution_document_keeps_physical_destination_out_of_arguments(self):
         step = WorkflowStep(
             id="buffer",
             operation="analysis.buffer",
             arguments={
                 "input_layer": "layer:roads",
                 "output_name": "roads_buffer",
-                "output_workspace": r"D:\published\results.gdb",
             },
             reason="buffer roads",
             declared_outputs=(DeclaredOutput(
                 output_id="output:buffer",
                 name="roads_buffer",
                 kind="feature_class",
-                destination=r"D:\published\results.gdb\roads_buffer",
+                output_format="gdb",
+                destination_policy="physical",
+                destination_path=r"D:\published\results.gdb\roads_buffer",
             ),),
         )
 
         runtime_document = _runtime_step_document(step)
 
-        self.assertNotIn("output_workspace", runtime_document["arguments"])
-        self.assertEqual(step.arguments["output_workspace"], r"D:\published\results.gdb")
+        self.assertEqual(step.arguments, runtime_document["arguments"])
         self.assertEqual(
-            step.declared_outputs[0].destination,
+            step.declared_outputs[0].destination_path,
             r"D:\published\results.gdb\roads_buffer",
         )
 
@@ -83,6 +86,15 @@ class ExtraForbiddenTest(unittest.TestCase):
             CallerIdentity(user_id="u1", tenant_id="t1", role="analyst",
                            extra_field="nope")
 
+    def test_forged_model_binding_summary_is_rejected(self):
+        envelope = _envelope()
+        forged = dict(envelope.model_binding_summary)
+        forged["planner"] = dict(forged["planner"], role="auditor")
+        with self.assertRaises(ValidationError):
+            RequestEnvelope(**dict(
+                envelope.model_dump(mode="json"), model_binding_summary=forged,
+            ))
+
 
 class FieldPathInErrorTest(unittest.TestCase):
     """§11: ValidationError carries the failing field path."""
@@ -97,6 +109,8 @@ class FieldPathInErrorTest(unittest.TestCase):
                 target_selector={"bridge_pid": 2001, "bridge_port": 8766,
                                  "arcmap_pid": 2000, "hwnd": 3000,
                                  "deployment_hash": "a" * 64},
+                model_plan=fakes.fake_agent_model_plan().model_dump(mode="json"),
+                model_binding_summary=fakes.fake_model_binding_summary(),
             )
             self.fail("empty text should fail")
         except ValidationError as exc:

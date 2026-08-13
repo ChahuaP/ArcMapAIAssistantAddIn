@@ -13,17 +13,19 @@ from shared_runtime.condition_contract import (
     LOGICAL_CONDITION_OPERATORS,
     normalize_condition_tree,
 )
+from shared_runtime.semantic_abi import (
+    AREA_UNITS, ANGLE_UNITS, FIELD_TYPES, LENGTH_UNITS, SELECTION_TYPES,
+    SPATIAL_PREDICATES as OVERLAP_TYPES, FieldSpec, LineageFact, Quantity,
+    SpatialPredicate,
+)
 
-DISTANCE_UNITS = frozenset(("meters", "kilometers", "map_units", "degrees"))
-SELECTION_TYPES = frozenset(("new_selection", "add_to_selection", "remove_from_selection", "select_subset"))
-ARCMAP_SELECTION_TYPES = {
-    "NEW_SELECTION": "new_selection",
-    "ADD_TO_SELECTION": "add_to_selection",
-    "REMOVE_FROM_SELECTION": "remove_from_selection",
-    "SUBSET_SELECTION": "select_subset",
-}
-OVERLAP_TYPES = frozenset(("intersect", "contain", "within", "touch", "overlap", "cross", "within_a_distance"))
-ARTIFACT_EXPORT_ACTIONS = frozenset(("export_selected_features",))
+# The name is retained only as the public vocabulary constant; distances are
+# represented exclusively by Quantity objects below.
+DISTANCE_UNITS = LENGTH_UNITS
+ARTIFACT_EXPORT_ACTIONS = frozenset(("export_selected_features", "export_table", "export_map"))
+ARTIFACT_EXPORT_FORMATS = frozenset(("gdb", "csv", "png"))
+
+
 
 # Required fields are intentionally variant-specific where an operation has
 # genuinely different behaviour.  `action` prevents map/layout/export facts
@@ -42,7 +44,7 @@ _SPECS = {
  "project": (({"subject", "source", "spatial_reference"}, {"spatial_reference":"string"}),),
  "merge": (({"subject", "sources"}, {"sources":"entities"}),),
  "append": (({"subject", "sources", "target", "schema_type"}, {"sources":"entities", "schema_type":"string"}),),
- "field_add": (({"subject", "target", "field_name", "field_type", "field_length"}, {"field_name":"string", "field_type":"string", "field_length":"integer_or_null"}),),
+ "field_add": (({"subject", "target", "field"}, {"field":"field_spec"}),),
  "field_delete": (({"subject", "target", "field_name"}, {"field_name":"string"}),),
  "field_update": (({"subject", "target", "where", "assignments"}, {"where":"condition", "assignments":"object_or_null"}), ({"subject", "target", "where"}, {"where":"condition"})),
  "feature_create": (({"subject", "action"}, {"action":"string"}),),
@@ -79,6 +81,14 @@ _TASK_SPECS["artifact_export"] = (
     (
         {"subject", "target", "action", "selected_only"},
         {"action": "const:export_selected_features", "selected_only": "const:true"},
+    ),
+    (
+        {"subject", "target", "action", "selected_only"},
+        {"action": "const:export_table", "selected_only": "const:false"},
+    ),
+    (
+        {"subject", "action", "selected_only"},
+        {"action": "const:export_map", "selected_only": "const:false"},
     ),
 )
 KINDS = frozenset(_SPECS)
@@ -165,32 +175,21 @@ def exact_fields(value, required, path, error):
     if not isinstance(value, dict) or set(value) != set(required): _fail(error, path, " has invalid fields.")
     return value
 
-def normalize_distance(value, path="distance", error=ValueError):
-    if isinstance(value, str):
-        match = re.fullmatch(
-            r"\s*(\d+(?:\.\d+)?)\s*(meters|kilometers|map_units|degrees)\s*",
-            value,
-            flags=re.IGNORECASE,
-        )
-        if not match: _fail(error, path, " is ambiguous or invalid.")
-        value = {"value": float(match.group(1)), "unit": match.group(2).lower()}
-    if isinstance(value, dict) and isinstance(value.get("unit"), str):
-        value = dict(value, unit=value["unit"].lower())
-    if not isinstance(value, dict) or set(value) != {"value", "unit"} or isinstance(value["value"], bool) or not isinstance(value["value"], (int, float)) or value["unit"] not in DISTANCE_UNITS:
-        _fail(
-            error,
-            path,
-            ' must be exactly {"value": number, "unit": one of "meters", '
-            '"kilometers", "map_units", "degrees"}.',
-        )
-    if value["unit"] == "kilometers":
-        return {"value": value["value"] * 1000, "unit": "meters"}
-    return {"value": value["value"], "unit": value["unit"]}
+def normalize_quantity(value, path="quantity", error=ValueError, dimension=None):
+    if not isinstance(value, dict) or set(value) != {"value", "unit", "dimension", "tolerance", "crs"}:
+        _fail(error, path, " must be exactly a Quantity(value, unit, dimension, tolerance, crs) object.")
+    try:
+        quantity = Quantity(**value)
+    except (TypeError, ValueError) as exc:
+        _fail(error, path, " is invalid: " + str(exc))
+    if dimension is not None and quantity.dimension != dimension:
+        _fail(error, path, " has incompatible dimension.")
+    return quantity.canonical().as_dict()
 
-def distance(value, path, error): return normalize_distance(value, path, error)
+def distance(value, path, error): return normalize_quantity(value, path, error, "length")
 
 def _valid_value(value, kind, path, error):
-    if kind == "string": ok = isinstance(value, str) and bool(value)
+    if kind in ("string", "entity"): ok = isinstance(value, str) and bool(value)
     elif kind == "artifact_export_action":
         if value not in ARTIFACT_EXPORT_ACTIONS:
             _fail(error, path, " must use the closed vocabulary for artifact export actions.")
@@ -198,12 +197,22 @@ def _valid_value(value, kind, path, error):
     elif kind == "boolean": ok = isinstance(value, bool)
     elif kind == "integer_or_null": ok = value is None or (isinstance(value, int) and not isinstance(value, bool))
     elif kind == "object_or_null": ok = value is None or isinstance(value, dict)
+    elif kind == "field_spec":
+        try:
+            FieldSpec(
+                name=value["name"], type=value["type"], nullable=value["nullable"],
+                length=value["length"], precision=value["precision"],
+                scale=value["scale"], domain=tuple(value["domain"]),
+            )
+            ok = set(value) == {"name", "type", "nullable", "length", "precision", "scale", "domain"}
+        except (KeyError, TypeError, ValueError):
+            ok = False
     elif kind == "strings": ok = isinstance(value, list) and all(isinstance(x, str) and x for x in value)
     elif kind == "entities": ok = isinstance(value, list) and bool(value)
-    elif kind == "distance": normalize_distance(value, path, error); return
+    elif kind == "distance": normalize_quantity(value, path, error, "length"); return
     elif kind == "distance_or_null":
         if value is None: return
-        normalize_distance(value, path, error); return
+        normalize_quantity(value, path, error, "length"); return
     elif kind == "selection": ok = value in SELECTION_TYPES
     elif kind == "overlap": ok = value in OVERLAP_TYPES
     elif kind == "overlap_without_distance": ok = value in OVERLAP_TYPES - {"within_a_distance"}
@@ -211,6 +220,7 @@ def _valid_value(value, kind, path, error):
     elif kind.startswith("const:"):
         expected = kind.split(":", 1)[1]
         if expected == "true": expected = True
+        elif expected == "false": expected = False
         ok = value == expected
     elif kind == "condition": ok = isinstance(value, dict)
     else: raise RuntimeError("unknown semantic type " + kind)
@@ -218,12 +228,7 @@ def _valid_value(value, kind, path, error):
 
 def _canonical_value(value, type_name, path, error):
     if type_name in ("distance", "distance_or_null"):
-        return None if value is None and type_name == "distance_or_null" else normalize_distance(value, path, error)
-    if type_name == "selection" and isinstance(value, str):
-        normalized = value.strip()
-        value = ARCMAP_SELECTION_TYPES.get(normalized.upper(), normalized.lower())
-    if type_name in ("overlap", "overlap_without_distance", "overlap_with_distance") and isinstance(value, str):
-        value = value.strip().lower()
+        return None if value is None and type_name == "distance_or_null" else normalize_quantity(value, path, error, "length")
     if type_name.startswith("const:") and isinstance(value, str):
         value = value.strip().lower()
     if type_name == "condition": value = normalize_condition_tree(value)
@@ -247,7 +252,8 @@ def _task_spec(kind, fields, path, error):
             continue
         if all(
             not type_name.startswith("const:")
-            or fields[field] == (True if type_name == "const:true" else type_name.split(":", 1)[1])
+            or fields[field] == (True if type_name == "const:true" else
+                                 False if type_name == "const:false" else type_name.split(":", 1)[1])
             for field, type_name in types.items()
         ):
             matches.append(types)
@@ -304,9 +310,10 @@ def _binding(value, parameters, output_kind, field, path, error):
             "selection": "string" in actual_types,
             "overlap": "string" in actual_types,
             "condition": "object" in actual_types,
-            "distance": bool(actual_types & {"string", "object"}),
-            "distance_or_null": bool(actual_types & {"string", "object", "null"}),
+            "distance": "object" in actual_types,
+            "distance_or_null": bool(actual_types & {"object", "null"}),
             "object_or_null": bool(actual_types & {"object", "null"}),
+            "field_spec": "object" in actual_types,
         }
         # Entity bindings are runtime layer references, represented by strings
         # in the executable schema but marked with x-geopilot-kind.
@@ -340,8 +347,9 @@ def validate_capability_effect(effect, parameters_schema, output_kind, path, err
         type_name = types.get(field, "entities" if field == "sources" else "entity" if field in _ENTITY_FIELDS else None)
         if type_name is None: raise RuntimeError("semantic field lacks a declared type: " + field)
         binding = effect[field]
-        if type_name == "entities" and isinstance(binding, list):
-            if not binding: _fail(error, path + "." + field, " cannot be empty.")
+        if type_name == "entities":
+            if not isinstance(binding, list) or not binding:
+                _fail(error, path + "." + field, " must be a non-empty array of binding objects.")
             for item in binding: _binding(item, parameters, output_kind, type_name, path + "." + field, error)
         else: _binding(binding, parameters, output_kind, type_name, path + "." + field, error)
     if "result" in effect: _binding(effect["result"], parameters, output_kind, "string", path + ".result", error)
@@ -417,9 +425,12 @@ def predicate_schema():
         "type": "object",
         "properties": {
             "value": {"type": "number"},
-            "unit": {"type": "string", "enum": sorted(DISTANCE_UNITS)},
+            "unit": {"type": "string", "enum": sorted(LENGTH_UNITS)},
+            "dimension": {"const": "length"},
+            "tolerance": {"type": "number", "minimum": 0},
+            "crs": {"type": ["string", "null"]},
         },
-        "required": ["unit", "value"],
+        "required": ["unit", "value", "dimension", "tolerance", "crs"],
         "additionalProperties": False,
     }
     variants=[]
@@ -466,12 +477,14 @@ def predicate_schema():
                     elif type_name == "strings": props[field] = {"type": "array", "items": {"type": "string", "minLength": 1}}
                     elif type_name == "integer_or_null": props[field] = {"type": ["integer", "null"]}
                     elif type_name == "object_or_null": props[field] = {"type": ["object", "null"]}
+                    elif type_name == "field_spec": props[field] = {"type": "object"}
                     elif type_name == "string": props[field] = {"type": "string", "minLength": 1}
                     elif type_name == "artifact_export_action":
                         props[field] = {"type": "string", "enum": sorted(ARTIFACT_EXPORT_ACTIONS)}
                     elif isinstance(type_name, str) and type_name.startswith("const:"):
                         constant = type_name.split(":", 1)[1]
-                        props[field] = {"const": True if constant == "true" else constant}
+                        props[field] = {"const": True if constant == "true" else
+                                        False if constant == "false" else constant}
                     else: raise RuntimeError("unknown semantic type " + str(type_name))
             variants.append({"type":"object","properties":props,"required":sorted({"kind"}|required),"additionalProperties":False})
     return {"oneOf":variants}
@@ -492,6 +505,7 @@ def task_predicate_catalog():
         "distance": "distance",
         "integer_or_null": "integer_or_null",
         "object_or_null": "object_or_null",
+        "field_spec": "FieldSpec(name,type,nullable,length,precision,scale,domain)",
         "string": "non_empty_string",
         "strings": "non_empty_string_array",
     }
@@ -516,15 +530,16 @@ def task_predicate_catalog():
                         fields[field] = sorted(ARTIFACT_EXPORT_ACTIONS)
                     elif type_name.startswith("const:"):
                         constant = type_name.split(":", 1)[1]
-                        fields[field] = True if constant == "true" else constant
+                        fields[field] = True if constant == "true" else False if constant == "false" else constant
                     else:
                         fields[field] = field_types[type_name]
             variants.append({"kind": kind, "fields": fields})
     return {
         "rule": "predicate object has exactly kind plus one variant's fields",
         "distance": {
-            "fields": ["unit", "value"],
-            "unit": sorted(DISTANCE_UNITS),
+            "fields": ["value", "unit", "dimension", "tolerance", "crs"],
+            "unit": sorted(LENGTH_UNITS),
+            "dimension": "length",
             "value": "number",
         },
         "condition": [
@@ -551,7 +566,7 @@ def effect_schema():
     export_format_binding = {
         "type": "object",
         "additionalProperties": False,
-        "properties": {"const": {"const": "gdb"}},
+        "properties": {"const": {"type": "string", "enum": sorted(ARTIFACT_EXPORT_FORMATS)}},
         "required": ["const"],
     }
     variants=[]

@@ -4,20 +4,20 @@ from __future__ import absolute_import
 import arcpy
 
 from . import common
+from shared_runtime import semantic_abi
 
 
 def _output(context, arguments):
     return common.output_feature_class(
         context,
         arguments["output_name"],
-        arguments.get("output_workspace")
     )
 
 
 def buffer(context, arguments, step_outputs):
     layer = common.find_layer(context, arguments["input_layer"], step_outputs)
     output = _output(context, arguments)
-    arcpy.Buffer_analysis(layer, output, arguments["distance"])
+    arcpy.Buffer_analysis(layer, output, semantic_abi.quantity_to_arcpy(arguments["distance"]))
     return {"output": output}
 
 

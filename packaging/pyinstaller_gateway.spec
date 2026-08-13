@@ -10,6 +10,7 @@ a = Analysis(
     datas=[
         ('../VERSION', '.'),
         ('../operation_catalog', 'operation_catalog'),
+        ('../shared_runtime/runtime_gate.schema.json', 'shared_runtime'),
         ('../gateway_py3/web', 'gateway_py3/web'),
     ],
     hiddenimports=[

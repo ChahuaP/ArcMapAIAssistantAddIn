@@ -6,7 +6,7 @@ Only the kernel's four operations are exposed to HTTP callers:
   GET  /api/v1/runs              -> list runs (kernel store projection)
   GET  /api/v1/runs/<id>         -> inspect(run_id)
   POST /api/v1/runs/<id>/decide  -> decide(run_id, approved)
-  POST /api/v1/runs/<id>/resume  -> resume(run_id)
+  POST /api/v1/runs/<id>/clarifications -> answer_clarification(run_id, answer)
 
 Bridge callbacks (lease protocol, docs/GEOPILOT_BRIDGE_LEASE_PROTOCOL.md)
 are routed with lease fencing into the ArcMapRuntime bridge client:
@@ -34,6 +34,7 @@ from ..kernel.contracts import (
     CallerIdentity, RequestEnvelope, SideEffectScope,
 )
 from ..kernel.coordinator import GeoPilotKernel
+from ..model_runtime.contracts import AgentModelPlan
 from ..release import APP_VERSION
 
 API_PREFIX = "/api/v1"
@@ -44,6 +45,7 @@ ALLOWED_ORIGINS = frozenset({
     "null",  # file:// pages report Origin: null
 })
 _RUN_ID_RE = re.compile(r"^/api/v1/runs/([0-9a-fA-F-]{36})(/[a-z-]+)?$")
+_ARCHIVED_SESSION_RE = re.compile(r"^/api/v1/archived-sessions/([0-9a-fA-F-]{36})$")
 
 
 class HttpError(Exception):
@@ -70,23 +72,29 @@ class GeoPilotHttpAdapter:
         self._bridge_cache = None
         self._csrf_tokens: Dict[str, str] = {}
 
+    def _active_session(self) -> Dict[str, Any]:
+        return self.kernel.ports.store.get_active_session()
+
     def _session_token(self, headers: Optional[Dict[str, str]]) -> Dict[str, str]:
-        session_id = (headers or {}).get("X-Session-Id", "")
-        try:
-            session_id = str(uuid.UUID(session_id))
-        except (ValueError, TypeError):
-            raise HttpError(400, "X-Session-Id must be a canonical UUID.")
-        token = self._csrf_tokens.get(session_id)
+        active = self._active_session()
+        token = self._csrf_tokens.get(active["session_id"])
         if token is None:
             token = secrets.token_urlsafe(32)
-            self._csrf_tokens[session_id] = token
-        return {"session_id": session_id, "csrf_token": token}
+            self._csrf_tokens[active["session_id"]] = token
+        return dict(active, csrf_token=token)
+
+    def _assert_active_session(self, headers: Optional[Dict[str, str]]) -> Dict[str, Any]:
+        active = self._active_session()
+        headers = headers or {}
+        if headers.get("X-Session-Id") != active["session_id"] or str(headers.get("X-Session-Epoch", "")) != str(active["epoch"]):
+            raise HttpError(409, "ContractFailed: 会话已归档或会话世代已过期。")
+        return active
 
     def _assert_web_write(self, headers: Dict[str, str]) -> None:
-        session_id = headers.get("X-Session-Id", "")
-        if not session_id:
+        if not headers.get("X-Session-Id"):
             raise HttpError(400, "缺少 X-Session-Id 头。")
-        token = self._csrf_tokens.get(session_id)
+        active = self._assert_active_session(headers)
+        token = self._csrf_tokens.get(active["session_id"])
         origin = headers.get("Origin", "")
         if not token or origin not in self.allowed_origins or origin == "null":
             raise HttpError(403, "未知会话或跨源写请求被拒绝。")
@@ -107,9 +115,8 @@ class GeoPilotHttpAdapter:
         is rejected with HTTP 403. Runs are append-only journal entries: there
         is no delete endpoint.
         """
+        self._assert_active_session(headers)
         session_id = (headers or {}).get("X-Session-Id", "")
-        if not session_id:
-            raise HttpError(403, "缺少 X-Session-Id 头。")
         run = self.kernel.get_run(run_id)
         if run is None:
             raise HttpError(404, "运行不存在。")
@@ -122,8 +129,22 @@ class GeoPilotHttpAdapter:
                    headers: Optional[Dict[str, str]] = None) -> Any:
         if path == API_PREFIX + "/session":
             return self._session_token(headers)
+        if path == API_PREFIX + "/active-session":
+            return self._session_token(headers)
+        if path == API_PREFIX + "/archived-sessions":
+            self._assert_active_session(headers)
+            return {"sessions": self.kernel.ports.store.list_archived_sessions()}
+        archived = _ARCHIVED_SESSION_RE.match(path)
+        if archived:
+            self._assert_active_session(headers)
+            session_id = archived.group(1)
+            if session_id not in {item["session_id"] for item in self.kernel.ports.store.list_archived_sessions()}:
+                raise HttpError(404, "归档会话不存在。")
+            return {"session_id": session_id,
+                    "runs": [self._run_view_from_kernel(view)
+                             for view in self.kernel.list_runs(session_id)]}
         if path == API_PREFIX + "/runs":
-            session_id = (headers or {}).get("X-Session-Id", "")
+            session_id = self._assert_active_session(headers)["session_id"]
             runs = [self._run_view_from_kernel(v)
                     for v in self.kernel.list_runs(session_id)]
             return {"runs": runs}
@@ -217,7 +238,7 @@ class GeoPilotHttpAdapter:
         Bridge scanning is deferred to the /arcmap/bridges endpoint to keep
         this call fast (the front-end polls /arcmap/bridges separately).
         """
-        session_id = (headers or {}).get("X-Session-Id", "")
+        session_id = self._assert_active_session(headers)["session_id"]
         runs = [self._run_view_from_kernel(v)
                 for v in self.kernel.list_runs(session_id)]
         op_count = self._operation_count()
@@ -235,6 +256,12 @@ class GeoPilotHttpAdapter:
             self._assert_web_write(headers)
         if path == API_PREFIX + "/runs":
             return {"run": self._submit(payload, headers)}
+        if path == API_PREFIX + "/active-session/clear":
+            active = self.kernel.ports.store.clear_active_session()
+            self._csrf_tokens.pop(headers.get("X-Session-Id", ""), None)
+            token = secrets.token_urlsafe(32)
+            self._csrf_tokens[active["session_id"]] = token
+            return dict(active, csrf_token=token)
         match = _RUN_ID_RE.match(path)
         if match:
             run_id = match.group(1)
@@ -273,6 +300,23 @@ class GeoPilotHttpAdapter:
                 self._assert_session_owns_run(run_id, headers)
                 return {"run": self._run_view_from_kernel(
                     self.kernel.resume(run_id))}
+            if suffix == "/resume-quota":
+                self._assert_session_owns_run(run_id, headers)
+                try:
+                    return {"run": self._run_view_from_kernel(
+                        self.kernel.resume_quota(run_id))}
+                except ValueError as exc:
+                    raise HttpError(409, str(exc))
+            if suffix == "/clarifications":
+                self._assert_session_owns_run(run_id, headers)
+                answer = contracts.ClarificationAnswer(
+                    run_id=run_id, session_id=headers["X-Session-Id"],
+                    caller=self._caller_for(headers["X-Session-Id"]),
+                    clarification_id=payload.get("clarification_id", ""),
+                    answer=payload.get("answer", ""),
+                )
+                return {"run": self._run_view_from_kernel(
+                    self.kernel.answer_clarification(run_id, answer))}
         # Bridge callbacks (lease protocol)
         bridge = self._bridge_callback(path, payload)
         if bridge is not None:
@@ -304,11 +348,10 @@ class GeoPilotHttpAdapter:
         text = payload.get("text") or payload.get("command")
         if not isinstance(text, str) or not text.strip():
             raise HttpError(400, "text is required.")
-        session_id = headers.get("X-Session-Id") or payload.get("session_id")
-        try:
-            session_id = str(uuid.UUID(session_id))
-        except (ValueError, TypeError):
-            raise HttpError(400, "X-Session-Id must be a canonical UUID.")
+        active = self._assert_active_session(headers)
+        if payload.get("session_id") not in (None, active["session_id"]):
+            raise HttpError(409, "ContractFailed: 不接受伪造会话。")
+        session_id = active["session_id"]
         execute = bool(payload.get("execute", False))
         side_effects = None
         if execute:
@@ -334,6 +377,7 @@ class GeoPilotHttpAdapter:
                     if isinstance(item, dict)
                 ),
             )
+        model_plan = self._seal_model_plan(payload)
         envelope = RequestEnvelope(
             session_id=session_id,
             request_id=str(uuid.uuid4()),
@@ -345,9 +389,24 @@ class GeoPilotHttpAdapter:
             outputs=tuple(payload.get("outputs") or ()),
             plan_artifact=payload.get("plan_artifact"),
             target_selector=payload.get("target_selector"),
+            model_plan=model_plan,
+            model_binding_summary=self.kernel.ports.model.binding_summary(
+                AgentModelPlan.model_validate(model_plan)),
         )
         view = self.kernel.submit(envelope)
         return self._run_view_from_kernel(view)
+
+    def _seal_model_plan(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        selections = payload.get("model_bindings")
+        if not isinstance(selections, dict):
+            raise HttpError(400, "model_bindings is required for every task.")
+        runtime = self.kernel.ports.model
+        if runtime is None or not hasattr(runtime, "seal_task_plan"):
+            raise HttpError(503, "model runtime is unavailable.")
+        try:
+            return runtime.seal_task_plan(selections).model_dump(mode="json")
+        except (TypeError, ValueError, LookupError) as exc:
+            raise HttpError(400, str(exc))
 
     def _caller_for(self, session_id: str) -> CallerIdentity:
         """Derive the caller identity for a session (§8).
@@ -433,6 +492,9 @@ class GeoPilotHttpAdapter:
                 command = (event.get("payload") or {}).get("text", "")
                 break
         outcome = view.outcome.model_dump(mode="json") if view.outcome else None
+        received = next((event.get("payload") for event in events
+                         if event.get("kind") == "run_received"), {}) or {}
+        model_plan = received.get("model_plan")
         return {
             "id": view.run_id,
             "run_id": view.run_id,
@@ -450,6 +512,8 @@ class GeoPilotHttpAdapter:
             "workflow": {"action": "execute", "summary": stage_label(view.stage),
                          "steps": self._plan_steps(view)},
             "events": events,
+            "model_binding_summary": received.get("model_binding_summary", {}),
+            "model_plan_digest": contracts.digest(model_plan) if isinstance(model_plan, dict) else "",
         }
 
     @staticmethod
@@ -467,7 +531,8 @@ class GeoPilotHttpAdapter:
             declared = []
             for out in step.declared_outputs:
                 declared.append({"output_id": out.output_id, "name": out.name,
-                                 "kind": out.kind, "destination": out.destination})
+                                 "kind": out.kind, "format": out.output_format,
+                                 "destination": out.destination_path})
             steps.append({
                 "id": step.id, "operation": step.operation,
                 "arguments": step.arguments, "reason": step.reason,

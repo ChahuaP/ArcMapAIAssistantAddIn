@@ -9,6 +9,8 @@ import sys
 import tempfile
 import types
 import unittest
+import struct
+import zlib
 
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -127,10 +129,20 @@ def _feature_output_policy():
         "type": "feature_class",
         "formats": ["gdb"],
         "default_format": "gdb",
-        "workspace": "mxd_default_or_output_workspace",
+        "workspace": "server_managed_gdb",
         "overwrite": False,
         "add_to_map": True,
     }
+
+
+def _png_bytes():
+    def chunk(kind, payload):
+        return (struct.pack(">I", len(payload)) + kind + payload
+                + struct.pack(">I", zlib.crc32(kind + payload) & 0xffffffff))
+    ihdr = struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr)
+            + chunk(b"IDAT", zlib.compress(b"\x00\x00\x00\x00"))
+            + chunk(b"IEND", b""))
 
 
 PY2 = sys.version_info[0] == 2
@@ -141,6 +153,7 @@ if PY2:
     from arcmap_runtime_py2 import workflow_executor
     from arcmap_runtime_py2 import arcmap_desktop_selection
     from arcmap_runtime_py2 import artifact_observation
+    from arcmap_runtime_py2 import acceptance_probe
     from arcmap_runtime_py2 import context_reader
     from arcmap_runtime_py2 import map_state_observation
     from arcmap_runtime_py2.operations import common as runtime_common
@@ -156,14 +169,129 @@ if PY2:
     from arcmap_runtime_py2.operations import layout_ops
     from arcmap_runtime_py2.operations import map_ops
     from arcmap_runtime_py2.operations import selection_ops
+    from arcmap_runtime_py2.operations import artifact_ops
     sys.modules["operations.layer_ops"] = layer_ops
     sys.modules["operations.layout_ops"] = layout_ops
     sys.modules["operations.map_ops"] = map_ops
     sys.modules["operations.selection_ops"] = selection_ops
+    sys.modules["operations.artifact_ops"] = artifact_ops
 
 
 @unittest.skipUnless(PY2, "ArcMap Python 2.7 runtime test")
 class ExecutionSessionPython27Tests(unittest.TestCase):
+    def test_file_acceptance_probe_rejects_malformed_csv_and_truncated_png(self):
+        root = tempfile.mkdtemp(prefix="geopilot_bad_files_")
+        try:
+            bad_csv = os.path.join(root, "bad.csv")
+            with open(bad_csv, "wb") as handle:
+                handle.write(b"A,A\n1,2\n")
+            self.assertRaises(
+                acceptance_probe.AcceptanceProbeError,
+                acceptance_probe.probe, "csv", "file", bad_csv, "csv",
+            )
+            bad_png = os.path.join(root, "bad.png")
+            with open(bad_png, "wb") as handle:
+                handle.write(_png_bytes()[:-5])
+            self.assertRaises(
+                acceptance_probe.AcceptanceProbeError,
+                acceptance_probe.probe, "png", "file", bad_png, "png",
+            )
+        finally:
+            shutil.rmtree(root)
+
+    def test_csv_export_uses_server_managed_file_and_returns_measured_artifact(self):
+        root = tempfile.mkdtemp(prefix="geopilot_csv_export_")
+        output = os.path.join(root, "roads.csv")
+        source = _Layer(u"D:\\data\\roads.shp")
+        original_find = artifact_ops.common.find_layer
+        original_output = artifact_ops.common.output_file
+        original_export = getattr(FAKE_ARCPY, "TableToTable_conversion", None)
+        original_isfile = artifact_observation.path_utils.isfile
+        try:
+            artifact_ops.common.find_layer = lambda context, value, steps: source
+            artifact_ops.common.output_file = lambda context, name, fmt: output
+            def export_table(actual_source, folder, name):
+                self.assertIs(source, actual_source)
+                self.assertEqual(root, folder)
+                self.assertEqual("roads.csv", name)
+                with open(output, "wb") as handle:
+                    handle.write(b"OBJECTID,NAME\n1,Main\n")
+                return type("Result", (object,), {
+                    "getOutput": lambda self, index: output,
+                })()
+            FAKE_ARCPY.TableToTable_conversion = export_table
+            artifact_observation.path_utils.isfile = os.path.isfile
+
+            result = artifact_ops.export_table_csv(
+                {}, {"layer": "roads", "output_name": "roads.csv"}, {},
+            )
+            observed = artifact_observation.observe_and_verify(
+                {
+                    "output_policy": {"default_format": "csv"},
+                    "capability_contract": {
+                        "outputs": {
+                            "kind": "file",
+                            "geometry": {"rule": "not_applicable", "value": "not_applicable"},
+                            "fields": {"effect": "not_applicable", "target": "not_applicable", "static_fields": [], "parameter_field": "not_applicable"},
+                            "spatial_reference": {"rule": "not_applicable", "input": "not_applicable"},
+                            "cardinality": {"rule": "fixed", "value": "one"},
+                            "selection_state": "not_applicable",
+                            "map_publication": "none",
+                        },
+                        "parameters_schema": _parameter_schema({}, []),
+                        "postconditions": [{"expectation": dict(
+                            (name, {"ref": "outputs." + name}) for name in
+                            ("kind", "geometry", "fields", "spatial_reference", "cardinality", "selection_state", "map_publication")
+                        )}],
+                    },
+                }, {}, result, {}, {}, "none",
+            )
+
+            self.assertEqual(output, result["output"])
+            self.assertEqual("file", observed["kind"])
+            self.assertEqual("passed", observed["contract"]["verdict"])
+        finally:
+            artifact_ops.common.find_layer = original_find
+            artifact_ops.common.output_file = original_output
+            artifact_observation.path_utils.isfile = original_isfile
+            if original_export is None:
+                delattr(FAKE_ARCPY, "TableToTable_conversion")
+            else:
+                FAKE_ARCPY.TableToTable_conversion = original_export
+            shutil.rmtree(root)
+
+    def test_png_export_requires_a_real_server_managed_file(self):
+        root = tempfile.mkdtemp(prefix="geopilot_png_export_")
+        output = os.path.join(root, "map.png")
+        original_output = artifact_ops.common.output_file
+        original_mxd = artifact_ops.common.current_mxd
+        original_export = getattr(FAKE_ARCPY.mapping, "ExportToPNG", None)
+        try:
+            mxd = object()
+            artifact_ops.common.output_file = lambda context, name, fmt: output
+            artifact_ops.common.current_mxd = lambda: mxd
+            def export_map(actual_mxd, actual_output):
+                self.assertIs(mxd, actual_mxd)
+                self.assertEqual(output, actual_output)
+                with open(actual_output, "wb") as handle:
+                    handle.write(_png_bytes())
+            FAKE_ARCPY.mapping.ExportToPNG = export_map
+
+            result = artifact_ops.export_map_png(
+                {}, {"output_name": "map.png"}, {},
+            )
+
+            self.assertEqual(output, result["output"])
+            self.assertTrue(os.path.isfile(output))
+        finally:
+            artifact_ops.common.output_file = original_output
+            artifact_ops.common.current_mxd = original_mxd
+            if original_export is None:
+                delattr(FAKE_ARCPY.mapping, "ExportToPNG")
+            else:
+                FAKE_ARCPY.mapping.ExportToPNG = original_export
+            shutil.rmtree(root)
+
     def test_builtin_catalog_rejects_legacy_output_contract(self):
         root = tempfile.mkdtemp(prefix="geopilot_invalid_catalog_")
         original_root = workflow_executor.CATALOG_ROOT
@@ -181,7 +309,7 @@ class ExecutionSessionPython27Tests(unittest.TestCase):
                     "type": "vector",
                     "formats": ["gdb"],
                     "default_format": "gdb",
-                    "workspace": "mxd_default_or_output_workspace",
+                    "workspace": "server_managed_gdb",
                     "overwrite": False,
                     "add_to_map": True,
                 },
@@ -192,7 +320,7 @@ class ExecutionSessionPython27Tests(unittest.TestCase):
 
             with self.assertRaises(workflow_executor.WorkflowExecutionError) as caught:
                 workflow_executor._load_operations()
-            self.assertIn("output_policy.type must be feature_class", unicode(caught.exception))
+            self.assertIn("output_policy type/format is unsupported", unicode(caught.exception))
         finally:
             workflow_executor.CATALOG_ROOT = original_root
             shutil.rmtree(root)
@@ -1315,7 +1443,7 @@ class ExecutionSessionPython27Tests(unittest.TestCase):
         existing_paths = set([
             source.dataSource,
             boundary.dataSource,
-            u"D:\\out\\ArcMapAI_Output.gdb\\shelters_in_service_area",
+            u"D:\\out\\staging.gdb\\shelters_in_service_area",
         ])
         try:
             class _CopyResult(object):
@@ -1392,10 +1520,6 @@ class ExecutionSessionPython27Tests(unittest.TestCase):
                     "parameters_schema": _parameter_schema({
                         "layer": {"type": "string", "x-geopilot-kind": "layer"},
                         "output_name": {"type": "string"},
-                        "output_workspace": {
-                            "type": "string",
-                            "x-geopilot-kind": "path",
-                        },
                     }, ["layer", "output_name"]),
                     "side_effects": "writes_data",
                     "output_policy": _feature_output_policy(),
@@ -1404,19 +1528,19 @@ class ExecutionSessionPython27Tests(unittest.TestCase):
             workflow_executor._load_operations = lambda: operations
             def call(executor, context, arguments, outputs):
                 if executor == "clip":
-                    return {"output": u"D:\\out\\ArcMapAI_Output.gdb\\shelters_in_service_area"}
+                    return {"output": u"D:\\out\\staging.gdb\\shelters_in_service_area"}
                 if executor == "select":
                     return selection_ops.select_by_attribute(context, arguments, outputs)
                 return selection_ops.export_selected_features(context, arguments, outputs)
             workflow_executor._call_executor = call
-            context = {"staging_dir": output_folder, "layers": [
+            context = {"staging_root": output_folder, "layers": [
                 {"layer_ref": "shelters", "name": source.name, "longName": source.longName, "dataSource": source.dataSource},
                 {"layer_ref": "service_area", "name": boundary.name, "longName": boundary.longName, "dataSource": boundary.dataSource},
             ], "is_saved": True, "document_path": u"D:\\map.mxd"}
             workflow = {"summary": "chain", "steps": [
                 {"id": "clip", "operation": "analysis.clip", "arguments": {}},
                 {"id": "select", "operation": "selection.select_by_attribute", "arguments": {"layer": "from_step:clip", "where": {}}},
-                {"id": "export", "operation": "selection.export_selected_features", "arguments": {"layer": "from_step:clip", "output_name": "selected", "output_workspace": output_folder + u"\\ArcMapAI_Output.gdb"}},
+                {"id": "export", "operation": "selection.export_selected_features", "arguments": {"layer": "from_step:clip", "output_name": "selected"}},
             ]}
             result = workflow_executor.execute({"workflow": workflow, "context_hash": context_reader.context_hash(context)}, context)
             self.assertTrue(result.result["ok"])

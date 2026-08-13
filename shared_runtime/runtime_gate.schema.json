@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "protocol": "geopilot-runtime-gate-v1",
+  "request_common_required": [
+    "arcmap_pid",
+    "bridge_pid",
+    "bridge_port",
+    "deployment_hash",
+    "hwnd",
+    "lifecycle_lease_id",
+    "mode",
+    "protocol",
+    "result_path",
+    "schema_hash"
+  ],
+  "request_mode_required": {
+    "evaluate": ["artifacts", "expected"],
+    "prepare": ["source_layers", "staging_gdb"],
+    "restore": ["artifacts", "initial_digest"]
+  },
+  "result_common_required": [
+    "context_hash",
+    "lifecycle_lease_id",
+    "protocol",
+    "schema_hash"
+  ],
+  "result_mode_required": {
+    "evaluate": ["artifact_manifests", "evidence_hash", "truth_ids"],
+    "prepare": ["staging_gdb"],
+    "restore": []
+  }
+}

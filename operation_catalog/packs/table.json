@@ -15,26 +15,68 @@
         "type": "object",
         "required": [
           "layer",
-          "field_name"
+          "field"
         ],
         "properties": {
           "layer": {
             "type": "string",
             "x-geopilot-kind": "layer"
           },
-          "field_name": {
-            "type": "string"
-          },
-          "field_type": {
-            "type": "string",
-            "default": "TEXT"
-          },
-          "field_length": {
-            "type": [
-              "integer",
-              "null"
+          "field": {
+            "type": "object",
+            "x-geopilot-semantic": "field_spec",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "smallinteger",
+                  "integer",
+                  "biginteger",
+                  "single",
+                  "double",
+                  "string",
+                  "date",
+                  "guid",
+                  "globalid",
+                  "blob"
+                ]
+              },
+              "nullable": {
+                "type": "boolean"
+              },
+              "length": null,
+              "precision": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "scale": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "domain": {
+                "type": "array",
+                "uniqueItems": true
+              }
+            },
+            "required": [
+              "name",
+              "type",
+              "nullable",
+              "precision",
+              "scale",
+              "domain"
             ],
-            "default": null
+            "additionalProperties": false
           }
         },
         "additionalProperties": false
@@ -54,9 +96,15 @@
           "user": "给 roads 添加字段 k",
           "arguments": {
             "layer": "roads",
-            "field_name": "k",
-            "field_type": "TEXT",
-            "field_length": 50
+            "field": {
+              "name": "k",
+              "type": "string",
+              "nullable": true,
+              "length": null,
+              "precision": null,
+              "scale": null,
+              "domain": []
+            }
           }
         }
       ],
@@ -87,26 +135,68 @@
           "type": "object",
           "required": [
             "layer",
-            "field_name"
+            "field"
           ],
           "properties": {
             "layer": {
               "type": "string",
               "x-geopilot-kind": "layer"
             },
-            "field_name": {
-              "type": "string"
-            },
-            "field_type": {
-              "type": "string",
-              "default": "TEXT"
-            },
-            "field_length": {
-              "type": [
-                "integer",
-                "null"
+            "field": {
+              "type": "object",
+              "x-geopilot-semantic": "field_spec",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "smallinteger",
+                    "integer",
+                    "biginteger",
+                    "single",
+                    "double",
+                    "string",
+                    "date",
+                    "guid",
+                    "globalid",
+                    "blob"
+                  ]
+                },
+                "nullable": {
+                  "type": "boolean"
+                },
+                "length": null,
+                "precision": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0
+                },
+                "scale": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0
+                },
+                "domain": {
+                  "type": "array",
+                  "uniqueItems": true
+                }
+              },
+              "required": [
+                "name",
+                "type",
+                "nullable",
+                "precision",
+                "scale",
+                "domain"
               ],
-              "default": null
+              "additionalProperties": false
             }
           },
           "additionalProperties": false
@@ -121,7 +211,7 @@
             "effect": "add_parameter_field",
             "target": "layer",
             "static_fields": [],
-            "parameter_field": "field_name"
+            "parameter_field": "field"
           },
           "spatial_reference": {
             "rule": "not_applicable",
@@ -174,14 +264,8 @@
             "target": {
               "parameter": "layer"
             },
-            "field_name": {
-              "parameter": "field_name"
-            },
-            "field_type": {
-              "parameter": "field_type"
-            },
-            "field_length": {
-              "parameter": "field_length"
+            "field": {
+              "parameter": "field"
             }
           }
         ]

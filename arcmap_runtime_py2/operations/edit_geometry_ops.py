@@ -6,6 +6,7 @@ import math
 import arcpy
 
 from . import common
+from shared_runtime import semantic_abi
 
 try:
     import path_utils
@@ -109,10 +110,10 @@ def _regular_polygon_geometry(arguments, spatial_reference):
     sides = int(arguments["sides"])
     if sides < 3:
         raise common.OperationError(u"正多边形 sides 必须大于等于 3。")
-    radius = _distance_to_map_units(arguments["radius"], arguments["radius_unit"], spatial_reference)
+    radius = _distance_to_map_units(arguments["radius"], spatial_reference)
     if radius <= 0:
         raise common.OperationError(u"radius 必须大于 0。")
-    start_angle = float(arguments.get("start_angle_degrees", -90.0))
+    start_angle = _angle_degrees(arguments.get("start_angle_degrees"))
     points = _radial_points(
         float(arguments["center_x"]),
         float(arguments["center_y"]),
@@ -145,15 +146,14 @@ def _star_polygon_geometry(arguments, spatial_reference):
     point_count = int(arguments.get("point_count", 5))
     if point_count < 3:
         raise common.OperationError(u"星形 point_count 必须大于等于 3。")
-    outer = _distance_to_map_units(arguments["outer_radius"], arguments["outer_radius_unit"], spatial_reference)
+    outer = _distance_to_map_units(arguments["outer_radius"], spatial_reference)
     if outer <= 0:
         raise common.OperationError(u"outer_radius 必须大于 0。")
-    inner_unit = arguments.get("inner_radius_unit") or arguments["outer_radius_unit"]
     inner_value = arguments.get("inner_radius")
     if inner_value is None:
         inner = outer * 0.38196601125
     else:
-        inner = _distance_to_map_units(inner_value, inner_unit, spatial_reference)
+        inner = _distance_to_map_units(inner_value, spatial_reference)
     if inner <= 0 or inner >= outer:
         raise common.OperationError(u"inner_radius 必须大于 0 且小于 outer_radius。")
     radii = []
@@ -163,7 +163,7 @@ def _star_polygon_geometry(arguments, spatial_reference):
         float(arguments["center_x"]),
         float(arguments["center_y"]),
         radii,
-        float(arguments.get("start_angle_degrees", -90.0)),
+        _angle_degrees(arguments.get("start_angle_degrees")),
         180.0 / point_count
     )
     return _polygon_geometry(_closed_ring(points), spatial_reference)
@@ -180,7 +180,6 @@ def _create_feature_class(context, arguments, geometry_type, spatial_reference):
     output = common.output_feature_class(
         context,
         arguments["output_name"],
-        arguments.get("output_workspace")
     )
     workspace = path_utils.dirname(output)
     name = path_utils.basename(output)
@@ -353,13 +352,12 @@ def _regular_polygon_rows(arguments, spatial_reference):
                 "center_x",
                 "center_y",
                 "radius",
-                "radius_unit",
                 "sides",
                 "start_angle_degrees"
             ])
             rows.append((_regular_polygon_geometry(feature_arguments, spatial_reference), _feature_name(item, "regular_polygon_%s" % index)))
         return rows
-    _require_arguments(arguments, ["center_x", "center_y", "radius", "radius_unit", "sides"])
+    _require_arguments(arguments, ["center_x", "center_y", "radius", "sides"])
     return [(_regular_polygon_geometry(arguments, spatial_reference), arguments.get("name") or arguments.get("output_name") or "regular_polygon_1")]
 
 
@@ -373,15 +371,13 @@ def _star_polygon_rows(arguments, spatial_reference):
                 "center_x",
                 "center_y",
                 "outer_radius",
-                "outer_radius_unit",
                 "inner_radius",
-                "inner_radius_unit",
                 "point_count",
                 "start_angle_degrees"
             ])
             rows.append((_star_polygon_geometry(feature_arguments, spatial_reference), _feature_name(item, "star_%s" % index)))
         return rows
-    _require_arguments(arguments, ["center_x", "center_y", "outer_radius", "outer_radius_unit"])
+    _require_arguments(arguments, ["center_x", "center_y", "outer_radius"])
     return [(_star_polygon_geometry(arguments, spatial_reference), arguments.get("name") or arguments.get("output_name") or "star_1")]
 
 
@@ -456,8 +452,10 @@ def _radial_points(center_x, center_y, radii, start_angle_degrees, step_degrees)
     return points
 
 
-def _distance_to_map_units(value, unit, spatial_reference):
-    distance = float(value)
+def _distance_to_map_units(quantity, spatial_reference):
+    semantic_abi.quantity(quantity)
+    distance = float(quantity["value"])
+    unit = quantity["unit"]
     unit = common._text(unit).strip().lower()
     if unit == "map_units":
         return distance
@@ -478,6 +476,16 @@ def _distance_to_map_units(value, unit, spatial_reference):
             raise common.OperationError(u"当前坐标系无法把 meters 转换为地图单位；请改用 map_units。")
         return distance / float(meters_per_unit)
     raise common.OperationError(u"Unsupported distance unit: %s" % unit)
+
+
+def _angle_degrees(value):
+    if value is None:
+        return -90.0
+    if not isinstance(value, dict) or set(value) != set(("value", "unit", "dimension", "tolerance", "crs")):
+        raise common.OperationError(u"start_angle_degrees 必须是关闭的 Quantity 对象。")
+    if value["dimension"] != "angle" or value["unit"] != "degrees" or value["crs"] is not None:
+        raise common.OperationError(u"start_angle_degrees 必须以 degrees 表示。")
+    return float(value["value"])
 
 
 def estimate_append_point_features(context, arguments, step_outputs):

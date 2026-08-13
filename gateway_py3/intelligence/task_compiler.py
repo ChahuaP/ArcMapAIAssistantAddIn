@@ -21,7 +21,7 @@ from ..kernel.contracts import (
     CapabilitySnapshot, ContextSnapshot, IntentSpec, EntityBinding, context_verifier_view,
     Outcome, RequestEnvelope, outcome_succeeded, outcome_paused, outcome_failed,
 )
-from ..model_runtime import ModelRuntime, ModelRequest, StructuredOutputContract
+from ..model_runtime import AgentModelPlan, ModelRuntime, ModelRequest, StructuredOutputContract
 from ..task_contract import (
     TaskContractError,
     bind_model_task_contract,
@@ -91,11 +91,15 @@ class TaskCompiler:
         if isinstance(raw_contract, dict) and raw_contract.get("clarifications"):
             clarifications = raw_contract["clarifications"]
             if isinstance(clarifications, list) and clarifications:
+                try:
+                    draft = bind_model_task_contract(raw_contract, request.text, verifier_context)
+                except TaskContractError as exc:
+                    return outcome_failed(contracts.CONTRACT_FAILED, "intent", "clarification_contract_invalid", str(exc))
                 question = clarifications[0].get("question", "需要用户澄清。") if isinstance(clarifications[0], dict) else str(clarifications[0])
                 return outcome_paused(
                     contracts.CLARIFICATION_REQUIRED, "intent", "clarification_required",
                     question,
-                    details={"clarifications": clarifications},
+                    details={"clarifications": clarifications, "task_contract_draft": draft},
                 )
         try:
             task_contract = self._bind_and_parse(
@@ -152,6 +156,8 @@ class TaskCompiler:
             capability_hash=capabilities.digest,
             context_projection=context_projection,
             domain_rule_hash=capabilities.domain_rule_hash,
+            model_plan=request.model_plan,
+            model_binding_summary=request.model_binding_summary,
             generation_params={
                 "predicate_catalog": self._catalog_text,
             },
@@ -171,6 +177,21 @@ class TaskCompiler:
         inner = response.get("task_contract") if isinstance(response.get("task_contract"), dict) else response
         bound = bind_model_task_contract(inner, request_text, verifier_context)
         return parse_task_contract(bound, request_text, verifier_context)
+
+    def resume_with_patch(self, request: RequestEnvelope, context: ContextSnapshot,
+                          capabilities: CapabilitySnapshot,
+                          task_contract: Dict[str, Any]) -> Outcome:
+        """Build IntentSpec from one server-patched contract without a model call."""
+        try:
+            parsed = parse_task_contract(task_contract, request.text, context_verifier_view(context))
+        except TaskContractError as exc:
+            return outcome_failed(contracts.CONTRACT_FAILED, "intent", "clarification_patch_invalid", str(exc))
+        if parsed.get("clarifications"):
+            return outcome_failed(contracts.CONTRACT_FAILED, "intent", "clarification_patch_incomplete",
+                                  "typed clarification patch did not clear the pending request")
+        intent = self._build_intent(request, parsed, context, capabilities)
+        return outcome_succeeded("intent", "澄清答案已确定性应用。",
+                                 details={"intent": intent, "task_contract": parsed})
 
     # -- IntentSpec construction -------------------------------------------
 
@@ -226,8 +247,11 @@ class TaskCompiler:
                 },
                 "publication_targets": tuple(request.outputs),
                 "declared_outputs": tuple(task_contract.get("outputs", [])),
+                "model_plan": request.model_plan,
+                "model_binding_summary": request.model_binding_summary,
             },
-            model_identity=self.model_runtime.model_identity("compiler"),
+            model_identity=self.model_runtime.model_identity_for(
+                AgentModelPlan.model_validate(request.model_plan), "compiler"),
             prompt_version=PROMPT_VERSION,
         )
 

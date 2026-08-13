@@ -27,6 +27,7 @@ from gateway_py3.runtime.acceptance_publisher import AcceptancePublisher
 from gateway_py3.kernel.coordinator import GeoPilotKernel
 from gateway_py3.kernel.coordinator import KernelPorts
 from gateway_py3.kernel.store import JournalStore
+from tests.kernel import fakes
 
 
 def _caller(user="u1", tenant="t1", role="analyst"):
@@ -43,6 +44,8 @@ def _envelope(session_id="00000000-0000-0000-0000-000000000001",
         target_selector={"bridge_pid": 2001, "bridge_port": 8766,
                          "arcmap_pid": 2000, "hwnd": 3000,
                          "deployment_hash": "a" * 64} if execute else {},
+        model_plan=fakes.fake_agent_model_plan().model_dump(mode="json"),
+        model_binding_summary=fakes.fake_model_binding_summary(),
     )
 
 
@@ -57,7 +60,9 @@ def _plan(risk_level=1, plan_id="00000000-0000-0000-0000-0000000000bb") -> Verif
             WorkflowStep(id="s1", operation="analysis.buffer",
                          arguments={"output_name": "out"}, reason="buffer",
                          declared_outputs=(DeclaredOutput(output_id="out-1", name="out",
-                             kind="feature_class", destination="C:\\publish\\out.gdb\\out",
+                             kind="feature_class", output_format="gdb",
+                             destination_policy="physical",
+                             destination_path="C:\\publish\\out.gdb\\out",
                              geometry_type="Polygon", expected_fields=("NAME",)),)),
         ),
         validation_report={"ok": True},
@@ -306,8 +311,15 @@ class AcceptancePublisherTest(unittest.TestCase):
 
     def _probe(self, artifact, digest=""):
         probe = {"output_id": "out-1", "kind": "feature_class", "canonical_path": str(artifact),
-                 "exists": True, "geometry": "Polygon", "spatial_reference": "WGS84",
-                 "fields": ["NAME"], "feature_count": 1,
+                 "exists": True, "geometry": "Polygon",
+                 "geometry_evidence": {"status": "Proven", "geometry_type": "Polygon",
+                                       "null_count": 0, "empty_count": 0, "invalid_count": 0},
+                 "spatial_reference": {"name": "WGS84", "factory_code": 4326, "type": "Geographic"},
+                 "fields": [{"name": "NAME", "type": "String", "nullable": True,
+                             "precision": 0, "scale": 0, "length": 64, "domain": None}],
+                 "feature_count": 1,
+                 "record_content": {"status": "Proven", "stable_id_field": "OBJECTID",
+                                    "record_hash": "b" * 64, "attribute_hashes": {"NAME": "c" * 64}},
                  "members": [{"relative_path": "out.gdb", "size": 11, "sha256": "a" * 64}]}
         from gateway_py3.runtime.acceptance_publisher import _canonical_json
         import hashlib
@@ -329,10 +341,10 @@ class AcceptancePublisherTest(unittest.TestCase):
         (source_gdb / "a00000001.gdbtable").write_bytes(b"gdb-content")
         publisher = AcceptancePublisher()
         artifact = source_gdb / "out"
-        identity = ArtifactIdentity(output_id="out-1", kind="feature_class",
+        identity = ArtifactIdentity(output_id="out-1", kind="feature_class", output_format="gdb",
             logical_dataset_path=str(artifact), source_publish_unit_path=str(source_gdb),
             destination_dataset_path="C:\\publish\\out.gdb\\out",
-            destination_publish_unit_path="C:\\publish\\out.gdb")
+            destination_publish_unit_path="C:\\publish", publication_kind="file_gdb")
         output_probe = self._probe(artifact)
         outcome = publisher.accept(self.intent, self.plan, [output_probe, self._unit_probe(source_gdb, output_probe["members"])], [identity])
         self.assertTrue(outcome.succeeded)
@@ -342,15 +354,53 @@ class AcceptancePublisherTest(unittest.TestCase):
         outcome = publisher.accept(self.intent, self.plan, [], [])
         self.assertEqual(outcome.kind, ACCEPTANCE_FAILED)
 
+    def test_accept_rejects_shape_type_without_independent_geometry_evidence(self):
+        source_gdb = self.staging / "staged.gdb"
+        source_gdb.mkdir()
+        (source_gdb / "a00000001.gdbtable").write_bytes(b"gdb-content")
+        artifact = source_gdb / "out"
+        identity = ArtifactIdentity(output_id="out-1", kind="feature_class", output_format="gdb",
+            logical_dataset_path=str(artifact), source_publish_unit_path=str(source_gdb),
+            destination_dataset_path="C:\\publish\\out.gdb\\out",
+            destination_publish_unit_path="C:\\publish", publication_kind="file_gdb")
+        probe = self._probe(artifact)
+        del probe["geometry_evidence"]
+        from gateway_py3.runtime.acceptance_publisher import _canonical_json
+        probe["manifest_digest"] = __import__("hashlib").sha256(
+            _canonical_json(probe).encode("utf-8")).hexdigest()
+        outcome = AcceptancePublisher().accept(
+            self.intent, self.plan, [probe, self._unit_probe(source_gdb, probe["members"])], [identity])
+        self.assertEqual(outcome.kind, ACCEPTANCE_FAILED)
+
+    def test_receipt_style_probe_cannot_publish_when_required_semantic_proof_is_unresolved(self):
+        source_gdb = self.staging / "staged.gdb"
+        source_gdb.mkdir()
+        (source_gdb / "a00000001.gdbtable").write_bytes(b"gdb-content")
+        artifact = source_gdb / "out"
+        identity = ArtifactIdentity(output_id="out-1", kind="feature_class", output_format="gdb",
+            logical_dataset_path=str(artifact), source_publish_unit_path=str(source_gdb),
+            destination_dataset_path="C:\\publish\\out.gdb\\out",
+            destination_publish_unit_path="C:\\publish", publication_kind="file_gdb")
+        probe = self._probe(artifact)
+        probe["acceptance_proofs"] = [{"proof_id": "acceptance:r1", "status": "Unresolved"}]
+        from gateway_py3.runtime.acceptance_publisher import _canonical_json
+        probe["manifest_digest"] = __import__("hashlib").sha256(
+            _canonical_json(probe).encode("utf-8")).hexdigest()
+        outcome = AcceptancePublisher().accept(
+            self.intent, self.plan, [probe, self._unit_probe(source_gdb, probe["members"])], [identity],
+            {"rules": [{"proof_id": "acceptance:r1", "required": True}]})
+        self.assertEqual(outcome.kind, ACCEPTANCE_FAILED)
+
     def _map_plan(self):
         output = DeclaredOutput(output_id="map-1", name="map", kind="map_state",
-                                destination="not_applicable")
+                                output_format="not_applicable",
+                                destination_policy="not_applicable")
         step = WorkflowStep(id="map", operation="layer.set_visibility",
                             arguments={"layer": "layer:0", "visible": True},
                             reason="show layer", declared_outputs=(output,))
         return self.plan.model_copy(update={"workflow": (step,)})
 
-    def _map_probe(self, plan, passed=True, digest=None):
+    def _map_probe(self, plan, passed=True, digest=None, proof_status="Proven"):
         from gateway_py3.catalog_loader import OperationCatalog
         from gateway_py3.runtime.acceptance_publisher import _canonical_json
         condition = OperationCatalog().get("layer.set_visibility")["capability_contract"]["postconditions"][0]
@@ -358,24 +408,36 @@ class AcceptancePublisherTest(unittest.TestCase):
                  "postcondition": condition, "arguments": plan.workflow[0].arguments,
                  "map_state": {"active_view": "Layers", "extent": {}, "layers": []},
                  "map_state_check": {"kind": condition["kind"], "verdict": "passed" if passed else "failed"},
-                 "passed": passed}
+                 "passed": passed,
+                 "acceptance_proofs": [{"proof_id": "acceptance:r1", "status": proof_status}]}
         import hashlib
         probe["manifest_digest"] = digest or hashlib.sha256(_canonical_json(probe).encode("utf-8")).hexdigest()
         return probe
 
+    def _map_contract(self):
+        return {"rules": [{"proof_id": "acceptance:r1", "required": True}],
+                "digest": "d", "plan_digest": "p", "task_contract_digest": "t"}
+
     def test_map_state_probe_accepts_live_postcondition(self):
         outcome = AcceptancePublisher().accept(self.intent, self._map_plan(),
-                                               [self._map_probe(self._map_plan())], [])
+                                               [self._map_probe(self._map_plan())], [],
+                                               self._map_contract())
         self.assertTrue(outcome.succeeded)
 
     def test_map_state_probe_rejects_failed_live_postcondition(self):
+        # The runtime marks the map proof Violated when its independent
+        # post-state observation fails; the publisher rejects via required_proofs.
         plan = self._map_plan()
-        outcome = AcceptancePublisher().accept(self.intent, plan, [self._map_probe(plan, passed=False)], [])
+        outcome = AcceptancePublisher().accept(self.intent, plan,
+                                               [self._map_probe(plan, passed=False, proof_status="Violated")], [],
+                                               self._map_contract())
         self.assertEqual(outcome.kind, ACCEPTANCE_FAILED)
 
     def test_map_state_probe_rejects_tampered_digest(self):
         plan = self._map_plan()
-        outcome = AcceptancePublisher().accept(self.intent, plan, [self._map_probe(plan, digest="0" * 64)], [])
+        outcome = AcceptancePublisher().accept(self.intent, plan,
+                                               [self._map_probe(plan, digest="0" * 64)], [],
+                                               self._map_contract())
         self.assertEqual(outcome.kind, ACCEPTANCE_FAILED)
 
     def test_publish_filegdb_logical_dataset_as_one_atomic_unit(self):
@@ -384,7 +446,7 @@ class AcceptancePublisherTest(unittest.TestCase):
         (source_gdb / "a00000001.gdbtable").write_bytes(b"gdb-content")
         target_gdb = self.publish_dir / "published.gdb"
         output = self.plan.workflow[0].declared_outputs[0].model_copy(update={
-            "kind": "feature_class", "destination": str(target_gdb / "roads"),
+            "kind": "feature_class", "destination_path": str(target_gdb / "roads"),
         })
         plan = self.plan.model_copy(update={
             "workflow": (self.plan.workflow[0].model_copy(update={"declared_outputs": (output,)}),),
@@ -393,16 +455,23 @@ class AcceptancePublisherTest(unittest.TestCase):
         members = [{"relative_path": "a00000001.gdbtable", "size": 11,
                     "sha256": __import__("hashlib").sha256(b"gdb-content").hexdigest()}]
         probe = {"output_id": "out-1", "kind": "feature_class",
-                 "canonical_path": str(logical_path), "exists": True,
-                 "geometry": "Polygon", "spatial_reference": "WGS84",
-                 "fields": ["NAME"], "feature_count": 1, "members": members}
+                 "canonical_path": str(logical_path), "exists": True, "geometry": "Polygon",
+                 "geometry_evidence": {"status": "Proven", "geometry_type": "Polygon",
+                                       "null_count": 0, "empty_count": 0, "invalid_count": 0},
+                 "spatial_reference": {"name": "WGS84", "factory_code": 4326, "type": "Geographic"},
+                 "fields": [{"name": "NAME", "type": "String", "nullable": True,
+                             "precision": 0, "scale": 0, "length": 64, "domain": None}],
+                 "feature_count": 1,
+                 "record_content": {"status": "Proven", "stable_id_field": "OBJECTID",
+                                    "record_hash": "b" * 64, "attribute_hashes": {"NAME": "c" * 64}},
+                 "members": members}
         from gateway_py3.runtime.acceptance_publisher import _canonical_json
         probe["manifest_digest"] = __import__("hashlib").sha256(
             _canonical_json(probe).encode("utf-8")).hexdigest()
-        artifact = ArtifactIdentity(output_id="out-1", kind="feature_class",
+        artifact = ArtifactIdentity(output_id="out-1", kind="feature_class", output_format="gdb",
             logical_dataset_path=str(logical_path), source_publish_unit_path=str(source_gdb),
             destination_dataset_path=str(target_gdb / "roads"),
-            destination_publish_unit_path=str(target_gdb))
+            destination_publish_unit_path=str(target_gdb.parent), publication_kind="file_gdb")
         publisher = AcceptancePublisher()
         accepted = publisher.accept(self.intent, plan, [probe, self._unit_probe(source_gdb, members)], [artifact])
         self.assertTrue(accepted.succeeded)
@@ -417,6 +486,18 @@ class AcceptancePublisherTest(unittest.TestCase):
         outcome = publisher.commit(prepared.details["publication"])
         self.assertTrue(outcome.succeeded)
         self.assertEqual((target_gdb / "a00000001.gdbtable").read_bytes(), b"gdb-content")
+        published = outcome.details["publication"]["published_artifacts"][0]
+        self.assertEqual(str(target_gdb / "roads"), published["destination_dataset_path"])
+        self.assertTrue(published["members"])
+        self.assertEqual(probe["manifest_digest"], published["acceptance_evidence_hash"])
+        __import__("shutil").rmtree(source_gdb)
+        self.assertTrue(publisher.commit(prepared.details["publication"]).succeeded,
+                        "published recovery must not depend on deleted staging")
+        (target_gdb / "a00000001.gdbtable").write_bytes(b"tampered")
+        self.assertEqual(
+            "PublicationIndeterminate",
+            publisher.commit(prepared.details["publication"]).kind,
+        )
 
 
 class AuthorizationOutputIdentityTest(unittest.TestCase):

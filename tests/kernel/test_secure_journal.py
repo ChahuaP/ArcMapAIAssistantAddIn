@@ -13,6 +13,7 @@ from gateway_py3.kernel.contracts import CallerIdentity, RequestEnvelope, Target
 from gateway_py3.kernel.store import JournalStore
 from gateway_py3.model_runtime.credentials import DpapiCredentialVault
 from gateway_py3.model_runtime.configuration import ModelConfigurationStore
+from tests.kernel import fakes
 
 
 def _request() -> RequestEnvelope:
@@ -21,6 +22,8 @@ def _request() -> RequestEnvelope:
         caller=CallerIdentity(user_id="u", tenant_id="t", role="operator"),
         target_selector=TargetSelector(bridge_pid=1, bridge_port=2, arcmap_pid=3,
                                        hwnd=4, deployment_hash="deployment"),
+        model_plan=fakes.fake_agent_model_plan().model_dump(mode="json"),
+        model_binding_summary=fakes.fake_model_binding_summary(),
     )
 
 

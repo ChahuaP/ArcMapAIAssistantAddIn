@@ -75,12 +75,17 @@ class BridgeContextProvider:
             layers.append(LayerSnapshot(
                 identity=LayerRef(name=layer["name"], layer_ref=layer["layer_ref"],
                                   data_source=layer["data_source"], layer_type=layer["layer_type"]),
-                fields=tuple(FieldColumn(name=field["name"], dtype=field["type"])
-                             for field in fields),
+                fields=tuple(_field_column(field) for field in fields),
                 geometry_type=layer["geometry_type"], coordinate_system=layer["spatial_reference"],
                 selection_count=int(layer["selected_count"]),
                 long_name=layer["long_name"], visible=bool(layer["visible"]),
                 selection_hash=layer["selection_hash"],
+                identity_fields=tuple(layer.get("identity_fields") or ()),
+                source_content_digest=layer.get("source_content_digest"),
+                feature_manifest_digest=layer.get("feature_manifest_digest"),
+                raster_content_digest=layer.get("raster_content_digest"),
+                crs_type=layer.get("crs_type"),
+                meters_per_unit=layer.get("meters_per_unit"),
             ))
 
         return ContextSnapshot(
@@ -118,6 +123,31 @@ def _wait_for_context_callback(store: JournalStore, run_id: str,
     raise RuntimeError("上下文回调超时（%ss），Py2 runtime 未响应。" % timeout)
 
 
+def _field_column(field) -> FieldColumn:
+    """Build a FieldColumn carrying the full canonical ABI semantics.
+
+    Legacy captures that only supply ``{name, type}`` remain valid; the
+    optional precision/scale/length/domain default to absent evidence.
+    """
+    return FieldColumn(
+        name=field["name"], dtype=field.get("type"),
+        nullable=bool(field.get("nullable", True)),
+        precision=field.get("precision"),
+        scale=field.get("scale"),
+        length=field.get("length"),
+        domain=tuple(field.get("domain") or ()),
+    )
+
+
+def _field_doc(field) -> dict:
+    """Round-trip a FieldColumn back to the full canonical ABI document."""
+    return {
+        "name": field.name, "type": field.dtype, "nullable": field.nullable,
+        "precision": field.precision, "scale": field.scale,
+        "length": field.length, "domain": list(field.domain),
+    }
+
+
 def _snapshot_to_context_data(snapshot) -> dict:
     return {
         "layers": [
@@ -126,13 +156,19 @@ def _snapshot_to_context_data(snapshot) -> dict:
                 "layer_ref": l.identity.layer_ref,
                 "data_source": l.identity.data_source,
                 "layer_type": l.identity.layer_type,
-                "fields": [{"name": field.name, "type": field.dtype} for field in l.fields],
+                "fields": [_field_doc(field) for field in l.fields],
                 "geometry_type": l.geometry_type,
                 "spatial_reference": l.coordinate_system,
                 "selected_count": l.selection_count,
                 "long_name": l.long_name,
                 "visible": l.visible,
                 "selection_hash": l.selection_hash,
+                "identity_fields": list(l.identity_fields),
+                "source_content_digest": l.source_content_digest,
+                "feature_manifest_digest": l.feature_manifest_digest,
+                "raster_content_digest": l.raster_content_digest,
+                "crs_type": l.crs_type,
+                "meters_per_unit": l.meters_per_unit,
             }
             for l in snapshot.layers
         ],

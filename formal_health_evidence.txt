@@ -1,0 +1,16 @@
+ARCMAP_PID=50280
+ARCMAP_STATE=started
+ARCMAP_HWND=2559888
+ARCMAP_RESPONDING=True
+BRIDGE_PID=39428
+BRIDGE_PATH=C:\Program Files\GeoPilot\bridge\ArcMapBridge.exe
+BRIDGE_STATE=started
+GATEWAY_PID=32352
+GATEWAY_PATH=C:\Program Files\GeoPilot\gateway\ArcMapAIAssistantGateway.exe
+GATEWAY_STATE=started
+HEALTH_8766_STATUS=200
+HEALTH_8766_BODY={"ok":true,"bridge":"arcmap-external","bridge_pid":39428,"bridge_port":8766,"deployment_hash":"a04cebf8352cbf8352bd8023e8e6ce56aa27fdd1e27063ec808c48320bebb5b1"}
+HEALTH_8765_STATUS=200
+HEALTH_8765_BODY={"app_version": "2.0.0", "ok": true}
+DEPLOY_HASH_8766_deployment_hash=a04cebf8352cbf8352bd8023e8e6ce56aa27fdd1e27063ec808c48320bebb5b1
+DONE

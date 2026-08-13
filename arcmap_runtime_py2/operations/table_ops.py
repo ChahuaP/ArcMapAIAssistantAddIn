@@ -5,28 +5,18 @@ import arcpy
 
 from . import common
 from . import condition_utils
-
-
-FIELD_TYPE_MAP = {
-    "text": "TEXT",
-    "string": "TEXT",
-    "short": "SHORT",
-    "long": "LONG",
-    "integer": "LONG",
-    "float": "FLOAT",
-    "double": "DOUBLE",
-    "date": "DATE"
-}
+from shared_runtime import semantic_abi
 
 
 def add_field(context, arguments, step_outputs):
     layer = common.find_layer(context, arguments["layer"], step_outputs)
-    field_name = common.safe_output_name(arguments["field_name"])
+    specification = semantic_abi.field_spec(arguments["field"])
+    field_name = common.safe_output_name(specification["name"])
     if condition_utils.field_exists(layer, field_name):
         raise common.OperationError(u"字段已存在：%s" % field_name)
-    field_type = _field_type(arguments.get("field_type", "TEXT"))
-    field_length = arguments.get("field_length")
-    arcpy.AddField_management(layer, field_name, field_type, "", "", field_length or "")
+    field_type = semantic_abi.field_type_to_arcpy(specification)
+    field_length = specification["precision"] if specification["type"] == "string" else None
+    arcpy.AddField_management(layer, field_name, field_type, "", "", field_length or "", "NULLABLE" if specification["nullable"] else "NON_NULLABLE")
     return {"layer": layer.name, "field_name": field_name, "field_type": field_type}
 
 
@@ -69,7 +59,7 @@ def delete_rows(context, arguments, step_outputs):
 
 def estimate_add_field(context, arguments, step_outputs):
     layer = common.find_layer(context, arguments["layer"], step_outputs)
-    return {"summary": u"将直接修改图层 %s：添加字段 %s。" % (layer.name, arguments["field_name"])}
+    return {"summary": u"将直接修改图层 %s：添加字段 %s。" % (layer.name, arguments["field"]["name"])}
 
 
 def estimate_delete_field(context, arguments, step_outputs):
@@ -87,11 +77,6 @@ def estimate_delete_rows(context, arguments, step_outputs):
     layer = common.find_layer(context, arguments["layer"], step_outputs)
     count = condition_utils.count_where(layer, arguments["where"])
     return {"summary": u"将直接修改图层 %s：删除 %s 条要素。" % (layer.name, count), "count": count}
-
-
-def _field_type(value):
-    key = common._text(value).strip().lower()
-    return FIELD_TYPE_MAP.get(key, common._text(value).strip().upper())
 
 
 def _assignments(arguments):

@@ -25,7 +25,11 @@ from gateway_py3.kernel.contracts import (
     RequestEnvelope, SUCCEEDED, CONTRACT_FAILED,
 )
 from gateway_py3.kernel.store import JournalStore
-from tests.kernel.fakes import build_test_model_runtime
+from tests.kernel.fakes import (
+    build_test_model_runtime,
+    fake_agent_model_plan,
+    fake_model_binding_summary,
+)
 
 
 # --- minimal valid task_contract + workflow fixtures ----------------------
@@ -83,7 +87,7 @@ def _add_layer_task_contract_response():
             "geometry": "not_applicable",
             "required_fields": [],
             "spatial_reference": "not_applicable",
-            "destination": "not_applicable",
+            "destination_policy": "not_applicable",
             "evidence": "D:/Data/shapefile/nanjing.shp",
         }],
         "requirements": [{
@@ -120,7 +124,7 @@ class _ScriptedAdapter:
         elif "工作流修复器" in system:
             response, tokens = self._responses.get("repair", self._responses.get("workflow", {})), 15
         elif "G3 审计器" in system:
-            default_audit = {"audit_result": {"decision": "pass", "claims": []}}
+            default_audit = {"audit_result": {"decision": "pass", "revision": None, "clarification": None}}
             response, tokens = self._responses.get("audit", default_audit), 5
         else:
             response, tokens = self._responses.get("default", {}), 1
@@ -185,6 +189,8 @@ def _request(text="列出地图图层") -> RequestEnvelope:
         target_selector={"bridge_pid": 2001, "bridge_port": 8766,
                          "arcmap_pid": 2000, "hwnd": 3000,
                          "deployment_hash": "a" * 64},
+        model_plan=fake_agent_model_plan().model_dump(mode="json"),
+        model_binding_summary=fake_model_binding_summary(),
     )
 
 

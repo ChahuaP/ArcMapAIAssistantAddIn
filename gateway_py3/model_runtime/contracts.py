@@ -140,6 +140,8 @@ class ModelRequest(_FrozenModel):
     capability_hash: str
     context_projection: Dict[str, Any]
     domain_rule_hash: str
+    model_plan: AgentModelPlan
+    model_binding_summary: Dict[str, Any]
     generation_params: Dict[str, Any] = Field(default_factory=dict)
     run_id: str = ""
 

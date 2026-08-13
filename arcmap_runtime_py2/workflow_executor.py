@@ -82,12 +82,12 @@ def execute(workflow_row, context, confirm_callback=None):
     # The Gateway is the only authority that names the run-scoped staging
     # directory. Local derivation would permit stale runtimes to escape it.
     run_id = workflow_row.get("run_id") or u""
-    staging_dir = workflow_row.get("staging_dir") or u""
+    staging_root = workflow_row.get("staging_root") or u""
     if run_id:
-        if not staging_dir:
-            raise WorkflowExecutionError(u"Gateway lease acknowledgement lacks staging_dir.")
+        if not staging_root:
+            raise WorkflowExecutionError(u"Gateway lease acknowledgement lacks staging_root.")
         context = dict(context)
-        context["staging_dir"] = staging_dir
+        context["staging_root"] = staging_root
         context["run_id"] = run_id
 
     operations = _load_operations()
@@ -257,11 +257,10 @@ def _call_executor(executor_path, context, arguments, step_outputs):
 
 
 def _prepare_runtime_arguments(operation, context, arguments, step_outputs):
+    runtime_arguments = _adapt_semantic_arguments(arguments, operation.get("parameters_schema") or {})
     if not _is_custom_operation(operation):
-        return arguments
-    runtime_arguments = _normalize_declared_path_arguments(
-        dict(arguments), operation.get("parameters_schema") or {}
-    )
+        return runtime_arguments
+    runtime_arguments = _normalize_declared_path_arguments(runtime_arguments, operation.get("parameters_schema") or {})
     common = _operations_common()
     for name in _layer_argument_names(operation):
         if name not in runtime_arguments:
@@ -272,9 +271,28 @@ def _prepare_runtime_arguments(operation, context, arguments, step_outputs):
             context,
             runtime_arguments["output_name"],
             operation.get("output_policy") or {},
-            runtime_arguments.get("output_workspace")
         )
     return runtime_arguments
+
+
+def _adapt_semantic_arguments(arguments, schema):
+    """Translate the closed Gateway ABI only at the ArcPy boundary."""
+    try:
+        from shared_runtime import semantic_abi
+    except ImportError:
+        import semantic_abi
+    properties = schema.get("properties") or {}
+    result = dict(arguments)
+    for name, descriptor in properties.items():
+        if name not in result or not isinstance(descriptor, dict):
+            continue
+        semantic = descriptor.get("x-geopilot-semantic")
+        value = result[name]
+        if semantic == "selection_type":
+            result[name] = semantic_abi.selection_to_arcpy(value)
+        elif semantic == "spatial_predicate":
+            result[name] = semantic_abi.spatial_predicate_to_arcpy(value)
+    return result
 
 
 def _finalize_runtime_result(operation, context, arguments, result):

@@ -96,12 +96,7 @@ def _validate_unique_output_destinations(
         )
         output_type = output_policy_type(policy)
         output_format = policy["default_format"]
-        container = str(
-            arguments.get("output_workspace")
-            or "<default>"
-        ).strip().replace("/", "\\").rstrip("\\").casefold()
         key = (
-            container,
             str(arguments["output_name"]).strip().casefold(),
             output_format,
         )
@@ -125,8 +120,8 @@ def normalize_workflow(workflow: Dict[str, Any]) -> None:
 
 def normalize_workflow_arguments(workflow: Dict[str, Any], catalog: OperationCatalog) -> None:
     declared_defaults = {
-        "selection.select_by_attribute": {"selection_type": "NEW_SELECTION"},
-        "selection.select_by_location": {"selection_type": "NEW_SELECTION"},
+        "selection.select_by_attribute": {"selection_type": "new_selection"},
+        "selection.select_by_location": {"selection_type": "new_selection"},
     }
     for step in workflow.get("steps") or []:
         if not isinstance(step, dict):
@@ -189,16 +184,6 @@ def normalize_internal_output_references(
     return events
 
 
-def _valid_output_workspace(value: Any) -> bool:
-    if not isinstance(value, str) or not value.strip():
-        return False
-    text = value.strip()
-    path = Path(text)
-    if text.lower().endswith(".gdb"):
-        return path.exists() or (path.parent.exists() and path.parent.is_dir())
-    return path.exists() and path.is_dir()
-
-
 def validate_workflow_semantics(workflow: Dict[str, Any], catalog: OperationCatalog, context: Dict[str, Any]) -> None:
     if workflow.get("action") != "execute":
         return
@@ -216,7 +201,7 @@ def validate_workflow_semantics(workflow: Dict[str, Any], catalog: OperationCata
         _validate_field_references(operation, arguments, context, available_layers)
         _validate_condition_value_types(operation, arguments, available_layers)
         _validate_output_location(operation, arguments, context)
-        _validate_output_name(arguments)
+        _validate_output_name(operation, arguments)
         _validate_layer_add_path(step, arguments, available_layers)
 
         _apply_map_layer_effect(step, available_layers)
@@ -322,13 +307,9 @@ def friendly_validation_message(error: Exception) -> str:
     if " must be object." in message:
         return message + " 对象参数必须写成 JSON 对象。请修正 workflow_json 后继续，不要向用户追问。"
     if "has unknown arguments:" in message:
-        if "folder_path" in message:
-            return "workflow operation 里不能使用 folder_path；folder_path 只属于 file_resolve。请按 operation schema 使用 output_workspace。请修正 workflow，不要向用户追问。"
         return message
     if "属性条件缺少 op" in message:
         return "属性条件 where 缺少 op。布尔条件必须写成 {\"op\":\"and\",\"conditions\":[...]} 或 {\"op\":\"or\",\"conditions\":[...]}，不能写 {\"and\":[...]}；叶子条件必须写 op，例如 {\"field\":\"NAME\",\"op\":\"like\",\"value\":\"%南京%\"}。请修正 workflow，不要向用户追问。"
-    if "输出文件夹不存在" in message or "输出工作空间不可用" in message:
-        return message + " 如果这是用户指定的位置，请向用户确认一个现有 geodatabase；如果用户没有指定输出位置，请移除 output_workspace，让系统使用任务 staging。"
     if "Unknown operation" in message:
         return "当前版本还不支持这个操作。请换成已有能力，或告诉我你想完成的 GIS 处理目标。"
     if message:
@@ -366,7 +347,7 @@ def _validate_arguments(step_id: str, operation_id: str, arguments: Dict[str, An
             if "output_path" in extra:
                 raise ValidationError(
                     "%s 不要传 output_path。output_path 只由 GeoPilot 执行时根据 output_name 和输出位置生成；"
-                    "workflow 只允许传 operation schema 里声明的 output_name 或 output_workspace，"
+                    "workflow 只允许传 operation schema 里声明的逻辑参数，"
                     "不要为了 output_path 修订自建工具。"
                     % step_id
                 )
@@ -400,9 +381,27 @@ def _validate_type(step_id: str, name: str, value: Any, schema: Dict[str, Any]) 
         item_schema = schema.get("items", {})
         for index, item in enumerate(value):
             _validate_type(step_id, f"{name}[{index}]", item, item_schema)
+    if isinstance(value, dict) and "object" in expected_types:
+        properties = schema.get("properties", {})
+        required = schema.get("required", [])
+        missing = [item for item in required if item not in value]
+        if missing:
+            raise ValidationError(f"{step_id}.{name} missing object fields: {missing}.")
+        if schema.get("additionalProperties") is False:
+            extra = sorted(set(value) - set(properties))
+            if extra:
+                raise ValidationError(f"{step_id}.{name} has unknown object fields: {extra}.")
+        for child, child_value in value.items():
+            if child in properties:
+                _validate_type(step_id, f"{name}.{child}", child_value, properties[child])
     enum = schema.get("enum")
     if enum and value not in enum:
         raise ValidationError(f"{step_id}.{name} must be one of {enum}.")
+    if "const" in schema and value != schema["const"]:
+        raise ValidationError(f"{step_id}.{name} must equal {schema['const']!r}.")
+    minimum = schema.get("minimum")
+    if minimum is not None and isinstance(value, (int, float)) and not isinstance(value, bool) and value < minimum:
+        raise ValidationError(f"{step_id}.{name} must be at least {minimum}.")
 
 
 def _matches_json_type(value: Any, expected: str) -> bool:
@@ -685,37 +684,32 @@ def _validate_output_location(
         operation.get("output_policy"), operation.get("side_effects", ""),
     )
     output_policy_type(policy)
-    if arguments.get("output_workspace"):
-        if not _valid_output_workspace(arguments["output_workspace"]):
-            raise ValidationError(
-                "输出工作空间不可用：%s。请使用已存在的文件夹/GDB，"
-                "或在已保存 MXD 中省略输出位置使用默认输出位置。"
-                % arguments["output_workspace"]
-            )
-        return
-    workspace = (operation.get("output_policy") or {}).get("workspace", "")
-    if context.get("is_saved") and workspace.startswith("mxd_default"):
-        return
-    raise ValidationError(
-        "这个操作会生成新数据，但当前输出位置还不明确。请告诉我输出到哪个文件夹或 GDB。"
-    )
 
 
-def _validate_output_name(arguments: Dict[str, Any]) -> None:
+def _validate_output_name(operation: Dict[str, Any], arguments: Dict[str, Any]) -> None:
     output_name = arguments.get("output_name")
     if not output_name:
         return
     text = str(output_name)
-    if (
-        text != text.strip()
-        or text in (".", "..")
-        or "." in text
+    policy = validate_output_policy(
+        operation.get("output_policy"), operation.get("side_effects", ""),
+    )
+    output_format = policy.get("default_format")
+    unsafe = (
+        text != text.strip() or text in (".", "..")
         or re.search(r'[<>:"/\\|?*\x00-\x1f]', text)
-    ):
+    )
+    if output_format == "gdb":
+        invalid = unsafe or "." in text
+    elif output_format in ("csv", "png"):
+        suffix = "." + output_format
+        invalid = unsafe or not text.lower().endswith(suffix) or text[:-len(suffix)].endswith(".")
+    else:
+        invalid = unsafe
+    if invalid:
         raise ValidationError(
-            "输出名称“%s”不能用于输出。请只传文件名主体，不要包含扩展名、"
-            "路径或系统非法字符。"
-            % output_name
+            "输出名称“%s”不符合 %s 输出合同。"
+            % (output_name, output_format)
         )
 
 

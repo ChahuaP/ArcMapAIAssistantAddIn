@@ -4,6 +4,7 @@ from __future__ import absolute_import
 
 import arcpy
 from shared_runtime import capability_contract
+from shared_runtime.file_semantics import inspect_file, FileSemanticError
 
 try:
     import arcmap_desktop_selection
@@ -70,7 +71,8 @@ def observe_and_verify(operation, arguments, result, context, step_outputs, publ
             )
     else:
         target = _target(operation, arguments, result, context, step_outputs)
-        observation = _observe(target, outputs.get("kind", "none"))
+        output_format = (operation.get("output_policy") or {}).get("default_format")
+        observation = _observe(target, outputs.get("kind", "none"), output_format)
     observation["map_publication"] = publication_state or "none"
     observation["input_snapshot"] = input_snapshot or {"inputs": {}}
     observation["contract"] = {"verdict": "passed", "checks": []}
@@ -127,12 +129,24 @@ def _find_layer(context, value, step_outputs):
     return common.find_layer(context, value, step_outputs or {})
 
 
-def _observe(target, expected_kind):
+def _observe(target, expected_kind, output_format=None):
     observation = {"path": None, "kind": "none", "geometry": "not_applicable", "fields": [],
                    "feature_count": None, "spatial_reference": None, "selection_count": None}
     if target is None:
         return observation
     observation["path"] = _path(target)
+    if expected_kind == "file":
+        exists = path_utils.isfile(observation["path"])
+        if not exists:
+            raise ArtifactVerificationError("outputs.file", "existing valid file", observation["path"])
+        try:
+            semantics = inspect_file(observation["path"], output_format)
+        except FileSemanticError as exc:
+            raise ArtifactVerificationError("outputs.file_semantics", output_format, unicode(exc))
+        observation.update({"kind": "file" if exists else "missing", "exists": exists,
+                            "geometry": "not_applicable", "fields": [], "feature_count": 1 if exists else 0,
+                            "spatial_reference": "not_applicable", "file_semantics": semantics})
+        return observation
     dataset_target = _dataset_target(target)
     # In-place edits have output kind none but still require full dataset observation.
     if not _exists(dataset_target):

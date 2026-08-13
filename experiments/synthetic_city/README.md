@@ -24,12 +24,15 @@ All source and truth layers use EPSG:32650, so distances and areas are evaluated
 
 ## Formal ablation runner
 
-`run_formal_experiments.py` is the sole formal-experiment entry point. It controls ArcMap only through the GeoPilot Gateway: before every mode/case/repetition, it clears the map, reloads exactly the 14 immutable source layers, and verifies the fresh Bridge context. It then executes the three dependent rounds, scores every generated vector against the truth IDs, checks required CSV/PNG artifacts, and continuously writes run records plus CSV summaries.
+`experiments.supervisor` is the sole formal-experiment entry point. It controls ArcMap only through GeoPilotKernel, freezes paired G2/G3 provenance, and refuses any provider/model other than MiniMax-M3.
 
 ```powershell
-python experiments\synthetic_city\run_formal_experiments.py `
-  --output experiments\out\formal-experiments\run-001 `
-  --repetitions 3
+python -m experiments.supervisor `
+  --provider minimax --model MiniMax-M3 `
+  --dataset experiments\data\synthetic-city-formal-20260910 `
+  --output experiments\out\c3-gate-kernel-v1-minimax-<timestamp> `
+  --seed 20260910 --repetition 1 `
+  --case FLOOD_RESPONSE --case LAND_COMPLIANCE
 ```
 
-The output directory must not already exist. A failure stops the batch immediately and leaves `run_records.json` and the partial score tables for diagnosis; it never silently reuses a polluted ArcMap state or overwrites an earlier result set.
+The output directory must not already exist. The supervisor writes atomic campaign state and retains infrastructure or capability failures as evidence; it never reuses an earlier campaign or writes partial results into the paper's formal output.

@@ -18,6 +18,8 @@ from the exact bound target.
 from __future__ import annotations
 
 import json
+import os
+import uuid
 import threading
 import time
 import urllib.error
@@ -26,6 +28,11 @@ from typing import Any, Dict, Optional
 
 from ..kernel.contracts import (
     AuthorizationGrant, ContextSnapshot, RuntimeLease, VerifiedPlan,
+)
+from ..runtime.bridge_discovery import discover_bridge_target
+from shared_runtime.platform_paths import localappdata_path
+from shared_runtime.runtime_gate_protocol import (
+    RUNTIME_GATE_PROTOCOL, SCHEMA_SHA256, validate_request, validate_result,
 )
 
 DEFAULT_BRIDGE_HOST = "127.0.0.1"
@@ -129,7 +136,8 @@ class RealBridgeClient:
             return self._receipts.pop(run_id, None)
 
     def probe_output(self, lease: RuntimeLease, plan: VerifiedPlan, output_id: str,
-                     kind: str, staged_path: str) -> Optional[Dict[str, Any]]:
+                     kind: str, output_format: str, staged_path: str,
+                     acceptance_contract: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Request a fenced, independent ArcPy acceptance probe."""
         token = "%s:%s" % (lease.run_id, output_id)
         event = self._new_probe_event(token)
@@ -137,7 +145,8 @@ class RealBridgeClient:
             "lease_id": lease.lease_id, "epoch": lease.epoch,
             "plan_hash": plan.digest, "run_id": lease.run_id,
             "deployment_hash": lease.deployment_hash, "hwnd": lease.target_hwnd,
-            "output_id": output_id, "kind": kind, "staged_path": staged_path,
+            "output_id": output_id, "kind": kind, "output_format": output_format,
+            "staged_path": staged_path, "acceptance_contract": acceptance_contract,
         })
         if not event.wait(timeout=BRIDGE_REQUEST_TIMEOUT_SECONDS):
             return None
@@ -160,16 +169,24 @@ class RealBridgeClient:
             return self._probes.pop(token, None)
 
     def probe_map_state(self, lease: RuntimeLease, plan: VerifiedPlan, output_id: str,
-                        postcondition: Dict[str, Any], arguments: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Request a fenced live-map probe bound to one sealed workflow step."""
+                        postcondition: Dict[str, Any], arguments: Dict[str, Any],
+                        acceptance_contract: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+        """Request a fenced live-map probe bound to one sealed workflow step.
+
+        Carries the sealed acceptance contract so the runtime produces the map
+        semantic proof through the same ``probe_contract`` path as file outputs.
+        """
         token = "%s:%s" % (lease.run_id, output_id)
         event = self._new_probe_event(token)
-        self._post(lease.bridge_port, "/acceptance-probe", {
+        payload = {
             "lease_id": lease.lease_id, "epoch": lease.epoch, "plan_hash": plan.digest,
             "run_id": lease.run_id, "deployment_hash": lease.deployment_hash,
             "hwnd": lease.target_hwnd, "probe_type": "map_state", "output_id": output_id,
             "postcondition": postcondition, "arguments": arguments,
-        })
+        }
+        if acceptance_contract is not None:
+            payload["acceptance_contract"] = acceptance_contract
+        self._post(lease.bridge_port, "/acceptance-probe", payload)
         if not event.wait(timeout=BRIDGE_REQUEST_TIMEOUT_SECONDS):
             return None
         with self._lock:
@@ -192,6 +209,52 @@ class RealBridgeClient:
         if not isinstance(result, dict):
             raise ArcMapBridgeError("Bridge returned an invalid sample-values document.")
         return {"values": result}
+
+    def runtime_gate_prepare(self, selector, source_layers, staging_gdb: str) -> str:
+        """Reset one explicitly selected ArcMap document to formal input state."""
+        target = discover_bridge_target(selector)
+        payload = self._runtime_gate_payload("prepare", selector, target)
+        payload.update({"hwnd": target["hwnd"],
+                   "source_layers": [str(path) for path in source_layers],
+                   "staging_gdb": str(staging_gdb)})
+        validate_request(payload)
+        result = self._post(target["bridge_port"], "/runtime-gate", payload)
+        if os.path.normcase(os.path.abspath(str(staging_gdb))) != os.path.normcase(os.path.abspath(str(result.get("staging_gdb", "")))):
+            raise ArcMapBridgeError("runtime-gate did not bind the requested staging_gdb")
+        return _runtime_gate_context_hash(result, "prepare")
+
+    def runtime_gate_restore(self, selector, initial_digest: str, artifacts: Dict[str, Dict[str, Any]]) -> str:
+        """Restore accepted prior-round artifacts into an already reset map."""
+        target = discover_bridge_target(selector)
+        payload = self._runtime_gate_payload("restore", selector, target)
+        payload.update({"hwnd": target["hwnd"],
+                   "initial_digest": initial_digest, "artifacts": artifacts})
+        validate_request(payload)
+        result = self._post(target["bridge_port"], "/runtime-gate", payload)
+        return _runtime_gate_context_hash(result, "restore")
+
+    def runtime_gate_evaluate(self, selector, artifacts: Dict[str, Dict[str, Any]], expected: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+        target = discover_bridge_target(selector)
+        payload = self._runtime_gate_payload("evaluate", selector, target)
+        payload.update({"hwnd": target["hwnd"], "artifacts": artifacts, "expected": expected})
+        validate_request(payload)
+        result = self._post(target["bridge_port"], "/runtime-gate", payload)
+        _runtime_gate_context_hash(result, "evaluate")
+        return result
+
+    @staticmethod
+    def _runtime_gate_payload(mode: str, selector, target: Dict[str, Any]) -> Dict[str, Any]:
+        if target["source_sha256"] != selector.deployment_hash:
+            raise ArcMapBridgeError("runtime-gate deployment identity drifted before lifecycle dispatch")
+        directory = localappdata_path("runtime_gate")
+        os.makedirs(directory, exist_ok=True)
+        lifecycle_id = str(uuid.uuid4())
+        payload = {"mode": mode, "bridge_pid": selector.bridge_pid,
+                "bridge_port": selector.bridge_port, "arcmap_pid": selector.arcmap_pid,
+                "deployment_hash": selector.deployment_hash, "lifecycle_lease_id": lifecycle_id,
+                "protocol": RUNTIME_GATE_PROTOCOL, "schema_hash": SCHEMA_SHA256,
+                "result_path": os.path.join(directory, lifecycle_id + ".json")}
+        return payload
 
     # -- receipt callback entry (called by the HTTP adapter) ----------------
 
@@ -284,3 +347,14 @@ class RealBridgeClient:
                 "Bridge %s returned error: %s" % (path, result.get("error") if isinstance(result, dict) else result)
             )
         return result
+
+
+def _runtime_gate_context_hash(document: Dict[str, Any], mode: str) -> str:
+    try:
+        validate_result(document, mode)
+    except RuntimeError as exc:
+        raise ArcMapBridgeError(str(exc))
+    value = document.get("context_hash") if isinstance(document, dict) else None
+    if not isinstance(value, str) or len(value) != 64 or any(char not in "0123456789abcdef" for char in value):
+        raise ArcMapBridgeError("runtime-gate did not return a valid live ArcMap context hash")
+    return value

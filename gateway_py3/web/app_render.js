@@ -43,12 +43,51 @@
       if (stage === 'authorization_required') {
         text = '任务已规划，等待授权确认。';
       } else if (stage === 'clarification_required') {
+        const pending = pendingClarification(item);
+        if (pending) text = pending.question;
         text += '\n\n信息不够，当前不会执行任何操作。';
       } else if (isTerminalStage(stage) && stage !== 'succeeded') {
         text += '\n\n任务未成功完成。';
       }
       appendBubble('assistant', text, scroll);
+      if (stage === 'clarification_required') appendClarificationControl(item);
       if (updateStatus) setStatus(stageLabel(stage));
+    }
+
+    function pendingClarification(item) {
+      const events = (item && item.events) || [];
+      for (let index = events.length - 1; index >= 0; index -= 1) {
+        const values = ((events[index].payload || {}).clarifications || []);
+        if (events[index].kind === 'clarification_required' && values.length) return values[0];
+      }
+      return null;
+    }
+
+    function appendClarificationControl(item) {
+      const pending = pendingClarification(item);
+      if (!pending) return;
+      const schema = (pending.patch || {}).value_schema || {};
+      const row = document.createElement('div');
+      row.className = 'bubble-row assistant';
+      const box = document.createElement('div');
+      box.className = 'bubble clarification-control';
+      let control;
+      if (Array.isArray(schema.enum)) {
+        control = document.createElement('select');
+        schema.enum.forEach(value => {
+          const option = document.createElement('option');
+          option.value = value; option.textContent = value; control.appendChild(option);
+        });
+      } else {
+        control = document.createElement('input');
+        control.type = schema.type === 'number' ? 'number' : 'text';
+      }
+      const button = document.createElement('button');
+      button.className = 'btn btn-sm btn-primary'; button.textContent = '提交澄清';
+      button.onclick = () => submitClarification(item.run_id, pending.clarification_id,
+        schema.type === 'number' ? Number(control.value) : control.value);
+      box.appendChild(control); box.appendChild(button); row.appendChild(box);
+      document.getElementById('chatLog').appendChild(row);
     }
 
     function appendBubble(role, text, scroll = true) {

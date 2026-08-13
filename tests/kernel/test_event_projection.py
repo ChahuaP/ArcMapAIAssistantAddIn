@@ -63,6 +63,8 @@ class EventProjectionTest(unittest.TestCase):
             target_selector={"bridge_pid": 2001, "bridge_port": 8766,
                              "arcmap_pid": 2000, "hwnd": 3000,
                              "deployment_hash": "a" * 64},
+            model_plan=fakes.fake_agent_model_plan().model_dump(mode="json"),
+            model_binding_summary=fakes.fake_model_binding_summary(),
         )
 
     def test_events_project_to_sse_types(self):
@@ -135,11 +137,27 @@ class PublicationTransactionTest(unittest.TestCase):
     @staticmethod
     def _artifact():
         return contracts.ArtifactIdentity(
-            output_id="out", kind="feature_class",
+            output_id="out", kind="feature_class", output_format="gdb",
             logical_dataset_path="C:\\staging\\run\\out.gdb\\roads",
             source_publish_unit_path="C:\\staging\\run\\out.gdb",
             destination_dataset_path="C:\\publish\\out.gdb\\roads",
-            destination_publish_unit_path="C:\\publish\\out.gdb")
+            destination_publish_unit_path="C:\\publish",
+            publication_kind="file_gdb")
+
+    @staticmethod
+    def _publication():
+        document = {
+            "output_id": "out", "kind": "feature_class", "output_format": "gdb",
+            "destination_dataset_path": "C:\\publish\\out.gdb\\roads",
+            "destination_publish_unit_path": "C:\\publish",
+            "publication_kind": "file_gdb",
+            "members": [{"relative_path": "out.gdb/a", "size": 1, "sha256": "a" * 64}],
+            "semantic_evidence": {"kind": "feature_class"},
+            "acceptance_evidence_hash": "b" * 64,
+        }
+        document["evidence_hash"] = contracts.digest(document)
+        return {"publication_id": "pub", "publication_kind": "artifact_bundle",
+                "artifacts": [{"output_id": "out"}], "published_artifacts": [document]}
 
     def _accepted_run(self, store):
         request = contracts.RequestEnvelope(
@@ -147,7 +165,9 @@ class PublicationTransactionTest(unittest.TestCase):
             text="test", caller=contracts.CallerIdentity(user_id="u", tenant_id="t", role="analyst"),
             target_selector={"bridge_pid": 2001, "bridge_port": 8766,
                              "arcmap_pid": 2000, "hwnd": 3000,
-                             "deployment_hash": "a" * 64})
+                             "deployment_hash": "a" * 64},
+            model_plan=fakes.fake_agent_model_plan().model_dump(mode="json"),
+            model_binding_summary=fakes.fake_model_binding_summary())
         store.create_session(SID, "t")
         run_id = store.create_run(request)["run_id"]
         for kind, stage in (("context_leased", "context_leased"), ("context_frozen", "context_frozen"),
@@ -163,8 +183,11 @@ class PublicationTransactionTest(unittest.TestCase):
         run_id = self._accepted_run(store)
         artifact = self._artifact()
         store.store_artifact(run_id, artifact)
-        store.finalize_publication(run_id, "grant", {"publication_id": "pub", "artifacts": [{"output_id": "out"}]})
+        store.finalize_publication(run_id, "grant", self._publication())
         self.assertEqual(store.list_staged_artifacts(run_id), [])
+        published = store.list_published_artifacts(run_id)
+        self.assertEqual("C:\\publish\\out.gdb\\roads", published[0]["destination_dataset_path"])
+        self.assertNotIn("logical_dataset_path", published[0])
         with store._connection() as conn:
             self.assertEqual(conn.execute("SELECT staged, published FROM artifacts WHERE run_id=? AND output_id='out'", (run_id,)).fetchone(), (0, 1))
 
@@ -187,9 +210,7 @@ class PublicationTransactionTest(unittest.TestCase):
         store.store_artifact(run_id, artifact)
         store.add_event_listener(lambda *args: (_ for _ in ()).throw(RuntimeError("listener fault")))
 
-        store.finalize_publication(run_id, "grant", {
-            "publication_id": "pub", "artifacts": [{"output_id": "out"}],
-        })
+        store.finalize_publication(run_id, "grant", self._publication())
 
         self.assertEqual(store.get_run(run_id)["stage"], "published")
         self.assertEqual(store.list_staged_artifacts(run_id), [])

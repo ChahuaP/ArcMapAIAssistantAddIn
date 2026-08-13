@@ -47,6 +47,21 @@ def planning_context_hash(snapshot: "ContextSnapshot") -> str:
     return digest(document)
 
 
+def experiment_input_hash(snapshot: "ContextSnapshot") -> str:
+    """Hash only user-visible ArcMap input state for a paired experiment.
+
+    The runtime gate assigns a different server-owned output FileGDB to each
+    arm.  That destination is deliberately not part of the model-visible input
+    state and therefore must not make otherwise identical G2/G3 inputs differ.
+    """
+    document = snapshot.model_dump(mode="json")
+    document.pop("lease_id", None)
+    document.pop("captured_at", None)
+    document["default_gdb"] = ""
+    document["content_hash"] = ""
+    return digest(document)
+
+
 def _seal_document(model: BaseModel) -> Any:
     """Canonical document for digest over a BaseModel.
 
@@ -163,7 +178,7 @@ class ExperimentSpec(_FrozenModel):
     seed: int
     provider: str
     model: str
-    phase: str = "planning_gate"
+    artifact_root: str
 
     @model_validator(mode="after")
     def _validate(self) -> "ExperimentSpec":
@@ -174,8 +189,10 @@ class ExperimentSpec(_FrozenModel):
             raise ValueError("experiment.seed must be non-negative.")
         if self.provider != "minimax" or self.model != "MiniMax-M3":
             raise ValueError("formal experiments require minimax/MiniMax-M3.")
-        if self.phase != "planning_gate":
-            raise ValueError("experiment.phase must be planning_gate.")
+        normalized = ntpath.normpath(self.artifact_root)
+        if (not ntpath.isabs(normalized) or normalized != self.artifact_root or
+                ntpath.splitext(normalized)[1]):
+            raise ValueError("experiment.artifact_root must be a normalized absolute directory path.")
         return self
 
 
@@ -196,6 +213,13 @@ class RequestEnvelope(_FrozenModel):
     outputs: Tuple[str, ...] = ()
     plan_artifact: Optional[Dict[str, Any]] = None
     target_selector: TargetSelector
+    # Server-expanded, task-owned model plan.  The HTTP boundary accepts only
+    # the caller's explicit role selections, then resolves and seals the full
+    # plan against its registered provider runtime before this envelope exists.
+    # Keeping it here makes retries, checkpoints and clarification resumes use
+    # the original provider/model contract instead of mutable gateway config.
+    model_plan: Dict[str, Any]
+    model_binding_summary: Dict[str, Any]
     experiment: Optional[ExperimentSpec] = None
 
     @model_validator(mode="after")
@@ -206,8 +230,105 @@ class RequestEnvelope(_FrozenModel):
             raise ValueError("execute=True requires an explicit side_effect scope.")
         if self.side_effects is not None and not self.execute:
             raise ValueError("side_effects require execute=True.")
-        if self.experiment is not None and self.execute:
-            raise ValueError("experiment planning_gate requires execute=False.")
+        if self.experiment is not None:
+            if not self.execute:
+                raise ValueError("formal experiment requests always execute through the runtime gate.")
+        if set(self.model_plan) != {"compiler", "planner", "auditor", "repairer"}:
+            raise ValueError("model_plan must bind every agent role exactly once.")
+        if set(self.model_binding_summary) != {"compiler", "planner", "auditor", "repairer"}:
+            raise ValueError("model_binding_summary must cover every agent role exactly once.")
+        # The summary is audit evidence, not caller-controlled decoration.
+        # Validate its complete closed shape against the expanded plan before a
+        # journal row can be written.
+        from ..model_runtime.contracts import AGENT_ROLES, AgentModelPlan
+        plan = AgentModelPlan.model_validate(self.model_plan)
+        for role in AGENT_ROLES:
+            binding = plan.binding_for(role)
+            summary = self.model_binding_summary[role]
+            if not isinstance(summary, dict) or set(summary) != {
+                "connection_id", "provider", "model", "endpoint_fingerprint",
+                "deployment_fingerprint", "credential_ref", "role", "parameters",
+                "token_plan",
+            }:
+                raise ValueError("model binding summary has an invalid contract.")
+            if (summary["connection_id"], summary["model"], summary["role"]) != (
+                    binding.connection_id, binding.model_id, role):
+                raise ValueError("model binding summary does not match its sealed role binding.")
+            if (not isinstance(summary["provider"], str) or not summary["provider"] or
+                    not isinstance(summary["endpoint_fingerprint"], str) or not summary["endpoint_fingerprint"] or
+                    not isinstance(summary["deployment_fingerprint"], str) or not summary["deployment_fingerprint"] or
+                    not isinstance(summary["parameters"], dict) or
+                    not isinstance(summary["token_plan"], dict)):
+                raise ValueError("model binding summary has invalid evidence fields.")
+            if summary["parameters"] != {
+                    "temperature": binding.temperature,
+                    "max_output_tokens": binding.max_output_tokens,
+            } or summary["token_plan"] != binding.budget_policy.model_dump(mode="json"):
+                raise ValueError("model binding summary does not match sealed parameters.")
+        return self
+
+    @property
+    def model_plan_digest(self) -> str:
+        return digest(self.model_plan)
+
+
+class ClarificationPatch(_FrozenModel):
+    option_id: str
+    kind: str
+    target_path: str
+    value_schema: Dict[str, Any]
+
+    @model_validator(mode="after")
+    def _validate(self) -> "ClarificationPatch":
+        _require_id(self.option_id, "clarification_patch.option_id")
+        _require_id(self.kind, "clarification_patch.kind")
+        if not self.target_path or not isinstance(self.value_schema, dict):
+            raise ValueError("clarification patch must seal a path and schema")
+        return self
+
+
+class ClarificationRequest(_FrozenModel):
+    clarification_id: str
+    option_id: str
+    question: str = Field(min_length=1)
+    patch: ClarificationPatch
+    proof_ids: Tuple[str, ...]
+    request_digest: str
+    context_digest: str
+    plan_digest: Optional[str] = None
+    task_contract_digest: str
+    graph_digest: str = EMPTY
+    node_digest: str = EMPTY
+
+    @model_validator(mode="after")
+    def _validate(self) -> "ClarificationRequest":
+        _require_id(self.clarification_id, "clarification_request.clarification_id")
+        if self.option_id != self.patch.option_id or not self.proof_ids:
+            raise ValueError("clarification request has inconsistent option/proof binding")
+        for value in (self.request_digest, self.context_digest, self.task_contract_digest):
+            if not isinstance(value, str) or not value:
+                raise ValueError("clarification request digests are incomplete")
+        return self
+
+
+class ClarificationAnswer(_FrozenModel):
+    """A caller-bound answer to one persisted clarification request.
+
+    The answer is deliberately a closed value, not a replacement prompt or a
+    plan patch.  Its run/session/caller binding makes it impossible to apply a
+    response from another browser session to a paused run.
+    """
+    run_id: str
+    session_id: str
+    caller: CallerIdentity
+    clarification_id: str
+    answer: Any
+
+    @model_validator(mode="after")
+    def _validate(self) -> "ClarificationAnswer":
+        _require_uuid(self.run_id, "clarification_answer.run_id")
+        _require_uuid(self.session_id, "clarification_answer.session_id")
+        _require_id(self.clarification_id, "clarification_answer.clarification_id")
         return self
 
 
@@ -227,18 +348,41 @@ class LayerRef(_FrozenModel):
 
 
 class FieldColumn(_FrozenModel):
+    """One field sealed with its complete canonical ABI semantics (§2).
+
+    ``precision``/``scale``/``domain`` are optional only because legacy
+    captures omit them; the acceptance boundary treats a sealed spec without
+    them as weaker evidence, never as a complete contract.  ``length`` records
+    the text/blob width the desktop runtime reports alongside the ABI pair.
+    """
     name: str
     dtype: Optional[str] = None
     nullable: bool = True
+    precision: Optional[int] = None
+    scale: Optional[int] = None
+    length: Optional[int] = None
+    domain: Tuple[str, ...] = ()
 
     @model_validator(mode="after")
     def _validate(self) -> "FieldColumn":
         _require_id(self.name, "field.name")
+        for name in ("precision", "scale", "length"):
+            value = getattr(self, name)
+            if value is not None and (not isinstance(value, int) or isinstance(value, bool) or value < 0):
+                raise ValueError("field.%s must be a non-negative int." % name)
+        if self.scale is not None and (self.precision is None or self.scale > self.precision):
+            raise ValueError("field.scale cannot exceed field.precision.")
         return self
 
 
 class LayerSnapshot(_FrozenModel):
-    """Stable reference + structure for one map layer (§4.2)."""
+    """Stable reference + structure for one map layer (§4.2).
+
+    ``source_content_digest`` is the attribute-only manifest; ``feature_manifest_digest``
+    and ``raster_content_digest`` carry the normalized geometry / cell evidence
+    required to prove a source was not silently reshaped or regridded.  All
+    three are independent of directory timestamps and re-readable post-run.
+    """
     identity: LayerRef
     fields: Tuple[FieldColumn, ...] = ()
     coordinate_system: Optional[str] = None
@@ -248,6 +392,14 @@ class LayerSnapshot(_FrozenModel):
     visible: bool = False
     selection_hash: Optional[str] = None
     value_summary: Optional[Dict[str, Any]] = None
+    identity_fields: Tuple[str, ...] = ()
+    source_content_digest: Optional[str] = None
+    feature_manifest_digest: Optional[str] = None
+    raster_content_digest: Optional[str] = None
+    # Runtime-verified CRS identity (from ArcPy Describe), sealed so linear
+    # Quantity acceptance never infers the unit from a CRS name.
+    crs_type: Optional[str] = None
+    meters_per_unit: Optional[float] = None
 
     @model_validator(mode="after")
     def _validate(self) -> "LayerSnapshot":
@@ -464,7 +616,9 @@ class DeclaredOutput(_FrozenModel):
     output_id: str
     name: str
     kind: str  # feature_class | table | raster | layer_file
-    destination: str
+    output_format: str
+    destination_policy: str
+    destination_path: Optional[str] = None
     coordinate_system: Optional[str] = None  # EPSG:xxxx; None = inherit from input
     geometry_type: Optional[str] = None
     expected_fields: Tuple[str, ...] = ()
@@ -475,15 +629,26 @@ class DeclaredOutput(_FrozenModel):
         _require_id(self.output_id, "declared_output.output_id")
         _require_id(self.name, "declared_output.name")
         _require_id(self.kind, "declared_output.kind")
-        _require_id(self.destination, "declared_output.destination")
-        if self.kind == "map_state":
-            if self.destination != "not_applicable":
-                raise ValueError("map_state output must use not_applicable destination.")
-        else:
-            import ntpath
-            normalized = ntpath.normpath(self.destination)
-            if not ntpath.isabs(normalized) or normalized != self.destination:
-                raise ValueError("declared_output.destination must be a normalized absolute Windows path.")
+        if self.output_format not in ("gdb", "csv", "png", "not_applicable"):
+            raise ValueError("declared_output.output_format is invalid.")
+        if self.destination_policy not in ("server_derived", "not_applicable", "physical"):
+            raise ValueError("declared_output.destination_policy is invalid.")
+        if self.kind == "map_state" and (self.destination_policy, self.destination_path) != ("not_applicable", None):
+            raise ValueError("map_state output must use not_applicable without a path.")
+        if self.kind != "map_state" and self.destination_policy == "server_derived" and self.destination_path is not None:
+            raise ValueError("logical server-derived output cannot carry a physical path.")
+        if self.kind != "map_state" and self.destination_policy == "not_applicable":
+            raise ValueError("persisted output requires server_derived or physical destination.")
+        if self.kind == "map_state" and self.output_format != "not_applicable":
+            raise ValueError("map_state output_format must be not_applicable.")
+        if self.kind != "map_state" and self.output_format == "not_applicable":
+            raise ValueError("persisted output requires a concrete output_format.")
+        if self.destination_policy == "physical":
+            if not isinstance(self.destination_path, str):
+                raise ValueError("physical output requires destination_path.")
+            normalized = ntpath.normpath(self.destination_path)
+            if not ntpath.isabs(normalized) or normalized != self.destination_path:
+                raise ValueError("destination_path must be a normalized absolute Windows path.")
         if self.min_record_count < 0:
             raise ValueError("declared_output.min_record_count must be non-negative.")
         return self
@@ -541,6 +706,37 @@ class VerifiedPlan(_FrozenModel):
     def digest(self) -> str:
         return digest(_seal_document(self))
 
+    def authorization_scope(self) -> SideEffectScope:
+        """Return the exact side-effect scope sealed by this plan."""
+        return SideEffectScope(
+            level=self.risk_level,
+            input_identities=tuple((identity, identity) for identity in self.input_identities),
+            output_identities=tuple(
+                (output.output_id, output.destination_path)
+                for step in self.workflow for output in step.declared_outputs
+                if output.kind != "map_state"
+            ),
+        )
+
+    def experiment_output_signature(self, artifact_root: str) -> Tuple[Tuple[str, str], ...]:
+        """Validate one arm's physical fence and return its logical signature."""
+        root = ntpath.normcase(ntpath.normpath(artifact_root))
+        signature = []
+        for step in self.workflow:
+            file_outputs = tuple(output for output in step.declared_outputs
+                                 if output.kind != "map_state")
+            if not file_outputs:
+                continue
+            for output in file_outputs:
+                if output.destination_policy != "physical" or not output.destination_path:
+                    raise ValueError("experiment output lacks a physical server binding")
+                destination = ntpath.normcase(ntpath.normpath(output.destination_path))
+                relative = ntpath.relpath(destination, root)
+                if relative == ".." or relative.startswith(".." + ntpath.sep):
+                    raise ValueError("experiment output escapes its arm-private workspace")
+                signature.append((output.output_id, relative.replace("\\", "/")))
+        return tuple(sorted(signature))
+
 
 # --- §4.6 staged artifact identity -----------------------------------------
 
@@ -548,15 +744,19 @@ class ArtifactIdentity(_FrozenModel):
     """One sealed logical dataset and its single FileGDB publication unit."""
     output_id: str
     kind: str
+    output_format: str
     logical_dataset_path: str
     source_publish_unit_path: str
     destination_dataset_path: str
     destination_publish_unit_path: str
+    publication_kind: str
 
     @model_validator(mode="after")
     def _validate(self) -> "ArtifactIdentity":
         _require_id(self.output_id, "artifact.output_id")
         _require_id(self.kind, "artifact.kind")
+        if self.output_format not in ("gdb", "csv", "png"):
+            raise ValueError("artifact.output_format is invalid")
         values = ("logical_dataset_path", "source_publish_unit_path",
                   "destination_dataset_path", "destination_publish_unit_path")
         normalized = {}
@@ -573,14 +773,56 @@ class ArtifactIdentity(_FrozenModel):
         if (source_relative == ".." or source_relative.startswith(".." + ntpath.sep)
                 or destination_relative == ".." or destination_relative.startswith(".." + ntpath.sep)):
             raise ValueError("artifact dataset path escapes its publish unit")
-        if source_relative != destination_relative:
-            raise ValueError("artifact source and destination relative dataset paths differ")
-        if not normalized["source_publish_unit_path"].endswith(".gdb"):
-            raise ValueError("artifact.source_publish_unit_path must be a FileGDB")
-        if not normalized["destination_publish_unit_path"].endswith(".gdb"):
-            raise ValueError("artifact.destination_publish_unit_path must be a FileGDB")
+        if self.publication_kind not in ("file_gdb", "file"):
+            raise ValueError("artifact.publication_kind is invalid")
         if "\\staging\\" not in normalized["source_publish_unit_path"]:
             raise ValueError("artifact.source_publish_unit_path must be under run staging")
+        return self
+
+
+class PublishedArtifactManifest(_FrozenModel):
+    """Immutable evidence for one accepted artifact at its published destination."""
+    output_id: str
+    kind: str
+    output_format: str
+    destination_dataset_path: str
+    destination_publish_unit_path: str
+    publication_kind: str
+    members: Tuple[Dict[str, Any], ...]
+    semantic_evidence: Dict[str, Any]
+    acceptance_evidence_hash: str
+    evidence_hash: str
+
+    @model_validator(mode="after")
+    def _validate(self) -> "PublishedArtifactManifest":
+        _require_id(self.output_id, "published_artifact.output_id")
+        _require_id(self.kind, "published_artifact.kind")
+        if self.output_format not in ("gdb", "csv", "png"):
+            raise ValueError("published_artifact.output_format is invalid")
+        if self.publication_kind not in ("file_gdb", "file"):
+            raise ValueError("published_artifact.publication_kind is invalid")
+        for name in ("destination_dataset_path", "destination_publish_unit_path"):
+            value = ntpath.normpath(getattr(self, name))
+            if not ntpath.isabs(value) or value != getattr(self, name):
+                raise ValueError("published artifact paths must be normalized and absolute")
+        if not self.members or any(
+                not isinstance(item, dict) or set(item) != {"relative_path", "size", "sha256"}
+                or not isinstance(item["size"], int) or item["size"] < 0
+                or not isinstance(item["sha256"], str) or len(item["sha256"]) != 64
+                for item in self.members):
+            raise ValueError("published artifact members are invalid")
+        _require_id(self.acceptance_evidence_hash, "published_artifact.acceptance_evidence_hash")
+        expected = digest({
+            "output_id": self.output_id, "kind": self.kind,
+            "output_format": self.output_format,
+            "destination_dataset_path": self.destination_dataset_path,
+            "destination_publish_unit_path": self.destination_publish_unit_path,
+            "publication_kind": self.publication_kind,
+            "members": list(self.members), "semantic_evidence": self.semantic_evidence,
+            "acceptance_evidence_hash": self.acceptance_evidence_hash,
+        })
+        if self.evidence_hash != expected:
+            raise ValueError("published artifact evidence hash mismatch")
         return self
 
 
@@ -859,12 +1101,12 @@ PUBLISHED = "published"
 SUCCEEDED_STAGE = "succeeded"
 
 # Paused stages (outcome set, not terminal).
-PAUSED_STAGES = frozenset({AUTHORIZATION_REQUIRED, "execution_indeterminate", "publication_indeterminate"})
+PAUSED_STAGES = frozenset({AUTHORIZATION_REQUIRED, "clarification_required",
+                           "execution_indeterminate", "publication_indeterminate"})
 
 # Terminal stages (outcome set, terminal).
 TERMINAL_STAGES = frozenset({
     SUCCEEDED_STAGE,
-    "clarification_required",
     "policy_denied",
     "contract_failed",
     "capability_failed",
@@ -881,6 +1123,7 @@ RUN_TRANSITIONS: Dict[str, frozenset] = {
     RECEIVED: frozenset({CONTEXT_LEASED, "contract_failed", "infrastructure_failed", "cancelled"}),
     CONTEXT_LEASED: frozenset({CONTEXT_FROZEN, "contract_failed", "infrastructure_failed", "cancelled"}),
     CONTEXT_FROZEN: frozenset({INTENT_COMPILED, "clarification_required", "contract_failed", "infrastructure_failed", "cancelled"}),
+    "clarification_required": frozenset({INTENT_COMPILED, "contract_failed", "infrastructure_failed", "cancelled"}),
     INTENT_COMPILED: frozenset({PLAN_VERIFIED, "contract_failed", "infrastructure_failed", "cancelled"}),
     PLAN_VERIFIED: frozenset({AUTHORIZATION_REQUIRED, AUTHORIZED, CLARIFICATION_REQUIRED, "policy_denied", "infrastructure_failed", "cancelled"}),
     AUTHORIZATION_REQUIRED: frozenset({AUTHORIZED, "policy_denied", "cancelled"}),

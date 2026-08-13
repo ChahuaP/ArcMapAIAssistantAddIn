@@ -62,7 +62,8 @@
       // headers, so the session id is passed via query string and events are
       // filtered server-side to this session only.
       const sessionId = (typeof getSessionId === 'function') ? getSessionId() : '';
-      const eventsUrl = apiUrl('/events') + (sessionId ? '?session_id=' + encodeURIComponent(sessionId) : '');
+      const epoch = (typeof getSessionEpoch === 'function') ? getSessionEpoch() : '';
+      const eventsUrl = apiUrl('/events') + (sessionId ? '?session_id=' + encodeURIComponent(sessionId) + '&epoch=' + encodeURIComponent(epoch) : '');
       eventSource = new EventSource(eventsUrl);
       eventSource.addEventListener('open', () => {
         if (appState.health) {
@@ -146,5 +147,9 @@
     });
 
     renderEmptyChat();
-    refreshAll();
-    connectEventStream();
+    loadActiveSession().then(() => {
+      refreshAll();
+      connectEventStream();
+    }).catch(err => {
+      setStatus(err.message);
+    });

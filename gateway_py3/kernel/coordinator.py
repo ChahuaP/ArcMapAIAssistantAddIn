@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import time
 import uuid
+import ntpath
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
@@ -79,7 +80,8 @@ class WorkflowPlanner(Protocol):
     def plan(self, run_id: str, intent: IntentSpec, context: ContextSnapshot,
              capabilities: CapabilitySnapshot) -> contracts.Outcome: ...
     def plan_ablation(self, run_id: str, intent: IntentSpec, context: ContextSnapshot,
-                      capabilities: CapabilitySnapshot, auditor_enabled: bool) -> contracts.Outcome: ...
+                      capabilities: CapabilitySnapshot, auditor_enabled: bool,
+                      sealed_baseline: Optional[VerifiedPlan] = None) -> contracts.Outcome: ...
     def decide_authorization(self, run_id: str, approved: bool) -> str: ...
 
 
@@ -161,6 +163,7 @@ class GeoPilotKernel:
         instantly and SSE events drive the front-end progress display.
         """
         import threading
+        self.ports.store.assert_active_session(request.session_id, request.caller.tenant_id)
         self.ports.store.create_session(request.session_id, request.caller.tenant_id)
         run = self.ports.store.create_run(request)
         self.ports.store.append_event(
@@ -184,6 +187,12 @@ class GeoPilotKernel:
         try:
             self._drive_lifecycle(run_id)
         except Exception as exc:
+            # ``clear_active_session`` may commit the cancellation between a
+            # lifecycle guard and the next append.  That is a successful
+            # cancellation race, never an infrastructure failure.
+            row = self.ports.store.get_run(run_id)
+            if row is not None and row.get("outcome_kind") == contracts.CANCELLED:
+                return
             tb = traceback.format_exc()[:500]
             write_event("run.advancer_error", {"run_id": run_id,
                         "error": str(exc)[:200], "type": type(exc).__name__,
@@ -193,6 +202,10 @@ class GeoPilotKernel:
 
     def inspect(self, run_id: str) -> RunView:
         return self._view(run_id)
+
+    def experiment_port(self) -> "ExperimentKernelPort":
+        """Return the narrow orchestration port used only by formal gates."""
+        return ExperimentKernelPort(self)
 
     def list_runs(self, session_id: str) -> List[RunView]:
         """List recent runs for one session (§5: sessions are isolation boundaries).
@@ -299,6 +312,7 @@ class GeoPilotKernel:
 
     def receive_receipt_callback(self, run_id: str, payload: Dict[str, Any]) -> None:
         """Bridge posts an execution receipt (lease protocol §3.2)."""
+        self.ports.store.assert_run_in_active_session(run_id)
         lease = self._fence_lease(run_id, payload)
         if payload.get("deployment_hash") != lease.deployment_hash:
             raise ValueError("execution receipt deployment hash mismatch")
@@ -314,6 +328,7 @@ class GeoPilotKernel:
             raise ValueError("no waiter for receipt")
 
     def receive_sample_callback(self, run_id: str, payload: Dict[str, Any]) -> None:
+        self.ports.store.assert_run_in_active_session(run_id)
         lease = self._fence_lease(run_id, payload)
         if payload.get("deployment_hash") != lease.deployment_hash:
             raise ValueError("sample deployment hash mismatch")
@@ -328,6 +343,7 @@ class GeoPilotKernel:
 
     def receive_acceptance_probe_callback(self, run_id: str, payload: Dict[str, Any]) -> None:
         """Accept only a fully fenced ArcPy probe callback."""
+        self.ports.store.assert_run_in_active_session(run_id)
         lease = self._fence_lease(run_id, payload)
         if payload.get("deployment_hash") != lease.deployment_hash:
             raise ValueError("acceptance probe deployment hash mismatch")
@@ -370,6 +386,7 @@ class GeoPilotKernel:
 
     def heartbeat_callback(self, run_id: str, payload: Dict[str, Any]) -> None:
         """Bridge heartbeat: refresh the lease last_heartbeat."""
+        self.ports.store.assert_run_in_active_session(run_id)
         lease = self._fence_lease(run_id, payload)
         updated = lease.model_copy(update={"last_heartbeat": time.time()})
         self.ports.store.store_runtime_lease(updated)
@@ -382,6 +399,7 @@ class GeoPilotKernel:
         content_hash). The lease triple is fenced against the run's context
         lease before the snapshot is accepted.
         """
+        self.ports.store.assert_run_in_active_session(run_id)
         if not isinstance(payload, dict) or not payload:
             raise ValueError("empty context payload")
         # Fence the lease triple before trusting the context.
@@ -418,17 +436,18 @@ class GeoPilotKernel:
     def lease_ack_callback(self, run_id: str,
                            payload: Dict[str, Any]) -> Dict[str, Any]:
         """Bridge acknowledges the lease and fetches the workflow to execute."""
+        self.ports.store.assert_run_in_active_session(run_id)
         lease = self._fence_lease(run_id, payload)
         plan = self.ports.store.get_verified_plan(run_id)
         if plan is None:
             raise ValueError("no sealed plan for run")
         context_snapshot = self.ports.store.get_planning_context_snapshot(run_id)
         from ..paths import localappdata_dir
-        staging_dir = str(localappdata_dir() / "staging" / run_id)
+        staging_root = str(localappdata_dir() / "staging" / run_id)
         return {
             "lease": lease.model_dump(mode="json"),
             "run_id": run_id,
-            "staging_dir": staging_dir,
+            "staging_root": staging_root,
             "workflow": {
                 "action": "execute",
                 "summary": "",
@@ -494,7 +513,8 @@ class GeoPilotKernel:
             "verified_plan": plan.model_dump(mode="json") if plan else None,
             "authorization_grant": store.get_authorization_grant(run_id).model_dump(mode="json") if store.get_authorization_grant(run_id) else None,
             "runtime_lease": store.get_runtime_lease(run_id).model_dump(mode="json") if store.get_runtime_lease(run_id) else None,
-            "artifacts": store.list_artifacts(run_id),
+            "artifacts": store.list_published_artifacts(run_id),
+            "staging_artifacts": store.list_artifacts(run_id),
             "prepared_publication": store.get_prepared_publication(run_id),
             "publication_receipt": store.get_publication_receipt(run_id),
             "experiment_baseline": {key: value for key, value in (baseline or {}).items()
@@ -518,23 +538,23 @@ class GeoPilotKernel:
 
     def _freeze_experiment_baseline(self, run_id: str, request: RequestEnvelope,
                                     context: ContextSnapshot, capabilities: CapabilitySnapshot,
-                                    intent: IntentSpec) -> None:
+                                    intent: IntentSpec, plan: VerifiedPlan) -> None:
         spec = request.experiment
         if spec is None:
             return
         binding = {"text": request.text, "inputs": list(request.inputs), "seed": spec.seed,
                    "target_selector": request.target_selector.model_dump(mode="json")}
         self.ports.store.freeze_experiment_baseline(spec.pair_id, run_id, context, capabilities,
-                                                    intent, spec.provider, spec.model, binding)
+                                                    intent, plan, spec.provider, spec.model, binding)
         self.ports.store.append_event(run_id, "experiment_baseline_frozen", INTENT_COMPILED,
                                       {"pair_id": spec.pair_id, "arm": spec.arm,
                                        "provider": spec.provider, "model": spec.model,
-                                       "content_hash": context.content_hash,
-                                       "planning_context_hash": contracts.planning_context_hash(context),
+                                       "experiment_input_hash": contracts.experiment_input_hash(context),
                                        "binding": binding})
 
     def decide(self, run_id: str, decision: contracts.AuthorizationDecision) -> RunView:
         with self._run_lock(run_id):
+            self.ports.store.assert_run_in_active_session(run_id)
             return self._decide_locked(run_id, decision)
 
     def _decide_locked(self, run_id: str, decision: contracts.AuthorizationDecision) -> RunView:
@@ -578,7 +598,10 @@ class GeoPilotKernel:
         advances; proven-failed terminates.
         """
         with self._run_lock(run_id):
+            self.ports.store.assert_run_in_active_session(run_id)
             row = self.ports.store.get_run(run_id)
+            if row is not None and row.get("outcome_kind") == contracts.CLARIFICATION_REQUIRED:
+                raise ValueError("clarification_required runs must use answer_clarification")
             if row is not None and row["stage"] == "execution_indeterminate":
                 self._reconcile_runtime_run(run_id)
                 return self._view(run_id)
@@ -591,6 +614,105 @@ class GeoPilotKernel:
                 return self._view(run_id)
             return self._drive_lifecycle_locked(run_id)
 
+    def answer_clarification(self, run_id: str,
+                             answer: contracts.ClarificationAnswer) -> RunView:
+        """Validate and deterministically apply one sealed typed patch."""
+        from ..clarification import apply_patch, validate_answer
+        with self._run_lock(run_id):
+            self.ports.store.assert_run_in_active_session(run_id)
+            if answer.run_id != run_id:
+                raise ValueError("clarification answer run_id does not match the run")
+            row = self.ports.store.get_run(run_id)
+            if row is None or row["stage"] != "clarification_required" or \
+                    row.get("outcome_kind") != contracts.CLARIFICATION_REQUIRED:
+                raise ValueError("run is not awaiting a clarification answer")
+            request = self._reconstruct_request(row)
+            if answer.session_id != request.session_id or answer.caller != request.caller:
+                raise ValueError("clarification answer caller does not own the run")
+            pending = self._pending_clarifications(run_id)
+            item = next((value for value in pending
+                         if value.get("clarification_id") == answer.clarification_id), None)
+            if item is None:
+                raise ValueError("clarification_id is not pending for this run")
+            context = self._load_context(run_id)
+            if context is None or item.get("context_digest") != context.digest:
+                raise ValueError("clarification context has drifted; submit a new task")
+            request_digest = contracts.digest(request.model_dump(mode="json"))
+            if item.get("request_digest") != request_digest:
+                raise ValueError("clarification request binding is invalid")
+            sealed = contracts.ClarificationRequest.model_validate(item)
+            plan = self._load_plan(run_id)
+            if sealed.plan_digest is not None and (plan is None or plan.digest != sealed.plan_digest):
+                raise ValueError("clarification plan has drifted")
+            pending_event = next(event for event in reversed(self.ports.store.run_events(run_id))
+                                 if event["kind"] == "clarification_required")
+            old_contract = pending_event.get("payload", {}).get("task_contract_draft")
+            if not isinstance(old_contract, dict):
+                intent = self._load_intent(run_id)
+                old_contract = intent.derived_facts.get("task_contract") if intent is not None else None
+            if not isinstance(old_contract, dict) or contracts.digest(old_contract) != sealed.task_contract_digest:
+                raise ValueError("clarification task contract has drifted")
+            # Rebuild the clarification nodes from the CURRENT contract and
+            # verify the sealed node still exists with the same descriptor and
+            # graph binding.  A resolved/stale/irrelevant answer is rejected
+            # outright — no scanner at answer time, no fail-open rebinding.
+            from ..clarification import build_nodes, node_for
+            current_nodes, current_graph_digest = build_nodes(old_contract)
+            current_node = node_for(current_nodes, sealed.patch.target_path)
+            if current_node is None:
+                raise ValueError("clarification answer targets a resolved or absent location")
+            if current_node.node_digest != sealed.node_digest:
+                raise ValueError("clarification node descriptor has drifted")
+            if sealed.graph_digest and current_graph_digest != sealed.graph_digest:
+                raise ValueError("clarification proof graph has drifted")
+            if current_node.proof_id not in sealed.proof_ids:
+                raise ValueError("clarification answer is not bound to the sealed node")
+            validate_answer(sealed.patch.value_schema, answer.answer)
+            new_contract = apply_patch(old_contract, sealed.patch.target_path, answer.answer)
+            capabilities = self._load_capabilities(run_id)
+            if capabilities is None:
+                raise ValueError("clarification capability snapshot is missing")
+            outcome = self.ports.compiler.resume_with_patch(request, context, capabilities, new_contract)
+            if not outcome.succeeded:
+                raise ValueError(outcome.message)
+            intent = outcome.details.get("intent")
+            if not isinstance(intent, IntentSpec):
+                raise ValueError("clarification patch did not produce an IntentSpec")
+            self.ports.store.store_intent_spec(run_id, intent)
+            self.ports.store.start_clarification_lineage(run_id)
+            self.ports.store.append_event(
+                run_id, "clarification_answered", INTENT_COMPILED,
+                {"clarification_id": answer.clarification_id, "option_id": sealed.option_id,
+                 "answer": answer.answer, "patch": sealed.patch.model_dump(mode="json"),
+                 "old_task_contract_digest": sealed.task_contract_digest,
+                 "new_task_contract_digest": contracts.digest(new_contract),
+                 "proof_ids": list(sealed.proof_ids), "request_digest": request_digest,
+                 "context_digest": context.digest, "plan_digest": sealed.plan_digest},
+                clear_outcome=True,
+            )
+            return self._drive_lifecycle_locked(run_id)
+
+    def _pending_clarifications(self, run_id: str) -> List[Dict[str, Any]]:
+        events = self.ports.store.run_events(run_id)
+        for event in reversed(events):
+            if event["kind"] != "clarification_required":
+                continue
+            values = event.get("payload", {}).get("clarifications", [])
+            if isinstance(values, list):
+                return values
+        return []
+
+    def resume_quota(self, run_id: str) -> RunView:
+        """Resume exactly the unfinished model node after operator restart."""
+        with self._run_lock(run_id):
+            self.ports.store.assert_run_in_active_session(run_id)
+            row = self.ports.store.get_run(run_id)
+            if row.get("outcome_kind") == contracts.QUOTA_STOPPED:
+                self.ports.store.reopen_quota_stopped_run(run_id)
+            elif not self.ports.store.has_active_quota_resume(run_id):
+                raise ValueError("only a quota-stopped run can be resumed")
+            return self._drive_lifecycle_locked(run_id)
+
     # -- state machine driver ----------------------------------------------
 
     def _drive_lifecycle(self, run_id: str) -> RunView:
@@ -601,6 +723,12 @@ class GeoPilotKernel:
     def _drive_lifecycle_locked(self, run_id: str) -> RunView:
         while True:
             row = self.ports.store.get_run(run_id)
+            # A clear rotates the sole active session and records a terminal
+            # cancellation in the same transaction.  A detached background
+            # worker must never advance, retry, or invoke a model after that
+            # durable boundary.
+            if not self.ports.store.is_run_in_active_session(run_id):
+                return self._view(run_id)
             stage = row["stage"]
             if stage == SUCCEEDED_STAGE or row["outcome_kind"] is not None:
                 return self._view(run_id)
@@ -614,6 +742,9 @@ class GeoPilotKernel:
                 self._compile_intent(run_id, row)
                 continue
             if stage == INTENT_COMPILED:
+                if self._load_intent(run_id) is None:
+                    self._compile_intent(run_id, row)
+                    continue
                 self._verify_plan(run_id, row)
                 continue
             if stage == PLAN_VERIFIED:
@@ -704,6 +835,7 @@ class GeoPilotKernel:
     def _compile_intent(self, run_id: str, row: Dict[str, Any]) -> None:
         if self.ports.compiler is None:
             raise ValueError("intent compiler is not wired; cannot compile intent.")
+        base_request = self._reconstruct_request(row)
         request = self._reconstruct_request(row)
         context = self._load_context(run_id)
         if request.experiment is not None and request.experiment.arm == "g3":
@@ -718,8 +850,7 @@ class GeoPilotKernel:
                 self._fail(run_id, contracts.CONTRACT_FAILED, "intent", "baseline_binding_mismatch",
                            "G3 request differs from the frozen G2 experiment binding.")
                 return
-            if (baseline["content_hash"] != context.content_hash or
-                    baseline["planning_context_hash"] != contracts.planning_context_hash(context)):
+            if baseline["planning_context_hash"] != contracts.experiment_input_hash(context):
                 self._fail(run_id, contracts.CONTRACT_FAILED, "intent", "context_changed",
                            "G3 context content_hash differs from the G2 baseline.")
                 return
@@ -730,8 +861,7 @@ class GeoPilotKernel:
                                           {"pair_id": request.experiment.pair_id,
                                            "captured_context_digest": context.digest,
                                            "baseline_context_digest": baseline_context.digest,
-                                           "content_hash": context.content_hash,
-                                           "planning_context_hash": contracts.planning_context_hash(context)})
+                                           "experiment_input_hash": contracts.experiment_input_hash(context)})
             self.ports.store.store_planning_context_snapshot(run_id, baseline_context)
             self.ports.store.store_intent_spec(run_id, intent)
             self.ports.store.store_capability_snapshot(run_id, capabilities)
@@ -739,7 +869,7 @@ class GeoPilotKernel:
                                           {"pair_id": request.experiment.pair_id,
                                            "baseline_run_id": baseline["run_id"],
                                            "baseline_digest": baseline["baseline_digest"],
-                                           "content_hash": context.content_hash})
+                                           "experiment_input_hash": contracts.experiment_input_hash(context)})
             return
         capabilities = self._freeze_capabilities(run_id)
         if context is None:
@@ -748,9 +878,13 @@ class GeoPilotKernel:
             return
         outcome = self.ports.compiler.compile(request, context, capabilities, run_id)
         if outcome.kind == contracts.CLARIFICATION_REQUIRED:
+            clarifications = self._bind_clarifications(run_id, base_request, context,
+                                                        outcome.details.get("clarifications", []),
+                                                        outcome.details.get("task_contract_draft"))
             self.ports.store.append_event(
                 run_id, "clarification_required", INTENT_COMPILED,
-                {"message": outcome.message}, outcome=outcome,
+                {"message": outcome.message, "clarifications": clarifications,
+                 "task_contract_draft": outcome.details.get("task_contract_draft")}, outcome=outcome,
             )
             return
         if not outcome.succeeded:
@@ -769,8 +903,54 @@ class GeoPilotKernel:
             run_id, "intent_compiled", INTENT_COMPILED,
             {"intent_digest": intent.digest},
         )
-        if request.experiment is not None and request.experiment.arm == "g2":
-            self._freeze_experiment_baseline(run_id, request, context, capabilities, intent)
+
+    @staticmethod
+    def _bind_clarifications(run_id: str, request: RequestEnvelope,
+                             context: ContextSnapshot, values: Any,
+                             task_contract: Dict[str, Any],
+                             plan_digest: Optional[str] = None) -> List[Dict[str, Any]]:
+        from ..clarification import build_nodes, ClarificationError
+        if not isinstance(task_contract, dict):
+            raise ValueError("clarification outcome lacks its task contract")
+        request_digest = contracts.digest(request.model_dump(mode="json"))
+        task_contract_digest = contracts.digest(task_contract)
+        # The server is the sole authority: it generates one sealed proof node
+        # per genuinely unresolved location.  The model only supplies questions
+        # per kind; it cannot name a path.  Multiple locations of the same kind
+        # become distinct, separately-addressable instances.
+        try:
+            nodes, graph_digest = build_nodes(task_contract)
+        except ClarificationError as exc:
+            raise ValueError("clarification nodes are not sealable: %s" % exc)
+        questions = {}
+        for value in (values or []):
+            if isinstance(value, dict) and isinstance(value.get("option_id"), str) \
+                    and isinstance(value.get("question"), str) and value["question"]:
+                questions.setdefault(value["option_id"], value["question"])
+        bound = []
+        for node in nodes:
+            question = questions.get(node.option_id) or (
+                "请澄清未决的 %s 字段。" % node.option_id)
+            clarification_id = "clarification:" + contracts.digest({
+                "run_id": run_id, "proof_id": node.proof_id,
+                "target_path": node.target_path, "node_digest": node.node_digest,
+                "task_contract": task_contract_digest,
+            })[:24]
+            sealed = contracts.ClarificationRequest(
+                clarification_id=clarification_id, option_id=node.option_id,
+                question=question,
+                patch=contracts.ClarificationPatch(
+                    option_id=node.option_id, kind=node.kind.value,
+                    target_path=node.target_path, value_schema=node.value_schema),
+                proof_ids=(node.proof_id,), request_digest=request_digest,
+                context_digest=context.digest, plan_digest=plan_digest,
+                task_contract_digest=task_contract_digest,
+                graph_digest=graph_digest, node_digest=node.node_digest,
+            )
+            bound.append(sealed.model_dump(mode="json"))
+        if not bound:
+            raise ValueError("clarification outcome produced no sealed unresolved node")
+        return bound
 
     def _verify_plan(self, run_id: str, row: Dict[str, Any]) -> None:
         if self.ports.planner is None:
@@ -783,11 +963,31 @@ class GeoPilotKernel:
                        "snapshot_missing", "a sealed snapshot required for planning is missing")
             return
         request = self._reconstruct_request(row)
+        baseline = None
         if request.experiment is not None:
+            if request.experiment.arm == "g3":
+                baseline = self.ports.store.get_experiment_baseline(request.experiment.pair_id)
+                if baseline is None:
+                    self._fail(run_id, contracts.CONTRACT_FAILED, "plan", "baseline_missing",
+                               "G3 requires a sealed G2 baseline plan.")
+                    return
             outcome = self.ports.planner.plan_ablation(
-                run_id, intent, context, capabilities, request.experiment.arm == "g3")
+                run_id, intent, context, capabilities, request.experiment.arm == "g3",
+                baseline["plan"] if baseline is not None else None,
+                force_audit=request.experiment.arm == "g3")
         else:
             outcome = self.ports.planner.plan(run_id, intent, context, capabilities)
+        if outcome.kind == contracts.CLARIFICATION_REQUIRED:
+            clarifications = self._bind_clarifications(run_id, request, context,
+                                                        outcome.details.get("clarifications", []),
+                                                        intent.derived_facts.get("task_contract"),
+                                                        baseline["plan"].digest if baseline is not None else None)
+            self.ports.store.append_event(
+                run_id, "clarification_required", PLAN_VERIFIED,
+                {"message": outcome.message, "clarifications": clarifications,
+                 "task_contract_draft": intent.derived_facts.get("task_contract")}, outcome=outcome,
+            )
+            return
         if not outcome.succeeded:
             self.ports.store.append_event(
                 run_id, "plan_failed", PLAN_VERIFIED,
@@ -799,6 +999,25 @@ class GeoPilotKernel:
             self._fail(run_id, contracts.CONTRACT_FAILED, "plan",
                        "planner_returned_no_plan", "planner did not return a VerifiedPlan")
             return
+        from ..acceptance_contract import derive as derive_acceptance_contract, AcceptanceContractError
+        try:
+            # This is an execution gate, not a late acceptance convenience:
+            # all independent inputs must be sealable before authorization.
+            derive_acceptance_contract(intent.derived_facts.get("task_contract"),
+                                       plan, intent.bound_inputs, context,
+                                       catalog=getattr(self.ports.planner, "catalog", None))
+        except AcceptanceContractError as exc:
+            self._fail(run_id, contracts.CONTRACT_FAILED, "plan",
+                       "acceptance_contract_unsealable", str(exc))
+            return
+        if request.experiment is not None and request.experiment.arm == "g2":
+            self._freeze_experiment_baseline(run_id, request, context, capabilities, intent, plan)
+        if request.experiment is not None:
+            artifact_root = request.experiment.artifact_root
+        else:
+            from ..paths import data_dir
+            artifact_root = str((data_dir() / "runs" / run_id / "artifacts").resolve())
+        plan = _bind_server_destinations(plan, artifact_root)
         self.ports.store.store_verified_plan(run_id, plan)
         facts = {"plan_id": plan.plan_id, "plan_digest": plan.digest}
         if request.experiment is not None:
@@ -935,7 +1154,7 @@ class GeoPilotKernel:
     @staticmethod
     def _plan_output_identities(plan: VerifiedPlan):
         return tuple(sorted(
-            (output.output_id, output.destination)
+            (output.output_id, output.destination_path)
             for step in plan.workflow for output in step.declared_outputs
             if output.kind != "map_state"
         ))
@@ -1076,15 +1295,25 @@ class GeoPilotKernel:
                 continue
             if output is None:
                 raise ValueError("receipt contains undeclared or ambiguous staged output")
-            source_unit = _file_gdb_unit(str(resolved))
-            destination_unit = _file_gdb_unit(output.destination)
-            if source_unit is None or destination_unit is None:
-                raise ValueError("file output must be contained in a FileGDB publish unit")
+            destination = output.destination_path
+            if output.destination_policy != "physical" or not destination:
+                raise ValueError("sealed output lacks a server-derived physical destination")
+            if output.output_format == "gdb":
+                source_gdb = _file_gdb_unit(str(resolved))
+                destination_gdb = _file_gdb_unit(destination)
+                publication_kind = "file_gdb"
+                if source_gdb is None or destination_gdb is None:
+                    raise ValueError("gdb output must be contained in a FileGDB publish unit")
+            else:
+                publication_kind = "file"
             identity = contracts.ArtifactIdentity(
                 output_id=output.output_id, kind=output.kind,
-                logical_dataset_path=str(resolved), source_publish_unit_path=source_unit,
-                destination_dataset_path=output.destination,
-                destination_publish_unit_path=destination_unit,
+                output_format=output.output_format,
+                logical_dataset_path=str(resolved), source_publish_unit_path=str(staging_root),
+                destination_dataset_path=destination,
+                destination_publish_unit_path=ntpath.dirname(
+                    _file_gdb_unit(destination) if publication_kind == "file_gdb" else ntpath.dirname(destination)),
+                publication_kind=publication_kind,
             )
             self.ports.store.store_artifact(run_id, identity, staged=True)
 
@@ -1095,9 +1324,18 @@ class GeoPilotKernel:
             raise ValueError("acceptance publisher is not wired; cannot accept.")
         plan = self._load_plan(run_id)
         intent = self._load_intent(run_id)
-        if plan is None or intent is None:
+        context = self._load_context(run_id)
+        if plan is None or intent is None or context is None:
             self._fail(run_id, contracts.INFRASTRUCTURE_FAILED, "acceptance",
                        "binding_missing", "plan or intent missing for acceptance")
+            return
+        from ..acceptance_contract import derive as derive_acceptance_contract, AcceptanceContractError
+        try:
+            acceptance_contract = derive_acceptance_contract(
+                intent.derived_facts.get("task_contract"), plan, intent.bound_inputs, context,
+                catalog=getattr(self.ports.planner, "catalog", None))
+        except AcceptanceContractError as exc:
+            self._fail(run_id, contracts.ACCEPTANCE_FAILED, "acceptance", "contract_invalid", str(exc))
             return
         staged = self.ports.store.list_staged_artifacts(run_id)
         lease = self._load_lease(run_id)
@@ -1113,20 +1351,23 @@ class GeoPilotKernel:
                 return
             staged_by_output = {item.output_id: item for item in staged
                                 if isinstance(item, contracts.ArtifactIdentity)}
-            units = {item.source_publish_unit_path for item in staged_by_output.values()}
-            if len(units) != 1:
+            gdb_artifacts = [item for item in staged_by_output.values()
+                             if item.publication_kind == "file_gdb"]
+            units = {_file_gdb_unit(item.logical_dataset_path) for item in gdb_artifacts}
+            if len(units) > 1:
                 self._fail(run_id, contracts.ACCEPTANCE_FAILED, "acceptance", "multiple_source_units",
-                           "所有文件成果必须来自同一个 staging FileGDB。")
+                           "所有 FileGDB 成果必须来自同一个 staging FileGDB。")
                 return
-            unit = self.ports.bridge.probe_unit(lease, plan, next(iter(units)))
-            expected = sorted(_relative_dataset_path(item.logical_dataset_path, item.source_publish_unit_path)
-                              for item in staged_by_output.values())
-            actual = sorted(unit.get("datasets", ())) if isinstance(unit, dict) else []
-            if expected != actual:
-                self._fail(run_id, contracts.ACCEPTANCE_FAILED, "acceptance", "unit_dataset_mismatch",
-                           "staging FileGDB 含有未声明、缺失或路径不一致的数据集。")
-                return
-            probes.append(unit)
+            if units:
+                unit = self.ports.bridge.probe_unit(lease, plan, next(iter(units)))
+                expected = sorted(_relative_dataset_path(item.logical_dataset_path, _file_gdb_unit(item.logical_dataset_path))
+                                  for item in gdb_artifacts)
+                actual = sorted(unit.get("datasets", ())) if isinstance(unit, dict) else []
+                if expected != actual:
+                    self._fail(run_id, contracts.ACCEPTANCE_FAILED, "acceptance", "unit_dataset_mismatch",
+                               "staging FileGDB 含有未声明、缺失或路径不一致的数据集。")
+                    return
+                probes.append(unit)
             for output in declared:
                 artifact = staged_by_output.get(output.output_id)
                 if artifact is None:
@@ -1134,7 +1375,8 @@ class GeoPilotKernel:
                                "封存成果未登记 staging artifact。")
                     return
                 probe = self.ports.bridge.probe_output(
-                    lease, plan, output.output_id, output.kind, artifact.logical_dataset_path)
+                    lease, plan, output.output_id, output.kind, output.output_format,
+                    artifact.logical_dataset_path, acceptance_contract)
                 if not isinstance(probe, dict):
                     self._fail(run_id, contracts.ACCEPTANCE_FAILED, "acceptance", "probe_missing",
                                "独立 ArcPy 验收探针未返回证据。")
@@ -1156,13 +1398,14 @@ class GeoPilotKernel:
                                "封存地图状态成果必须声明一个可独立验收的后置条件。")
                     return
                 probe = self.ports.bridge.probe_map_state(lease, plan, output.output_id,
-                                                          supported[0], step.arguments)
+                                                          supported[0], step.arguments,
+                                                          acceptance_contract)
                 if not isinstance(probe, dict):
                     self._fail(run_id, contracts.ACCEPTANCE_FAILED, "acceptance", "map_probe_missing",
                                "独立 ArcPy 地图状态验收探针未返回证据。")
                     return
                 probes.append(probe)
-        outcome = self.ports.acceptance.accept(intent, plan, probes, staged)
+        outcome = self.ports.acceptance.accept(intent, plan, probes, staged, acceptance_contract)
         if not outcome.succeeded:
             self.ports.store.append_event(
                 run_id, "acceptance_failed", ACCEPTED,
@@ -1309,6 +1552,8 @@ class GeoPilotKernel:
             side_effects=side_effects,
             inputs=tuple(payload.get("inputs") or ()),
             target_selector=payload["target_selector"],
+            model_plan=payload["model_plan"],
+            model_binding_summary=payload["model_binding_summary"],
             experiment=contracts.ExperimentSpec.model_validate(payload["experiment"])
             if payload.get("experiment") is not None else None,
         )
@@ -1340,15 +1585,54 @@ def _file_gdb_unit(path: str) -> Optional[str]:
 
 
 def _runtime_step_document(step: contracts.WorkflowStep) -> Dict[str, Any]:
-    arguments = dict(step.arguments)
-    if any(output.kind != "map_state" for output in step.declared_outputs):
-        arguments.pop("output_workspace", None)
     return {
         "id": step.id,
         "operation": step.operation,
-        "arguments": arguments,
+        "arguments": dict(step.arguments),
         "reason": step.reason,
     }
+
+
+def _bind_server_destinations(plan: contracts.VerifiedPlan,
+                              artifact_root: str) -> contracts.VerifiedPlan:
+    """Derive physical destinations from one server-owned output root.
+
+    The LLM never sees or selects this path.  Every non-map output is rebound
+    to the server-owned FileGDB while output ids, topology, operations and all
+    analytical arguments remain unchanged.
+    """
+    import ntpath
+    normalized = ntpath.normpath(artifact_root)
+    if (not ntpath.isabs(normalized) or normalized != artifact_root
+            or ntpath.splitext(normalized)[1]):
+        raise ValueError("server artifact root must be a normalized absolute directory path")
+    document = plan.model_dump(mode="json")
+    for step in document["workflow"]:
+        file_outputs = [item for item in step.get("declared_outputs", ())
+                        if item.get("kind") != "map_state"]
+        if not file_outputs:
+            continue
+        step["arguments"] = dict(step.get("arguments") or {})
+        for output in file_outputs:
+            if output.get("destination_policy") != "server_derived" or output.get("destination_path") is not None:
+                raise ValueError("logical plan contains a physical or unknown destination")
+            name = output["name"]
+            if ntpath.basename(name) != name or name in (".", ".."):
+                raise ValueError("logical output name is not a safe path segment")
+            fmt = output["output_format"]
+            if fmt == "gdb":
+                if "." in name:
+                    raise ValueError("FileGDB dataset output name cannot contain an extension")
+                destination = ntpath.join(normalized, "published.gdb", name)
+            elif fmt in ("csv", "png"):
+                extension = "." + fmt
+                leaf = name if name.lower().endswith(extension) else name + extension
+                destination = ntpath.join(normalized, "files", leaf)
+            else:
+                raise ValueError("persisted experiment output has an unsupported format")
+            output["destination_policy"] = "physical"
+            output["destination_path"] = ntpath.normpath(destination)
+    return contracts.VerifiedPlan.model_validate(document)
 
 
 def _relative_dataset_path(dataset_path: str, unit_path: str) -> str:
@@ -1367,6 +1651,36 @@ def _requested_effect_level(request: RequestEnvelope) -> int:
 
 def _load_outcome(document: Dict[str, Any]) -> Outcome:
     return Outcome.model_validate(document)
+
+
+class ExperimentKernelPort:
+    """Complete, narrow experiment lifecycle owned by the production Kernel."""
+    def __init__(self, kernel: GeoPilotKernel):
+        self._kernel = kernel
+
+    @property
+    def runtime_identity(self) -> Dict[str, Any]:
+        return self._kernel.runtime_identity
+
+    def submit(self, request: RequestEnvelope) -> RunView:
+        return self._kernel.submit(request)
+
+    def inspect(self, run_id: str) -> RunView:
+        return self._kernel.inspect(run_id)
+
+    def decide(self, decision: AuthorizationDecision) -> RunView:
+        return self._kernel.decide(decision.run_id, decision)
+
+    def resume_quota(self, run_id: str) -> RunView:
+        return self._kernel.resume_quota(run_id)
+
+    def export_run_journal(self, run_id: str) -> Dict[str, Any]:
+        return self._kernel.export_run_journal(run_id)
+
+    def await_progress(self, run_id: str, event_kinds=(),
+                       timeout: float = 30.0) -> RunView:
+        self._kernel.ports.store.wait_for_run_event(run_id, event_kinds, timeout)
+        return self._kernel.inspect(run_id)
 
 
 def _build_context_snapshot_from_payload(payload: Dict[str, Any], lease):
@@ -1421,7 +1735,8 @@ def _build_context_snapshot_from_payload(payload: Dict[str, Any], lease):
     )
 
 
-def _layer_from_context_payload(layer: Dict[str, Any]) -> LayerSnapshot:
+def _layer_from_context_payload(layer: Dict[str, Any]):
+    from .contracts import LayerSnapshot, LayerRef, FieldColumn
     required = ("name", "layer_ref", "long_name", "visible", "selection_hash", "data_source", "layer_type", "fields",
                 "geometry_type", "spatial_reference", "selected_count")
     if not isinstance(layer, dict) or any(name not in layer for name in required):
@@ -1434,9 +1749,20 @@ def _layer_from_context_payload(layer: Dict[str, Any]) -> LayerSnapshot:
     return LayerSnapshot(
         identity=LayerRef(name=layer["name"], layer_ref=layer["layer_ref"],
                           data_source=layer["data_source"], layer_type=layer["layer_type"]),
-        fields=tuple(FieldColumn(name=field["name"], dtype=field["type"]) for field in fields),
+        fields=tuple(FieldColumn(
+            name=field["name"], dtype=field.get("type"),
+            nullable=bool(field.get("nullable", True)),
+            precision=field.get("precision"), scale=field.get("scale"),
+            length=field.get("length"), domain=tuple(field.get("domain") or ()),
+        ) for field in fields),
         geometry_type=layer["geometry_type"], coordinate_system=layer["spatial_reference"],
         selection_count=int(layer["selected_count"]),
         long_name=layer["long_name"], visible=bool(layer["visible"]),
         selection_hash=layer["selection_hash"],
+        identity_fields=tuple(layer.get("identity_fields") or ()),
+        source_content_digest=layer.get("source_content_digest"),
+        feature_manifest_digest=layer.get("feature_manifest_digest"),
+        raster_content_digest=layer.get("raster_content_digest"),
+        crs_type=layer.get("crs_type"),
+        meters_per_unit=layer.get("meters_per_unit"),
     )

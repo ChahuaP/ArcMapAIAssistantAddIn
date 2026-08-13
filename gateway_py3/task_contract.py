@@ -3,16 +3,13 @@ from __future__ import annotations
 
 from copy import deepcopy
 import json
-import ntpath
 from typing import Any, Dict
 
 from .artifact_identity import artifact_filename_is_mentioned, artifact_format_is_mentioned
 from .model_runtime.contracts import StructuredOutputContract
 from .kernel.contracts import digest as canonical_hash
-from .semantic_domain import (
-    bind_condition_field_types,
-    parse_task_predicate,
-)
+from .semantic_domain import bind_condition_field_types, parse_task_predicate
+from shared_runtime.semantic_abi import FieldSpec
 from shared_runtime.condition_contract import (
     LEAF_CONDITION_OPERATORS, LOGICAL_CONDITION_OPERATORS, VALUE_CONDITION_OPERATORS,
     FIELD_COMPARISON_OPERATORS, normalize_condition_tree, canonical_operator,
@@ -28,17 +25,19 @@ _ROOT = {"input_entities", "outputs", "requirements", "allowed_side_effects", "c
 _INPUT = {"entity_id", "role", "kind", "reference", "evidence"}
 _OUTPUT = {
     "output_id", "kind", "name", "format", "geometry",
-    "required_fields", "spatial_reference", "destination", "evidence",
+    "required_fields", "spatial_reference", "destination_policy", "evidence",
 }
 _REQUIREMENT = {"requirement_id", "predicate", "evidence"}
-_CLARIFICATION = {"clarification_id", "question", "evidence"}
+_CLARIFICATION = {"option_id", "question", "evidence"}
 _MODEL_INPUT = _INPUT - {"evidence", "kind"}
 _MODEL_CLARIFICATION = _CLARIFICATION - {"evidence"}
 _MODEL_REQUIREMENT = {"requirement_id", "predicate_json"}
 _KINDS = {"feature_layer", "raster_layer", "table", "file", "map_state", "feature_class", "raster"}
 _GEOMETRY = {"point", "polyline", "polygon", "raster", "not_applicable"}
 _EFFECTS = {"read_only", "changes_map", "writes_data", "edits_data"}
-_FORMATS = {"not_applicable", "map", "gdb"}
+_FORMATS = {"not_applicable", "map", "gdb", "csv", "png"}
+_DESTINATION_POLICIES = {"server_derived", "not_applicable"}
+_NON_PERSISTED_OUTPUT_KINDS = {"feature_layer", "raster_layer", "map_state"}
 _NON_SPATIAL_OUTPUT_KINDS = {"file", "table", "map_state"}
 _OUTPUT_PRODUCER_KINDS = {
     "buffer", "overlay", "spatial_join", "aggregate", "project", "merge", "append",
@@ -81,6 +80,23 @@ def _raise_task_contract_violations(violations):
             for index, message in enumerate(violations)
         ))
     )
+
+
+def _field_specs(value: Any, path: str) -> list[dict]:
+    if not isinstance(value, list):
+        raise TaskContractError(path + " must be a FieldSpec array.")
+    names = set()
+    for index, item in enumerate(value):
+        if not isinstance(item, dict) or set(item) != {"name", "type", "nullable", "length", "precision", "scale", "domain"}:
+            raise TaskContractError("%s[%d] must be an exact FieldSpec." % (path, index))
+        try:
+            field = FieldSpec(item["name"], item["type"], item["nullable"], item["length"], item["precision"], item["scale"], tuple(item["domain"]))
+        except (TypeError, ValueError) as exc:
+            raise TaskContractError("%s[%d] is invalid: %s" % (path, index, exc))
+        if field.name.casefold() in names:
+            raise TaskContractError(path + " contains duplicate field names.")
+        names.add(field.name.casefold())
+    return value
 
 
 def _parse_requirement(
@@ -196,29 +212,24 @@ def parse_task_contract(value: Dict[str, Any], request: str, context: Dict[str, 
     declaration_violations = []
     for index, item in enumerate(result["outputs"]):
         _exact(item, _OUTPUT, "outputs[%d]" % index)
-        for field in ("output_id", "name", "spatial_reference", "destination"):
+        for field in ("output_id", "name", "spatial_reference", "destination_policy"):
             _text(item[field], "outputs[%d].%s" % (index, field))
         if item["format"] not in _FORMATS:
             raise TaskContractError("output format is invalid.")
         if item["kind"] not in _KINDS or item["geometry"] not in _GEOMETRY:
             raise TaskContractError("output kind or geometry is invalid.")
         item["evidence"] = _evidence(item["evidence"], request, "outputs[%d].evidence" % index)
-        destination = item["destination"]
-        if item["kind"] == "map_state" and destination != "not_applicable":
+        destination_policy = item["destination_policy"]
+        if destination_policy not in _DESTINATION_POLICIES:
+            raise TaskContractError("output destination_policy is invalid.")
+        if item["kind"] in _NON_PERSISTED_OUTPUT_KINDS and destination_policy != "not_applicable":
             raise TaskContractError(
-                "outputs[%d].destination must be not_applicable for map_state." % index
+                "outputs[%d].destination_policy must be not_applicable for map-display state." % index
             )
-        if item["kind"] != "map_state" and destination == "not_applicable":
+        if item["kind"] not in _NON_PERSISTED_OUTPUT_KINDS and destination_policy != "server_derived":
             raise TaskContractError(
-                "outputs[%d].destination cannot be not_applicable for a persisted output." % index
+                "outputs[%d].destination_policy must be server_derived for a persisted output." % index
             )
-        if destination not in {"default", "not_applicable"}:
-            if not _is_fully_qualified_windows_path(destination):
-                raise TaskContractError("outputs[%d].destination must be an absolute Windows path." % index)
-            if destination not in request:
-                raise TaskContractError(
-                    "outputs[%d].destination must be copied exactly from the user request." % index
-                )
         if (
             artifact_format_is_mentioned(item["format"], item["evidence"])
             and not artifact_filename_is_mentioned(item["name"], item["format"], item["evidence"])
@@ -233,8 +244,10 @@ def parse_task_contract(value: Dict[str, Any], request: str, context: Dict[str, 
             # on CSV/PDF/PNG/KMZ files or map-state acknowledgements.
             item["geometry"] = "not_applicable"
             item["spatial_reference"] = "not_applicable"
-        if not isinstance(item["required_fields"], list) or any(not isinstance(name, str) or not name for name in item["required_fields"]):
-            declaration_violations.append("outputs[%d].output required_fields is invalid." % index)
+        try:
+            _field_specs(item["required_fields"], "outputs[%d].required_fields" % index)
+        except TaskContractError as exc:
+            declaration_violations.append(str(exc))
         if item["output_id"] in ids:
             raise TaskContractError("input and output ids must be disjoint.")
         if item["output_id"] in output_ids:
@@ -307,14 +320,14 @@ def parse_task_contract(value: Dict[str, Any], request: str, context: Dict[str, 
             }
         elif source_id in outputs_by_id:
             source_fields = {
-                str(field).casefold()
+                str(field["name"]).casefold()
                 for field in outputs_by_id[source_id]["required_fields"]
             }
         if source_fields is None:
             continue
         unavailable = [
-            field for field in output["required_fields"]
-            if field.casefold() not in source_fields
+            field["name"] for field in output["required_fields"]
+            if field["name"].casefold() not in source_fields
         ]
         if unavailable:
             raise TaskContractError(
@@ -344,38 +357,17 @@ def parse_task_contract(value: Dict[str, Any], request: str, context: Dict[str, 
     clarification_ids = set()
     for index, item in enumerate(result["clarifications"]):
         _exact(item, _CLARIFICATION, "clarifications[%d]" % index)
-        for field in ("clarification_id", "question"):
+        for field in ("option_id", "question"):
             _text(item[field], "clarifications[%d].%s" % (index, field))
         _evidence(item["evidence"], request, "clarifications[%d].evidence" % index)
-        if item["clarification_id"] in clarification_ids:
-            raise TaskContractError("clarification ids must be unique.")
-        clarification_ids.add(item["clarification_id"])
-    if (
-        isinstance(context, dict)
-        and context.get("is_saved") is False
-        and any(
-            output["kind"] != "map_state" and output["destination"] == "default"
-            for output in result["outputs"]
-        )
-        and not result["clarifications"]
-    ):
-        raise TaskContractError(
-            "An unsaved ArcMap document with persisted outputs requires an output-location clarification "
-            "unless every persisted output has an explicit request-bound destination."
-        )
+        if item["option_id"] in clarification_ids:
+            raise TaskContractError("clarification option ids must be unique.")
+        clarification_ids.add(item["option_id"])
     return result
 
 
-def _is_fully_qualified_windows_path(value: str) -> bool:
-    drive, tail = ntpath.splitdrive(value)
-    if drive.startswith("\\\\"):
-        parts = [part for part in drive[2:].split("\\") if part]
-        return len(parts) >= 2
-    return bool(drive and tail.startswith(("\\", "/")))
-
-
 TASK_CONTRACT = StructuredOutputContract(
-    name="submit_task_contract_v10",
+    name="submit_task_contract_v11",
     description=(
         "Submit the closed GeoPilot task contract. The server binds authoritative input kinds "
         "from live ArcMap references and immutable request evidence."
@@ -404,19 +396,30 @@ TASK_CONTRACT = StructuredOutputContract(
                                 "format": {"type": "string", "enum": sorted(_FORMATS)},
                                 "geometry": {"type": "string", "enum": sorted(_GEOMETRY)},
                                 "required_fields": {
-                                    "type": "array", "items": {"type": "string", "minLength": 1},
+                                    "type": "array", "items": {
+                                        "type": "object", "additionalProperties": False,
+                                        "properties": {
+                                            "name": {"type": "string", "minLength": 1},
+                                            "type": {"type": "string", "minLength": 1},
+                                            "nullable": {"type": "boolean"},
+                                            "length": {"type": ["integer", "null"], "minimum": 0},
+                                            "precision": {"type": ["integer", "null"], "minimum": 0},
+                                            "scale": {"type": ["integer", "null"], "minimum": 0},
+                                            "domain": {"type": "array", "uniqueItems": True},
+                                        },
+                                        "required": ["name", "type", "nullable", "length", "precision", "scale", "domain"],
+                                    },
                                     "description": (
                                         "Only fields explicitly required on this output and supplied by its "
                                         "source or producer; never inventory or invent an output schema."
                                     ),
                                 },
                                 "spatial_reference": {"type": "string", "minLength": 1},
-                                "destination": {
-                                    "type": "string", "minLength": 1,
+                                "destination_policy": {
+                                    "type": "string", "enum": sorted(_DESTINATION_POLICIES),
                                     "description": (
-                                        "Use the exact absolute Windows folder or geodatabase path requested "
-                                        "for this output. Use default only when the request does not specify "
-                                        "a destination, and not_applicable only for a non-file map-state output."
+                                        "Use server_derived for every persisted output. Physical paths are "
+                                        "bound later by the server. Use not_applicable only for non-persisted map-display state."
                                     ),
                                 },
                                 "evidence": {
@@ -451,7 +454,9 @@ TASK_CONTRACT = StructuredOutputContract(
                     "clarifications": {
                         "type": "array", "items": {
                             "type": "object", "properties": {
-                                "clarification_id": {"type": "string", "minLength": 1},
+                                "option_id": {"type": "string", "enum": [
+                                    "field.type", "quantity.unit", "selection.state", "spatial.predicate"
+                                ]},
                                 "question": {"type": "string", "minLength": 1},
                             }, "required": sorted(_MODEL_CLARIFICATION), "additionalProperties": False,
                         },
@@ -535,7 +540,7 @@ def _bind_map_state_contract(result):
         if (
             isinstance(output, dict)
             and output.get("output_id") in map_state_outputs
-            and output.get("destination") == "not_applicable"
+            and output.get("destination_policy") == "not_applicable"
         ):
             output.update({
                 "kind": "map_state",
@@ -565,7 +570,7 @@ def _bind_external_layer_addition(result):
         or not isinstance(output, dict)
         or output.get("kind") not in {"feature_layer", "raster_layer", "map_state"}
         or output.get("format") != "not_applicable"
-        or output.get("destination") != "not_applicable"
+        or output.get("destination_policy") != "not_applicable"
         or not isinstance(predicate, dict)
         or predicate != {"kind": "source_preserved", "subject": source.get("entity_id")}
     ):

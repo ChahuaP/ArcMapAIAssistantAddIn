@@ -24,6 +24,7 @@ from gateway_py3.model_runtime.contracts import (
     AgentModelPlan, ModelBinding, ProviderConnection, ProviderInvocation,
     ProviderResponse, StructuredOutputContract, TokenPlan,
 )
+from gateway_py3.model_runtime.contracts import model_binding_evidence
 from gateway_py3.model_runtime.registry import ProviderRegistry
 
 FAKE_LEASE_ID = "00000000-0000-0000-0000-0000000000aa"
@@ -69,6 +70,14 @@ def fake_agent_model_plan(connection_id: str = FAKE_CONNECTION_ID,
     )
 
 
+def fake_model_binding_summary(plan=None):
+    plan = plan or fake_agent_model_plan()
+    connection = fake_provider_connection(connection_id=plan.compiler.connection_id,
+                                          model_id=plan.compiler.model_id)
+    return {role: model_binding_evidence(connection, plan.binding_for(role))
+            for role in ("compiler", "planner", "auditor", "repairer")}
+
+
 def build_test_model_runtime(adapter, store, *,
                              connection: Optional[ProviderConnection] = None,
                              plan: Optional[AgentModelPlan] = None):
@@ -99,6 +108,8 @@ def _fake_context_snapshot(run_id: str, lease_id: str = FAKE_LEASE_ID) -> Contex
                 fields=(FieldColumn(name="NAME"), FieldColumn(name="POP"),),
                 geometry_type="Point", coordinate_system="WGS84",
                 selection_count=0,
+                identity_fields=("OBJECTID",),
+                source_content_digest="test-source-content-digest",
             ),
         ),
         active_data_frame="Layers",
@@ -185,7 +196,7 @@ class FakeModelAdapter:
     def _response(self, contract: StructuredOutputContract) -> Dict[str, Any]:
         self.call_count += 1
         if self.require_clarification:
-            return {"task_contract": {"clarifications": [{"clarification_id": "c1", "question": "请指定要操作的图层。"}]}}
+            return {"task_contract": {"clarifications": [{"option_id": "selection.state", "question": "使用当前选择还是全部要素？"}]}}
         if contract.name == "submit_task_contract":
             payload = self.intent_payload or {"task_contract": {
                 "input_entities": [], "outputs": [], "requirements": [],
@@ -265,15 +276,27 @@ class FakeIntentCompiler:
                 result.error or "模型调用失败")
         clarifications = (result.response or {}).get("task_contract", {}).get("clarifications")
         if clarifications:
+            draft = {
+                "input_entities": [], "outputs": [], "allowed_side_effects": ["read_only"],
+                "requirements": [{"requirement_id": "req:selection", "predicate": {
+                    "kind": "attribute_filter", "subject": "input:cities", "target": "input:cities",
+                    "selection_type": "unresolved"}}],
+                "clarifications": list(clarifications),
+            }
             return outcome_paused(
                 contracts.CLARIFICATION_REQUIRED, "intent", "need_layer",
                 clarifications[0].get("question", "请补充信息。"),
+                details={"clarifications": clarifications, "task_contract_draft": draft},
             )
         intent = _fake_intent(request, context, capabilities)
         return outcome_succeeded(
             "intent", "意图编译完成。",
             details={"intent": intent},
         )
+
+    def resume_with_patch(self, request, context, capabilities, task_contract):
+        intent = _fake_intent(request, context, capabilities)
+        return outcome_succeeded("intent", "澄清答案已应用。", details={"intent": intent})
 
 
 class FakeWorkflowPlanner:
@@ -293,7 +316,8 @@ class FakeWorkflowPlanner:
         return self.plan_ablation(run_id, intent, context, capabilities, auditor_enabled=True)
 
     def plan_ablation(self, run_id: str, intent: IntentSpec, context: ContextSnapshot,
-                      capabilities: CapabilitySnapshot, auditor_enabled: bool) -> Outcome:
+                      capabilities: CapabilitySnapshot, auditor_enabled: bool,
+                      sealed_baseline=None) -> Outcome:
         if self.model_runtime is None:
             plan = _fake_plan(intent, context, capabilities, self.risk_level)
             return outcome_succeeded(
@@ -383,7 +407,8 @@ class FakeArcMapExecutor:
 class FakeAcceptancePublisher:
     """§6.8 accept + publish: always passes."""
     def accept(self, intent: IntentSpec, plan: VerifiedPlan,
-               runtime_outcome: Any, staged_artifacts: Any = None) -> Outcome:
+               probe_documents: Any, staged_artifacts: Any = None,
+               acceptance_contract: Any = None) -> Outcome:
         return outcome_succeeded(
             "acceptance", "成果验收通过。",
             details={"artifacts": [], "report": {"passed": True}},
@@ -443,7 +468,8 @@ def _build_model_request(owner, role: str, system_prompt: str,
         user_input=payload.get("request") or payload.get("text") or canonical_json(payload),
         tool_contract={"type": "object"},
         capability_hash="ch", context_projection=payload,
-        domain_rule_hash="drh", generation_params={},
+        domain_rule_hash="drh", model_plan=fake_agent_model_plan(),
+        model_binding_summary=fake_model_binding_summary(), generation_params={},
         run_id=getattr(owner, "request_id", ""),
     )
 

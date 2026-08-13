@@ -127,6 +127,8 @@ class ArcMapRuntime:
                 visible=bool(layer.get("visible", False)),
                 selection_hash=layer.get("selection_hash"),
                 value_summary=None,
+                crs_type=layer.get("crs_type"),
+                meters_per_unit=layer.get("meters_per_unit"),
             )
             for layer in structural_layers
         )

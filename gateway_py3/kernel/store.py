@@ -51,8 +51,9 @@ class QuotaStoppedError(Exception):
 class UncertainCallError(Exception):
     """A model call previously finished uncertain; it needs human adjudication."""
 
-SCHEMA_VERSION = 12
-SCHEMA_MARKER = "geopilot-journal-v12-dpapi-chain-full-projection-anchor"
+SCHEMA_VERSION = 15
+SCHEMA_MARKER = "geopilot-journal-v15-single-active-session"
+_PREVIOUS_SCHEMA_MARKER = "geopilot-journal-v14-append-only-model-attempt-lineage"
 
 # Legacy table/column names that mark an incompatible old database. If any are
 # present, the store refuses to start (§7: no migration).
@@ -123,6 +124,32 @@ def _create_tables(conn: sqlite3.Connection) -> None:
             closed_at REAL
         );
 
+        -- Exactly one machine-visible conversation.  The singleton primary
+        -- key is the database-level invariant; it is not a browser convention.
+        CREATE TABLE IF NOT EXISTS active_session (
+            singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+            session_id TEXT NOT NULL UNIQUE,
+            epoch INTEGER NOT NULL CHECK (epoch > 0),
+            activated_at REAL NOT NULL,
+            FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+        );
+        CREATE TABLE IF NOT EXISTS archived_sessions (
+            session_id TEXT PRIMARY KEY,
+            epoch INTEGER NOT NULL,
+            archived_at REAL NOT NULL,
+            FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+        );
+        CREATE TABLE IF NOT EXISTS session_normalization_evidence (
+            evidence_id INTEGER PRIMARY KEY CHECK (evidence_id = 1),
+            selected_session_id TEXT NOT NULL,
+            selected_epoch INTEGER NOT NULL,
+            selection_reason TEXT NOT NULL,
+            candidate_count INTEGER NOT NULL,
+            normalized_at REAL NOT NULL,
+            document_json TEXT NOT NULL,
+            FOREIGN KEY (selected_session_id) REFERENCES sessions(session_id)
+        );
+
         CREATE TABLE IF NOT EXISTS runs (
             run_id TEXT PRIMARY KEY,
             session_id TEXT NOT NULL,
@@ -161,9 +188,23 @@ def _create_tables(conn: sqlite3.Connection) -> None:
             FOREIGN KEY (run_id) REFERENCES runs(run_id)
         );
         CREATE TABLE IF NOT EXISTS planning_node_updates (
-            run_id TEXT NOT NULL, node TEXT NOT NULL, attempt INTEGER NOT NULL,
+            run_id TEXT NOT NULL, lineage_id TEXT NOT NULL,
+            node TEXT NOT NULL, attempt INTEGER NOT NULL,
             status TEXT NOT NULL, update_json TEXT NOT NULL, recorded_at REAL NOT NULL,
-            PRIMARY KEY (run_id, node, attempt), FOREIGN KEY (run_id) REFERENCES runs(run_id)
+            replayed_from_lineage TEXT,
+            PRIMARY KEY (run_id, lineage_id, node, attempt),
+            FOREIGN KEY (run_id) REFERENCES runs(run_id)
+        );
+        CREATE TABLE IF NOT EXISTS planning_lineages (
+            run_id TEXT NOT NULL, lineage_id TEXT NOT NULL, sequence INTEGER NOT NULL,
+            resumed_from_lineage TEXT, created_at REAL NOT NULL,
+            PRIMARY KEY (run_id, lineage_id), UNIQUE (run_id, sequence),
+            FOREIGN KEY (run_id) REFERENCES runs(run_id)
+        );
+        CREATE TABLE IF NOT EXISTS planning_lineage_invalidations (
+            run_id TEXT NOT NULL, lineage_id TEXT NOT NULL, node TEXT NOT NULL,
+            PRIMARY KEY (run_id, lineage_id, node),
+            FOREIGN KEY (run_id, lineage_id) REFERENCES planning_lineages(run_id, lineage_id)
         );
 
         CREATE TABLE IF NOT EXISTS experiment_pair_baselines (
@@ -172,6 +213,7 @@ def _create_tables(conn: sqlite3.Connection) -> None:
             intent_digest TEXT NOT NULL, context_digest TEXT NOT NULL,
             capability_digest TEXT NOT NULL, task_contract_json TEXT NOT NULL,
             context_json TEXT NOT NULL, intent_json TEXT NOT NULL, capability_json TEXT NOT NULL,
+            baseline_plan_json TEXT NOT NULL,
             binding_json TEXT NOT NULL,
             baseline_digest TEXT NOT NULL,
             provider TEXT NOT NULL, model TEXT NOT NULL, created_at REAL NOT NULL,
@@ -222,7 +264,8 @@ def _create_tables(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_verified_plans_digest ON verified_plans(digest);
 
         CREATE TABLE IF NOT EXISTS model_calls (
-            call_key TEXT PRIMARY KEY,
+            call_key TEXT NOT NULL,
+            attempt INTEGER NOT NULL,
             run_id TEXT NOT NULL,
             provider TEXT NOT NULL,
             model TEXT NOT NULL,
@@ -231,7 +274,8 @@ def _create_tables(conn: sqlite3.Connection) -> None:
             response_json TEXT,
             ledger_json TEXT NOT NULL,
             reserved_at REAL NOT NULL,
-            committed_at REAL
+            committed_at REAL,
+            PRIMARY KEY (call_key, attempt)
         );
         CREATE INDEX IF NOT EXISTS idx_model_calls_run ON model_calls(run_id);
         CREATE INDEX IF NOT EXISTS idx_model_calls_status ON model_calls(status, committed_at);
@@ -243,6 +287,12 @@ def _create_tables(conn: sqlite3.Connection) -> None:
             PRIMARY KEY (call_key, run_id)
         );
         CREATE INDEX IF NOT EXISTS idx_model_call_bindings_run ON model_call_bindings(run_id);
+        CREATE TABLE IF NOT EXISTS model_call_resume_authorizations (
+            call_key TEXT NOT NULL, prior_attempt INTEGER NOT NULL, run_id TEXT NOT NULL,
+            lineage_id TEXT NOT NULL, authorized_at REAL NOT NULL,
+            PRIMARY KEY (call_key, prior_attempt, run_id),
+            FOREIGN KEY (run_id) REFERENCES runs(run_id)
+        );
 
         CREATE TABLE IF NOT EXISTS runtime_leases (
             run_id TEXT PRIMARY KEY,
@@ -351,8 +401,11 @@ def _validate_schema(conn: sqlite3.Connection) -> None:
     if "manifest_json" in prepared_columns or "target_unit_path" in prepared_columns:
         raise RuntimeError("existing publication_prepared table uses legacy plaintext schema; remove database explicitly")
     node_columns = {row[1] for row in conn.execute("PRAGMA table_info(planning_node_updates)").fetchall()}
-    if node_columns and "update_json" not in node_columns:
-        raise RuntimeError("existing planning_node_updates table lacks update facts; remove database explicitly")
+    if node_columns and not {"update_json", "lineage_id", "replayed_from_lineage"}.issubset(node_columns):
+        raise RuntimeError("existing planning_node_updates table lacks append-only lineage facts; remove database explicitly")
+    model_columns = {row[1] for row in conn.execute("PRAGMA table_info(model_calls)").fetchall()}
+    if model_columns and "attempt" not in model_columns:
+        raise RuntimeError("existing model_calls table lacks append-only attempts; remove database explicitly")
     event_columns = {row[1] for row in conn.execute("PRAGMA table_info(run_events)").fetchall()}
     if event_columns and not {"previous_hash", "chain_hash"}.issubset(event_columns):
         raise RuntimeError("existing run_events table lacks the DPAPI chain contract; remove database explicitly")
@@ -369,7 +422,7 @@ def _validate_schema(conn: sqlite3.Connection) -> None:
             "existing database is not a GeoPilot journal; "
             "remove it explicitly before starting GeoPilot."
         )
-    if marker[0] != SCHEMA_MARKER:
+    if marker[0] not in (SCHEMA_MARKER, _PREVIOUS_SCHEMA_MARKER):
         raise RuntimeError(
             "existing database schema marker is %r, expected %r; "
             "remove it explicitly before starting GeoPilot." % (marker[0], SCHEMA_MARKER)
@@ -388,6 +441,7 @@ class JournalStore:
     def __init__(self, path: Optional[Path] = None):
         self.path = Path(path) if path is not None else GEOPILOT_DB_PATH
         self._event_listeners: list = []
+        self._event_condition = threading.Condition()
         self._io_lock = threading.RLock()
         self._init()
 
@@ -437,9 +491,86 @@ class JournalStore:
                     "INSERT OR IGNORE INTO schema_meta(key, value) VALUES ('schema_version', ?)",
                     (str(SCHEMA_VERSION),),
                 )
+                self._normalize_single_active_session_locked(conn)
+                conn.execute("UPDATE schema_meta SET value=? WHERE key='schema_marker'", (SCHEMA_MARKER,))
+                conn.execute("UPDATE schema_meta SET value=? WHERE key='schema_version'", (str(SCHEMA_VERSION),))
             self._verify_all_run_facts(conn)
         finally:
             conn.close()
+
+    @staticmethod
+    def _normalize_single_active_session_locked(conn: sqlite3.Connection) -> None:
+        """Normalize a v14 multi-session journal without deleting evidence.
+
+        An existing valid active projection wins.  Otherwise the session with
+        the most recently updated run wins; a journal with no runs selects its
+        newest session.  Ties are broken by UUID so the choice is reproducible.
+        Every non-selected session becomes a read-only archive and the exact
+        choice is recorded once in the journal database.
+        """
+        already = conn.execute(
+            "SELECT 1 FROM session_normalization_evidence WHERE evidence_id=1"
+        ).fetchone()
+        if already is not None:
+            return
+        active = conn.execute(
+            "SELECT session_id, epoch FROM active_session WHERE singleton=1"
+        ).fetchone()
+        candidates = conn.execute("SELECT session_id, created_at FROM sessions ORDER BY session_id").fetchall()
+        if active is not None:
+            selected_id, epoch, reason = active[0], int(active[1]), "existing_active_projection"
+        elif candidates:
+            selected = conn.execute(
+                "SELECT s.session_id FROM sessions s LEFT JOIN runs r ON r.session_id=s.session_id "
+                "GROUP BY s.session_id ORDER BY MAX(r.updated_at) IS NULL, MAX(r.updated_at) DESC, "
+                "MAX(s.created_at) DESC, s.session_id ASC LIMIT 1"
+            ).fetchone()
+            selected_id, epoch, reason = selected[0], 1, "latest_run_then_created_at"
+            conn.execute(
+                "INSERT INTO active_session(singleton, session_id, epoch, activated_at) VALUES (1, ?, ?, ?)",
+                (selected_id, epoch, _now()),
+            )
+        else:
+            # Empty installation: get_active_session performs the first
+            # creation later; there is no historic session to normalize.
+            return
+        now = _now()
+        archived_ids = [row[0] for row in candidates if row[0] != selected_id]
+        for session_id in archived_ids:
+            active_runs = conn.execute(
+                "SELECT run_id FROM runs WHERE session_id=? AND stage NOT IN (%s)"
+                % ",".join("?" for _ in TERMINAL_STAGES),
+                (session_id,) + tuple(TERMINAL_STAGES),
+            ).fetchall()
+            for (run_id,) in active_runs:
+                outcome = contracts.outcome_failed(
+                    contracts.CANCELLED, "session_normalization", "session_archived",
+                    "旧会话已归档；运行不会在非活动会话中恢复。",
+                )
+                payload = {"reason": "session_normalized_to_archive", "outcome_kind": outcome.kind,
+                           "outcome": _outcome_document(outcome), "projected_stage": "cancelled"}
+                JournalStore._append_event_locked(conn, run_id, "session_archived", "cancelled", payload, now)
+                conn.execute(
+                    "UPDATE runs SET stage='cancelled', outcome_kind=?, outcome_json=?, updated_at=? WHERE run_id=?",
+                    (outcome.kind, _json_dumps(_outcome_document(outcome)), now, run_id),
+                )
+                JournalStore._write_event_anchor_locked(conn, run_id)
+            conn.execute(
+                "UPDATE runtime_leases SET released=1 WHERE run_id IN (SELECT run_id FROM runs WHERE session_id=?)",
+                (session_id,),
+            )
+            conn.execute("UPDATE sessions SET closed_at=COALESCE(closed_at, ?) WHERE session_id=?", (now, session_id))
+            conn.execute(
+                "INSERT OR IGNORE INTO archived_sessions(session_id, epoch, archived_at) VALUES (?, ?, ?)",
+                (session_id, 0, now),
+            )
+        evidence = {"selected_session_id": selected_id, "epoch": epoch, "reason": reason,
+                    "candidate_session_ids": [row[0] for row in candidates], "archived_session_ids": archived_ids}
+        conn.execute(
+            "INSERT INTO session_normalization_evidence(evidence_id, selected_session_id, selected_epoch, "
+            "selection_reason, candidate_count, normalized_at, document_json) VALUES (1, ?, ?, ?, ?, ?, ?)",
+            (selected_id, epoch, reason, len(candidates), now, _json_dumps(evidence)),
+        )
 
     @staticmethod
     def _verify_all_event_chains(conn: sqlite3.Connection) -> None:
@@ -541,14 +672,178 @@ class JournalStore:
 
     # -- sessions (§5) ------------------------------------------------------
 
-    def create_session(self, session_id: str, tenant_id: str) -> Dict[str, Any]:
-        now = _now()
+    @staticmethod
+    def _active_document(row) -> Dict[str, Any]:
+        return {"session_id": row[0], "epoch": int(row[1]), "activated_at": row[2]}
+
+    def get_active_session(self) -> Dict[str, Any]:
+        """Return the sole active conversation, creating it atomically once."""
         with self._connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT session_id, epoch, activated_at FROM active_session WHERE singleton=1"
+            ).fetchone()
+            if row is None:
+                now = _now()
+                session_id = str(uuid.uuid4())
+                conn.execute("INSERT INTO sessions(session_id, tenant_id, created_at) VALUES (?, ?, ?)",
+                             (session_id, "local-tenant", now))
+                conn.execute("INSERT INTO active_session(singleton, session_id, epoch, activated_at) VALUES (1, ?, 1, ?)",
+                             (session_id, now))
+                return {"session_id": session_id, "epoch": 1, "activated_at": now}
+            return self._active_document(row)
+
+    def clear_active_session(self) -> Dict[str, Any]:
+        """Archive the active conversation and rotate to a fresh epoch atomically."""
+        with self._connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("SELECT session_id, epoch FROM active_session WHERE singleton=1").fetchone()
+            if row is None:
+                # The same transaction creates the initial active session.
+                now = _now()
+                session_id = str(uuid.uuid4())
+                conn.execute("INSERT INTO sessions(session_id, tenant_id, created_at) VALUES (?, ?, ?)",
+                             (session_id, "local-tenant", now))
+                conn.execute("INSERT INTO active_session(singleton, session_id, epoch, activated_at) VALUES (1, ?, 1, ?)",
+                             (session_id, now))
+                return {"session_id": session_id, "epoch": 1, "activated_at": now}
+            old_id, old_epoch = row
+            now = _now()
+            session_id = str(uuid.uuid4())
+            epoch = int(old_epoch) + 1
+            active_runs = conn.execute(
+                "SELECT run_id, stage FROM runs WHERE session_id=? AND stage NOT IN (%s)"
+                % ",".join("?" for _ in TERMINAL_STAGES),
+                (old_id,) + tuple(TERMINAL_STAGES),
+            ).fetchall()
+            for run_id, stage in active_runs:
+                outcome = contracts.outcome_failed(
+                    contracts.CANCELLED, "session_clear", "session_cleared",
+                    "会话已清空；该运行不能在已归档会话中继续。",
+                )
+                payload = {
+                    "reason": "session_cleared", "outcome_kind": outcome.kind,
+                    "outcome": _outcome_document(outcome), "projected_stage": "cancelled",
+                }
+                self._append_event_locked(conn, run_id, "session_cleared", "cancelled", payload, now)
+                conn.execute(
+                    "UPDATE runs SET stage='cancelled', outcome_kind=?, outcome_json=?, updated_at=? WHERE run_id=?",
+                    (outcome.kind, _json_dumps(_outcome_document(outcome)), now, run_id),
+                )
+                self._write_event_anchor_locked(conn, run_id)
+            # Lease fencing survives process boundaries.  Clearing a session
+            # must revoke every lease owned by it before the new active epoch
+            # is published, including leases of already-terminal runs.
             conn.execute(
-                "INSERT OR IGNORE INTO sessions(session_id, tenant_id, created_at) VALUES (?, ?, ?)",
-                (session_id, tenant_id, now),
+                "UPDATE runtime_leases SET released=1 WHERE run_id IN "
+                "(SELECT run_id FROM runs WHERE session_id=?)",
+                (old_id,),
             )
-        return {"session_id": session_id, "tenant_id": tenant_id, "created_at": now}
+            conn.execute("UPDATE sessions SET closed_at=? WHERE session_id=?", (now, old_id))
+            conn.execute("INSERT INTO archived_sessions(session_id, epoch, archived_at) VALUES (?, ?, ?)",
+                         (old_id, old_epoch, now))
+            conn.execute("INSERT INTO sessions(session_id, tenant_id, created_at) VALUES (?, ?, ?)",
+                         (session_id, "local-tenant", now))
+            conn.execute("UPDATE active_session SET session_id=?, epoch=?, activated_at=? WHERE singleton=1",
+                         (session_id, epoch, now))
+            return {"session_id": session_id, "epoch": epoch, "activated_at": now}
+
+    def is_active_session(self, session_id: str, epoch: Any) -> bool:
+        try:
+            epoch = int(epoch)
+        except (TypeError, ValueError):
+            return False
+        with self._connection() as conn:
+            return conn.execute("SELECT 1 FROM active_session WHERE singleton=1 AND session_id=? AND epoch=?",
+                                (session_id, epoch)).fetchone() is not None
+
+    def list_archived_sessions(self) -> List[Dict[str, Any]]:
+        with self._connection() as conn:
+            rows = conn.execute("SELECT session_id, epoch, archived_at FROM archived_sessions ORDER BY archived_at DESC").fetchall()
+        return [{"session_id": row[0], "epoch": row[1], "archived_at": row[2]} for row in rows]
+
+    def create_session(self, session_id: str, tenant_id: str) -> Dict[str, Any]:
+        """Provision only a journal that has no active-session projection.
+
+        Production always creates ``active_session`` before any kernel call;
+        once it exists this method is only an assertion and cannot create a
+        second conversation.  The empty-projection branch preserves isolated
+        kernel test and offline journal construction without weakening the
+        production singleton invariant.
+        """
+        with self._connection() as conn:
+            active = conn.execute("SELECT session_id, epoch FROM active_session WHERE singleton=1").fetchone()
+            if active is None:
+                now = _now()
+                conn.execute("BEGIN IMMEDIATE")
+                conn.execute(
+                    "INSERT OR IGNORE INTO sessions(session_id, tenant_id, created_at) VALUES (?, ?, ?)",
+                    (session_id, tenant_id, now),
+                )
+                return {"session_id": session_id, "tenant_id": tenant_id, "created_at": now}
+            if active[0] != session_id:
+                raise ValueError("only the current active session may submit runs")
+            row = conn.execute(
+                "SELECT created_at FROM sessions WHERE session_id=? AND tenant_id=?",
+                (session_id, tenant_id),
+            ).fetchone()
+        if row is None:
+            raise ValueError("active session is missing its durable session record")
+        return {"session_id": session_id, "tenant_id": tenant_id, "created_at": row[0]}
+
+    def assert_active_session(self, session_id: str, tenant_id: str) -> None:
+        """Reject kernel submission through anything except the active session."""
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT s.session_id, s.tenant_id FROM active_session a "
+                "JOIN sessions s ON s.session_id=a.session_id WHERE a.singleton=1"
+            ).fetchone()
+        if row is not None and (row[0] != session_id or row[1] != tenant_id):
+            raise ValueError("only the current active session may submit runs")
+
+    def is_run_in_active_session(self, run_id: str) -> bool:
+        """Whether a lifecycle worker may still advance this run.
+
+        Clearing a conversation is a hard cancellation boundary.  The worker
+        can outlive the HTTP request that started it, so it must check this
+        durable join before every lifecycle step instead of relying on an
+        in-memory cancellation flag.
+        """
+        with self._connection() as conn:
+            active = conn.execute("SELECT session_id FROM active_session WHERE singleton=1").fetchone()
+            if active is None:
+                # Isolated kernel/unit harnesses may deliberately construct a
+                # journal without the HTTP-owned active-session projection.
+                # Production always has it before a request is admitted.
+                return True
+            return conn.execute(
+                "SELECT 1 FROM runs r JOIN active_session a ON a.session_id=r.session_id "
+                "WHERE r.run_id=? AND r.stage NOT IN (%s)"
+                % ",".join("?" for _ in TERMINAL_STAGES),
+                (run_id,) + tuple(TERMINAL_STAGES),
+            ).fetchone() is not None
+
+    def assert_run_in_active_session(self, run_id: str) -> None:
+        """Fail closed for every kernel control/callback entry point.
+
+        This deliberately checks ownership only, not the run stage: a current
+        terminal run may be inspected idempotently, while any archived run is
+        rejected before it can reconcile, publish, call a model, or touch a
+        bridge lease.
+        """
+        with self._connection() as conn:
+            active = conn.execute("SELECT 1 FROM active_session WHERE singleton=1").fetchone()
+            # Isolated kernel stores deliberately omit the HTTP-owned session
+            # projection.  They have no archived session to cross; production
+            # has one before any request/control is exposed.
+            if active is None:
+                return
+            row = conn.execute(
+                "SELECT 1 FROM runs r JOIN active_session a ON a.session_id=r.session_id "
+                "WHERE r.run_id=?", (run_id,),
+            ).fetchone()
+        if row is None:
+            raise ValueError("SessionArchived: ContractFailed: run does not belong to the current active session")
 
     def session_messages(self, session_id: str) -> List[Dict[str, Any]]:
         """Return the conversation messages for one session only.
@@ -601,6 +896,8 @@ class JournalStore:
                  "side_effects": _side_effects_document(request.side_effects),
                  "inputs": list(request.inputs),
                  "target_selector": request.target_selector.model_dump(mode="json"),
+                 "model_plan": request.model_plan,
+                 "model_binding_summary": request.model_binding_summary,
                  "experiment": request.experiment.model_dump(mode="json") if request.experiment else None,
                  "projected_stage": RECEIVED},
                 now,
@@ -676,25 +973,186 @@ class JournalStore:
         self._notify_listeners(event_seq, run_id, kind, stage, event_payload)
         return result
 
-    def get_planning_node_update(self, run_id: str, node: str, attempt: int) -> Optional[Dict[str, Any]]:
-        with self._connection() as conn:
-            row = conn.execute("SELECT status, update_json FROM planning_node_updates WHERE run_id=? AND node=? AND attempt=?", (run_id, node, attempt)).fetchone()
-        return None if row is None else {"status": row[0], "update": _json_loads(row[1])}
+    def reopen_quota_stopped_run(self, run_id: str) -> Dict[str, Any]:
+        """Explicitly resume the unfinished node after quota is restored.
 
-    def record_planning_node_update(self, run_id: str, node: str, attempt: int,
-                                    status: str, update: Dict[str, Any]) -> None:
-        """Write each LangGraph node fact once, keyed by run/node/attempt."""
+        This is intentionally separate from generic recovery. It appends a new
+        planning lineage and retry authorizations; no historical model attempt,
+        node fact, checkpoint, baseline, grant, or run event is deleted.
+        """
+        recorded_at = _now()
+        with self._connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT stage,outcome_kind FROM runs WHERE run_id=?", (run_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(run_id)
+            if row[0] != "quota_stopped" or row[1] != contracts.QUOTA_STOPPED:
+                raise ValueError("only a quota-stopped run can be explicitly resumed")
+            last = conn.execute(
+                "SELECT kind FROM run_events WHERE run_id=? ORDER BY event_seq DESC LIMIT 1",
+                (run_id,),
+            ).fetchone()
+            resume_stages = {"intent_failed": contracts.CONTEXT_FROZEN,
+                             "plan_failed": contracts.INTENT_COMPILED}
+            resume_stage = resume_stages.get(last[0] if last else None)
+            if resume_stage is None:
+                raise ValueError("quota-stopped run has no resumable model node")
+            lineage = conn.execute(
+                "SELECT lineage_id,sequence FROM planning_lineages WHERE run_id=? ORDER BY sequence DESC LIMIT 1",
+                (run_id,),
+            ).fetchone()
+            prior_lineage, prior_sequence = (lineage[0], int(lineage[1])) if lineage else (run_id, 0)
+            if lineage is None:
+                conn.execute(
+                    "INSERT INTO planning_lineages(run_id,lineage_id,sequence,resumed_from_lineage,created_at) VALUES (?,?,0,NULL,?)",
+                    (run_id, prior_lineage, recorded_at),
+                )
+            lineage_id = str(uuid.uuid4())
+            conn.execute(
+                "INSERT INTO planning_lineages(run_id,lineage_id,sequence,resumed_from_lineage,created_at) VALUES (?,?,?,?,?)",
+                (run_id, lineage_id, prior_sequence + 1, prior_lineage, recorded_at),
+            )
+            quota_attempts = conn.execute(
+                "SELECT m.call_key,m.attempt FROM model_calls AS m "
+                "LEFT JOIN model_call_resume_authorizations AS a "
+                "ON a.call_key=m.call_key AND a.prior_attempt=m.attempt AND a.run_id=m.run_id "
+                "WHERE m.run_id=? AND m.status='quota_stopped' AND a.call_key IS NULL",
+                (run_id,),
+            ).fetchall()
+            for call_key, attempt in quota_attempts:
+                conn.execute(
+                    "INSERT INTO model_call_resume_authorizations(call_key,prior_attempt,run_id,lineage_id,authorized_at) VALUES (?,?,?,?,?)",
+                    (call_key, attempt, run_id, lineage_id, recorded_at),
+                )
+            payload = {"projected_stage": resume_stage,
+                       "resume_reason": "operator_confirmed_quota_restored",
+                       "lineage_id": lineage_id, "resumed_from_lineage": prior_lineage,
+                       "authorized_model_attempts": len(quota_attempts)}
+            event_seq = self._append_event_locked(
+                conn, run_id, "quota_resume_requested", resume_stage,
+                payload, recorded_at,
+            )
+            conn.execute(
+                "UPDATE runs SET stage=?,outcome_kind=NULL,outcome_json=NULL,updated_at=? WHERE run_id=?",
+                (resume_stage, recorded_at, run_id),
+            )
+            self._write_event_anchor_locked(conn, run_id)
+        result = self.get_run(run_id)
+        result["_event_seq"] = event_seq
+        self._notify_listeners(event_seq, run_id, "quota_resume_requested",
+                               resume_stage, payload)
+        return result
+
+    def has_active_quota_resume(self, run_id: str) -> bool:
+        """Return whether a crash left an authorized resume generation in flight."""
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT outcome_kind FROM runs WHERE run_id=?", (run_id,),
+            ).fetchone()
+            if row is None or row[0] is not None:
+                return False
+            resumed = conn.execute(
+                "SELECT MAX(event_seq) FROM run_events WHERE run_id=? AND kind='quota_resume_requested'",
+                (run_id,),
+            ).fetchone()[0]
+            stopped = conn.execute(
+                "SELECT MAX(event_seq) FROM run_events WHERE run_id=? AND stage='quota_stopped'",
+                (run_id,),
+            ).fetchone()[0]
+        return resumed is not None and (stopped is None or int(resumed) > int(stopped))
+
+    def current_planning_lineage(self, run_id: str) -> str:
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT lineage_id FROM planning_lineages WHERE run_id=? ORDER BY sequence DESC LIMIT 1",
+                (run_id,),
+            ).fetchone()
+            if row is not None:
+                return row[0]
+            conn.execute(
+                "INSERT INTO planning_lineages(run_id,lineage_id,sequence,resumed_from_lineage,created_at) VALUES (?,?,0,NULL,?)",
+                (run_id, run_id, _now()),
+            )
+        return run_id
+
+    def start_clarification_lineage(self, run_id: str) -> str:
+        """Invalidate proof-dependent nodes while preserving model draft facts."""
         now = _now()
         with self._connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            existing = conn.execute("SELECT status, update_json FROM planning_node_updates WHERE run_id=? AND node=? AND attempt=?", (run_id,node,attempt)).fetchone()
+            row = conn.execute(
+                "SELECT lineage_id,sequence FROM planning_lineages WHERE run_id=? ORDER BY sequence DESC LIMIT 1",
+                (run_id,),
+            ).fetchone()
+            prior, sequence = (row[0], int(row[1])) if row else (run_id, 0)
+            if row is None:
+                conn.execute(
+                    "INSERT INTO planning_lineages(run_id,lineage_id,sequence,resumed_from_lineage,created_at) VALUES (?,?,0,NULL,?)",
+                    (run_id, prior, now),
+                )
+            lineage = str(uuid.uuid4())
+            conn.execute(
+                "INSERT INTO planning_lineages(run_id,lineage_id,sequence,resumed_from_lineage,created_at) VALUES (?,?,?,?,?)",
+                (run_id, lineage, sequence + 1, prior, now),
+            )
+            for node in ("validate", "audit", "revise", "seal", "authorization_required",
+                         "authorization_auto", "fail"):
+                conn.execute(
+                    "INSERT INTO planning_lineage_invalidations(run_id,lineage_id,node) VALUES (?,?,?)",
+                    (run_id, lineage, node),
+                )
+        return lineage
+
+    def get_planning_node_update(self, run_id: str, node: str, attempt: int) -> Optional[Dict[str, Any]]:
+        lineage = self.current_planning_lineage(run_id)
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT status,update_json,replayed_from_lineage FROM planning_node_updates WHERE run_id=? AND lineage_id=? AND node=? AND attempt=?",
+                (run_id, lineage, node, attempt),
+            ).fetchone()
+            if row is not None:
+                return {"status": row[0], "update": _json_loads(row[1]),
+                        "lineage_id": lineage, "replayed_from_lineage": row[2], "exact": True}
+            invalidated = conn.execute(
+                "SELECT 1 FROM planning_lineage_invalidations WHERE run_id=? AND lineage_id=? AND node=?",
+                (run_id, lineage, node),
+            ).fetchone()
+            if invalidated is not None:
+                return None
+            row = conn.execute(
+                "SELECT p.status,p.update_json,p.lineage_id FROM planning_node_updates p "
+                "JOIN planning_lineages l ON l.run_id=p.run_id AND l.lineage_id=p.lineage_id "
+                "WHERE p.run_id=? AND p.node=? AND p.attempt=? AND p.status IN ('succeeded','replayed') "
+                "ORDER BY l.sequence DESC LIMIT 1",
+                (run_id, node, attempt),
+            ).fetchone()
+        return None if row is None else {"status": row[0], "update": _json_loads(row[1]),
+                                         "lineage_id": lineage, "replayed_from_lineage": row[2],
+                                         "exact": False}
+
+    def record_planning_node_update(self, run_id: str, node: str, attempt: int,
+                                    status: str, update: Dict[str, Any],
+                                    replayed_from_lineage: Optional[str] = None) -> None:
+        """Append one immutable node fact to the active planning lineage."""
+        now = _now()
+        lineage = self.current_planning_lineage(run_id)
+        with self._connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            existing = conn.execute(
+                "SELECT status,update_json,replayed_from_lineage FROM planning_node_updates WHERE run_id=? AND lineage_id=? AND node=? AND attempt=?",
+                (run_id, lineage, node, attempt),
+            ).fetchone()
             if existing is not None:
-                if existing[0] != status or _json_loads(existing[1]) != update:
+                if (existing[0] != status or _json_loads(existing[1]) != update or
+                        existing[2] != replayed_from_lineage):
                     raise ValueError("planning node fact already exists and differs")
                 return
             inserted = conn.execute(
-                "INSERT INTO planning_node_updates(run_id,node,attempt,status,update_json,recorded_at) VALUES (?,?,?,?,?,?)",
-                (run_id, node, attempt, status, _json_dumps(update), now),
+                "INSERT INTO planning_node_updates(run_id,lineage_id,node,attempt,status,update_json,recorded_at,replayed_from_lineage) VALUES (?,?,?,?,?,?,?,?)",
+                (run_id, lineage, node, attempt, status, _json_dumps(update), now,
+                 replayed_from_lineage),
             ).rowcount
             if inserted:
                 row = conn.execute("SELECT stage FROM runs WHERE run_id = ?", (run_id,)).fetchone()
@@ -702,12 +1160,34 @@ class JournalStore:
                     raise KeyError(run_id)
                 event_seq = self._append_event_locked(conn, run_id, "planning.node_update", row[0],
                                                       {"node": node, "attempt": attempt, "status": status,
+                                                       "lineage_id": lineage,
+                                                       "replayed_from_lineage": replayed_from_lineage,
                                                        "projected_stage": row[0], "outcome_kind": None}, now)
                 self._write_event_anchor_locked(conn, run_id)
         if inserted:
             self._notify_listeners(event_seq, run_id, "planning.node_update", row[0],
                                    {"node": node, "attempt": attempt, "status": status,
+                                    "lineage_id": lineage,
+                                    "replayed_from_lineage": replayed_from_lineage,
                                     "projected_stage": row[0], "outcome_kind": None})
+
+    def wait_for_run_event(self, run_id: str, event_kinds=(),
+                           timeout: float = 30.0) -> Dict[str, Any]:
+        """Wait on committed journal events, not a polling interval."""
+        wanted = frozenset(event_kinds)
+        deadline = time.monotonic() + float(timeout)
+        with self._event_condition:
+            while True:
+                view = self.get_run(run_id)
+                events = self.run_events(run_id)
+                if (wanted and any(event["kind"] in wanted for event in events)) or \
+                        view.get("outcome_kind") is not None or \
+                        view.get("stage") in TERMINAL_STAGES:
+                    return view
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return view
+                self._event_condition.wait(timeout=remaining)
 
     def _append_event_locked(self, conn: sqlite3.Connection, run_id: str, kind: str,
                              stage: str, payload: Dict[str, Any],
@@ -955,26 +1435,27 @@ class JournalStore:
                                    context: contracts.ContextSnapshot,
                                    capabilities: contracts.CapabilitySnapshot,
                                    intent: contracts.IntentSpec,
+                                   plan: contracts.VerifiedPlan,
                                    provider: str, model: str, binding: Dict[str, Any]) -> None:
         task_contract = intent.derived_facts.get("task_contract")
         if not isinstance(task_contract, dict):
             raise ValueError("experiment baseline requires a validated task contract")
         with self._connection() as conn:
             conn.execute(
-                "INSERT INTO experiment_pair_baselines(pair_id,run_id,content_hash,planning_context_hash,intent_digest,context_digest,capability_digest,task_contract_json,context_json,intent_json,capability_json,binding_json,baseline_digest,provider,model,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (pair_id, run_id, context.content_hash, contracts.planning_context_hash(context), intent.digest, context.digest,
+                "INSERT INTO experiment_pair_baselines(pair_id,run_id,content_hash,planning_context_hash,intent_digest,context_digest,capability_digest,task_contract_json,context_json,intent_json,capability_json,baseline_plan_json,binding_json,baseline_digest,provider,model,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (pair_id, run_id, contracts.experiment_input_hash(context), contracts.experiment_input_hash(context), intent.digest, context.digest,
                  capabilities.digest, _json_dumps(task_contract),
                  _json_dumps(context.model_dump(mode="json")), _json_dumps(intent.model_dump(mode="json")),
-                 _json_dumps(capabilities.model_dump(mode="json")), _json_dumps(binding),
+                 _json_dumps(capabilities.model_dump(mode="json")), _json_dumps(plan.model_dump(mode="json")), _json_dumps(binding),
                  contracts.digest({"context": context.digest, "intent": intent.digest,
                                    "capabilities": capabilities.digest, "task_contract": task_contract,
-                                   "binding": binding, "provider": provider, "model": model}), provider, model, _now()),
+                                   "plan": plan.digest, "binding": binding, "provider": provider, "model": model}), provider, model, _now()),
             )
 
     def get_experiment_baseline(self, pair_id: str) -> Optional[Dict[str, Any]]:
         with self._connection() as conn:
             row = conn.execute(
-                "SELECT run_id,content_hash,planning_context_hash,intent_digest,context_digest,capability_digest,task_contract_json,context_json,intent_json,capability_json,binding_json,baseline_digest,provider,model FROM experiment_pair_baselines WHERE pair_id=?",
+                "SELECT run_id,content_hash,planning_context_hash,intent_digest,context_digest,capability_digest,task_contract_json,context_json,intent_json,capability_json,baseline_plan_json,binding_json,baseline_digest,provider,model FROM experiment_pair_baselines WHERE pair_id=?",
                 (pair_id,),
             ).fetchone()
         if row is None:
@@ -982,15 +1463,16 @@ class JournalStore:
         context = contracts.ContextSnapshot.model_validate(_json_loads(row[7]))
         intent = contracts.IntentSpec.model_validate(_json_loads(row[8]))
         capabilities = contracts.CapabilitySnapshot.model_validate(_json_loads(row[9]))
+        plan = contracts.VerifiedPlan.model_validate(_json_loads(row[10]))
         task_contract = _json_loads(row[6])
-        binding = _json_loads(row[10]); baseline_digest = contracts.digest({"context": context.digest, "intent": intent.digest,
+        binding = _json_loads(row[11]); baseline_digest = contracts.digest({"context": context.digest, "intent": intent.digest,
             "capabilities": capabilities.digest, "task_contract": task_contract,
-            "binding": binding, "provider": row[12], "model": row[13]})
-        if (context.digest, intent.digest, capabilities.digest, contracts.planning_context_hash(context), baseline_digest) != (row[4], row[3], row[5], row[2], row[11]):
+            "plan": plan.digest, "binding": binding, "provider": row[13], "model": row[14]})
+        if (context.digest, intent.digest, capabilities.digest, contracts.experiment_input_hash(context), baseline_digest) != (row[4], row[3], row[5], row[2], row[12]):
             raise ValueError("experiment baseline sealed documents do not match their digests")
         return {"run_id": row[0], "content_hash": row[1], "planning_context_hash": row[2], "intent_digest": row[3],
                 "context_digest": row[4], "capability_digest": row[5], "task_contract": task_contract, "context": context,
-                "intent": intent, "capabilities": capabilities, "binding": binding, "baseline_digest": row[11], "provider": row[12], "model": row[13]}
+                "intent": intent, "capabilities": capabilities, "plan": plan, "binding": binding, "baseline_digest": row[12], "provider": row[13], "model": row[14]}
 
     def get_verified_plan(self, run_id: str) -> Optional[contracts.VerifiedPlan]:
         with self._connection() as conn:
@@ -1018,6 +1500,11 @@ class JournalStore:
     def store_runtime_lease(self, lease: contracts.RuntimeLease) -> None:
         document = _seal_snapshot(lease)
         with self._connection() as conn:
+            previous = conn.execute(
+                "SELECT released FROM runtime_leases WHERE run_id=?", (lease.run_id,)
+            ).fetchone()
+            if previous is not None and previous[0]:
+                raise ValueError("runtime lease has been released")
             conn.execute(
                 """
                 INSERT OR REPLACE INTO runtime_leases(run_id, lease_id, plan_digest, epoch,
@@ -1033,7 +1520,7 @@ class JournalStore:
         with self._connection() as conn:
             row = conn.execute(
                 "SELECT document_json FROM runtime_leases WHERE run_id = ? "
-                "ORDER BY acquired_at DESC LIMIT 1",
+                "AND released=0 ORDER BY acquired_at DESC LIMIT 1",
                 (run_id,),
             ).fetchone()
         if row is None:
@@ -1098,6 +1585,10 @@ class JournalStore:
     def finalize_publication(self, run_id: str, grant_id: str, document: Dict[str, Any]) -> Dict[str, Any]:
         """Atomically persist the sealed receipt and the published transition."""
         publication_id = document["publication_id"]
+        manifests = [contracts.PublishedArtifactManifest.model_validate(item)
+                     for item in document.get("published_artifacts", ())]
+        if document.get("publication_kind") == "artifact_bundle" and not manifests:
+            raise ValueError("artifact publication lacks published manifests")
         recorded_at = _now()
         with self._connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -1112,6 +1603,9 @@ class JournalStore:
                                     if isinstance(item, dict) and isinstance(item.get("output_id"), str)))
             if len(expected) != len(set(expected)):
                 raise ValueError("publication artifact identities are duplicated")
+            manifest_ids = tuple(sorted(item.output_id for item in manifests))
+            if manifest_ids != expected:
+                raise ValueError("published manifests do not exactly match publication artifacts")
             rows = conn.execute("SELECT output_id FROM artifacts WHERE run_id=? AND staged=1 AND published=0 ORDER BY output_id", (run_id,)).fetchall()
             actual = tuple(row[0] for row in rows)
             if actual != expected:
@@ -1138,6 +1632,8 @@ class JournalStore:
     def _notify_listeners(self, event_seq: int, run_id: str, kind: str,
                           stage: str, payload: Dict[str, Any]) -> None:
         """Project committed facts best-effort; listeners cannot undo SQLite state."""
+        with self._event_condition:
+            self._event_condition.notify_all()
         for listener in self._event_listeners:
             try:
                 listener(event_seq, run_id, kind, stage, payload)
@@ -1175,6 +1671,13 @@ class JournalStore:
         with self._connection() as conn:
             rows = conn.execute("SELECT identity_json, staged, published FROM artifacts WHERE run_id=? ORDER BY created_at", (run_id,)).fetchall()
         return [{"identity": _json_loads(row[0]), "staged": bool(row[1]), "published": bool(row[2])} for row in rows]
+
+    def list_published_artifacts(self, run_id: str) -> List[Dict[str, Any]]:
+        receipt = self.get_publication_receipt(run_id)
+        if receipt is None:
+            return []
+        return [contracts.PublishedArtifactManifest.model_validate(item).model_dump(mode="json")
+                for item in receipt.get("published_artifacts", ())]
 
     def prepare_publication(self, run_id: str, publication: Dict[str, Any]) -> None:
         publication_id = publication["publication_id"]
@@ -1219,40 +1722,46 @@ class JournalStore:
                            ledger: Dict[str, Any]) -> bool:
         """Single-flight reservation (§6.4). Returns True if this caller wins.
 
-        Only ``reserved`` blocks (another caller is in-flight). ``failed`` is
-        overwritten so transient failures can be retried. ``quota_stopped`` and
-        ``uncertain`` are terminal money-sensitive states (§7: no automatic
-        retry on quota stop) and raise rather than let a caller double-charge.
-        A ``succeeded`` record should never reach here (cache lookup reuses it)
-        and raises to surface the bug.
+        Every invocation is a new immutable attempt. A quota-stopped attempt
+        requires an explicit resume authorization tied to the same run and a
+        new planning lineage. Uncertain attempts are never retried.
         """
         with self._connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             existing = conn.execute(
-                "SELECT status FROM model_calls WHERE call_key = ?", (call_key,)
+                "SELECT attempt,status,run_id FROM model_calls WHERE call_key=? ORDER BY attempt DESC LIMIT 1",
+                (call_key,),
             ).fetchone()
+            attempt = 1
             if existing is not None:
-                status = existing[0]
+                prior_attempt, status, prior_run_id = int(existing[0]), existing[1], existing[2]
                 if status == "reserved":
                     return False
                 if status == "quota_stopped":
-                    raise QuotaStoppedError(call_key)
+                    authorized = conn.execute(
+                        "SELECT 1 FROM model_call_resume_authorizations WHERE call_key=? AND prior_attempt=? AND run_id=?",
+                        (call_key, prior_attempt, run_id),
+                    ).fetchone()
+                    if authorized is None or prior_run_id != run_id:
+                        raise QuotaStoppedError(call_key)
                 if status == "uncertain":
                     raise UncertainCallError(call_key)
+                if status == "failed":
+                    raise RuntimeError("failed model call cannot be retried with the same call identity")
                 if status == "succeeded":
                     raise RuntimeError(
                         "model call %s already succeeded; cache lookup should have "
                         "prevented reserve" % call_key
                     )
-                # failed: overwrite so the caller can retry.
+                attempt = prior_attempt + 1
             conn.execute(
                 """
-                INSERT OR REPLACE INTO model_calls(call_key, run_id, provider, model, status,
+                INSERT INTO model_calls(call_key, attempt, run_id, provider, model, status,
                                         request_hash, response_json, ledger_json,
                                         reserved_at, committed_at)
-                VALUES (?, ?, ?, ?, 'reserved', ?, NULL, ?, ?, NULL)
+                VALUES (?, ?, ?, ?, ?, 'reserved', ?, NULL, ?, ?, NULL)
                 """,
-                (call_key, run_id, provider, model, request_hash,
+                (call_key, attempt, run_id, provider, model, request_hash,
                  _encrypted_json_dumps(ledger), _now()),
             )
         return True
@@ -1260,18 +1769,18 @@ class JournalStore:
     def get_model_call(self, call_key: str) -> Optional[Dict[str, Any]]:
         with self._connection() as conn:
             row = conn.execute(
-                "SELECT call_key, run_id, provider, model, status, request_hash, "
+                "SELECT call_key, attempt, run_id, provider, model, status, request_hash, "
                 "response_json, ledger_json, reserved_at, committed_at "
-                "FROM model_calls WHERE call_key = ?",
+                "FROM model_calls WHERE call_key=? ORDER BY (status='succeeded') DESC,attempt DESC LIMIT 1",
                 (call_key,),
             ).fetchone()
         if row is None:
             return None
         return {
-            "call_key": row[0], "run_id": row[1], "provider": row[2], "model": row[3],
-            "status": row[4], "request_hash": row[5],
-            "response": _encrypted_json_loads(row[6]) if row[6] else None,
-            "ledger": _encrypted_json_loads(row[7]), "reserved_at": row[8], "committed_at": row[9],
+            "call_key": row[0], "attempt": row[1], "run_id": row[2], "provider": row[3], "model": row[4],
+            "status": row[5], "request_hash": row[6],
+            "response": _encrypted_json_loads(row[7]) if row[7] else None,
+            "ledger": _encrypted_json_loads(row[8]), "reserved_at": row[9], "committed_at": row[10],
         }
 
     def record_cache_hit(self, call_key: str, run_id: str) -> None:
@@ -1300,28 +1809,28 @@ class JournalStore:
         """
         with self._connection() as conn:
             rows = conn.execute(
-                "SELECT m.call_key, m.provider, m.model, m.status, m.request_hash, "
+                "SELECT m.call_key,m.attempt,m.provider,m.model,m.status,m.request_hash, "
                 "m.response_json, m.ledger_json, m.reserved_at, m.committed_at, "
                 "0 AS cache_hit, NULL AS bound_at "
                 "FROM model_calls AS m "
                 "WHERE m.run_id = ? "
                 "UNION ALL "
-                "SELECT m.call_key, m.provider, m.model, m.status, m.request_hash, "
+                "SELECT m.call_key,m.attempt,m.provider,m.model,m.status,m.request_hash, "
                 "m.response_json, m.ledger_json, m.reserved_at, m.committed_at, "
                 "1 AS cache_hit, b.bound_at "
                 "FROM model_calls AS m "
-                "INNER JOIN model_call_bindings AS b ON b.call_key = m.call_key "
-                "WHERE b.run_id = ? "
+                "INNER JOIN model_call_bindings AS b ON b.call_key=m.call_key "
+                "WHERE b.run_id=? AND m.status='succeeded' "
                 "ORDER BY reserved_at",
                 (run_id, run_id),
             ).fetchall()
         return [
-            {"call_key": r[0], "provider": r[1], "model": r[2], "status": r[3],
-             "request_hash": r[4],
-             "response": _encrypted_json_loads(r[5]) if r[5] else None,
-             "ledger": _encrypted_json_loads(r[6]) if r[6] else None,
-             "reserved_at": r[7], "committed_at": r[8],
-             "cache_hit": bool(r[9]), "bound_at": r[10]}
+            {"call_key": r[0], "attempt": r[1], "provider": r[2], "model": r[3], "status": r[4],
+             "request_hash": r[5],
+             "response": _encrypted_json_loads(r[6]) if r[6] else None,
+             "ledger": _encrypted_json_loads(r[7]) if r[7] else None,
+             "reserved_at": r[8], "committed_at": r[9],
+             "cache_hit": bool(r[10]), "bound_at": r[11]}
             for r in rows
         ]
 
@@ -1334,28 +1843,50 @@ class JournalStore:
         with self._connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
-                "SELECT status FROM model_calls WHERE call_key = ?", (call_key,)
+                "SELECT attempt,status FROM model_calls WHERE call_key=? ORDER BY attempt DESC LIMIT 1",
+                (call_key,),
             ).fetchone()
             if row is None:
                 raise KeyError(call_key)
-            if row[0] != "reserved":
-                raise ValueError("model call %s already committed: %s" % (call_key, row[0]))
+            if row[1] != "reserved":
+                raise ValueError("model call %s already committed: %s" % (call_key, row[1]))
             conn.execute(
                 """
                 UPDATE model_calls SET status = ?, response_json = ?, ledger_json = ?,
                                        committed_at = ?
-                WHERE call_key = ? AND status = 'reserved'
+                WHERE call_key=? AND attempt=? AND status='reserved'
                 """,
                 (status, _encrypted_json_dumps(response) if response is not None else None,
-                 _encrypted_json_dumps(ledger), _now(), call_key),
+                 _encrypted_json_dumps(ledger), _now(), call_key, row[0]),
             )
 
     # -- recovery (§7) ------------------------------------------------------
 
     def iter_active_runs(self) -> Iterator[Dict[str, Any]]:
-        """Used at startup to resume or fail interrupted runs (§7)."""
-        for run in self.list_active_runs():
-            yield run
+        """Yield only active runs from the current active-session projection.
+
+        Archived conversations are immutable evidence.  Recovery must never
+        revive a stale worker merely because an old projection was interrupted
+        before it was archived.
+        """
+        placeholders = ",".join("?" for _ in ACTIVE_RUN_STAGES)
+        with self._connection() as conn:
+            self._verify_all_run_facts(conn)
+            rows = conn.execute(
+                """
+                SELECT r.run_id, r.session_id, r.request_id, r.tenant_id, r.stage,
+                       r.outcome_kind, r.outcome_json, r.text, r.execute,
+                       r.created_at, r.updated_at
+                FROM runs r JOIN active_session a ON a.session_id=r.session_id
+                WHERE r.stage IN (%s) ORDER BY r.created_at ASC
+                """ % placeholders,
+                tuple(ACTIVE_RUN_STAGES),
+            ).fetchall()
+            for row in rows:
+                self._verify_run_event_chain(conn, row[0])
+                self._verify_run_anchor(conn, row[0])
+        for row in rows:
+            yield _run_row_to_dict(row)
 
     def quarantine_reserved_model_calls(self) -> int:
         """Quarantine every still-reserved model call as uncertain (§7).

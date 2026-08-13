@@ -73,7 +73,7 @@ class ExecutionSession(object):
         path = path_utils.to_unicode_path(path)
         if step_id in self._output_by_step:
             raise RuntimeError("Step output was registered twice: %s" % step_id)
-        if output_type not in ("feature_class", "raster", "table"):
+        if output_type not in ("feature_class", "raster", "table", "file"):
             raise RuntimeError("Unsupported runtime output type: %s" % output_type)
         self._output_by_step[step_id] = {"path": path, "type": output_type}
         self._outputs.append((step_id, path))

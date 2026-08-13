@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, replace
-import ntpath
+from enum import Enum
 from typing import Any, Dict, Iterable
 from shared_runtime.capability_contract import (
     resolve_lowest_dimension_geometry,
@@ -25,6 +25,62 @@ _FIELD_EFFECTS = {
 }
 
 
+class ProofStatus(str, Enum):
+    PROVEN = "Proven"
+    UNRESOLVED = "Unresolved"
+    VIOLATED = "Violated"
+
+
+@dataclass(frozen=True)
+class ProofNode:
+    proof_id: str
+    status: ProofStatus
+    subject: str
+    detail: Dict[str, Any]
+
+    def as_dict(self):
+        return {"proof_id": self.proof_id, "status": self.status.value,
+                "subject": self.subject, "detail": self.detail}
+
+
+class ProofGraph:
+    """Single proof projection consumed by verification, audit and acceptance.
+
+    The graph deliberately has only three states.  A successful executor
+    receipt is not a node because it cannot prove GIS semantics.
+    """
+    def __init__(self):
+        self._nodes: Dict[str, ProofNode] = {}
+
+    def add(self, proof_id: str, status: ProofStatus, subject: str, **detail):
+        if proof_id in self._nodes:
+            raise ValueError("duplicate proof id: " + proof_id)
+        self._nodes[proof_id] = ProofNode(proof_id, status, subject, detail)
+
+    def documents(self):
+        return [self._nodes[key].as_dict() for key in sorted(self._nodes)]
+
+    @classmethod
+    def from_report(cls, violations, obligations, blocking, facts, requirements, outputs):
+        graph = cls()
+        for item in violations:
+            proof_id = item.get("violation_id") or canonical_hash(item)
+            graph.add(proof_id, ProofStatus.VIOLATED, item.get("contract_path", "workflow"), required=True, **item)
+        for item in list(obligations) + list(blocking):
+            proof_id = item.get("obligation_id") or canonical_hash(item)
+            graph.add(proof_id, ProofStatus.UNRESOLVED, item.get("contract_path", "workflow"), required=True, **item)
+        for item in list(requirements) + list(outputs):
+            if item.get("satisfied") is True:
+                proof_id = item.get("requirement_id") or item.get("output_id") or canonical_hash(item)
+                graph.add("proven:" + proof_id, ProofStatus.PROVEN,
+                          item.get("requirement_id") or item.get("output_id") or "workflow", required=True, **item)
+        for item in facts:
+            step_id = item.get("step_id")
+            if step_id:
+                graph.add("step:" + step_id, ProofStatus.PROVEN, step_id, **item)
+        return graph
+
+
 def _canonical_geometry(value):
     value = str(value or "").strip().lower()
     return value if value in _GEOMETRY else None
@@ -42,6 +98,13 @@ def _fields(value):
     return frozenset(result)
 
 
+def _field_names(value):
+    return frozenset(
+        field["name"] if isinstance(field, dict) else field
+        for field in value
+    )
+
+
 @dataclass(frozen=True)
 class Fact:
     reference: str
@@ -55,7 +118,7 @@ class Fact:
     name: str | None
     format: str | None
     tabular_fields: frozenset | None = None
-    destination: str | None = "not_applicable"
+    destination_policy: str = "not_applicable"
 
     def as_dict(self):
         return {
@@ -65,7 +128,7 @@ class Fact:
             "selection": self.selection, "map_publication": self.publication,
             "name": self.name, "format": self.format,
             "tabular_fields": sorted(self.tabular_fields) if self.tabular_fields is not None else None,
-            "destination": self.destination,
+            "destination_policy": self.destination_policy,
         }
 
 
@@ -124,42 +187,11 @@ class WorkflowVerifier:
             violations.append(self._violation("authorization.side_effect", "authorization.side_effect", step_id=step["id"], actual=effect))
         output_results = self._task_outputs(task_contract, artifacts.values(), violations, obligations)
         requirements = self._requirements(task_contract, artifacts.values(), semantic_facts, prepared, violations, obligations)
-        obligations.extend(self._request_alignment_obligations(task_contract))
         report = self._report(prepared, violations, obligations, blocking, facts, events, output_results, requirements, side_effects, authorization_scopes)
         report["task_contract"] = deepcopy(task_contract)
         return report
 
     @staticmethod
-    def _request_alignment_obligations(task_contract):
-        """Expose the NL-to-contract boundary to G3 without pretending it is deterministic."""
-        result = []
-        for requirement in task_contract.get("requirements", []):
-            predicate = requirement["predicate"]
-            item = WorkflowVerifier._obligation(
-                "request_alignment.unresolved", "requirements.predicate",
-                requirement_id=requirement["requirement_id"],
-                expected=requirement["evidence"], actual=predicate,
-            )
-            item["obligation_id"] += "|" + canonical_hash({
-                "evidence": requirement["evidence"],
-                "predicate": predicate,
-            })
-            result.append(item)
-        for output in task_contract.get("outputs", []):
-            destination = output.get("destination")
-            if destination in {"default", "not_applicable"}:
-                continue
-            item = WorkflowVerifier._obligation(
-                "request_alignment.output_destination", "outputs.destination",
-                output_id=output["output_id"], expected=output["evidence"],
-                actual=destination,
-            )
-            item["obligation_id"] += "|" + canonical_hash({
-                "evidence": output["evidence"], "destination": destination,
-            })
-            result.append(item)
-        return result
-
     @staticmethod
     def _allows_owned_output_mutation(step, contract, task_contract):
         """A write-authorized run may refine only its own earlier data products."""
@@ -204,7 +236,7 @@ class WorkflowVerifier:
 
     @staticmethod
     def _report(prepared, violations, obligations, blocking, facts, events, output_results, requirements, side_effects, authorization_scopes):
-        return {
+        report = {
             "ok": not violations and not blocking,
             "hard_violations": violations,
             "review_obligations": obligations,
@@ -217,6 +249,10 @@ class WorkflowVerifier:
             "side_effects": sorted(side_effects),
             "authorization_scopes": sorted(authorization_scopes),
         }
+        report["proof_graph"] = ProofGraph.from_report(
+            violations, obligations, blocking, facts, requirements, output_results,
+        ).documents()
+        return report
 
     @staticmethod
     def _violation(code, contract_path, step_id=None, output_id=None, requirement_id=None, actual=None, expected=None, message=None):
@@ -275,7 +311,7 @@ class WorkflowVerifier:
                     violations.append(self._violation("input.geometry", "inputs.%s.geometry" % spec["parameter"], step["id"], actual=fact.geometry, expected=spec["geometry"]))
                 if fact.fields is None:
                     violations.append(self._violation("input.fields_unresolved", "inputs.%s.required_fields" % spec["parameter"], step["id"]))
-                elif not set(spec["required_fields"]).issubset(fact.fields):
+                elif not _field_names(spec["required_fields"]).issubset(fact.fields):
                     violations.append(self._violation("input.fields", "inputs.%s.required_fields" % spec["parameter"], step["id"], actual=sorted(fact.fields), expected=spec["required_fields"]))
                 if self._requires_live_selection(spec["selection"], step, contract) and fact.selection != "selected":
                     violations.append(self._violation(
@@ -376,7 +412,7 @@ class WorkflowVerifier:
             reference="from_step:" + step["id"], kind=artifact_kind, geometry=geometry, fields=fields,
             spatial_reference=spatial, cardinality=cardinality, selection=selection,
             publication=output["map_publication"], name=name, format=fmt, tabular_fields=tabular_fields,
-            destination=self._destination(contract, step),
+            destination_policy=self._destination_policy(contract),
         )
         update = None
         if effect in {"add_static_fields", "add_parameter_field", "delete_parameter_field", "in_place_update"} and target_inputs:
@@ -410,11 +446,10 @@ class WorkflowVerifier:
         raise RuntimeError("unhandled output format rule: %s" % rule)
 
     @staticmethod
-    def _destination(contract, step):
+    def _destination_policy(contract):
         if contract["side_effects"] != "writes_data":
             return "not_applicable"
-        arguments = step["arguments"]
-        return arguments.get("output_workspace") or "default"
+        return "server_derived"
 
     @staticmethod
     def _semantic_facts(step, contract, artifact, inputs):
@@ -523,11 +558,13 @@ class WorkflowVerifier:
             fields = frozenset(str(value).lstrip("#") for value in parameters)
         elif effect == "static_generated": fields = frozenset()
         else: raise RuntimeError("unhandled field effect: %s" % effect)
-        fields = (fields or frozenset()) | frozenset(descriptor["static_fields"])
+        fields = (fields or frozenset()) | frozenset(
+            field["name"] for field in descriptor["static_fields"]
+        )
         parameter = descriptor["parameter_field"]
         if effect == "add_parameter_field":
             value = step["arguments"].get(parameter)
-            return None if not isinstance(value, str) or not value else fields | {value.lstrip("#")}
+            return None if not isinstance(value, dict) or not isinstance(value.get("name"), str) or not value["name"] else fields | {value["name"].lstrip("#")}
         if effect == "delete_parameter_field":
             value = step["arguments"].get(parameter)
             return None if not isinstance(value, str) or not value else fields - {value.lstrip("#")}
@@ -596,7 +633,12 @@ class WorkflowVerifier:
 
     @staticmethod
     def _kind_matches(expected, actual):
-        return expected == actual
+        aliases = {
+            "feature_layer": "feature_class",
+            "raster_layer": "raster",
+            "table_view": "table",
+        }
+        return aliases.get(expected, expected) == aliases.get(actual, actual)
 
     @classmethod
     def _matches_output(cls, output, fact):
@@ -613,19 +655,12 @@ class WorkflowVerifier:
             elif actual != wanted:
                 violations.append(self._violation("output.%s" % key, "outputs.%s" % key, output_id=expected["output_id"], actual=actual, expected=wanted))
         if fact.fields is None: obligations.append(self._obligation("output.fields_unresolved", "outputs.required_fields", output_id=expected["output_id"]))
-        elif not set(expected["required_fields"]).issubset(fact.fields): violations.append(self._violation("output.fields", "outputs.required_fields", output_id=expected["output_id"], actual=sorted(fact.fields), expected=expected["required_fields"]))
-        if self._canonical_destination(fact.destination) != self._canonical_destination(expected["destination"]):
+        elif not _field_names(expected["required_fields"]).issubset(fact.fields): violations.append(self._violation("output.fields", "outputs.required_fields", output_id=expected["output_id"], actual=sorted(fact.fields), expected=expected["required_fields"]))
+        if fact.destination_policy != expected["destination_policy"]:
             violations.append(self._violation(
-                "output.destination", "outputs.destination", output_id=expected["output_id"],
-                actual=fact.destination, expected=expected["destination"],
+                "output.destination_policy", "outputs.destination_policy", output_id=expected["output_id"],
+                actual=fact.destination_policy, expected=expected["destination_policy"],
             ))
-
-    @staticmethod
-    def _canonical_destination(value):
-        text = str(value or "").strip()
-        if text in {"default", "not_applicable"}:
-            return text
-        return ntpath.normcase(ntpath.normpath(text))
 
     @staticmethod
     def _selector_selection_invalidator(selector_reference, selection_proof, consumer_fact,

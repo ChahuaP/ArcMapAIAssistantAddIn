@@ -34,15 +34,13 @@ Source: "{#MySourceDir}\packaging\uninstall.ps1"; DestDir: "{app}\packaging"; Fl
 [Icons]
 Name: "{autoprograms}\GeoPilot\卸载 GeoPilot"; Filename: "{uninstallexe}"; IconFilename: "{app}\uninstall.ico"
 
-[Run]
-Filename: "pwsh.exe"; Parameters: "-NoLogo -NoProfile -ExecutionPolicy Bypass -File ""{tmp}\GeoPilotPackage\packaging\install.ps1"" -InstallDir ""{app}"" -Quiet"; StatusMsg: "正在安装 GeoPilot..."; Flags: runhidden waituntilterminated
-
 [UninstallRun]
 Filename: "pwsh.exe"; Parameters: "-NoLogo -NoProfile -ExecutionPolicy Bypass -File ""{app}\packaging\uninstall.ps1"" -Quiet{code:UninstallUserDataParameter}"; Flags: runhidden waituntilterminated; RunOnceId: "GeoPilotCleanup"
 
 [Code]
 var
   RemoveUserDataOnUninstall: Boolean;
+  InstallScriptExitCode: Integer;
 
 function InitializeUninstall(): Boolean;
 var
@@ -108,4 +106,27 @@ begin
     Result := ' -RemoveUserConfig'
   else
     Result := '';
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  ResultCode: Integer;
+  Parameters: String;
+begin
+  if CurStep <> ssPostInstall then
+    exit;
+  Parameters := ExpandConstant('-NoLogo -NoProfile -ExecutionPolicy Bypass -File "{tmp}\GeoPilotPackage\packaging\install.ps1" -InstallDir "{app}" -Quiet');
+  if not Exec('pwsh.exe', Parameters, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+  begin
+    InstallScriptExitCode := 1;
+    RaiseException('无法启动 GeoPilot 安装脚本。');
+  end;
+  InstallScriptExitCode := ResultCode;
+  if InstallScriptExitCode <> 0 then
+    RaiseException(Format('GeoPilot 安装验证失败，退出码：%d。', [ResultCode]));
+end;
+
+function GetCustomSetupExitCode(): Integer;
+begin
+  Result := InstallScriptExitCode;
 end;

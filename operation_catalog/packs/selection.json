@@ -34,15 +34,14 @@
           },
           "selection_type": {
             "type": "string",
-            "default": "NEW_SELECTION",
             "enum": [
-              "NEW_SELECTION",
-              "ADD_TO_SELECTION",
-              "REMOVE_FROM_SELECTION",
-              "SUBSET_SELECTION",
-              "SWITCH_SELECTION",
-              "CLEAR_SELECTION"
-            ]
+              "new_selection",
+              "add_to_selection",
+              "remove_from_selection",
+              "select_subset"
+            ],
+            "default": "new_selection",
+            "x-geopilot-semantic": "selection_type"
           }
         },
         "additionalProperties": false
@@ -88,8 +87,8 @@
               "rule": "parameter_values_require_selected",
               "parameter": "selection_type",
               "values": [
-                "REMOVE_FROM_SELECTION",
-                "SUBSET_SELECTION"
+                "remove_from_selection",
+                "select_subset"
               ]
             }
           }
@@ -110,15 +109,14 @@
             },
             "selection_type": {
               "type": "string",
-              "default": "NEW_SELECTION",
               "enum": [
-                "NEW_SELECTION",
-                "ADD_TO_SELECTION",
-                "REMOVE_FROM_SELECTION",
-                "SUBSET_SELECTION",
-                "SWITCH_SELECTION",
-                "CLEAR_SELECTION"
-              ]
+                "new_selection",
+                "add_to_selection",
+                "remove_from_selection",
+                "select_subset"
+              ],
+              "default": "new_selection",
+              "x-geopilot-semantic": "selection_type"
             }
           },
           "additionalProperties": false
@@ -227,7 +225,17 @@
             "x-geopilot-kind": "layer"
           },
           "overlap_type": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "intersect",
+              "contain",
+              "within",
+              "touch",
+              "overlap",
+              "cross",
+              "within_a_distance"
+            ],
+            "x-geopilot-semantic": "spatial_predicate"
           },
           "select_layer": {
             "type": "string",
@@ -235,13 +243,57 @@
           },
           "selection_type": {
             "type": "string",
-            "default": "NEW_SELECTION"
+            "enum": [
+              "new_selection",
+              "add_to_selection",
+              "remove_from_selection",
+              "select_subset"
+            ],
+            "default": "new_selection",
+            "x-geopilot-semantic": "selection_type"
           },
           "search_distance": {
             "type": [
-              "string",
+              "object",
               "null"
             ],
+            "x-geopilot-semantic": "quantity",
+            "properties": {
+              "value": {
+                "type": "number",
+                "minimum": 0
+              },
+              "unit": {
+                "type": "string",
+                "enum": [
+                  "meters",
+                  "kilometers",
+                  "map_units",
+                  "degrees"
+                ]
+              },
+              "dimension": {
+                "const": "length"
+              },
+              "tolerance": {
+                "type": "number",
+                "minimum": 0
+              },
+              "crs": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "value",
+              "unit",
+              "dimension",
+              "tolerance",
+              "crs"
+            ],
+            "additionalProperties": false,
             "default": null
           }
         },
@@ -260,7 +312,7 @@
           "user": "选择和 rivers 相交的 parcels",
           "arguments": {
             "target_layer": "parcels",
-            "overlap_type": "INTERSECT",
+            "overlap_type": "intersect",
             "select_layer": "rivers"
           }
         }
@@ -283,8 +335,8 @@
               "rule": "parameter_values_require_selected",
               "parameter": "selection_type",
               "values": [
-                "REMOVE_FROM_SELECTION",
-                "SUBSET_SELECTION"
+                "remove_from_selection",
+                "select_subset"
               ]
             }
           },
@@ -318,7 +370,17 @@
               "x-geopilot-kind": "layer"
             },
             "overlap_type": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "intersect",
+                "contain",
+                "within",
+                "touch",
+                "overlap",
+                "cross",
+                "within_a_distance"
+              ],
+              "x-geopilot-semantic": "spatial_predicate"
             },
             "select_layer": {
               "type": "string",
@@ -326,13 +388,57 @@
             },
             "selection_type": {
               "type": "string",
-              "default": "NEW_SELECTION"
+              "enum": [
+                "new_selection",
+                "add_to_selection",
+                "remove_from_selection",
+                "select_subset"
+              ],
+              "default": "new_selection",
+              "x-geopilot-semantic": "selection_type"
             },
             "search_distance": {
               "type": [
-                "string",
+                "object",
                 "null"
               ],
+              "x-geopilot-semantic": "quantity",
+              "properties": {
+                "value": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "unit": {
+                  "type": "string",
+                  "enum": [
+                    "meters",
+                    "kilometers",
+                    "map_units",
+                    "degrees"
+                  ]
+                },
+                "dimension": {
+                  "const": "length"
+                },
+                "tolerance": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "crs": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "value",
+                "unit",
+                "dimension",
+                "tolerance",
+                "crs"
+              ],
+              "additionalProperties": false,
               "default": null
             }
           },
@@ -587,10 +693,6 @@
           },
           "output_name": {
             "type": "string"
-          },
-          "output_workspace": {
-            "type": "string",
-            "x-geopilot-kind": "path"
           }
         },
         "additionalProperties": false
@@ -607,7 +709,7 @@
           "gdb"
         ],
         "default_format": "gdb",
-        "workspace": "mxd_default_or_output_workspace",
+        "workspace": "server_managed_gdb",
         "overwrite": false,
         "add_to_map": true
       },
@@ -653,10 +755,6 @@
             },
             "output_name": {
               "type": "string"
-            },
-            "output_workspace": {
-              "type": "string",
-              "x-geopilot-kind": "path"
             }
           },
           "additionalProperties": false

@@ -1,0 +1,43 @@
+{
+  "generated_at": "2026-08-13T12:17:14.6945852+08:00",
+  "app_version": "2.0.0",
+  "deployment_hash": "a04cebf8352cbf8352bd8023e8e6ce56aa27fdd1e27063ec808c48320bebb5b1",
+  "source_to_staging": {
+    "expected_count": 185,
+    "actual_count": 185,
+    "missing_count": 0,
+    "hash_diff_count": 0,
+    "extra_count": 0,
+    "passed": true
+  },
+  "staging_to_installed": {
+    "expected_count": 186,
+    "actual_count": 186,
+    "missing_count": 0,
+    "hash_diff_count": 0,
+    "extra_count": 0,
+    "passed": true
+  },
+  "installed_identity": {
+    "bridge": "a04cebf8352cbf8352bd8023e8e6ce56aa27fdd1e27063ec808c48320bebb5b1",
+    "gateway": "a04cebf8352cbf8352bd8023e8e6ce56aa27fdd1e27063ec808c48320bebb5b1",
+    "arcmap_runtime_py2": "a04cebf8352cbf8352bd8023e8e6ce56aa27fdd1e27063ec808c48320bebb5b1"
+  },
+  "identities_match": true,
+  "addins": [
+    {
+      "path": "C:\\Users\\user\\Documents\\ArcGIS\\AddIns\\Desktop10.1\\{7f42eea1-1f17-4cf4-9d4f-c0c8d28c0a23}\\arcmapaiassistantaddin.esriaddin",
+      "exists": true,
+      "sha256": "8830d24bdf7caa6ef1360317ae139eb7e731648392441b7ca4131c61ed32a231",
+      "matches_manifest": true
+    },
+    {
+      "path": "C:\\Users\\user\\Documents\\ArcGIS\\AddIns\\Desktop10.2\\{7f42eea1-1f17-4cf4-9d4f-c0c8d28c0a23}\\arcmapaiassistantaddin.esriaddin",
+      "exists": true,
+      "sha256": "8830d24bdf7caa6ef1360317ae139eb7e731648392441b7ca4131c61ed32a231",
+      "matches_manifest": true
+    }
+  ],
+  "addins_match": true,
+  "passed": true
+}

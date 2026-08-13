@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 
-_FORMAT_SUFFIXES = {}
+_FORMAT_SUFFIXES = {
+    "csv": (".csv",),
+    "png": (".png",),
+}
 
 
 def canonical_artifact_name(name: str | None, artifact_format: str | None) -> str | None:

@@ -1,0 +1,53 @@
+{
+  "generated_at": "2026-08-13T12:18:38.6670395+08:00",
+  "request_scope": "read_only_no_model_no_business_task",
+  "endpoints": {
+    "active_session_first": {
+      "status": 200,
+      "body": {
+        "activated_at": 1786594678.716735,
+        "csrf_token": "UfAzbqmfsTQyyD5rRkfyJ1b83ilJvl1CpJAZOSNRTsA",
+        "epoch": 1,
+        "session_id": "9811aa8d-9e13-4e50-bf70-5f1c26bfad35"
+      }
+    },
+    "active_session_second": {
+      "status": 200,
+      "body": {
+        "activated_at": 1786594678.716735,
+        "csrf_token": "UfAzbqmfsTQyyD5rRkfyJ1b83ilJvl1CpJAZOSNRTsA",
+        "epoch": 1,
+        "session_id": "9811aa8d-9e13-4e50-bf70-5f1c26bfad35"
+      }
+    },
+    "gateway_health": {
+      "status": 200,
+      "body": {
+        "app_version": "2.0.0",
+        "ok": true
+      }
+    },
+    "bridge_health": {
+      "status": 200,
+      "body": {
+        "ok": true,
+        "bridge": "arcmap-external",
+        "bridge_pid": 39428,
+        "bridge_port": 8766,
+        "deployment_hash": "a04cebf8352cbf8352bd8023e8e6ce56aa27fdd1e27063ec808c48320bebb5b1"
+      }
+    }
+  },
+  "active_session": {
+    "session_id": "9811aa8d-9e13-4e50-bf70-5f1c26bfad35",
+    "epoch": 1,
+    "stable_across_two_reads": true,
+    "csrf_tokens_issued": true
+  },
+  "process_counts": {
+    "arcmap": 1,
+    "gateway": 1,
+    "bridge": 1
+  },
+  "passed": true
+}

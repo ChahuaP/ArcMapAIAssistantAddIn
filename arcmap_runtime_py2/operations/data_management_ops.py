@@ -63,7 +63,6 @@ def _output(context, arguments):
     return common.output_feature_class(
         context,
         arguments["output_name"],
-        arguments.get("output_workspace")
     )
 
 

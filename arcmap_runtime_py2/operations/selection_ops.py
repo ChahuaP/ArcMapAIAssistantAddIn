@@ -14,6 +14,8 @@ except ImportError:
     from . import common
     from . import condition_utils
 
+from shared_runtime import semantic_abi
+
 
 def select_by_attribute(context, arguments, step_outputs):
     layer = common.find_layer(context, arguments["layer"], step_outputs)
@@ -31,8 +33,12 @@ def select_by_location(context, arguments, step_outputs):
     target = common.find_layer(context, arguments["target_layer"], step_outputs)
     select_layer = common.find_layer(context, arguments["select_layer"], step_outputs)
     selection_type = arguments.get("selection_type", "NEW_SELECTION")
-    search_distance = arguments.get("search_distance", "")
-    arcpy.SelectLayerByLocation_management(target, arguments["overlap_type"], select_layer, search_distance, selection_type)
+    search_distance = arguments.get("search_distance")
+    arcpy.SelectLayerByLocation_management(
+        target, arguments["overlap_type"], select_layer,
+        semantic_abi.quantity_to_arcpy(search_distance) if search_distance is not None else "",
+        selection_type,
+    )
     return {
         "target_layer": target.name,
         "select_layer": select_layer.name,
@@ -56,7 +62,6 @@ def export_selected_features(context, arguments, step_outputs):
     output = common.output_feature_class(
         context,
         arguments["output_name"],
-        arguments.get("output_workspace")
     )
     copy_result = arcpy.CopyFeatures_management(layer, output)
     materialized_output = path_utils.to_unicode_path(copy_result.getOutput(0))

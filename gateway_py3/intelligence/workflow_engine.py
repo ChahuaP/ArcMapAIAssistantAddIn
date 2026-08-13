@@ -50,6 +50,8 @@ from ..structured_contracts import (
 from ..task_contract import task_contract_model_view
 from ..workflow_protocol import workflow_protocol
 from ..workflow_verifier import WorkflowVerifier
+from ..plan_revision import PlanRevision, PlanRevisionError, MonotonicPlanValidator, revision_scope
+from ..audit_contract import AUDIT_CONTRACT, audit_contract_for_scope
 from ..validators import ValidationError, prepare_workflow
 from pydantic import ValidationError as PydanticValidationError
 from .dpapi_serde import DpapiCheckpointSerializer
@@ -92,6 +94,14 @@ class _ModelOutcome(Exception):
         self.message = message
 
 
+class _ModelPlanContractError(ValueError):
+    """The checkpoint binding is incompatible with this sealed task."""
+
+
+class _CheckpointContractError(ValueError):
+    """The persisted planning state cannot be safely read or validated."""
+
+
 class PlanState(TypedDict, total=False):
     """JSON-serializable state for the planning graph (§13.2).
 
@@ -110,14 +120,22 @@ class PlanState(TypedDict, total=False):
     validation_revisions: int
     audit_revisions: int
     auditor_enabled: bool
+    audit_forced: bool
     audit_decision: Optional[str]
-    audit_report: Dict[str, Any]
+    audit_result: Dict[str, Any]
+    audit_scope: Dict[str, Tuple[str, ...]]
+    audit_options: Dict[str, Tuple[str, ...]]
+    audit_baseline_workflow: Optional[Dict[str, Any]]
+    audit_baseline_report: Dict[str, Any]
     plan: Optional[Dict[str, Any]]
     failure: Optional[Dict[str, Any]]
     done: bool
     decision: Optional[Dict[str, Any]]
     authorization_result: Optional[str]
     node_attempts: Dict[str, int]
+    sealed_baseline: Optional[Dict[str, Any]]
+    sealed_baseline_plan: Optional[Dict[str, Any]]
+    model_plan_digest: str
 
 
 class WorkflowEngine:
@@ -156,6 +174,7 @@ class WorkflowEngine:
         graph.add_node("validate", self._journaled("validate", self._node_validate))
         graph.add_node("repair", self._journaled("repair", self._node_repair))
         graph.add_node("audit", self._journaled("audit", self._node_audit))
+        graph.add_node("revise", self._journaled("revise", self._node_revise))
         graph.add_node("seal", self._journaled("seal", self._node_seal))
         graph.add_node("authorization_required", self._journaled("authorization_required", self._node_authorization_required))
         graph.add_node("authorization_auto", self._journaled("authorization_auto", self._node_authorization_auto))
@@ -169,8 +188,9 @@ class WorkflowEngine:
         graph.add_edge("repair", "validate")
         graph.add_conditional_edges(
             "audit", self._route_audit,
-            {"seal": "seal", "repair": "repair", "fail": "fail"},
+            {"seal": "seal", "revise": "revise", "fail": "fail"},
         )
+        graph.add_edge("revise", "audit")
         graph.add_conditional_edges("seal", self._route_authorization,
                                     {"authorization_required": "authorization_required",
                                      "authorization_auto": "authorization_auto"})
@@ -198,7 +218,9 @@ class WorkflowEngine:
         return self._app
 
     def _config(self, run_id: str) -> Dict[str, Any]:
-        return {"configurable": {"thread_id": run_id}}
+        lineage = self._journal.current_planning_lineage(run_id) \
+            if self._journal is not None else run_id
+        return {"configurable": {"thread_id": lineage}}
 
     # -- public API ---------------------------------------------------------
 
@@ -212,7 +234,9 @@ class WorkflowEngine:
         return self.plan_ablation(run_id, intent, context, capabilities, auditor_enabled=True)
 
     def plan_ablation(self, run_id: str, intent: IntentSpec, context: ContextSnapshot,
-                      capabilities: CapabilitySnapshot, auditor_enabled: bool) -> Outcome:
+                      capabilities: CapabilitySnapshot, auditor_enabled: bool,
+                      sealed_baseline: Optional[VerifiedPlan] = None,
+                      force_audit: bool = False) -> Outcome:
         """Plan an ablation arm on the production graph.
 
         The graph and all planner parameters remain fixed.  G2 only bypasses
@@ -227,7 +251,13 @@ class WorkflowEngine:
             )
         # Reuse an already-sealed plan from the checkpoint (§13.2: a
         # crash-restarted run must not repeat sealed model calls).
-        existing = self._sealed_plan(run_id)
+        expected_model_plan_digest = _intent_model_plan_digest(intent)
+        try:
+            existing = self._sealed_plan(run_id, expected_model_plan_digest)
+        except _ModelPlanContractError as exc:
+            return outcome_failed(CONTRACT_FAILED, "plan", "model_plan_drift", str(exc))
+        except _CheckpointContractError as exc:
+            return outcome_failed(CONTRACT_FAILED, "plan", "checkpoint_contract_failure", str(exc))
         if existing is not None:
             return outcome_succeeded("plan", "计划已封存，复用检查点。",
                                      details={"plan": existing,
@@ -236,6 +266,7 @@ class WorkflowEngine:
         state: PlanState = {
             "run_id": run_id,
             "intent": intent.model_dump(mode="json"),
+            "model_plan_digest": expected_model_plan_digest,
             "context": context.model_dump(mode="json"),
             "capabilities": capabilities.model_dump(mode="json"),
             "task_contract": task_contract,
@@ -246,21 +277,32 @@ class WorkflowEngine:
             "validation_revisions": 0,
             "audit_revisions": 0,
             "auditor_enabled": bool(auditor_enabled),
+            "audit_forced": bool(force_audit or sealed_baseline is not None),
             "audit_decision": None,
-            "audit_report": {},
+            "audit_result": {},
+            "audit_scope": {},
+            "audit_options": {},
+            "audit_baseline_workflow": None,
+            "audit_baseline_report": {},
             "plan": None,
             "failure": None,
             "done": False,
             "decision": None,
             "authorization_result": None,
             "node_attempts": {},
+            "sealed_baseline": _baseline_draft(sealed_baseline) if sealed_baseline is not None else None,
+            "sealed_baseline_plan": sealed_baseline.model_dump(mode="json") if sealed_baseline is not None else None,
         }
         # The production path is the graph stream.  Its checkpoint is the
         # source of the final state, so a process interruption cannot leave a
         # hand-written planner state separate from LangGraph.
         app = self._compiled()
         prior = app.get_state(self._config(run_id))
-        resume = prior is not None and isinstance(prior.values, dict) and bool(prior.values)
+        resume = (prior is not None and isinstance(prior.values, dict)
+                  and "model_plan_digest" in prior.values)
+        if resume and prior.values.get("model_plan_digest") != expected_model_plan_digest:
+            return outcome_failed(CONTRACT_FAILED, "plan", "model_plan_drift",
+                                  "规划检查点的模型绑定与当前任务封存绑定不一致。")
         stream_input = None if resume else state
         for _chunk in app.stream(stream_input, config=self._config(run_id), stream_mode="updates"):
             pass
@@ -322,6 +364,10 @@ class WorkflowEngine:
                     update = dict(recorded["update"])
                     attempts[node] = attempt
                     update["node_attempts"] = attempts
+                    if recorded.get("exact") is False:
+                        self._journal.record_planning_node_update(
+                            state["run_id"], node, attempt, "replayed", update,
+                            replayed_from_lineage=recorded["replayed_from_lineage"])
                     return update
             update = handler(state)
             update = dict(update or {})
@@ -336,6 +382,11 @@ class WorkflowEngine:
     # -- graph nodes --------------------------------------------------------
 
     def _node_draft(self, state: PlanState) -> Dict[str, Any]:
+        sealed_baseline = state.get("sealed_baseline")
+        if sealed_baseline is not None:
+            # G3 starts from the exact G2-sealed workflow. Only its audit node
+            # can request a deterministic, bounded revision afterwards.
+            return {"draft": sealed_baseline}
         intent = IntentSpec.model_validate(state["intent"])
         context = ContextSnapshot.model_validate(state["context"])
         capabilities = CapabilitySnapshot.model_validate(state["capabilities"])
@@ -382,9 +433,7 @@ class WorkflowEngine:
         try:
             repaired = self._request_repair(intent, context, capabilities,
                                             state["task_contract"], draft,
-                                            state["report"],
-                                            state.get("run_id", ""),
-                                            state.get("audit_report"))
+                                            state["report"], state.get("run_id", ""))
         except _ModelOutcome as exc:
             return {"failure": _failure_document(outcome_failed(
                 exc.kind, exc.stage, exc.code, exc.message))}
@@ -406,9 +455,31 @@ class WorkflowEngine:
             return {"failure": _failure_document(outcome_failed(
                 CONTRACT_FAILED, "plan", "missing_workflow",
                 "缺少已验证工作流，无法审计。"))}
+        scope = revision_scope(workflow, state["report"], self.catalog)
+        # The server generates every unresolved clarification node from the
+        # real task contract; each node binds one-to-one to the in-scope proof
+        # whose contract path equals the node's sealed target path.  No string
+        # token guessing, no prefix search, no fail-open fallback.
+        from ..clarification import build_nodes
+        task_contract = intent.derived_facts.get("task_contract") if isinstance(intent.derived_facts, dict) else {}
+        if not isinstance(task_contract, dict):
+            task_contract = {}
+        proof_graph = state["report"].get("proof_graph", ()) or []
+        nodes, _graph_digest = build_nodes(task_contract)
+        option_proofs = {}
+        for node in nodes:
+            matches = []
+            for graph_node in proof_graph:
+                if not isinstance(graph_node, dict):
+                    continue
+                detail = graph_node.get("detail") if isinstance(graph_node.get("detail"), dict) else {}
+                contract_path = detail.get("contract_path") if isinstance(detail.get("contract_path"), str) else ""
+                if graph_node.get("proof_id") in scope and contract_path == node.target_path:
+                    matches.append(graph_node["proof_id"])
+            option_proofs[node.proof_id] = tuple(sorted(set(matches)))
         try:
             audit_result = self._request_audit(intent, context, capabilities,
-                                               workflow, state["report"],
+                                               workflow, state["report"], scope, option_proofs,
                                                state.get("run_id", ""))
         except _ModelOutcome as exc:
             return {"failure": _failure_document(outcome_failed(
@@ -417,13 +488,47 @@ class WorkflowEngine:
             return {"failure": _failure_document(outcome_failed(
                 INFRASTRUCTURE_FAILED, "plan", "audit_call_failed",
                 "审计模型调用失败。" ))}
-        decision = audit_result.get("decision")
-        if decision not in ("pass", "revise", "clarify", "reject"):
+        try:
+            AUDIT_CONTRACT.validate_shape(audit_result)
+        except Exception as exc:
             return {"failure": _failure_document(outcome_failed(
-                CONTRACT_FAILED, "plan", "audit_invalid_decision",
-                "审计返回了无效的决策：%s" % decision))}
-        return {"audit_decision": decision, "audit_report": audit_result,
+                CONTRACT_FAILED, "plan", "audit_invalid_result", str(exc)))}
+        decision = audit_result["decision"]
+        if decision == "revise":
+            proof_id = (audit_result.get("revision") or {}).get("proof_id")
+            if proof_id not in scope:
+                return {"failure": _failure_document(outcome_failed(
+                    CONTRACT_FAILED, "plan", "audit_proof_out_of_scope",
+                    "审计选择了不属于未解决证明义务的 proof_id。"))}
+        if decision == "clarify":
+            option_id = (audit_result.get("clarification") or {}).get("option_id")
+            if option_id not in option_proofs:
+                return {"failure": _failure_document(outcome_failed(
+                    CONTRACT_FAILED, "plan", "audit_option_out_of_scope",
+                    "审计选择了不属于未解决证明义务的 option_id。"))}
+        return {"audit_decision": decision, "audit_result": audit_result,
+                "audit_scope": scope,
+                "audit_options": option_proofs,
+                "audit_baseline_workflow": state.get("audit_baseline_workflow") or workflow,
+                "audit_baseline_report": state.get("audit_baseline_report") or state["report"],
                 "audit_revisions": state.get("audit_revisions", 0) + 1}
+
+    def _node_revise(self, state: PlanState) -> Dict[str, Any]:
+        result = state.get("audit_result") or {}
+        revision_doc = result.get("revision") if isinstance(result, dict) else None
+        try:
+            revision = PlanRevision(**revision_doc)
+            candidate = MonotonicPlanValidator.apply(state["workflow"], revision, state.get("audit_scope", {}))
+            prepared, candidate_report = self._validate(candidate, state["verifier_context"], state["task_contract"])
+            if prepared is None:
+                raise PlanRevisionError("revision fails deterministic verification")
+            MonotonicPlanValidator.validate(state["audit_baseline_workflow"], prepared,
+                                            state["audit_baseline_report"], candidate_report,
+                                            revision.proof_id, revision)
+        except (PlanRevisionError, TypeError, ValidationError) as exc:
+            return {"failure": _failure_document(outcome_failed(
+                CONTRACT_FAILED, "plan", "audit_revision_rejected", str(exc)))}
+        return {"workflow": prepared, "report": candidate_report}
 
     def _node_seal(self, state: PlanState) -> Dict[str, Any]:
         intent = IntentSpec.model_validate(state["intent"])
@@ -434,19 +539,27 @@ class WorkflowEngine:
             return {"failure": _failure_document(outcome_failed(
                 CONTRACT_FAILED, "plan", "missing_workflow",
                 "缺少已验证工作流，无法封存。"))}
-        audit_report = state.get("audit_report")
+        unresolved = [item for item in state.get("report", {}).get("proof_graph", ())
+                      if isinstance(item, dict) and item.get("detail", {}).get("required") is True
+                      and item.get("status") != "Proven"]
+        if unresolved:
+            return {"failure": _failure_document(outcome_failed(
+                CONTRACT_FAILED, "plan", "required_proofs_unresolved",
+                "封存计划前必须证明所有必需语义义务。",
+                details={"proof_ids": [item.get("proof_id") for item in unresolved]}))}
+        if state.get("sealed_baseline_plan") is not None and state.get("audit_decision") == "pass":
+            baseline = VerifiedPlan.model_validate(state["sealed_baseline_plan"])
+            if _workflow_identity(_baseline_draft(baseline)) != _workflow_identity(workflow):
+                return {"failure": _failure_document(outcome_failed(
+                    CONTRACT_FAILED, "plan", "audit_pass_changed_baseline",
+                    "审计 pass 时基线工作流不得变化。"))}
+            return {"plan": baseline.model_dump(mode="json"), "done": True}
+        audit_opinion = state.get("audit_result")
         audit_opinions: Tuple[Dict[str, Any], ...] = ()
-        if isinstance(audit_report, dict):
-            audit_opinions = (dict(audit_report),)
+        if isinstance(audit_opinion, dict):
+            audit_opinions = (dict(audit_opinion),)
         plan = self._seal(intent, context, capabilities, workflow,
                           state["report"], audit_opinions=audit_opinions)
-        units = {_gdb_publish_unit(output.destination)
-                 for step in plan.workflow for output in step.declared_outputs
-                 if output.kind != "map_state"}
-        if None in units or len(units) > 1:
-            return {"failure": _failure_document(outcome_failed(
-                CONTRACT_FAILED, "plan", "multiple_publish_units",
-                "一个运行的正式数据输出必须属于同一个目标 FileGDB；请拆分任务。"))}
         return {"plan": plan.model_dump(mode="json"), "done": True}
 
     def _node_authorization_required(self, state: PlanState) -> Dict[str, Any]:
@@ -471,7 +584,7 @@ class WorkflowEngine:
     def _route_validate(self, state: PlanState) -> str:
         if state.get("failure"):
             return "fail"
-        if state.get("workflow") is not None and state.get("auditor_enabled", True):
+        if state.get("workflow") is not None and self._should_audit(state):
             return "audit"
         if state.get("workflow") is not None:
             return "seal"
@@ -492,16 +605,56 @@ class WorkflowEngine:
         ))
         return "fail"
 
+    @staticmethod
+    def _should_audit(state: PlanState) -> bool:
+        """Deterministic G3 trigger policy; models and UI cannot override it.
+
+        G2 disables auditing. G3 experiment runs force it. Production audits
+        unresolved ProofGraph obligations, plans with risk/effects beyond
+        read-only, and workflows whose multi-step or lineage topology makes a
+        one-step proof insufficient.
+        """
+        if not state.get("auditor_enabled", True):
+            return False
+        if state.get("audit_forced", False):
+            return True
+        report = state.get("report") or {}
+        graph = report.get("proof_graph", ())
+        if any(isinstance(item, dict) and item.get("status") == "Unresolved" for item in graph):
+            return True
+        intent = state.get("intent") or {}
+        if int(intent.get("acceptable_side_effects", 1)) >= 2:
+            return True
+        if any(effect != "read_only" for effect in report.get("side_effects", ())):
+            return True
+        workflow = state.get("workflow") or {}
+        if len(workflow.get("steps", ())) > 1:
+            return True
+        return any(isinstance(result, dict) and len(result.get("proof", {}).get("lineage_steps", ())) > 1
+                   for result in report.get("requirements", ()))
+
     def _route_audit(self, state: PlanState) -> str:
         if state.get("failure"):
             return "fail"
         decision = state.get("audit_decision", "pass")
         if decision == "pass":
             return "seal"
-        if decision in ("clarify", "reject"):
+        if decision == "clarify":
+            clarification = (state.get("audit_result") or {}).get("clarification", {})
+            option_id = clarification.get("option_id", "")
+            state["failure"] = _failure_document(contracts.outcome_paused(
+                contracts.CLARIFICATION_REQUIRED, "plan", "audit_clarification_required",
+                "需要用户澄清后才能证明工作流正确。",
+                details={"clarifications": [{
+                    "option_id": option_id,
+                    "question": clarification.get("question", "请澄清此 GIS 语义。"),
+                    "proof_ids": list((state.get("audit_options") or {}).get(option_id, ())),
+                }]}))
+            return "fail"
+        if decision == "reject":
             return "fail"
         if state.get("audit_revisions", 0) < MAX_AUDIT_REVISIONS:
-            return "repair"
+            return "revise"
         return "fail"
 
     @staticmethod
@@ -612,25 +765,11 @@ class WorkflowEngine:
                         capabilities: CapabilitySnapshot, task_contract: Dict[str, Any],
                         draft: Dict[str, Any], report: Dict[str, Any],
                         run_id: str = "",
-                        audit_report: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+                        ) -> Optional[Dict[str, Any]]:
         tools = workflow_tools_for_capabilities(
             list(capabilities.operation_cards_as_dicts())
         )
         diagnostics = _repair_diagnostics(report)
-        # When the repair is triggered by a G3 audit revision, fold the audit
-        # claims into the diagnostics so the model sees what the auditor flagged
-        # (not just the deterministic verifier's hard violations).
-        if isinstance(audit_report, dict):
-            claims = audit_report.get("claims")
-            if isinstance(claims, list):
-                for claim in claims:
-                    if isinstance(claim, dict):
-                        diagnostics.append({
-                            "code": claim.get("proof_id", "audit_claim"),
-                            "message": claim.get("required_change", ""),
-                            "step_id": None,
-                            "source": "audit",
-                        })
         model_request = self._build_repair_request(intent, context, capabilities,
                                                    draft, diagnostics, tools, run_id)
         result = self.model_runtime.invoke(model_request, None,
@@ -652,10 +791,9 @@ class WorkflowEngine:
 
     def _request_audit(self, intent: IntentSpec, context: ContextSnapshot,
                        capabilities: CapabilitySnapshot,
-                       workflow: Dict[str, Any], report: Dict[str, Any],
+                       workflow: Dict[str, Any], report: Dict[str, Any], scope, option_proofs,
                        run_id: str = "") -> Optional[Dict[str, Any]]:
-        from ..audit_contract import audit_contract_for_report
-        audit_contract = audit_contract_for_report(report)
+        audit_contract = audit_contract_for_scope(scope, option_proofs)
         model_request = self._build_audit_request(intent, context, capabilities,
                                                    workflow, report, audit_contract, run_id)
         result = self.model_runtime.invoke(model_request, audit_contract,
@@ -669,7 +807,7 @@ class WorkflowEngine:
                                     "audit_uncertain", result.error or "")
             return None
         # AuditResultModel wraps the body in ``audit_result``; unwrap so the
-        # consumer (``_node_audit``) sees ``{decision, claims}`` directly.
+        # consumer (``_node_audit``) sees the decision body directly.
         body = result.response.get("audit_result")
         return body if isinstance(body, dict) else result.response
 
@@ -753,7 +891,8 @@ class WorkflowEngine:
             output = matching[0]
             declared_outputs = (DeclaredOutput(
                 output_id=str(output["output_id"]), name=str(output_name),
-                kind=str(output["kind"]), destination=str(output["destination"]),
+                kind=str(output["kind"]), output_format=str(output["format"]),
+                destination_policy=str(output["destination_policy"]),
                 coordinate_system=str(output["spatial_reference"]),
                 geometry_type=str(output["geometry"]),
                 expected_fields=tuple(output.get("required_fields", ())),
@@ -766,7 +905,7 @@ class WorkflowEngine:
 
     # -- checkpoint reuse ---------------------------------------------------
 
-    def _sealed_plan(self, run_id: str) -> Optional[VerifiedPlan]:
+    def _sealed_plan(self, run_id: str, expected_model_plan_digest: str) -> Optional[VerifiedPlan]:
         """Return a previously sealed plan from the checkpoint, if any.
 
         §13.2: a sealed plan is committed fact; a crash-restarted run reuses
@@ -774,19 +913,41 @@ class WorkflowEngine:
         """
         try:
             snapshot = self._compiled().get_state(self._config(run_id))
-        except (KeyError, ValueError, RuntimeError):
+        except Exception as exc:
+            raise _CheckpointContractError(
+                "planning checkpoint could not be read: %s" % type(exc).__name__
+            ) from exc
+        if snapshot is None:
             return None
-        values = snapshot.values if snapshot is not None else None
-        plan_doc = (values or {}).get("plan") if isinstance(values, dict) else None
+        try:
+            values = snapshot.values
+        except Exception as exc:
+            raise _CheckpointContractError(
+                "planning checkpoint state could not be read: %s" % type(exc).__name__
+            ) from exc
+        if not isinstance(values, dict):
+            raise _CheckpointContractError("planning checkpoint state is malformed")
+        # LangGraph returns an empty values mapping before it has ever written
+        # this thread. That is the sole representation of no checkpoint.
+        if not values:
+            return None
+        actual_model_plan_digest = values.get("model_plan_digest")
+        if not isinstance(actual_model_plan_digest, str) or not actual_model_plan_digest:
+            raise _ModelPlanContractError("planning checkpoint is missing model binding digest")
+        if actual_model_plan_digest != expected_model_plan_digest:
+            raise _ModelPlanContractError("sealed planning checkpoint model binding differs from task binding")
+        plan_doc = values.get("plan")
+        if plan_doc is None:
+            return None
         if not isinstance(plan_doc, dict):
-            return None
+            raise _CheckpointContractError("planning checkpoint plan is malformed")
         try:
             return VerifiedPlan.model_validate(plan_doc)
         except PydanticValidationError as exc:
             from gateway_py3.logs import write_event
             write_event("workflow.checkpoint_plan_invalid", {"run_id": run_id,
                         "error": str(exc)[:200]})
-            return None
+            raise _CheckpointContractError("planning checkpoint plan is invalid") from exc
 
     def _outcome_from_state(self, state: PlanState) -> Outcome:
         failure = state.get("failure")
@@ -831,6 +992,8 @@ class WorkflowEngine:
             capability_hash=capabilities.digest,
             context_projection=model_view,
             domain_rule_hash=capabilities.domain_rule_hash,
+            model_plan=_intent_model_plan(intent),
+            model_binding_summary=_intent_model_binding_summary(intent),
             generation_params={"protocol": self.protocol},
             run_id=run_id,
         )
@@ -851,6 +1014,8 @@ class WorkflowEngine:
             capability_hash=capabilities.digest,
             context_projection={"draft": draft, "diagnostics": diagnostics},
             domain_rule_hash=capabilities.domain_rule_hash,
+            model_plan=_intent_model_plan(intent),
+            model_binding_summary=_intent_model_binding_summary(intent),
             generation_params={"protocol": self.protocol},
             run_id=run_id,
         )
@@ -871,12 +1036,36 @@ class WorkflowEngine:
             capability_hash=capabilities.digest,
             context_projection={"workflow": workflow, "report": report},
             domain_rule_hash=capabilities.domain_rule_hash,
+            model_plan=_intent_model_plan(intent),
+            model_binding_summary=_intent_model_binding_summary(intent),
             generation_params={"protocol": self.protocol},
             run_id=run_id,
         )
 
 
 # --- helpers ----------------------------------------------------------------
+
+def _baseline_draft(plan: VerifiedPlan) -> Dict[str, Any]:
+    """Project one sealed G2 plan back to the immutable graph draft form.
+
+    This is deliberately a lossless projection of the executable workflow,
+    not a new model draft.  G3 may audit and, if justified, revise this exact
+    baseline; it must never make a second independent planner call.
+    """
+    return {
+        "action": "execute",
+        "summary": "",
+        "steps": [{"id": step.id, "operation": step.operation,
+                   "arguments": dict(step.arguments), "reason": step.reason}
+                  for step in plan.workflow],
+    }
+
+
+def _workflow_identity(workflow: Dict[str, Any]) -> Tuple[Tuple[str, str, str], ...]:
+    """Executable identity only: pass cannot alter step ids, operations, or arguments."""
+    return tuple((step["id"], step["operation"],
+                  json.dumps(step.get("arguments", {}), sort_keys=True, separators=(",", ":")))
+                 for step in workflow.get("steps", []))
 
 def _intent_security_scope(intent: IntentSpec) -> Dict[str, Any]:
     """Recover the caller scope persisted with the compiled intent.
@@ -895,6 +1084,27 @@ def _intent_security_scope(intent: IntentSpec) -> Dict[str, Any]:
     if not isinstance(data_scope, (list, tuple)) or any(not isinstance(item, str) for item in data_scope):
         raise ValueError("compiled intent has invalid data scope")
     return {"tenant_id": tenant_id, "role": role, "data_scope": tuple(sorted(data_scope))}
+
+
+def _intent_model_plan(intent: IntentSpec):
+    """Load the immutable task plan carried by the compiler's sealed intent."""
+    from ..model_runtime import AgentModelPlan
+    value = intent.derived_facts.get("model_plan")
+    if not isinstance(value, dict):
+        raise ValueError("compiled intent is missing its model plan")
+    return AgentModelPlan.model_validate(value)
+
+
+def _intent_model_binding_summary(intent: IntentSpec) -> Dict[str, Any]:
+    value = intent.derived_facts.get("model_binding_summary")
+    if not isinstance(value, dict):
+        raise ValueError("compiled intent is missing its model binding summary")
+    return value
+
+
+def _intent_model_plan_digest(intent: IntentSpec) -> str:
+    plan = _intent_model_plan(intent)
+    return contracts.digest(plan.model_dump(mode="json"))
 
 
 def _intent_scope_hash(intent: IntentSpec) -> str:
@@ -943,15 +1153,6 @@ def _repair_diagnostics(report: Dict[str, Any]) -> List[Dict[str, Any]]:
     return diagnostics
 
 
-def _gdb_publish_unit(destination: str) -> Optional[str]:
-    normalized = str(destination).replace("/", "\\")
-    parts = normalized.split("\\")
-    for index, part in enumerate(parts):
-        if part.lower().endswith(".gdb"):
-            return "\\".join(parts[:index + 1]).casefold()
-    return None
-
-
 def _failure_document(outcome: Outcome) -> Dict[str, Any]:
     return {
         "kind": outcome.kind, "code": outcome.code, "stage": outcome.stage,
@@ -960,10 +1161,4 @@ def _failure_document(outcome: Outcome) -> Dict[str, Any]:
 
 
 def _outcome_from_document(document: Dict[str, Any]) -> Outcome:
-    return outcome_failed(
-        document.get("kind", CONTRACT_FAILED),
-        document.get("stage", "plan"),
-        document.get("code", "plan_failed"),
-        document.get("message", "规划失败。"),
-        details=document.get("details", {}),
-    )
+    return Outcome.model_validate(document)

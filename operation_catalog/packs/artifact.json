@@ -1,0 +1,317 @@
+{
+  "pack": "artifact",
+  "operations": [
+    {
+      "id": "artifact.export_table_csv",
+      "version": "1.0",
+      "category": "export",
+      "summary": "将图层或表的属性导出为服务器管理的 CSV 文件。",
+      "keywords": [
+        "导出属性表",
+        "CSV",
+        "export table"
+      ],
+      "parameters_schema": {
+        "type": "object",
+        "required": [
+          "layer",
+          "output_name"
+        ],
+        "properties": {
+          "layer": {
+            "type": "string",
+            "x-geopilot-kind": "layer"
+          },
+          "output_name": {
+            "type": "string",
+            "pattern": "^[^./\\\\]+\\.csv$"
+          }
+        },
+        "additionalProperties": false
+      },
+      "context_requirements": {
+        "requires_layers": true
+      },
+      "side_effects": "writes_data",
+      "output_policy": {
+        "writes_output": true,
+        "type": "file",
+        "formats": [
+          "csv"
+        ],
+        "default_format": "csv",
+        "workspace": "server_managed_files",
+        "overwrite": false,
+        "add_to_map": false
+      },
+      "executor": "operations.artifact_ops.export_table_csv",
+      "examples": [
+        {
+          "user": "导出 roads 属性表为 roads.csv",
+          "arguments": {
+            "layer": "roads",
+            "output_name": "roads.csv"
+          }
+        }
+      ],
+      "capability_contract": {
+        "inputs": [
+          {
+            "parameter": "layer",
+            "cardinality": "one",
+            "data_kind": [
+              "feature_layer",
+              "table_view"
+            ],
+            "geometry": [
+              "point",
+              "polyline",
+              "polygon",
+              "not_applicable"
+            ],
+            "required_fields": [],
+            "selection": {
+              "rule": "any"
+            }
+          }
+        ],
+        "parameters_schema": {
+          "type": "object",
+          "required": [
+            "layer",
+            "output_name"
+          ],
+          "properties": {
+            "layer": {
+              "type": "string",
+              "x-geopilot-kind": "layer"
+            },
+            "output_name": {
+              "type": "string",
+              "pattern": "^[^./\\\\]+\\.csv$"
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "kind": "file",
+          "geometry": {
+            "rule": "not_applicable",
+            "value": "not_applicable"
+          },
+          "fields": {
+            "effect": "not_applicable",
+            "target": "not_applicable",
+            "static_fields": [],
+            "parameter_field": "not_applicable"
+          },
+          "spatial_reference": {
+            "rule": "not_applicable",
+            "input": "not_applicable"
+          },
+          "cardinality": {
+            "rule": "fixed",
+            "value": "one"
+          },
+          "selection_state": "not_applicable",
+          "map_publication": "none"
+        },
+        "side_effects": "writes_data",
+        "authorization": {
+          "required": true,
+          "scope": "write_file"
+        },
+        "postconditions": [
+          {
+            "kind": "csv_file_exported",
+            "target": "output_name",
+            "expectation": {
+              "kind": {
+                "ref": "outputs.kind"
+              },
+              "geometry": {
+                "ref": "outputs.geometry"
+              },
+              "fields": {
+                "ref": "outputs.fields"
+              },
+              "spatial_reference": {
+                "ref": "outputs.spatial_reference"
+              },
+              "cardinality": {
+                "ref": "outputs.cardinality"
+              },
+              "selection_state": {
+                "ref": "outputs.selection_state"
+              },
+              "map_publication": {
+                "ref": "outputs.map_publication"
+              }
+            }
+          }
+        ],
+        "semantic_effects": [
+          {
+            "kind": "artifact_export",
+            "target": {
+              "parameter": "layer"
+            },
+            "action": {
+              "const": "export_table"
+            },
+            "output_format": {
+              "const": "csv"
+            },
+            "selected_only": {
+              "const": false
+            },
+            "result": {
+              "output": true
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "artifact.export_map_png",
+      "version": "1.0",
+      "category": "export",
+      "summary": "将当前 ArcMap 地图或布局导出为服务器管理的 PNG 文件。",
+      "keywords": [
+        "导出地图",
+        "PNG",
+        "export map"
+      ],
+      "parameters_schema": {
+        "type": "object",
+        "required": [
+          "output_name"
+        ],
+        "properties": {
+          "output_name": {
+            "type": "string",
+            "pattern": "^[^./\\\\]+\\.png$"
+          }
+        },
+        "additionalProperties": false
+      },
+      "context_requirements": {
+        "requires_layers": false
+      },
+      "side_effects": "writes_data",
+      "output_policy": {
+        "writes_output": true,
+        "type": "file",
+        "formats": [
+          "png"
+        ],
+        "default_format": "png",
+        "workspace": "server_managed_files",
+        "overwrite": false,
+        "add_to_map": false
+      },
+      "executor": "operations.artifact_ops.export_map_png",
+      "examples": [
+        {
+          "user": "导出当前地图为 result.png",
+          "arguments": {
+            "output_name": "result.png"
+          }
+        }
+      ],
+      "capability_contract": {
+        "inputs": [],
+        "parameters_schema": {
+          "type": "object",
+          "required": [
+            "output_name"
+          ],
+          "properties": {
+            "output_name": {
+              "type": "string",
+              "pattern": "^[^./\\\\]+\\.png$"
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputs": {
+          "kind": "file",
+          "geometry": {
+            "rule": "not_applicable",
+            "value": "not_applicable"
+          },
+          "fields": {
+            "effect": "not_applicable",
+            "target": "not_applicable",
+            "static_fields": [],
+            "parameter_field": "not_applicable"
+          },
+          "spatial_reference": {
+            "rule": "not_applicable",
+            "input": "not_applicable"
+          },
+          "cardinality": {
+            "rule": "fixed",
+            "value": "one"
+          },
+          "selection_state": "not_applicable",
+          "map_publication": "none"
+        },
+        "side_effects": "writes_data",
+        "authorization": {
+          "required": true,
+          "scope": "write_file"
+        },
+        "postconditions": [
+          {
+            "kind": "png_map_exported",
+            "target": "output_name",
+            "expectation": {
+              "kind": {
+                "ref": "outputs.kind"
+              },
+              "geometry": {
+                "ref": "outputs.geometry"
+              },
+              "fields": {
+                "ref": "outputs.fields"
+              },
+              "spatial_reference": {
+                "ref": "outputs.spatial_reference"
+              },
+              "cardinality": {
+                "ref": "outputs.cardinality"
+              },
+              "selection_state": {
+                "ref": "outputs.selection_state"
+              },
+              "map_publication": {
+                "ref": "outputs.map_publication"
+              }
+            }
+          }
+        ],
+        "semantic_effects": [
+          {
+            "kind": "artifact_export",
+            "target": {
+              "const": "current_map"
+            },
+            "action": {
+              "const": "export_map"
+            },
+            "output_format": {
+              "const": "png"
+            },
+            "selected_only": {
+              "const": false
+            },
+            "result": {
+              "output": true
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

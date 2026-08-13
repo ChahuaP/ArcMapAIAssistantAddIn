@@ -1,6 +1,6 @@
     const API_ORIGIN = window.location.protocol === 'file:' ? 'http://127.0.0.1:8765' : '';
     
-    const SESSION_STORAGE_KEY = 'geopilot.sessionId';
+    let activeSession = null;
     let eventSource = null;
     let csrfToken = '';
     let eventRefreshBusy = false;
@@ -28,21 +28,15 @@
     };
     const taskDetailsState = new Map();
 
-    // §5 session isolation: one stable UUID per browser, sent as X-Session-Id.
-    // New task = same session (kernel creates a fresh run with its own run_id);
-    // clearing history starts a new session.
-    function getSessionId() {
-      let id = localStorage.getItem(SESSION_STORAGE_KEY);
-      if (!id) {
-        id = crypto.randomUUID();
-        localStorage.setItem(SESSION_STORAGE_KEY, id);
-      }
-      return id;
-    }
-
-    function resetSessionId() {
-      localStorage.removeItem(SESSION_STORAGE_KEY);
-      csrfToken = '';
+    function getSessionId() { return activeSession && activeSession.session_id; }
+    function getSessionEpoch() { return activeSession && activeSession.epoch; }
+    async function loadActiveSession() {
+      const response = await fetch(apiUrl('/api/v1/active-session'));
+      const data = await response.json();
+      if (!response.ok || data.error) throw new Error(data.error || response.statusText);
+      activeSession = data;
+      csrfToken = data.csrf_token;
+      return data;
     }
 
     // §14.4: run stage → user-facing label (no fake timer).
@@ -107,6 +101,15 @@
       await refreshRuns();
     }
 
+    async function submitClarification(runId, clarificationId, answer) {
+      const data = await api(`/api/v1/runs/${runId}/clarifications`, {
+        method: 'POST', body: JSON.stringify({clarification_id: clarificationId, answer})
+      });
+      selectedRunId = runId;
+      setStatus(stageLabel(data.run.stage));
+      await refreshRuns();
+    }
+
     function setState(patch) {
       patch = patch || {};
       Object.assign(appState, patch);
@@ -134,11 +137,12 @@
       let response;
       const opts = options || {};
       // §8: every request carries the session token
-      opts.headers = Object.assign({'X-Session-Id': getSessionId()}, opts.headers || {});
+      if (!activeSession) await loadActiveSession();
+      opts.headers = Object.assign({'X-Session-Id': getSessionId(), 'X-Session-Epoch': String(getSessionEpoch())}, opts.headers || {});
       if (opts.method && opts.method.toUpperCase() === 'POST') {
         if (!csrfToken) {
           const session = await fetch(apiUrl('/api/v1/session'), {
-            headers: {'X-Session-Id': getSessionId()}
+            headers: {'X-Session-Id': getSessionId(), 'X-Session-Epoch': String(getSessionEpoch())}
           });
           const sessionData = await session.json();
           if (!session.ok) throw new Error(sessionData.error || session.statusText);
@@ -181,6 +185,28 @@
     async function openDiagnostics() {
       openModal('diagnosticsModal');
       await loadDiagnostics();
+    }
+
+    async function openArchivedSessions() {
+      openModal('archivesModal');
+      const container = document.getElementById('archivesList');
+      container.textContent = '正在读取归档...';
+      try {
+        const data = await api('/api/v1/archived-sessions');
+        const sessions = data.sessions || [];
+        if (!sessions.length) { container.textContent = '没有已归档对话。'; return; }
+        container.innerHTML = sessions.map(item => `<button class="nav-btn" type="button" onclick="showArchivedSession('${escapeJs(item.session_id)}')">${escapeHtml(item.session_id)}（世代 ${escapeHtml(String(item.epoch))}）</button>`).join('');
+      } catch (err) { container.textContent = err.message; }
+    }
+
+    async function showArchivedSession(sessionId) {
+      const container = document.getElementById('archivesList');
+      try {
+        const data = await api('/api/v1/archived-sessions/' + encodeURIComponent(sessionId));
+        const runs = data.runs || [];
+        container.innerHTML = `<p><code>${escapeHtml(sessionId)}</code></p>` +
+          (runs.length ? runs.map(run => `<p>${escapeHtml(run.command || run.text || run.run_id)}：${escapeHtml(stageLabel(run.stage))}</p>`).join('') : '<p>此归档没有任务。</p>');
+      } catch (err) { container.textContent = err.message; }
     }
 
     async function openLogDir() {
@@ -535,11 +561,6 @@
         credential_required: Boolean(preset && preset.credential_required),
         pending_api_key: apiKey
       });
-      for (const role of ['compiler', 'planner', 'auditor', 'repairer']) {
-        if (!modelConfigDraft.agent_model_plan[role]) {
-          modelConfigDraft.agent_model_plan[role] = {connection_id: connectionId, model_id: models[0]};
-        }
-      }
       document.getElementById('newConnectionModels').value = '';
       document.getElementById('newConnectionKey').value = '';
       renderModelConfiguration();
@@ -552,12 +573,6 @@
       }
       syncRolePlanFromControls();
       modelConfigDraft.connections = modelConfigDraft.connections.filter(item => item.connection_id !== connectionId);
-      const first = modelConfigDraft.connections[0];
-      for (const role of ['compiler', 'planner', 'auditor', 'repairer']) {
-        if (modelConfigDraft.agent_model_plan[role].connection_id === connectionId) {
-          modelConfigDraft.agent_model_plan[role] = {connection_id: first.connection_id, model_id: first.enabled_models[0]};
-        }
-      }
       clearedModelKeys.delete(connectionId);
       renderModelConfiguration();
     }
@@ -586,12 +601,6 @@
       if (key) connection.pending_api_key = key;
       connection.endpoint = card.querySelector('[data-field="endpoint"]').value.trim();
       connection.enabled_models = models;
-      for (const role of ['compiler', 'planner', 'auditor', 'repairer']) {
-        const binding = modelConfigDraft.agent_model_plan[role];
-        if (binding.connection_id === connection.connection_id && !models.includes(binding.model_id)) {
-          binding.model_id = models[0];
-        }
-      }
       renderModelConfiguration();
     }
 
@@ -717,11 +726,6 @@
       const command = input.value.trim();
       if (!command) return;
       input.value = '';
-      // Each task gets its own session (§5: sessions are isolation boundaries
-      // and a task's model context must not leak into the next). Reset the
-      // session id, then reconnect SSE so the EventSource filters to the new
-      // session.
-      resetSessionId();
       transientUserMessage = command;
       transientAssistantMessage = '';
       const execute = true;
@@ -737,6 +741,7 @@
         const target = activeArcMapBridge();
         if (!target) throw new Error('请选择一个已连接的 ArcMap 目标。');
         const payload = {text: command, execute: execute, side_effect_level: 3,
+          model_bindings: taskModelBindings(),
           target_selector: {bridge_pid: target.bridge_pid, bridge_port: target.bridge_port,
             arcmap_pid: target.arcmap_pid, hwnd: target.hwnd,
             deployment_hash: target.deployment_hash}};
@@ -763,6 +768,23 @@
         renderConversation(cachedRuns);
         setStatus(err.message);
       }
+    }
+
+    function taskModelBindings() {
+      if (!modelConfigDraft || !modelConfigDraft.agent_model_plan) {
+        throw new Error('请先配置每个角色的模型。');
+      }
+      const connections = new Map(modelConfigDraft.connections.map(item => [item.connection_id, item]));
+      const result = {};
+      for (const role of ['compiler', 'planner', 'auditor', 'repairer']) {
+        const binding = modelConfigDraft.agent_model_plan[role];
+        const connection = binding && connections.get(binding.connection_id);
+        if (!connection || !connection.enabled_models.includes(binding.model_id)) {
+          throw new Error(`角色 ${role} 的模型配置无效。`);
+        }
+        result[role] = {provider: connection.provider_type, model: binding.model_id};
+      }
+      return result;
     }
 
     // §14: SSE-driven run wait. Replaces the old 250ms-2000ms backoff poll.
@@ -891,7 +913,10 @@
     }
 
     async function clearConversation() {
-      resetSessionId();
+      const data = await api('/api/v1/active-session/clear', {method: 'POST', body: '{}'});
+      activeSession = data;
+      csrfToken = data.csrf_token;
+      if (typeof connectEventStream === 'function') connectEventStream();
       selectedRunId = '';
       transientUserMessage = '';
       transientAssistantMessage = '';

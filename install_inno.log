@@ -1,0 +1,1038 @@
+﻿2026-08-13 12:14:12.719   Log opened. (Time zone: UTC+08:00)
+2026-08-13 12:14:12.719   Setup version: Inno Setup version 6.7.2
+2026-08-13 12:14:12.719   Original Setup EXE: D:\Development\Python\Arcpy\release\GeoPilotSetup-2.0.0.exe
+2026-08-13 12:14:12.719   Setup command line: /SL5="$590DBA,17481414,893952,D:\Development\Python\Arcpy\release\GeoPilotSetup-2.0.0.exe" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOG="D:\Development\Python\Arcpy\install_inno.log"
+2026-08-13 12:14:12.719   Compatibility mode: Yes (DetectorsAppHealth DetectorsAdminProtection Installer)
+2026-08-13 12:14:12.719   Windows version: 10.0.26200
+2026-08-13 12:14:12.729   Windows architecture: x64 (64-bit)
+2026-08-13 12:14:12.729   Machine types supported by system: x86 x64
+2026-08-13 12:14:12.729   User privileges: Administrative
+2026-08-13 12:14:12.731   Administrative install mode: Yes
+2026-08-13 12:14:12.731   Install mode root key: HKEY_LOCAL_MACHINE
+2026-08-13 12:14:12.731   64-bit install mode: Yes
+2026-08-13 12:14:12.731   RedirectionGuard status for current process: Enabled in enforcing mode
+2026-08-13 12:14:12.732   Created protected temporary directory: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp
+2026-08-13 12:14:12.843   Found 55 files to register with RestartManager.
+2026-08-13 12:14:12.843   Calling RestartManager's RmGetList.
+2026-08-13 12:14:12.851   RmGetList finished successfully.
+2026-08-13 12:14:12.851   RestartManager found no applications using one of our files.
+2026-08-13 12:14:12.856   Starting the installation process.
+2026-08-13 12:14:12.859   Directory for uninstall files: C:\Program Files\GeoPilot
+2026-08-13 12:14:12.870   Will append to existing uninstall log: C:\Program Files\GeoPilot\unins000.dat
+2026-08-13 12:14:12.872   -- File entry --
+2026-08-13 12:14:12.872   Dest filename: C:\Program Files\GeoPilot\unins000.exe
+2026-08-13 12:14:12.872   Non-default bitness: 32-bit
+2026-08-13 12:14:12.873   Time stamp of our file: 2026-08-13 12:14:12.479
+2026-08-13 12:14:12.873   Dest file exists.
+2026-08-13 12:14:12.873   Time stamp of existing file: 2026-08-13 09:27:38.736
+2026-08-13 12:14:12.873   Version of our file: 51.1054.0.0
+2026-08-13 12:14:12.972   Version of existing file: 51.1054.0.0
+2026-08-13 12:14:12.972   Installing the file.
+2026-08-13 12:14:12.977   Leaving temporary file in place for now.
+2026-08-13 12:14:12.977   -- File entry --
+2026-08-13 12:14:12.977   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\release_manifest.json
+2026-08-13 12:14:12.977   Time stamp of our file: 2026-08-13 12:07:48.000
+2026-08-13 12:14:12.977   Installing the file.
+2026-08-13 12:14:12.977   Creating directory: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage
+2026-08-13 12:14:12.978   Successfully installed the file.
+2026-08-13 12:14:12.978   -- File entry --
+2026-08-13 12:14:12.978   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\OpenAssistantWeb.cmd
+2026-08-13 12:14:12.978   Time stamp of our file: 2026-08-13 12:07:48.000
+2026-08-13 12:14:12.978   Installing the file.
+2026-08-13 12:14:12.978   Creating directory: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app
+2026-08-13 12:14:12.979   Successfully installed the file.
+2026-08-13 12:14:12.979   -- File entry --
+2026-08-13 12:14:12.979   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\StartGateway.cmd
+2026-08-13 12:14:12.979   Time stamp of our file: 2026-08-13 12:07:48.000
+2026-08-13 12:14:12.979   Installing the file.
+2026-08-13 12:14:12.980   Successfully installed the file.
+2026-08-13 12:14:12.980   -- File entry --
+2026-08-13 12:14:12.980   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\uninstall.ico
+2026-08-13 12:14:12.980   Time stamp of our file: 2026-05-22 09:50:02.000
+2026-08-13 12:14:12.980   Installing the file.
+2026-08-13 12:14:12.980   Successfully installed the file.
+2026-08-13 12:14:12.980   -- File entry --
+2026-08-13 12:14:12.980   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\VERSION
+2026-08-13 12:14:12.980   Time stamp of our file: 2026-08-10 04:25:08.000
+2026-08-13 12:14:12.980   Installing the file.
+2026-08-13 12:14:12.981   Successfully installed the file.
+2026-08-13 12:14:12.981   -- File entry --
+2026-08-13 12:14:12.981   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\arcmap_runtime_py2\acceptance_probe.py
+2026-08-13 12:14:12.981   Time stamp of our file: 2026-08-10 22:00:30.000
+2026-08-13 12:14:12.981   Installing the file.
+2026-08-13 12:14:12.981   Creating directory: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\arcmap_runtime_py2
+2026-08-13 12:14:12.982   Successfully installed the file.
+2026-08-13 12:14:12.982   -- File entry --
+2026-08-13 12:14:12.982   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\arcmap_runtime_py2\arcmap_desktop_selection.py
+2026-08-13 12:14:12.982   Time stamp of our file: 2026-07-31 15:04:06.000
+2026-08-13 12:14:12.982   Installing the file.
+2026-08-13 12:14:12.983   Successfully installed the file.
+2026-08-13 12:14:12.983   -- File entry --
+2026-08-13 12:14:12.983   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\arcmap_runtime_py2\arcmap_ui_dispatch.py
+2026-08-13 12:14:12.983   Time stamp of our file: 2026-08-12 23:04:40.000
+2026-08-13 12:14:12.983   Installing the file.
+2026-08-13 12:14:12.984   Successfully installed the file.
+2026-08-13 12:14:12.984   -- File entry --
+2026-08-13 12:14:12.984   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\arcmap_runtime_py2\artifact_observation.py
+2026-08-13 12:14:12.984   Time stamp of our file: 2026-08-10 19:06:14.000
+2026-08-13 12:14:12.984   Installing the file.
+2026-08-13 12:14:12.985   Successfully installed the file.
+2026-08-13 12:14:12.985   -- File entry --
+2026-08-13 12:14:12.985   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\arcmap_runtime_py2\bridge_process.py
+2026-08-13 12:14:12.985   Time stamp of our file: 2026-08-10 11:34:12.000
+2026-08-13 12:14:12.985   Installing the file.
+2026-08-13 12:14:12.985   Successfully installed the file.
+2026-08-13 12:14:12.985   -- File entry --
+2026-08-13 12:14:12.985   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\arcmap_runtime_py2\context_reader.py
+2026-08-13 12:14:12.985   Time stamp of our file: 2026-08-12 12:31:56.000
+2026-08-13 12:14:12.985   Installing the file.
+2026-08-13 12:14:12.986   Successfully installed the file.
+2026-08-13 12:14:12.986   -- File entry --
+2026-08-13 12:14:12.986   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\arcmap_runtime_py2\deployment_identity.json
+2026-08-13 12:14:12.986   Time stamp of our file: 2026-08-13 12:07:48.000
+2026-08-13 12:14:12.986   Installing the file.
+2026-08-13 12:14:12.987   Successfully installed the file.
+2026-08-13 12:14:12.987   -- File entry --
+2026-08-13 12:14:12.987   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\arcmap_runtime_py2\deployment_identity.py
+2026-08-13 12:14:12.987   Time stamp of our file: 2026-08-09 21:58:40.000
+2026-08-13 12:14:12.987   Installing the file.
+2026-08-13 12:14:12.988   Successfully installed the file.
+2026-08-13 12:14:12.988   -- File entry --
+2026-08-13 12:14:12.988   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\arcmap_runtime_py2\exception_text.py
+2026-08-13 12:14:12.988   Time stamp of our file: 2026-08-01 10:42:58.000
+2026-08-13 12:14:12.988   Installing the file.
+2026-08-13 12:14:12.988   Successfully installed the file.
+2026-08-13 12:14:12.988   -- File entry --
+2026-08-13 12:14:12.988   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\arcmap_runtime_py2\execution_outbox.py
+2026-08-13 12:14:12.988   Time stamp of our file: 2026-08-10 02:39:16.000
+2026-08-13 12:14:12.988   Installing the file.
+2026-08-13 12:14:12.989   Successfully installed the file.
+2026-08-13 12:14:12.989   -- File entry --
+2026-08-13 12:14:12.990   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\arcmap_runtime_py2\execution_session.py
+2026-08-13 12:14:12.990   Time stamp of our file: 2026-08-10 18:26:58.000
+2026-08-13 12:14:12.990   Installing the file.
+2026-08-13 12:14:12.990   Successfully installed the file.
+2026-08-13 12:14:12.990   -- File entry --
+2026-08-13 12:14:12.990   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\arcmap_runtime_py2\gateway_client.py
+2026-08-13 12:14:12.990   Time stamp of our file: 2026-08-10 06:36:58.000
+2026-08-13 12:14:12.990   Installing the file.
+2026-08-13 12:14:12.991   Successfully installed the file.
+2026-08-13 12:14:12.991   -- File entry --
+2026-08-13 12:14:12.991   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\arcmap_runtime_py2\map_state_observation.py
+2026-08-13 12:14:12.991   Time stamp of our file: 2026-08-10 00:38:44.000
+2026-08-13 12:14:12.991   Installing the file.
+2026-08-13 12:14:12.992   Successfully installed the file.
+2026-08-13 12:14:12.992   -- File entry --
+2026-08-13 12:14:12.992   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\arcmap_runtime_py2\path_utils.py
+2026-08-13 12:14:12.992   Time stamp of our file: 2026-07-31 15:49:38.000
+2026-08-13 12:14:12.992   Installing the file.
+2026-08-13 12:14:12.993   Successfully installed the file.
+2026-08-13 12:14:12.993   -- File entry --
+2026-08-13 12:14:12.993   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\arcmap_runtime_py2\release.py
+2026-08-13 12:14:12.993   Time stamp of our file: 2026-08-10 04:25:08.000
+2026-08-13 12:14:12.993   Installing the file.
+2026-08-13 12:14:12.994   Successfully installed the file.
+2026-08-13 12:14:12.994   -- File entry --
+2026-08-13 12:14:12.994   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\arcmap_runtime_py2\runtime.py
+2026-08-13 12:14:12.994   Time stamp of our file: 2026-08-12 23:05:52.000
+2026-08-13 12:14:12.994   Installing the file.
+2026-08-13 12:14:12.995   Successfully installed the file.
+2026-08-13 12:14:12.995   -- File entry --
+2026-08-13 12:14:12.995   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\arcmap_runtime_py2\runtime_gate.py
+2026-08-13 12:14:12.995   Time stamp of our file: 2026-08-10 19:14:56.000
+2026-08-13 12:14:12.995   Installing the file.
+2026-08-13 12:14:12.995   Successfully installed the file.
+2026-08-13 12:14:12.995   -- File entry --
+2026-08-13 12:14:12.995   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\arcmap_runtime_py2\semantic_acceptance.py
+2026-08-13 12:14:12.995   Time stamp of our file: 2026-08-12 12:46:46.000
+2026-08-13 12:14:12.995   Installing the file.
+2026-08-13 12:14:12.997   Successfully installed the file.
+2026-08-13 12:14:12.997   -- File entry --
+2026-08-13 12:14:12.997   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\arcmap_runtime_py2\workflow_executor.py
+2026-08-13 12:14:12.997   Time stamp of our file: 2026-08-10 22:01:22.000
+2026-08-13 12:14:12.997   Installing the file.
+2026-08-13 12:14:12.998   Successfully installed the file.
+2026-08-13 12:14:12.998   -- File entry --
+2026-08-13 12:14:12.998   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\arcmap_runtime_py2\__init__.py
+2026-08-13 12:14:12.998   Time stamp of our file: 2026-05-19 14:31:54.000
+2026-08-13 12:14:12.998   Installing the file.
+2026-08-13 12:14:12.998   Successfully installed the file.
+2026-08-13 12:14:12.998   -- File entry --
+2026-08-13 12:14:12.998   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\arcmap_runtime_py2\operations\analysis_ops.py
+2026-08-13 12:14:12.999   Time stamp of our file: 2026-08-10 22:01:22.000
+2026-08-13 12:14:12.999   Installing the file.
+2026-08-13 12:14:12.999   Creating directory: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\arcmap_runtime_py2\operations
+2026-08-13 12:14:12.999   Successfully installed the file.
+2026-08-13 12:14:12.999   -- File entry --
+2026-08-13 12:14:13.000   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\arcmap_runtime_py2\operations\artifact_ops.py
+2026-08-13 12:14:13.000   Time stamp of our file: 2026-08-10 19:01:08.000
+2026-08-13 12:14:13.000   Installing the file.
+2026-08-13 12:14:13.000   Successfully installed the file.
+2026-08-13 12:14:13.000   -- File entry --
+2026-08-13 12:14:13.000   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\arcmap_runtime_py2\operations\common.py
+2026-08-13 12:14:13.000   Time stamp of our file: 2026-08-10 19:01:08.000
+2026-08-13 12:14:13.000   Installing the file.
+2026-08-13 12:14:13.001   Successfully installed the file.
+2026-08-13 12:14:13.001   -- File entry --
+2026-08-13 12:14:13.001   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\arcmap_runtime_py2\operations\condition_utils.py
+2026-08-13 12:14:13.001   Time stamp of our file: 2026-08-10 07:12:02.000
+2026-08-13 12:14:13.001   Installing the file.
+2026-08-13 12:14:13.002   Successfully installed the file.
+2026-08-13 12:14:13.002   -- File entry --
+2026-08-13 12:14:13.002   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\arcmap_runtime_py2\operations\data_management_ops.py
+2026-08-13 12:14:13.002   Time stamp of our file: 2026-08-10 19:01:08.000
+2026-08-13 12:14:13.002   Installing the file.
+2026-08-13 12:14:13.002   Successfully installed the file.
+2026-08-13 12:14:13.002   -- File entry --
+2026-08-13 12:14:13.003   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\arcmap_runtime_py2\operations\edit_geometry_ops.py
+2026-08-13 12:14:13.003   Time stamp of our file: 2026-08-10 22:02:08.000
+2026-08-13 12:14:13.003   Installing the file.
+2026-08-13 12:14:13.003   Successfully installed the file.
+2026-08-13 12:14:13.003   -- File entry --
+2026-08-13 12:14:13.003   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\arcmap_runtime_py2\operations\layer_ops.py
+2026-08-13 12:14:13.003   Time stamp of our file: 2026-08-04 12:28:46.000
+2026-08-13 12:14:13.003   Installing the file.
+2026-08-13 12:14:13.004   Successfully installed the file.
+2026-08-13 12:14:13.004   -- File entry --
+2026-08-13 12:14:13.004   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\arcmap_runtime_py2\operations\layout_ops.py
+2026-08-13 12:14:13.004   Time stamp of our file: 2026-08-10 00:56:30.000
+2026-08-13 12:14:13.004   Installing the file.
+2026-08-13 12:14:13.005   Successfully installed the file.
+2026-08-13 12:14:13.005   -- File entry --
+2026-08-13 12:14:13.005   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\arcmap_runtime_py2\operations\map_ops.py
+2026-08-13 12:14:13.005   Time stamp of our file: 2026-08-10 00:37:00.000
+2026-08-13 12:14:13.005   Installing the file.
+2026-08-13 12:14:13.006   Successfully installed the file.
+2026-08-13 12:14:13.006   -- File entry --
+2026-08-13 12:14:13.006   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\arcmap_runtime_py2\operations\selection_ops.py
+2026-08-13 12:14:13.006   Time stamp of our file: 2026-08-10 22:01:22.000
+2026-08-13 12:14:13.006   Installing the file.
+2026-08-13 12:14:13.006   Successfully installed the file.
+2026-08-13 12:14:13.007   -- File entry --
+2026-08-13 12:14:13.007   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\arcmap_runtime_py2\operations\table_ops.py
+2026-08-13 12:14:13.007   Time stamp of our file: 2026-08-10 22:02:16.000
+2026-08-13 12:14:13.007   Installing the file.
+2026-08-13 12:14:13.007   Successfully installed the file.
+2026-08-13 12:14:13.007   -- File entry --
+2026-08-13 12:14:13.007   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\arcmap_runtime_py2\operations\__init__.py
+2026-08-13 12:14:13.007   Time stamp of our file: 2026-05-19 10:52:22.000
+2026-08-13 12:14:13.007   Installing the file.
+2026-08-13 12:14:13.008   Successfully installed the file.
+2026-08-13 12:14:13.008   -- File entry --
+2026-08-13 12:14:13.008   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\bridge\ArcMapBridge.build
+2026-08-13 12:14:13.008   Time stamp of our file: 2026-08-13 12:07:48.000
+2026-08-13 12:14:13.008   Installing the file.
+2026-08-13 12:14:13.008   Creating directory: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\bridge
+2026-08-13 12:14:13.009   Successfully installed the file.
+2026-08-13 12:14:13.009   -- File entry --
+2026-08-13 12:14:13.009   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\bridge\ArcMapBridge.exe
+2026-08-13 12:14:13.009   Time stamp of our file: 2026-08-13 12:07:48.000
+2026-08-13 12:14:13.009   Installing the file.
+2026-08-13 12:14:13.010   Successfully installed the file.
+2026-08-13 12:14:13.010   -- File entry --
+2026-08-13 12:14:13.010   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\bridge\deployment_identity.json
+2026-08-13 12:14:13.010   Time stamp of our file: 2026-08-13 12:07:48.000
+2026-08-13 12:14:13.010   Installing the file.
+2026-08-13 12:14:13.011   Successfully installed the file.
+2026-08-13 12:14:13.011   -- File entry --
+2026-08-13 12:14:13.011   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\bridge\Newtonsoft.Json.dll
+2026-08-13 12:14:13.011   Time stamp of our file: 2023-03-08 15:09:56.000
+2026-08-13 12:14:13.011   Installing the file.
+2026-08-13 12:14:13.023   Successfully installed the file.
+2026-08-13 12:14:13.023   -- File entry --
+2026-08-13 12:14:13.023   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\bridge\runtime_gate.schema.json
+2026-08-13 12:14:13.023   Time stamp of our file: 2026-08-10 19:14:56.000
+2026-08-13 12:14:13.023   Installing the file.
+2026-08-13 12:14:13.024   Successfully installed the file.
+2026-08-13 12:14:13.024   -- File entry --
+2026-08-13 12:14:13.024   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\ArcMapAIAssistantGateway.exe
+2026-08-13 12:14:13.024   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.024   Installing the file.
+2026-08-13 12:14:13.024   Creating directory: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway
+2026-08-13 12:14:13.080   Successfully installed the file.
+2026-08-13 12:14:13.080   -- File entry --
+2026-08-13 12:14:13.080   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\deployment_identity.json
+2026-08-13 12:14:13.080   Time stamp of our file: 2026-08-13 12:07:48.000
+2026-08-13 12:14:13.080   Installing the file.
+2026-08-13 12:14:13.081   Successfully installed the file.
+2026-08-13 12:14:13.081   -- File entry --
+2026-08-13 12:14:13.081   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\api-ms-win-core-console-l1-1-0.dll
+2026-08-13 12:14:13.081   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.081   Installing the file.
+2026-08-13 12:14:13.081   Creating directory: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal
+2026-08-13 12:14:13.082   Successfully installed the file.
+2026-08-13 12:14:13.082   -- File entry --
+2026-08-13 12:14:13.082   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\api-ms-win-core-datetime-l1-1-0.dll
+2026-08-13 12:14:13.082   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.082   Installing the file.
+2026-08-13 12:14:13.083   Successfully installed the file.
+2026-08-13 12:14:13.083   -- File entry --
+2026-08-13 12:14:13.083   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\api-ms-win-core-debug-l1-1-0.dll
+2026-08-13 12:14:13.083   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.083   Installing the file.
+2026-08-13 12:14:13.084   Successfully installed the file.
+2026-08-13 12:14:13.085   -- File entry --
+2026-08-13 12:14:13.085   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\api-ms-win-core-errorhandling-l1-1-0.dll
+2026-08-13 12:14:13.085   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.085   Installing the file.
+2026-08-13 12:14:13.086   Successfully installed the file.
+2026-08-13 12:14:13.086   -- File entry --
+2026-08-13 12:14:13.086   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\api-ms-win-core-fibers-l1-1-0.dll
+2026-08-13 12:14:13.086   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.086   Installing the file.
+2026-08-13 12:14:13.087   Successfully installed the file.
+2026-08-13 12:14:13.087   -- File entry --
+2026-08-13 12:14:13.087   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\api-ms-win-core-fibers-l1-1-1.dll
+2026-08-13 12:14:13.087   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.087   Installing the file.
+2026-08-13 12:14:13.088   Successfully installed the file.
+2026-08-13 12:14:13.088   -- File entry --
+2026-08-13 12:14:13.088   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\api-ms-win-core-file-l1-1-0.dll
+2026-08-13 12:14:13.088   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.088   Installing the file.
+2026-08-13 12:14:13.089   Successfully installed the file.
+2026-08-13 12:14:13.089   -- File entry --
+2026-08-13 12:14:13.089   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\api-ms-win-core-file-l1-2-0.dll
+2026-08-13 12:14:13.089   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.089   Installing the file.
+2026-08-13 12:14:13.090   Successfully installed the file.
+2026-08-13 12:14:13.090   -- File entry --
+2026-08-13 12:14:13.090   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\api-ms-win-core-file-l2-1-0.dll
+2026-08-13 12:14:13.091   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.091   Installing the file.
+2026-08-13 12:14:13.091   Successfully installed the file.
+2026-08-13 12:14:13.091   -- File entry --
+2026-08-13 12:14:13.092   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\api-ms-win-core-handle-l1-1-0.dll
+2026-08-13 12:14:13.092   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.092   Installing the file.
+2026-08-13 12:14:13.093   Successfully installed the file.
+2026-08-13 12:14:13.093   -- File entry --
+2026-08-13 12:14:13.093   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\api-ms-win-core-heap-l1-1-0.dll
+2026-08-13 12:14:13.093   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.093   Installing the file.
+2026-08-13 12:14:13.094   Successfully installed the file.
+2026-08-13 12:14:13.094   -- File entry --
+2026-08-13 12:14:13.094   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\api-ms-win-core-interlocked-l1-1-0.dll
+2026-08-13 12:14:13.094   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.094   Installing the file.
+2026-08-13 12:14:13.095   Successfully installed the file.
+2026-08-13 12:14:13.095   -- File entry --
+2026-08-13 12:14:13.095   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\api-ms-win-core-kernel32-legacy-l1-1-1.dll
+2026-08-13 12:14:13.095   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.095   Installing the file.
+2026-08-13 12:14:13.096   Successfully installed the file.
+2026-08-13 12:14:13.096   -- File entry --
+2026-08-13 12:14:13.096   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\api-ms-win-core-libraryloader-l1-1-0.dll
+2026-08-13 12:14:13.096   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.096   Installing the file.
+2026-08-13 12:14:13.097   Successfully installed the file.
+2026-08-13 12:14:13.097   -- File entry --
+2026-08-13 12:14:13.097   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\api-ms-win-core-localization-l1-2-0.dll
+2026-08-13 12:14:13.097   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.097   Installing the file.
+2026-08-13 12:14:13.098   Successfully installed the file.
+2026-08-13 12:14:13.098   -- File entry --
+2026-08-13 12:14:13.098   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\api-ms-win-core-memory-l1-1-0.dll
+2026-08-13 12:14:13.098   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.098   Installing the file.
+2026-08-13 12:14:13.099   Successfully installed the file.
+2026-08-13 12:14:13.099   -- File entry --
+2026-08-13 12:14:13.099   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\api-ms-win-core-namedpipe-l1-1-0.dll
+2026-08-13 12:14:13.099   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.099   Installing the file.
+2026-08-13 12:14:13.100   Successfully installed the file.
+2026-08-13 12:14:13.100   -- File entry --
+2026-08-13 12:14:13.101   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\api-ms-win-core-processenvironment-l1-1-0.dll
+2026-08-13 12:14:13.101   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.101   Installing the file.
+2026-08-13 12:14:13.102   Successfully installed the file.
+2026-08-13 12:14:13.102   -- File entry --
+2026-08-13 12:14:13.102   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\api-ms-win-core-processthreads-l1-1-0.dll
+2026-08-13 12:14:13.102   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.102   Installing the file.
+2026-08-13 12:14:13.103   Successfully installed the file.
+2026-08-13 12:14:13.103   -- File entry --
+2026-08-13 12:14:13.103   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\api-ms-win-core-processthreads-l1-1-1.dll
+2026-08-13 12:14:13.103   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.103   Installing the file.
+2026-08-13 12:14:13.104   Successfully installed the file.
+2026-08-13 12:14:13.104   -- File entry --
+2026-08-13 12:14:13.104   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\api-ms-win-core-profile-l1-1-0.dll
+2026-08-13 12:14:13.104   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.104   Installing the file.
+2026-08-13 12:14:13.105   Successfully installed the file.
+2026-08-13 12:14:13.105   -- File entry --
+2026-08-13 12:14:13.105   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\api-ms-win-core-rtlsupport-l1-1-0.dll
+2026-08-13 12:14:13.105   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.105   Installing the file.
+2026-08-13 12:14:13.107   Successfully installed the file.
+2026-08-13 12:14:13.107   -- File entry --
+2026-08-13 12:14:13.107   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\api-ms-win-core-string-l1-1-0.dll
+2026-08-13 12:14:13.107   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.107   Installing the file.
+2026-08-13 12:14:13.108   Successfully installed the file.
+2026-08-13 12:14:13.108   -- File entry --
+2026-08-13 12:14:13.108   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\api-ms-win-core-synch-l1-1-0.dll
+2026-08-13 12:14:13.108   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.108   Installing the file.
+2026-08-13 12:14:13.110   Successfully installed the file.
+2026-08-13 12:14:13.110   -- File entry --
+2026-08-13 12:14:13.110   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\api-ms-win-core-synch-l1-2-0.dll
+2026-08-13 12:14:13.110   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.110   Installing the file.
+2026-08-13 12:14:13.110   Successfully installed the file.
+2026-08-13 12:14:13.110   -- File entry --
+2026-08-13 12:14:13.110   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\api-ms-win-core-sysinfo-l1-1-0.dll
+2026-08-13 12:14:13.110   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.110   Installing the file.
+2026-08-13 12:14:13.111   Successfully installed the file.
+2026-08-13 12:14:13.111   -- File entry --
+2026-08-13 12:14:13.111   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\api-ms-win-core-sysinfo-l1-2-0.dll
+2026-08-13 12:14:13.111   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.111   Installing the file.
+2026-08-13 12:14:13.113   Successfully installed the file.
+2026-08-13 12:14:13.113   -- File entry --
+2026-08-13 12:14:13.113   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\api-ms-win-core-timezone-l1-1-0.dll
+2026-08-13 12:14:13.113   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.113   Installing the file.
+2026-08-13 12:14:13.114   Successfully installed the file.
+2026-08-13 12:14:13.114   -- File entry --
+2026-08-13 12:14:13.114   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\api-ms-win-core-util-l1-1-0.dll
+2026-08-13 12:14:13.114   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.114   Installing the file.
+2026-08-13 12:14:13.116   Successfully installed the file.
+2026-08-13 12:14:13.116   -- File entry --
+2026-08-13 12:14:13.116   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\api-ms-win-crt-conio-l1-1-0.dll
+2026-08-13 12:14:13.116   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.116   Installing the file.
+2026-08-13 12:14:13.117   Successfully installed the file.
+2026-08-13 12:14:13.117   -- File entry --
+2026-08-13 12:14:13.117   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\api-ms-win-crt-convert-l1-1-0.dll
+2026-08-13 12:14:13.117   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.117   Installing the file.
+2026-08-13 12:14:13.118   Successfully installed the file.
+2026-08-13 12:14:13.118   -- File entry --
+2026-08-13 12:14:13.118   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\api-ms-win-crt-environment-l1-1-0.dll
+2026-08-13 12:14:13.118   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.118   Installing the file.
+2026-08-13 12:14:13.119   Successfully installed the file.
+2026-08-13 12:14:13.119   -- File entry --
+2026-08-13 12:14:13.119   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\api-ms-win-crt-filesystem-l1-1-0.dll
+2026-08-13 12:14:13.119   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.119   Installing the file.
+2026-08-13 12:14:13.120   Successfully installed the file.
+2026-08-13 12:14:13.120   -- File entry --
+2026-08-13 12:14:13.120   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\api-ms-win-crt-heap-l1-1-0.dll
+2026-08-13 12:14:13.120   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.120   Installing the file.
+2026-08-13 12:14:13.121   Successfully installed the file.
+2026-08-13 12:14:13.121   -- File entry --
+2026-08-13 12:14:13.121   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\api-ms-win-crt-locale-l1-1-0.dll
+2026-08-13 12:14:13.121   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.121   Installing the file.
+2026-08-13 12:14:13.122   Successfully installed the file.
+2026-08-13 12:14:13.122   -- File entry --
+2026-08-13 12:14:13.122   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\api-ms-win-crt-math-l1-1-0.dll
+2026-08-13 12:14:13.122   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.122   Installing the file.
+2026-08-13 12:14:13.123   Successfully installed the file.
+2026-08-13 12:14:13.123   -- File entry --
+2026-08-13 12:14:13.123   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\api-ms-win-crt-process-l1-1-0.dll
+2026-08-13 12:14:13.124   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.124   Installing the file.
+2026-08-13 12:14:13.124   Successfully installed the file.
+2026-08-13 12:14:13.125   -- File entry --
+2026-08-13 12:14:13.125   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\api-ms-win-crt-runtime-l1-1-0.dll
+2026-08-13 12:14:13.125   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.125   Installing the file.
+2026-08-13 12:14:13.126   Successfully installed the file.
+2026-08-13 12:14:13.126   -- File entry --
+2026-08-13 12:14:13.126   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\api-ms-win-crt-stdio-l1-1-0.dll
+2026-08-13 12:14:13.126   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.126   Installing the file.
+2026-08-13 12:14:13.127   Successfully installed the file.
+2026-08-13 12:14:13.127   -- File entry --
+2026-08-13 12:14:13.127   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\api-ms-win-crt-string-l1-1-0.dll
+2026-08-13 12:14:13.127   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.127   Installing the file.
+2026-08-13 12:14:13.128   Successfully installed the file.
+2026-08-13 12:14:13.128   -- File entry --
+2026-08-13 12:14:13.128   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\api-ms-win-crt-time-l1-1-0.dll
+2026-08-13 12:14:13.128   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.128   Installing the file.
+2026-08-13 12:14:13.130   Successfully installed the file.
+2026-08-13 12:14:13.130   -- File entry --
+2026-08-13 12:14:13.130   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\api-ms-win-crt-utility-l1-1-0.dll
+2026-08-13 12:14:13.130   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.130   Installing the file.
+2026-08-13 12:14:13.131   Successfully installed the file.
+2026-08-13 12:14:13.131   -- File entry --
+2026-08-13 12:14:13.131   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\base_library.zip
+2026-08-13 12:14:13.131   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.131   Installing the file.
+2026-08-13 12:14:13.149   Successfully installed the file.
+2026-08-13 12:14:13.149   -- File entry --
+2026-08-13 12:14:13.149   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\libcrypto-3.dll
+2026-08-13 12:14:13.149   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.149   Installing the file.
+2026-08-13 12:14:13.219   Successfully installed the file.
+2026-08-13 12:14:13.219   -- File entry --
+2026-08-13 12:14:13.219   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\libffi-8.dll
+2026-08-13 12:14:13.219   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.219   Installing the file.
+2026-08-13 12:14:13.221   Successfully installed the file.
+2026-08-13 12:14:13.221   -- File entry --
+2026-08-13 12:14:13.221   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\libssl-3.dll
+2026-08-13 12:14:13.221   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.221   Installing the file.
+2026-08-13 12:14:13.233   Successfully installed the file.
+2026-08-13 12:14:13.233   -- File entry --
+2026-08-13 12:14:13.233   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\pyexpat.pyd
+2026-08-13 12:14:13.233   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.233   Installing the file.
+2026-08-13 12:14:13.237   Successfully installed the file.
+2026-08-13 12:14:13.238   -- File entry --
+2026-08-13 12:14:13.238   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\python3.dll
+2026-08-13 12:14:13.238   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.238   Installing the file.
+2026-08-13 12:14:13.240   Successfully installed the file.
+2026-08-13 12:14:13.240   -- File entry --
+2026-08-13 12:14:13.240   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\python311.dll
+2026-08-13 12:14:13.240   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.240   Installing the file.
+2026-08-13 12:14:13.327   Successfully installed the file.
+2026-08-13 12:14:13.327   -- File entry --
+2026-08-13 12:14:13.327   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\select.pyd
+2026-08-13 12:14:13.327   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.327   Installing the file.
+2026-08-13 12:14:13.328   Successfully installed the file.
+2026-08-13 12:14:13.328   -- File entry --
+2026-08-13 12:14:13.328   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\sqlite3.dll
+2026-08-13 12:14:13.328   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.328   Installing the file.
+2026-08-13 12:14:13.358   Successfully installed the file.
+2026-08-13 12:14:13.358   -- File entry --
+2026-08-13 12:14:13.358   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\ucrtbase.dll
+2026-08-13 12:14:13.358   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.358   Installing the file.
+2026-08-13 12:14:13.383   Successfully installed the file.
+2026-08-13 12:14:13.383   -- File entry --
+2026-08-13 12:14:13.383   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\unicodedata.pyd
+2026-08-13 12:14:13.383   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.383   Installing the file.
+2026-08-13 12:14:13.401   Successfully installed the file.
+2026-08-13 12:14:13.401   -- File entry --
+2026-08-13 12:14:13.401   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\VCRUNTIME140.dll
+2026-08-13 12:14:13.401   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.401   Installing the file.
+2026-08-13 12:14:13.404   Successfully installed the file.
+2026-08-13 12:14:13.404   -- File entry --
+2026-08-13 12:14:13.404   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\VCRUNTIME140_1.dll
+2026-08-13 12:14:13.404   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.405   Installing the file.
+2026-08-13 12:14:13.406   Successfully installed the file.
+2026-08-13 12:14:13.406   -- File entry --
+2026-08-13 12:14:13.406   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\VERSION
+2026-08-13 12:14:13.407   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.407   Installing the file.
+2026-08-13 12:14:13.407   Successfully installed the file.
+2026-08-13 12:14:13.407   -- File entry --
+2026-08-13 12:14:13.407   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\_asyncio.pyd
+2026-08-13 12:14:13.407   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.407   Installing the file.
+2026-08-13 12:14:13.409   Successfully installed the file.
+2026-08-13 12:14:13.409   -- File entry --
+2026-08-13 12:14:13.409   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\_bz2.pyd
+2026-08-13 12:14:13.409   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.409   Installing the file.
+2026-08-13 12:14:13.411   Successfully installed the file.
+2026-08-13 12:14:13.411   -- File entry --
+2026-08-13 12:14:13.411   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\_ctypes.pyd
+2026-08-13 12:14:13.411   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.411   Installing the file.
+2026-08-13 12:14:13.415   Successfully installed the file.
+2026-08-13 12:14:13.415   -- File entry --
+2026-08-13 12:14:13.415   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\_decimal.pyd
+2026-08-13 12:14:13.415   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.415   Installing the file.
+2026-08-13 12:14:13.420   Successfully installed the file.
+2026-08-13 12:14:13.420   -- File entry --
+2026-08-13 12:14:13.420   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\_elementtree.pyd
+2026-08-13 12:14:13.420   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.420   Installing the file.
+2026-08-13 12:14:13.423   Successfully installed the file.
+2026-08-13 12:14:13.423   -- File entry --
+2026-08-13 12:14:13.423   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\_hashlib.pyd
+2026-08-13 12:14:13.423   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.423   Installing the file.
+2026-08-13 12:14:13.425   Successfully installed the file.
+2026-08-13 12:14:13.425   -- File entry --
+2026-08-13 12:14:13.425   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\_lzma.pyd
+2026-08-13 12:14:13.425   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.425   Installing the file.
+2026-08-13 12:14:13.430   Successfully installed the file.
+2026-08-13 12:14:13.430   -- File entry --
+2026-08-13 12:14:13.430   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\_multiprocessing.pyd
+2026-08-13 12:14:13.430   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.430   Installing the file.
+2026-08-13 12:14:13.431   Successfully installed the file.
+2026-08-13 12:14:13.431   -- File entry --
+2026-08-13 12:14:13.431   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\_overlapped.pyd
+2026-08-13 12:14:13.431   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.431   Installing the file.
+2026-08-13 12:14:13.433   Successfully installed the file.
+2026-08-13 12:14:13.433   -- File entry --
+2026-08-13 12:14:13.433   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\_queue.pyd
+2026-08-13 12:14:13.433   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.433   Installing the file.
+2026-08-13 12:14:13.434   Successfully installed the file.
+2026-08-13 12:14:13.434   -- File entry --
+2026-08-13 12:14:13.434   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\_socket.pyd
+2026-08-13 12:14:13.434   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.434   Installing the file.
+2026-08-13 12:14:13.436   Successfully installed the file.
+2026-08-13 12:14:13.436   -- File entry --
+2026-08-13 12:14:13.436   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\_sqlite3.pyd
+2026-08-13 12:14:13.436   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.436   Installing the file.
+2026-08-13 12:14:13.439   Successfully installed the file.
+2026-08-13 12:14:13.439   -- File entry --
+2026-08-13 12:14:13.439   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\_ssl.pyd
+2026-08-13 12:14:13.439   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.439   Installing the file.
+2026-08-13 12:14:13.443   Successfully installed the file.
+2026-08-13 12:14:13.443   -- File entry --
+2026-08-13 12:14:13.443   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\_uuid.pyd
+2026-08-13 12:14:13.443   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.443   Installing the file.
+2026-08-13 12:14:13.445   Successfully installed the file.
+2026-08-13 12:14:13.445   -- File entry --
+2026-08-13 12:14:13.445   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\_zoneinfo.pyd
+2026-08-13 12:14:13.445   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.445   Installing the file.
+2026-08-13 12:14:13.447   Successfully installed the file.
+2026-08-13 12:14:13.447   -- File entry --
+2026-08-13 12:14:13.447   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\certifi\cacert.pem
+2026-08-13 12:14:13.447   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.447   Installing the file.
+2026-08-13 12:14:13.447   Creating directory: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\certifi
+2026-08-13 12:14:13.452   Successfully installed the file.
+2026-08-13 12:14:13.453   -- File entry --
+2026-08-13 12:14:13.453   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\certifi\py.typed
+2026-08-13 12:14:13.453   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.453   Installing the file.
+2026-08-13 12:14:13.454   Successfully installed the file.
+2026-08-13 12:14:13.454   -- File entry --
+2026-08-13 12:14:13.454   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\charset_normalizer\cd.cp311-win_amd64.pyd
+2026-08-13 12:14:13.454   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.454   Installing the file.
+2026-08-13 12:14:13.454   Creating directory: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\charset_normalizer
+2026-08-13 12:14:13.457   Successfully installed the file.
+2026-08-13 12:14:13.457   -- File entry --
+2026-08-13 12:14:13.457   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\charset_normalizer\md.cp311-win_amd64.pyd
+2026-08-13 12:14:13.457   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.457   Installing the file.
+2026-08-13 12:14:13.460   Successfully installed the file.
+2026-08-13 12:14:13.460   -- File entry --
+2026-08-13 12:14:13.460   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\gateway_py3\web\app.js
+2026-08-13 12:14:13.461   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.461   Installing the file.
+2026-08-13 12:14:13.461   Creating directory: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\gateway_py3
+2026-08-13 12:14:13.461   Creating directory: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\gateway_py3\web
+2026-08-13 12:14:13.462   Successfully installed the file.
+2026-08-13 12:14:13.462   -- File entry --
+2026-08-13 12:14:13.462   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\gateway_py3\web\app_events.js
+2026-08-13 12:14:13.462   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.462   Installing the file.
+2026-08-13 12:14:13.463   Successfully installed the file.
+2026-08-13 12:14:13.463   -- File entry --
+2026-08-13 12:14:13.463   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\gateway_py3\web\app_render.js
+2026-08-13 12:14:13.463   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.463   Installing the file.
+2026-08-13 12:14:13.464   Successfully installed the file.
+2026-08-13 12:14:13.464   -- File entry --
+2026-08-13 12:14:13.464   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\gateway_py3\web\app_voice.js
+2026-08-13 12:14:13.464   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.464   Installing the file.
+2026-08-13 12:14:13.464   Successfully installed the file.
+2026-08-13 12:14:13.464   -- File entry --
+2026-08-13 12:14:13.464   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\gateway_py3\web\components.css
+2026-08-13 12:14:13.465   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.465   Installing the file.
+2026-08-13 12:14:13.466   Successfully installed the file.
+2026-08-13 12:14:13.466   -- File entry --
+2026-08-13 12:14:13.466   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\gateway_py3\web\favicon.svg
+2026-08-13 12:14:13.466   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.466   Installing the file.
+2026-08-13 12:14:13.467   Successfully installed the file.
+2026-08-13 12:14:13.467   -- File entry --
+2026-08-13 12:14:13.467   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\gateway_py3\web\index.html
+2026-08-13 12:14:13.467   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.467   Installing the file.
+2026-08-13 12:14:13.468   Successfully installed the file.
+2026-08-13 12:14:13.468   -- File entry --
+2026-08-13 12:14:13.468   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\gateway_py3\web\styles.css
+2026-08-13 12:14:13.468   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.468   Installing the file.
+2026-08-13 12:14:13.468   Successfully installed the file.
+2026-08-13 12:14:13.468   -- File entry --
+2026-08-13 12:14:13.468   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\gateway_py3\web\tokens.css
+2026-08-13 12:14:13.468   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.468   Installing the file.
+2026-08-13 12:14:13.469   Successfully installed the file.
+2026-08-13 12:14:13.469   -- File entry --
+2026-08-13 12:14:13.469   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\operation_catalog\catalog.json
+2026-08-13 12:14:13.469   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.469   Installing the file.
+2026-08-13 12:14:13.469   Creating directory: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\operation_catalog
+2026-08-13 12:14:13.470   Successfully installed the file.
+2026-08-13 12:14:13.470   -- File entry --
+2026-08-13 12:14:13.470   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\operation_catalog\packs\analysis.json
+2026-08-13 12:14:13.470   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.470   Installing the file.
+2026-08-13 12:14:13.470   Creating directory: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\operation_catalog\packs
+2026-08-13 12:14:13.471   Successfully installed the file.
+2026-08-13 12:14:13.471   -- File entry --
+2026-08-13 12:14:13.471   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\operation_catalog\packs\artifact.json
+2026-08-13 12:14:13.471   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.471   Installing the file.
+2026-08-13 12:14:13.472   Successfully installed the file.
+2026-08-13 12:14:13.472   -- File entry --
+2026-08-13 12:14:13.472   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\operation_catalog\packs\data_management.json
+2026-08-13 12:14:13.472   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.472   Installing the file.
+2026-08-13 12:14:13.473   Successfully installed the file.
+2026-08-13 12:14:13.473   -- File entry --
+2026-08-13 12:14:13.473   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\operation_catalog\packs\edit_geometry.json
+2026-08-13 12:14:13.473   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.473   Installing the file.
+2026-08-13 12:14:13.474   Successfully installed the file.
+2026-08-13 12:14:13.474   -- File entry --
+2026-08-13 12:14:13.474   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\operation_catalog\packs\layout.json
+2026-08-13 12:14:13.475   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.475   Installing the file.
+2026-08-13 12:14:13.476   Successfully installed the file.
+2026-08-13 12:14:13.476   -- File entry --
+2026-08-13 12:14:13.476   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\operation_catalog\packs\map_context.json
+2026-08-13 12:14:13.476   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.476   Installing the file.
+2026-08-13 12:14:13.477   Successfully installed the file.
+2026-08-13 12:14:13.477   -- File entry --
+2026-08-13 12:14:13.477   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\operation_catalog\packs\selection.json
+2026-08-13 12:14:13.477   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.477   Installing the file.
+2026-08-13 12:14:13.477   Successfully installed the file.
+2026-08-13 12:14:13.477   -- File entry --
+2026-08-13 12:14:13.477   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\operation_catalog\packs\table.json
+2026-08-13 12:14:13.477   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.477   Installing the file.
+2026-08-13 12:14:13.478   Successfully installed the file.
+2026-08-13 12:14:13.478   -- File entry --
+2026-08-13 12:14:13.478   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\operation_catalog\packs\view_layer.json
+2026-08-13 12:14:13.478   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.478   Installing the file.
+2026-08-13 12:14:13.479   Successfully installed the file.
+2026-08-13 12:14:13.479   -- File entry --
+2026-08-13 12:14:13.479   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\operation_catalog\schemas\operation_spec.schema.json
+2026-08-13 12:14:13.479   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.479   Installing the file.
+2026-08-13 12:14:13.480   Creating directory: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\operation_catalog\schemas
+2026-08-13 12:14:13.481   Successfully installed the file.
+2026-08-13 12:14:13.481   -- File entry --
+2026-08-13 12:14:13.481   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\operation_catalog\schemas\workflow.schema.json
+2026-08-13 12:14:13.481   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.481   Installing the file.
+2026-08-13 12:14:13.482   Successfully installed the file.
+2026-08-13 12:14:13.482   -- File entry --
+2026-08-13 12:14:13.482   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\orjson\orjson.cp311-win_amd64.pyd
+2026-08-13 12:14:13.482   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.482   Installing the file.
+2026-08-13 12:14:13.482   Creating directory: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\orjson
+2026-08-13 12:14:13.486   Successfully installed the file.
+2026-08-13 12:14:13.486   -- File entry --
+2026-08-13 12:14:13.486   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\ormsgpack\ormsgpack.cp311-win_amd64.pyd
+2026-08-13 12:14:13.487   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.487   Installing the file.
+2026-08-13 12:14:13.487   Creating directory: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\ormsgpack
+2026-08-13 12:14:13.492   Successfully installed the file.
+2026-08-13 12:14:13.492   -- File entry --
+2026-08-13 12:14:13.492   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\pydantic-2.12.5.dist-info\INSTALLER
+2026-08-13 12:14:13.492   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.492   Installing the file.
+2026-08-13 12:14:13.492   Creating directory: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\pydantic-2.12.5.dist-info
+2026-08-13 12:14:13.493   Successfully installed the file.
+2026-08-13 12:14:13.493   -- File entry --
+2026-08-13 12:14:13.493   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\pydantic-2.12.5.dist-info\METADATA
+2026-08-13 12:14:13.493   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.493   Installing the file.
+2026-08-13 12:14:13.495   Successfully installed the file.
+2026-08-13 12:14:13.495   -- File entry --
+2026-08-13 12:14:13.495   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\pydantic-2.12.5.dist-info\RECORD
+2026-08-13 12:14:13.495   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.495   Installing the file.
+2026-08-13 12:14:13.496   Successfully installed the file.
+2026-08-13 12:14:13.496   -- File entry --
+2026-08-13 12:14:13.496   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\pydantic-2.12.5.dist-info\REQUESTED
+2026-08-13 12:14:13.496   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.496   Installing the file.
+2026-08-13 12:14:13.496   Successfully installed the file.
+2026-08-13 12:14:13.496   -- File entry --
+2026-08-13 12:14:13.496   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\pydantic-2.12.5.dist-info\WHEEL
+2026-08-13 12:14:13.496   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.496   Installing the file.
+2026-08-13 12:14:13.497   Successfully installed the file.
+2026-08-13 12:14:13.497   -- File entry --
+2026-08-13 12:14:13.497   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\pydantic-2.12.5.dist-info\licenses\LICENSE
+2026-08-13 12:14:13.497   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.497   Installing the file.
+2026-08-13 12:14:13.497   Creating directory: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\pydantic-2.12.5.dist-info\licenses
+2026-08-13 12:14:13.498   Successfully installed the file.
+2026-08-13 12:14:13.498   -- File entry --
+2026-08-13 12:14:13.498   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\pydantic_core\_pydantic_core.cp311-win_amd64.pyd
+2026-08-13 12:14:13.498   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.498   Installing the file.
+2026-08-13 12:14:13.498   Creating directory: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\pydantic_core
+2026-08-13 12:14:13.572   Successfully installed the file.
+2026-08-13 12:14:13.572   -- File entry --
+2026-08-13 12:14:13.572   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\pywin32_system32\pywintypes311.dll
+2026-08-13 12:14:13.572   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.572   Installing the file.
+2026-08-13 12:14:13.572   Creating directory: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\pywin32_system32
+2026-08-13 12:14:13.575   Successfully installed the file.
+2026-08-13 12:14:13.575   -- File entry --
+2026-08-13 12:14:13.575   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\shared_runtime\runtime_gate.schema.json
+2026-08-13 12:14:13.576   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.576   Installing the file.
+2026-08-13 12:14:13.576   Creating directory: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\shared_runtime
+2026-08-13 12:14:13.576   Successfully installed the file.
+2026-08-13 12:14:13.576   -- File entry --
+2026-08-13 12:14:13.576   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\urllib3-2.7.0.dist-info\INSTALLER
+2026-08-13 12:14:13.576   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.576   Installing the file.
+2026-08-13 12:14:13.576   Creating directory: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\urllib3-2.7.0.dist-info
+2026-08-13 12:14:13.577   Successfully installed the file.
+2026-08-13 12:14:13.577   -- File entry --
+2026-08-13 12:14:13.577   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\urllib3-2.7.0.dist-info\METADATA
+2026-08-13 12:14:13.577   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.577   Installing the file.
+2026-08-13 12:14:13.578   Successfully installed the file.
+2026-08-13 12:14:13.578   -- File entry --
+2026-08-13 12:14:13.578   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\urllib3-2.7.0.dist-info\RECORD
+2026-08-13 12:14:13.578   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.578   Installing the file.
+2026-08-13 12:14:13.579   Successfully installed the file.
+2026-08-13 12:14:13.579   -- File entry --
+2026-08-13 12:14:13.579   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\urllib3-2.7.0.dist-info\WHEEL
+2026-08-13 12:14:13.579   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.579   Installing the file.
+2026-08-13 12:14:13.579   Successfully installed the file.
+2026-08-13 12:14:13.579   -- File entry --
+2026-08-13 12:14:13.580   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\urllib3-2.7.0.dist-info\licenses\LICENSE.txt
+2026-08-13 12:14:13.580   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.580   Installing the file.
+2026-08-13 12:14:13.580   Creating directory: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\urllib3-2.7.0.dist-info\licenses
+2026-08-13 12:14:13.580   Successfully installed the file.
+2026-08-13 12:14:13.580   -- File entry --
+2026-08-13 12:14:13.580   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\uuid_utils\_uuid_utils.cp311-win_amd64.pyd
+2026-08-13 12:14:13.580   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.580   Installing the file.
+2026-08-13 12:14:13.580   Creating directory: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\uuid_utils
+2026-08-13 12:14:13.587   Successfully installed the file.
+2026-08-13 12:14:13.587   -- File entry --
+2026-08-13 12:14:13.587   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\win32\win32crypt.pyd
+2026-08-13 12:14:13.587   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.587   Installing the file.
+2026-08-13 12:14:13.587   Creating directory: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\win32
+2026-08-13 12:14:13.590   Successfully installed the file.
+2026-08-13 12:14:13.590   -- File entry --
+2026-08-13 12:14:13.590   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\xxhash\_xxhash.cp311-win_amd64.pyd
+2026-08-13 12:14:13.590   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.590   Installing the file.
+2026-08-13 12:14:13.590   Creating directory: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\xxhash
+2026-08-13 12:14:13.592   Successfully installed the file.
+2026-08-13 12:14:13.592   -- File entry --
+2026-08-13 12:14:13.592   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\yaml\_yaml.cp311-win_amd64.pyd
+2026-08-13 12:14:13.592   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.592   Installing the file.
+2026-08-13 12:14:13.593   Creating directory: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\yaml
+2026-08-13 12:14:13.598   Successfully installed the file.
+2026-08-13 12:14:13.598   -- File entry --
+2026-08-13 12:14:13.598   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\zstandard\backend_c.cp311-win_amd64.pyd
+2026-08-13 12:14:13.598   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.598   Installing the file.
+2026-08-13 12:14:13.598   Creating directory: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\zstandard
+2026-08-13 12:14:13.607   Successfully installed the file.
+2026-08-13 12:14:13.607   -- File entry --
+2026-08-13 12:14:13.607   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\gateway\_internal\zstandard\_cffi.cp311-win_amd64.pyd
+2026-08-13 12:14:13.607   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.607   Installing the file.
+2026-08-13 12:14:13.618   Successfully installed the file.
+2026-08-13 12:14:13.618   -- File entry --
+2026-08-13 12:14:13.618   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\operation_catalog\catalog.json
+2026-08-13 12:14:13.618   Time stamp of our file: 2026-08-10 18:28:58.000
+2026-08-13 12:14:13.618   Installing the file.
+2026-08-13 12:14:13.618   Creating directory: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\operation_catalog
+2026-08-13 12:14:13.619   Successfully installed the file.
+2026-08-13 12:14:13.619   -- File entry --
+2026-08-13 12:14:13.619   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\operation_catalog\packs\analysis.json
+2026-08-13 12:14:13.619   Time stamp of our file: 2026-08-12 16:56:52.000
+2026-08-13 12:14:13.619   Installing the file.
+2026-08-13 12:14:13.619   Creating directory: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\operation_catalog\packs
+2026-08-13 12:14:13.620   Successfully installed the file.
+2026-08-13 12:14:13.620   -- File entry --
+2026-08-13 12:14:13.620   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\operation_catalog\packs\artifact.json
+2026-08-13 12:14:13.620   Time stamp of our file: 2026-08-10 22:00:20.000
+2026-08-13 12:14:13.620   Installing the file.
+2026-08-13 12:14:13.621   Successfully installed the file.
+2026-08-13 12:14:13.621   -- File entry --
+2026-08-13 12:14:13.621   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\operation_catalog\packs\data_management.json
+2026-08-13 12:14:13.621   Time stamp of our file: 2026-08-12 16:56:52.000
+2026-08-13 12:14:13.621   Installing the file.
+2026-08-13 12:14:13.621   Successfully installed the file.
+2026-08-13 12:14:13.622   -- File entry --
+2026-08-13 12:14:13.622   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\operation_catalog\packs\edit_geometry.json
+2026-08-13 12:14:13.622   Time stamp of our file: 2026-08-10 22:00:20.000
+2026-08-13 12:14:13.622   Installing the file.
+2026-08-13 12:14:13.623   Successfully installed the file.
+2026-08-13 12:14:13.623   -- File entry --
+2026-08-13 12:14:13.623   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\operation_catalog\packs\layout.json
+2026-08-13 12:14:13.623   Time stamp of our file: 2026-08-10 22:00:20.000
+2026-08-13 12:14:13.623   Installing the file.
+2026-08-13 12:14:13.623   Successfully installed the file.
+2026-08-13 12:14:13.624   -- File entry --
+2026-08-13 12:14:13.624   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\operation_catalog\packs\map_context.json
+2026-08-13 12:14:13.624   Time stamp of our file: 2026-08-10 22:00:20.000
+2026-08-13 12:14:13.624   Installing the file.
+2026-08-13 12:14:13.624   Successfully installed the file.
+2026-08-13 12:14:13.624   -- File entry --
+2026-08-13 12:14:13.624   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\operation_catalog\packs\selection.json
+2026-08-13 12:14:13.624   Time stamp of our file: 2026-08-10 22:04:10.000
+2026-08-13 12:14:13.624   Installing the file.
+2026-08-13 12:14:13.625   Successfully installed the file.
+2026-08-13 12:14:13.625   -- File entry --
+2026-08-13 12:14:13.625   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\operation_catalog\packs\table.json
+2026-08-13 12:14:13.625   Time stamp of our file: 2026-08-12 16:56:52.000
+2026-08-13 12:14:13.625   Installing the file.
+2026-08-13 12:14:13.626   Successfully installed the file.
+2026-08-13 12:14:13.626   -- File entry --
+2026-08-13 12:14:13.626   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\operation_catalog\packs\view_layer.json
+2026-08-13 12:14:13.626   Time stamp of our file: 2026-08-10 22:00:20.000
+2026-08-13 12:14:13.626   Installing the file.
+2026-08-13 12:14:13.627   Successfully installed the file.
+2026-08-13 12:14:13.627   -- File entry --
+2026-08-13 12:14:13.627   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\operation_catalog\schemas\operation_spec.schema.json
+2026-08-13 12:14:13.627   Time stamp of our file: 2026-08-10 18:28:58.000
+2026-08-13 12:14:13.627   Installing the file.
+2026-08-13 12:14:13.627   Creating directory: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\operation_catalog\schemas
+2026-08-13 12:14:13.628   Successfully installed the file.
+2026-08-13 12:14:13.628   -- File entry --
+2026-08-13 12:14:13.628   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\operation_catalog\schemas\workflow.schema.json
+2026-08-13 12:14:13.628   Time stamp of our file: 2026-05-22 12:26:56.000
+2026-08-13 12:14:13.628   Installing the file.
+2026-08-13 12:14:13.629   Successfully installed the file.
+2026-08-13 12:14:13.629   -- File entry --
+2026-08-13 12:14:13.629   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\shared_runtime\acceptance_profile.py
+2026-08-13 12:14:13.629   Time stamp of our file: 2026-08-12 17:32:08.000
+2026-08-13 12:14:13.629   Installing the file.
+2026-08-13 12:14:13.629   Creating directory: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\shared_runtime
+2026-08-13 12:14:13.630   Successfully installed the file.
+2026-08-13 12:14:13.630   -- File entry --
+2026-08-13 12:14:13.630   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\shared_runtime\capability_contract.py
+2026-08-13 12:14:13.630   Time stamp of our file: 2026-08-10 07:06:26.000
+2026-08-13 12:14:13.630   Installing the file.
+2026-08-13 12:14:13.631   Successfully installed the file.
+2026-08-13 12:14:13.631   -- File entry --
+2026-08-13 12:14:13.631   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\shared_runtime\condition_contract.py
+2026-08-13 12:14:13.631   Time stamp of our file: 2026-08-10 07:14:14.000
+2026-08-13 12:14:13.631   Installing the file.
+2026-08-13 12:14:13.631   Successfully installed the file.
+2026-08-13 12:14:13.631   -- File entry --
+2026-08-13 12:14:13.631   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\shared_runtime\context_fingerprint.py
+2026-08-13 12:14:13.632   Time stamp of our file: 2026-08-10 07:08:24.000
+2026-08-13 12:14:13.632   Installing the file.
+2026-08-13 12:14:13.632   Successfully installed the file.
+2026-08-13 12:14:13.632   -- File entry --
+2026-08-13 12:14:13.632   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\shared_runtime\file_semantics.py
+2026-08-13 12:14:13.632   Time stamp of our file: 2026-08-10 19:05:14.000
+2026-08-13 12:14:13.632   Installing the file.
+2026-08-13 12:14:13.633   Successfully installed the file.
+2026-08-13 12:14:13.633   -- File entry --
+2026-08-13 12:14:13.633   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\shared_runtime\operation_schema.py
+2026-08-13 12:14:13.633   Time stamp of our file: 2026-08-10 06:50:16.000
+2026-08-13 12:14:13.633   Installing the file.
+2026-08-13 12:14:13.633   Successfully installed the file.
+2026-08-13 12:14:13.633   -- File entry --
+2026-08-13 12:14:13.633   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\shared_runtime\output_contract.py
+2026-08-13 12:14:13.634   Time stamp of our file: 2026-08-10 18:39:02.000
+2026-08-13 12:14:13.634   Installing the file.
+2026-08-13 12:14:13.634   Successfully installed the file.
+2026-08-13 12:14:13.634   -- File entry --
+2026-08-13 12:14:13.634   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\shared_runtime\platform_paths.py
+2026-08-13 12:14:13.634   Time stamp of our file: 2026-08-10 06:36:58.000
+2026-08-13 12:14:13.634   Installing the file.
+2026-08-13 12:14:13.635   Successfully installed the file.
+2026-08-13 12:14:13.635   -- File entry --
+2026-08-13 12:14:13.635   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\shared_runtime\runtime_gate.schema.json
+2026-08-13 12:14:13.635   Time stamp of our file: 2026-08-10 19:14:56.000
+2026-08-13 12:14:13.635   Installing the file.
+2026-08-13 12:14:13.635   Successfully installed the file.
+2026-08-13 12:14:13.635   -- File entry --
+2026-08-13 12:14:13.636   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\shared_runtime\runtime_gate_protocol.py
+2026-08-13 12:14:13.636   Time stamp of our file: 2026-08-10 18:18:30.000
+2026-08-13 12:14:13.636   Installing the file.
+2026-08-13 12:14:13.636   Successfully installed the file.
+2026-08-13 12:14:13.636   -- File entry --
+2026-08-13 12:14:13.636   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\shared_runtime\semantic_abi.py
+2026-08-13 12:14:13.636   Time stamp of our file: 2026-08-11 16:37:44.000
+2026-08-13 12:14:13.636   Installing the file.
+2026-08-13 12:14:13.637   Successfully installed the file.
+2026-08-13 12:14:13.637   -- File entry --
+2026-08-13 12:14:13.637   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\app\shared_runtime\__init__.py
+2026-08-13 12:14:13.637   Time stamp of our file: 2026-08-10 06:36:58.000
+2026-08-13 12:14:13.637   Installing the file.
+2026-08-13 12:14:13.638   Successfully installed the file.
+2026-08-13 12:14:13.638   -- File entry --
+2026-08-13 12:14:13.638   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\ArcMapAIAssistantAddIn\ArcMapAIAssistantAddIn.esriaddin
+2026-08-13 12:14:13.638   Time stamp of our file: 2026-08-13 12:07:46.000
+2026-08-13 12:14:13.638   Installing the file.
+2026-08-13 12:14:13.638   Creating directory: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\ArcMapAIAssistantAddIn
+2026-08-13 12:14:13.639   Successfully installed the file.
+2026-08-13 12:14:13.639   -- File entry --
+2026-08-13 12:14:13.639   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\packaging\install.ps1
+2026-08-13 12:14:13.639   Time stamp of our file: 2026-08-13 09:24:18.000
+2026-08-13 12:14:13.639   Installing the file.
+2026-08-13 12:14:13.639   Creating directory: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\packaging
+2026-08-13 12:14:13.640   Successfully installed the file.
+2026-08-13 12:14:13.640   -- File entry --
+2026-08-13 12:14:13.640   Dest filename: C:\WINDOWS\TEMP\is-PZDLK9QU2Z.tmp\GeoPilotPackage\packaging\uninstall.ps1
+2026-08-13 12:14:13.640   Time stamp of our file: 2026-08-10 10:09:30.000
+2026-08-13 12:14:13.640   Installing the file.
+2026-08-13 12:14:13.640   Successfully installed the file.
+2026-08-13 12:14:13.640   -- File entry --
+2026-08-13 12:14:13.640   Dest filename: C:\Program Files\GeoPilot\packaging\uninstall.ps1
+2026-08-13 12:14:13.641   Time stamp of our file: 2026-08-10 10:09:30.000
+2026-08-13 12:14:13.641   Dest file exists.
+2026-08-13 12:14:13.641   Time stamp of existing file: 2026-08-10 10:09:30.000
+2026-08-13 12:14:13.641   Installing the file.
+2026-08-13 12:14:13.651   Successfully installed the file.
+2026-08-13 12:14:13.651   -- Icon entry --
+2026-08-13 12:14:13.651   Dest filename: C:\ProgramData\Microsoft\Windows\Start Menu\Programs\GeoPilot\卸载 GeoPilot.lnk
+2026-08-13 12:14:13.653   Creating the icon.
+2026-08-13 12:14:13.672   Successfully created the icon.
+2026-08-13 12:14:13.682   Saving uninstall information.
+2026-08-13 12:14:13.682   Renaming uninstaller.
+2026-08-13 12:14:13.682   Deleting uninstall key left over from previous administrative 64-bit install.
+2026-08-13 12:14:13.683   Creating new uninstall key: HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\CurrentVersion\Uninstall\{A0EB8F34-2B74-4C45-BF41-7A4F7B3C1E68}_is1
+2026-08-13 12:14:13.683   Writing uninstall key values.
+2026-08-13 12:14:13.684   Detected previous non administrative install? No
+2026-08-13 12:14:13.684   Detected previous administrative 32-bit install? No
+2026-08-13 12:14:13.729   Installation process succeeded.
+2026-08-13 12:14:15.960   CurStepChanged raised an exception.
+2026-08-13 12:14:15.960   Exception message:
+2026-08-13 12:14:15.960   Defaulting to OK for suppressed message box (OK):
+                          Runtime error (at 22:778):
+                          
+                          GeoPilot 安装验证失败，退出码：1。.
+2026-08-13 12:14:15.960   Need to restart Windows? No
+2026-08-13 12:14:15.963   Deinitializing Setup.
+2026-08-13 12:14:16.037   Log closed.

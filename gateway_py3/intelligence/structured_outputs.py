@@ -9,7 +9,7 @@ The models match the **actual adapter response shape** after
 ``_extract_response`` (provider wire noise stripped):
 
 * planner / repair → ``chat_with_tools`` → ``{"tool_calls": [...]}``
-* audit → ``chat_structured`` → ``{"audit_result": {"decision":..., "claims":[...]}}``
+* audit → ``chat_structured`` → a closed pass/revise/clarify/reject decision
 
 Capability-closure and step-id synthesis stay in WorkflowEngine: these models
 only assert the wire-level structure the provider committed to.
@@ -58,29 +58,30 @@ class RepairDraftModel(_StrictModel):
 
 
 _AUDIT_DECISIONS = Literal["pass", "revise", "clarify", "reject"]
-_AUDIT_KINDS = Literal["revision", "clarification", "rejection"]
-_CHANGE_TARGETS = Literal["workflow", "task_contract", "none"]
-
-
-class AuditClaimModel(_StrictModel):
-    """One proof-bound G3 audit claim."""
-    kind: _AUDIT_KINDS
+class AuditRevisionModel(_StrictModel):
+    """One closed scalar revision; server derives its permitted scope."""
     proof_id: str = Field(min_length=1)
-    change_target: _CHANGE_TARGETS
-    required_change: str = Field(min_length=1)
+    step_id: str = Field(min_length=1)
+    path: str = Field(pattern=r"^arguments\.[A-Za-z_][A-Za-z0-9_]*$")
+    value: Any
+
+
+class AuditClarificationModel(_StrictModel):
+    option_id: str = Field(min_length=1)
+    question: str = Field(min_length=1)
 
 
 class AuditResultBody(_StrictModel):
     """Inner body of the audit response (matches AuditContract.validate_shape)."""
     decision: _AUDIT_DECISIONS
-    claims: List[AuditClaimModel]
+    revision: AuditRevisionModel | None = None
+    clarification: AuditClarificationModel | None = None
 
 
 class AuditResultModel(_StrictModel):
     """Validated shape of an audit response.
 
     The ``audit_result`` wrapper is part of the tool schema and survives
-    ``_extract_response``; the consumer (``_request_audit``) unwraps
-    ``response["audit_result"]`` to get the body.
+    ``_extract_response``; the consumer unwraps it before server validation.
     """
     audit_result: AuditResultBody

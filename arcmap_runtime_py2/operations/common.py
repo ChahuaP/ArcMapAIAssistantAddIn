@@ -123,16 +123,16 @@ def _assert_within_staging(context, path):
 
     Py2 execution must only stage outputs; writing to a user-named absolute
     path outside staging would bypass Gateway acceptance + atomic publish.
-    When staging_dir is set, any explicit output path must resolve under it.
+    Every output is derived beneath the server-issued staging_root.
     Uses a separator-aware prefix check so ``/foo/bar`` does not allow
     ``/foo/bar-evil`` (a plain ``startswith`` would).
     """
-    staging_dir = context.get("staging_dir")
-    if not staging_dir:
+    staging_root = context.get("staging_root")
+    if not staging_root:
         raise OperationError(u"缺少任务 staging 目录，拒绝输出。请确认运行租约已签发。")
     try:
         resolved = path_utils.abspath(path)
-        staging_abs = path_utils.abspath(staging_dir)
+        staging_abs = path_utils.abspath(staging_root)
         sep = os.sep
         inside = (
             resolved.lower() == staging_abs.lower()
@@ -145,36 +145,18 @@ def _assert_within_staging(context, path):
         raise OperationError(u"输出路径无效：%s" % path)
 
 
-def output_gdb(context, output_workspace=None):
-    if output_workspace:
-        workspace = _resolve_output_workspace(context, output_workspace)
-        _assert_within_staging(context, workspace)
-        if workspace.lower().endswith(u".gdb"):
-            gdb = workspace
-        else:
-            if not path_utils.isdir(workspace):
-                raise OperationError(u"Output folder not found: %s" % workspace)
-            gdb = path_utils.join_path(workspace, "ArcMapAI_Output.gdb")
-        folder = path_utils.dirname(gdb)
-        name = path_utils.basename(gdb)
-        if not folder or not path_utils.isdir(folder):
-            raise OperationError(u"Output workspace folder not found: %s" % folder)
-        if not arcpy.Exists(gdb):
-            arcpy.CreateFileGDB_management(folder, name)
-        return gdb
-
-    mxd_path = context.get("mxd_path")
+def output_gdb(context):
     # Outputs must land in the per-run staging directory (§6.8): fail closed
     # if it is missing — writing to the MXD folder would bypass Gateway
     # acceptance + atomic publish.
-    staging_dir = context.get("staging_dir")
-    if not staging_dir:
+    staging_root = context.get("staging_root")
+    if not staging_root:
         raise OperationError(u"缺少任务 staging 目录，拒绝输出。请确认运行租约已签发。")
-    if not path_utils.isdir(staging_dir):
-        path_utils.makedirs(staging_dir)
-    gdb = path_utils.join_path(staging_dir, "ArcMapAI_Output.gdb")
+    if not path_utils.isdir(staging_root):
+        path_utils.makedirs(staging_root)
+    gdb = path_utils.join_path(staging_root, "staging.gdb")
     if not arcpy.Exists(gdb):
-        arcpy.CreateFileGDB_management(staging_dir, "ArcMapAI_Output.gdb")
+        arcpy.CreateFileGDB_management(staging_root, "staging.gdb")
     return gdb
 
 
@@ -191,8 +173,8 @@ def safe_output_name(name):
     return text
 
 
-def output_feature_class(context, output_name, output_workspace=None):
-    gdb = output_gdb(context, output_workspace)
+def output_feature_class(context, output_name):
+    gdb = output_gdb(context)
     name = safe_output_name(output_name)
     path = path_utils.join_path(gdb, name)
     if arcpy.Exists(path):
@@ -200,13 +182,33 @@ def output_feature_class(context, output_name, output_workspace=None):
     return path
 
 
-def output_dataset(context, output_name, output_policy, output_workspace=None):
+def output_dataset(context, output_name, output_policy):
     try:
         policy = validate_output_policy(output_policy, "writes_data")
         output_policy_type(policy)
     except OutputContractError as exc:
         raise OperationError(str(exc))
-    return output_feature_class(context, output_name, output_workspace)
+    if output_policy_type(policy) == "file":
+        return output_file(context, output_name, policy["default_format"])
+    return output_feature_class(context, output_name)
+
+
+def output_file(context, output_name, output_format):
+    """Derive one run-private file beside the staging FileGDB."""
+    text = _text(output_name).strip() if output_name else u""
+    extension = u"." + _text(output_format).lower()
+    if (not text or text != _text(output_name) or path_utils.basename(text) != text
+            or text in (u".", u"..") or not text.lower().endswith(extension)
+            or text.count(u".") != 1 or INVALID_OUTPUT_NAME_RE.search(text)):
+        raise OperationError("Invalid %s output_name: %s" % (output_format, output_name))
+    gdb = output_gdb(context)
+    directory = path_utils.join_path(path_utils.dirname(gdb), "files")
+    if not path_utils.isdir(directory):
+        path_utils.makedirs(directory)
+    path = path_utils.join_path(directory, text)
+    if path_utils.isfile(path) or arcpy.Exists(path):
+        raise OperationError("Output already exists: %s" % path)
+    return path
 
 
 def read_layer(layer, selected_only=False, where_clause=None):
@@ -271,8 +273,6 @@ def _text(value):
     return unicode(value)
 
 
-def _resolve_output_workspace(context, output_workspace):
-    return _path_text(output_workspace).strip()
 
 
 def _find_layer_from_step(step_id, step_outputs):

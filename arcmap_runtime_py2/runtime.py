@@ -21,6 +21,7 @@ try:
     import execution_outbox
     import exception_text
     import gateway_client
+    import runtime_gate
     import path_utils
     from shared_runtime import platform_paths
     import workflow_executor
@@ -34,6 +35,7 @@ except ImportError:
     from . import execution_outbox
     from . import exception_text
     from . import gateway_client
+    from . import runtime_gate
     from . import path_utils
     from shared_runtime import platform_paths
     from . import workflow_executor
@@ -71,6 +73,20 @@ def open_web():
         cwd=REPO_ROOT,
         creationflags=CREATE_NO_WINDOW
     )
+
+
+def bind_ui_thread():
+    """Bind the calling (ArcMap UI) thread as the dispatch owner.
+
+    The Add-in's ``onClick`` runs on the ArcMap UI thread and must call this
+    idempotently before every ``open_or_handle_bridge_command()`` so the
+    deferred execution layer knows which thread is permitted to run ArcPy.
+    This forms the explicit C#/Add-in UI ownership boundary: the UI thread
+    identifies itself, and ``arcmap_ui_dispatch.defer`` fails closed for any
+    other thread.  Safe to call repeatedly on the same thread; a different
+    thread is rejected.
+    """
+    arcmap_ui_dispatch.register_ui_owner()
 
 
 def open_or_handle_bridge_command():
@@ -126,7 +142,7 @@ def _run_silent_command(command):
                 run_id, target, lease_id, epoch, plan_hash, heartbeat, exc, u"arcmap_ui_dispatch",
             )
             raise
-        _log_event(u"execution.deferred_to_arcmap_ui", run_id)
+        _log_event(u"execution.dispatched_synchronous", run_id)
         return
     if action == "acceptance_probe":
         _run_acceptance_probe(command)
@@ -136,6 +152,9 @@ def _run_silent_command(command):
         return
     if action == "sample":
         _run_sample(command)
+        return
+    if action == "runtime_gate":
+        runtime_gate.apply(command.get("context"))
         return
     raise RuntimeError(u"未知 Bridge 指令：%s" % _unicode_text(action))
 
@@ -158,8 +177,18 @@ def _run_acceptance_probe(command):
     elif request.get("probe_type") == "map_state":
         document = acceptance_probe.probe_map_state(
             request.get("output_id"), request.get("postcondition"), request.get("arguments"))
+        document["acceptance_proofs"] = acceptance_probe.probe_contract(
+            request.get("acceptance_contract"), document)
+        document["manifest_digest"] = acceptance_probe._digest(dict(
+            (key, value) for key, value in document.items() if key != "manifest_digest"))
     else:
-        document = acceptance_probe.probe(request.get("output_id"), request.get("kind"), request.get("staged_path"))
+        document = acceptance_probe.probe(
+            request.get("output_id"), request.get("kind"), request.get("staged_path"),
+            request.get("output_format"))
+        document["acceptance_proofs"] = acceptance_probe.probe_contract(
+            request.get("acceptance_contract"), document)
+        document["manifest_digest"] = acceptance_probe._digest(dict(
+            (key, value) for key, value in document.items() if key != "manifest_digest"))
     gateway_client.complete_acceptance_probe(run_id, document, lease_id, epoch, plan_hash, deployment_hash)
 
 
@@ -430,7 +459,7 @@ def _consume_silent_command():
         if float(payload.get("expires_at") or 0) < time.time():
             return {}
         action = payload.get("action")
-        if action not in ("sync", "execute", "acceptance_probe", "reconcile", "sample"):
+        if action not in ("sync", "execute", "acceptance_probe", "reconcile", "sample", "runtime_gate"):
             return {}
         try:
             path_utils.remove(SILENT_COMMAND_FILE)

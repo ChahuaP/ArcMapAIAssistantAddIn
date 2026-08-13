@@ -52,3 +52,16 @@ class ProviderRegistry:
         if connection is None:
             raise LookupError("provider connection is not registered: %s" % connection_id)
         return connection
+
+    def resolve_selection(self, provider_type: str, model_id: str) -> ProviderConnection:
+        """Resolve an explicit provider/model selection to one registered route.
+
+        A client never guesses connection IDs.  Ambiguity is a configuration
+        error, not an invitation to choose an arbitrary/default connection.
+        """
+        matches = [connection for connection in self._connections.values()
+                   if connection.provider_type == provider_type
+                   and model_id in connection.enabled_models]
+        if len(matches) != 1:
+            raise LookupError("provider/model selection must resolve to exactly one registered connection.")
+        return matches[0]

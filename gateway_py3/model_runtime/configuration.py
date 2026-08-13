@@ -56,7 +56,7 @@ class ModelConfigurationStore:
 
     def load(self) -> RuntimeModelConfiguration:
         if not self.path.exists():
-            return _default_configuration()
+            raise ValueError("model configuration is required before creating a task.")
         with self.path.open("r", encoding="utf-8") as stream:
             document = json.load(stream)
         if not isinstance(document, dict) or set(document) != {
@@ -189,26 +189,6 @@ def build_provider_registry(configuration: RuntimeModelConfiguration,
     for connection in configuration.connections:
         registry.register(connection, create_provider_adapter(connection, vault))
     return registry
-
-
-def _default_configuration() -> RuntimeModelConfiguration:
-    connection = ProviderConnection(
-        connection_id="minimax-official",
-        provider_type="minimax",
-        endpoint="https://api.minimaxi.com/v1",
-        credential_ref="credential:minimax-official",
-        enabled_models=("MiniMax-M3",),
-        deployment_fingerprint="minimax-public-api-v1",
-    )
-    return RuntimeModelConfiguration(
-        connections=(connection,),
-        plan=AgentModelPlan(**{
-            role: _binding(role, {
-                "connection_id": connection.connection_id,
-                "model_id": "MiniMax-M3",
-            }) for role in _ROLES
-        }),
-    )
 
 
 def _binding(role: str, value: Any) -> ModelBinding:

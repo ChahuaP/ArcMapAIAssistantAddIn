@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 from __future__ import absolute_import
 
+import hashlib
+
 import arcpy
 from shared_runtime import context_fingerprint
 
@@ -181,6 +183,7 @@ def _layer_info(layer, index):
         desc = arcpy.Describe(layer)
         info["geometry_type"] = getattr(desc, "shapeType", None)
         info["spatial_reference"] = _layer_spatial_reference(desc)
+        _seal_spatial_unit(info, desc)
         selection_oids = arcmap_desktop_selection.capture_oids(layer, desc)
         info["selected_count"] = len(selection_oids)
         info["selection_hash"] = context_fingerprint.selection_hash(
@@ -188,10 +191,189 @@ def _layer_info(layer, index):
         try:
             fields = arcpy.ListFields(layer)
             for field in fields:
-                info["fields"].append({"name": field.name, "type": field.type})
+                info["fields"].append(_field_spec(field))
+            info["identity_fields"] = [field.name for field in fields
+                                       if unicode(field.type).lower() in (u"oid", u"globalid", u"guid")]
+            info["source_content_digest"] = layer_content_digest(layer)
+            info["feature_manifest_digest"] = feature_manifest_digest(layer, info["identity_fields"])
         except (ARCPY_EXECUTE_ERROR, RuntimeError, AttributeError, TypeError) as exc:
             _layer_warning(info, u"field_read_failed: %s" % _sample_text(exc))
+    elif bool(getattr(layer, "isRasterLayer", False)):
+        try:
+            info["geometry_type"] = u"raster"
+            info["raster_content_digest"] = raster_content_digest(layer)
+            info["source_content_digest"] = info["raster_content_digest"]
+        except (ARCPY_EXECUTE_ERROR, RuntimeError, AttributeError, TypeError) as exc:
+            _layer_warning(info, u"raster_read_failed: %s" % _sample_text(exc))
     return info
+
+
+def _field_spec(field):
+    """Seal the complete canonical ABI field semantics from one ArcPy field."""
+    domain = getattr(field, "domain", None)
+    return {
+        "name": _sample_text(field.name),
+        "type": _sample_text(getattr(field, "type", u"") or u""),
+        "nullable": bool(getattr(field, "isNullable", False)),
+        "length": _int_or_none(getattr(field, "length", None)),
+        "precision": _int_or_none(getattr(field, "precision", None)),
+        "scale": _int_or_none(getattr(field, "scale", None)),
+        "domain": _sample_text(domain) if domain else None,
+    }
+
+
+def _int_or_none(value):
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def layer_content_digest(layer):
+    """Read-only deterministic attribute evidence; never an execution receipt.
+
+    Geometry is excluded here so attribute identity and geometric identity are
+    independently provable (see ``feature_manifest_digest`` / ``raster_content_digest``).
+    """
+    desc = arcpy.Describe(layer)
+    fields = [field.name for field in arcpy.ListFields(layer)
+              if unicode(field.type).lower() not in (u"blob", u"raster", u"geometry")]
+    digest = hashlib.sha256()
+    digest.update(unicode(getattr(desc, "catalogPath", layer)).encode("utf-8", "replace"))
+    digest.update(u"\x1f".join(fields).encode("utf-8", "replace"))
+    with arcpy.da.SearchCursor(layer, fields) as rows:
+        for row in rows:
+            digest.update(repr(tuple(row)).encode("utf-8", "replace"))
+    return digest.hexdigest()
+
+
+def feature_manifest_digest(layer, identity_fields):
+    """Order-independent feature manifest keyed by sealed business identity.
+
+    Every feature is read as (identity tuple, complete non-binary attribute
+    tuple, canonical geometry hash) and the whole set is hashed in sorted
+    order.  The digest is therefore replayable and order-independent: a single
+    changed geometry or attribute value changes one token and the digest, so
+    ``source_preserved`` can Violate a silent reshape deterministically.
+
+    Requires a real stable identity on the dataset.  No identity (or unreadable
+    cursor) returns None — the caller must then refuse to claim preservation
+    rather than fall back to OID ordering.
+    """
+    if not identity_fields:
+        return None
+    desc = arcpy.Describe(layer)
+    cursor = getattr(getattr(arcpy, "da", None), "SearchCursor", None)
+    if cursor is None:
+        return None
+    all_fields = [field.name for field in arcpy.ListFields(layer)
+                  if unicode(field.type).lower() not in (u"blob", u"raster", u"geometry")]
+    identity = [name for name in identity_fields if name in all_fields] or list(identity_fields)
+    attribute_fields = [name for name in all_fields if name not in identity]
+    cursor_fields = list(identity) + attribute_fields + [u"SHAPE@WKB"]
+    tokens = []
+    try:
+        with cursor(layer, cursor_fields) as rows:
+            for row in rows:
+                values = list(row[:-1])
+                wkb = row[-1]
+                ident = tuple(unicode(v) if v is not None else u"<null>" for v in values[:len(identity)])
+                attrs = tuple(unicode(v) if v is not None else u"<null>" for v in values[len(identity):])
+                geom_hash = hashlib.sha256(wkb if isinstance(wkb, str) else bytes(wkb)).hexdigest() if wkb else u"<null>"
+                tokens.append(u"\x1f".join(ident) + u"\x1e" + u"\x1f".join(attrs) + u"\x1e" + geom_hash)
+    except Exception:
+        return None
+    if not tokens:
+        return None
+    digest = hashlib.sha256()
+    digest.update(unicode(getattr(desc, "shapeType", u"")).encode("utf-8", "replace"))
+    for token in sorted(tokens):
+        digest.update(token.encode("utf-8", "replace"))
+        digest.update(b"\x1e")
+    return digest.hexdigest()
+
+
+def raster_content_digest(layer):
+    """Stable, chunked cell-content digest for raster sources.
+
+    Reads the actual cell values (per band) in memory-bounded row blocks plus
+    the NoData mask, grid geometry and CRS, and hashes them.  A raster whose
+    metadata is identical but whose cells were tampered with produces a
+    different digest.  Directory timestamps are never used.
+
+    If the runtime cannot reliably read cells (no ``RasterToNumPyArray`` /
+    numpy, or any read failure), this returns None so the caller refuses to
+    claim raster preservation rather than asserting support it cannot prove.
+    """
+    desc = arcpy.Describe(layer)
+    to_numpy = getattr(arcpy, "RasterToNumPyArray", None)
+    if to_numpy is None:
+        return None
+    try:
+        import numpy as _np
+    except ImportError:
+        return None
+    raster = arcpy.Raster(layer)
+    width = int(getattr(raster, "width", 0) or 0)
+    height = int(getattr(raster, "height", 0) or 0)
+    if width <= 0 or height <= 0:
+        return None
+    # Multi-band rasters are not reliably summarizable on this runtime; refuse
+    # to claim preservation (return None) so the seal rejects before execution
+    # rather than producing an Unresolved at runtime.
+    band_count = int(getattr(raster, "bandCount", 1) or 1)
+    if band_count > 1:
+        return None
+    pixel_type = unicode(getattr(raster, "pixelType", u"") or u"")
+    if pixel_type.upper() == u"F32" or pixel_type.upper() == u"F64":
+        # Floating rasters hash deterministically only when NoData is stable;
+        # treat as unsupported to avoid false Proven on this runtime.
+        return None
+    nodata = getattr(raster, "noDataValue", None)
+    digest = hashlib.sha256()
+    digest.update(unicode(getattr(desc, "catalogPath", layer)).encode("utf-8", "replace"))
+    digest.update(b"\x1f")
+    extent = getattr(desc, "extent", None)
+    if extent is not None:
+        for attr in (u"XMin", u"YMin", u"XMax", u"YMax"):
+            digest.update(unicode(context_fingerprint.canonical_coordinate(getattr(extent, attr, None))).encode("utf-8", "replace"))
+            digest.update(b"\x1e")
+    reference = getattr(desc, "spatialReference", None)
+    digest.update(unicode(getattr(reference, "factoryCode", None)).encode("utf-8", "replace"))
+    digest.update(b"\x1f")
+    digest.update(unicode(getattr(reference, "name", None)).encode("utf-8", "replace"))
+    digest.update(b"\x1f")
+    digest.update(unicode(getattr(desc, "meanCellWidth", None)).encode("utf-8", "replace"))
+    digest.update(b"\x1e")
+    digest.update(unicode(getattr(desc, "meanCellHeight", None)).encode("utf-8", "replace"))
+    digest.update(b"\x1e")
+    digest.update(unicode(nodata).encode("utf-8", "replace"))
+    digest.update(b"\x1e")
+    # Memory-bounded, windowed read: RasterToNumPyArray accepts a lower-left
+    # corner and a column/row count, so the raster is hashed one row-block at a
+    # time instead of loading the whole grid.
+    block = 256
+    extent = getattr(raster, "extent", None)
+    cellh = getattr(raster, "meanCellHeight", None) or getattr(desc, "meanCellHeight", None)
+    nodata_value = nodata if nodata is not None else 0
+    try:
+        for top in range(0, height, block):
+            row_count = min(block, height - top)
+            if extent is not None and cellh:
+                lower_left = arcpy.Point(extent.XMin, extent.YMax - (top + row_count) * cellh)
+                block_array = to_numpy(raster, lower_left, width, row_count, nodata_value)
+            else:
+                full = to_numpy(raster, nodata_to_value=nodata_value)
+                block_array = full[top:top + row_count, 0:width]
+                del full
+            if hasattr(block_array, "tobytes"):
+                digest.update(bytes(block_array.tobytes()))
+            else:
+                digest.update(bytes(buffer(block_array)))
+            del block_array
+    except Exception:
+        return None
+    return digest.hexdigest()
 
 
 def _layer_type(layer):
@@ -211,6 +393,25 @@ def _layer_spatial_reference(description):
     if isinstance(factory_code, INTEGER_TYPES) and factory_code > 0:
         return "EPSG:%d" % factory_code
     return name if name else None
+
+
+def _seal_spatial_unit(info, description):
+    """Seal the runtime-verified CRS type and meters-per-linear-unit.
+
+    ArcPy Describe is the authority; the acceptance strategy never infers the
+    unit from a CRS name.  For geographic CRS the linear unit is angular, so
+    meters_per_unit is left unset (degrees are handled by the strategy).
+    """
+    sr = getattr(description, "spatialReference", None)
+    if sr is None:
+        return
+    crs_type = getattr(sr, "type", None)
+    if isinstance(crs_type, (str, unicode)):
+        info["crs_type"] = crs_type
+    if crs_type and "projected" in unicode(crs_type).lower():
+        meters_per_unit = getattr(sr, "metersPerUnit", None)
+        if isinstance(meters_per_unit, (int, float)) and not isinstance(meters_per_unit, bool) and meters_per_unit > 0:
+            info["meters_per_unit"] = float(meters_per_unit)
 
 
 def _sample_text(value):

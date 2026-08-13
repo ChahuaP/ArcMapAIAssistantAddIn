@@ -38,7 +38,28 @@ class CatalogTests(unittest.TestCase):
                 self.assertFalse(required - set(operation), operation.get("id"))
                 self.assertNotIn(operation["id"], seen)
                 seen.add(operation["id"])
-        self.assertGreaterEqual(len(seen), 18)
+        self.assertEqual(len(seen), 56)
+
+    def test_all_registered_capabilities_use_closed_semantic_abi(self):
+        from gateway_py3.catalog_loader import OperationCatalog
+
+        catalog = OperationCatalog()
+        self.assertEqual(len(list(catalog.all_operations())), 56)
+        forbidden = {"radius_unit", "outer_radius_unit", "inner_radius_unit", "field_type", "field_length"}
+        for operation in catalog.all_operations():
+            properties = operation["parameters_schema"]["properties"]
+            self.assertFalse(forbidden & set(properties), operation["id"])
+            for name, schema in properties.items():
+                if name in {"distance", "search_distance", "radius", "outer_radius", "inner_radius"}:
+                    self.assertEqual(schema.get("x-geopilot-semantic"), "quantity", operation["id"])
+                    self.assertEqual(schema.get("type"), "object" if name != "search_distance" and name != "inner_radius" else ["object", "null"])
+                if name in {"overlap_type", "selection_type"}:
+                    self.assertIsInstance(schema.get("enum"), list, operation["id"])
+                    self.assertFalse(any(value.isupper() for value in schema["enum"]), operation["id"])
+            for item in operation["capability_contract"]["inputs"]:
+                self.assertTrue(all(isinstance(field, dict) for field in item["required_fields"]), operation["id"])
+            for field in operation["capability_contract"]["outputs"]["fields"]["static_fields"]:
+                self.assertEqual(set(field), {"name", "type", "nullable", "length", "precision", "scale", "domain"})
 
     def test_every_executor_function_exists(self):
         catalog = _load_json(CATALOG_ROOT / "catalog.json")
@@ -90,19 +111,22 @@ class CatalogTests(unittest.TestCase):
                         schema["properties"][parameter].get("x-geopilot-kind"),
                         "layer",
                     )
-                for parameter in ("path", "output_workspace"):
+                self.assertNotIn("output_workspace", schema["properties"])
+                for parameter in ("path",):
                     if parameter in schema["properties"]:
                         self.assertEqual(
                             schema["properties"][parameter].get("x-geopilot-kind"),
                             "path",
                         )
             if operation["side_effects"] == "writes_data":
-                self.assertEqual(operation["output_policy"]["type"], "feature_class")
-                self.assertEqual(operation["output_policy"]["formats"], ["gdb"])
-                self.assertEqual(
-                    operation["output_policy"]["workspace"],
-                    "mxd_default_or_output_workspace",
-                )
+                policy = operation["output_policy"]
+                if policy["type"] == "feature_class":
+                    self.assertEqual(policy["formats"], ["gdb"])
+                    self.assertEqual(policy["workspace"], "server_managed_gdb")
+                else:
+                    self.assertEqual(policy["type"], "file")
+                    self.assertIn(policy["formats"], (["csv"], ["png"]))
+                    self.assertEqual(policy["workspace"], "server_managed_files")
 
     def test_catalog_rejects_legacy_output_and_parameter_contracts(self):
         from gateway_py3.catalog_loader import CatalogError, OperationCatalog
@@ -113,7 +137,7 @@ class CatalogTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = pathlib.Path(temp_dir)
             _write_single_operation_catalog(root, operation)
-            with self.assertRaisesRegex(CatalogError, "must be feature_class"):
+            with self.assertRaisesRegex(CatalogError, "unsupported"):
                 OperationCatalog(root)
 
         operation = copy.deepcopy(catalog.get("analysis.buffer"))
@@ -235,10 +259,10 @@ class CatalogTests(unittest.TestCase):
             contracts.get("analysis.identity")["outputs"]["fields"]["sources"],
             ["input_layer", "identity_layer"],
         )
-        self.assertIn("Join_Count", spatial_join["fields"]["static_fields"])
+        self.assertIn("Join_Count", [field["name"] for field in spatial_join["fields"]["static_fields"]])
         buffer_fields = contracts.get("analysis.buffer")["outputs"]["fields"]
         self.assertEqual("add_static_fields", buffer_fields["effect"])
-        self.assertEqual(["BUFF_DIST"], buffer_fields["static_fields"])
+        self.assertEqual("BUFF_DIST", buffer_fields["static_fields"][0]["name"])
         self.assertEqual(contracts.get("selection.select_by_attribute")["outputs"]["selection_state"], "applied")
 
     def test_registry_rejects_unresolvable_postcondition_target_and_stale_output_reference(self):
@@ -278,7 +302,7 @@ class CatalogTests(unittest.TestCase):
         star_properties = operations["edit.create_star_polygon"]["parameters_schema"]["properties"]
         self.assertIn("features", star_properties)
         self.assertEqual(operations["edit.create_star_polygon"]["parameters_schema"]["required"], ["output_name"])
-        self.assertEqual(star_properties["outer_radius_unit"]["enum"], ["map_units", "meters", "degrees"])
+        self.assertEqual(star_properties["outer_radius"]["x-geopilot-semantic"], "quantity")
 
     def test_python_addin_exposes_only_console_button(self):
         tree = ET.parse(str(ADDIN_ROOT / "config.xml"))

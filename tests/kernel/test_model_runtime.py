@@ -20,7 +20,7 @@ from gateway_py3.model_runtime.adapter import ProviderError
 from gateway_py3.model_runtime.adapters.minimax import MiniMaxAdapter, _MiniMaxWireClient
 from gateway_py3.model_runtime.adapters.minimax import MINIMAX_MODEL
 from gateway_py3.model_runtime.configuration import ModelConfigurationStore
-from gateway_py3.model_runtime.contracts import ProviderInvocation, ProviderResponse
+from gateway_py3.model_runtime.contracts import ProviderInvocation, ProviderResponse, model_binding_evidence
 from gateway_py3.model_runtime.registry import ProviderRegistry
 
 
@@ -35,7 +35,8 @@ def _request(**overrides) -> ModelRequest:
         prompt_version="v1", system_prompt="you are planner",
         user_input="select cities", tool_contract={"type": "object"},
         capability_hash="ch", context_projection={"layers": ["cities"]},
-        domain_rule_hash="drh", generation_params={},
+        domain_rule_hash="drh", model_plan=_plan(),
+        model_binding_summary={role: model_binding_evidence(_connection(), _plan().binding_for(role)) for role in ("compiler", "planner", "auditor", "repairer")}, generation_params={},
         run_id="00000000-0000-0000-0000-000000000001",
     )
     values.update(overrides)
@@ -131,7 +132,8 @@ class _Base(unittest.TestCase):
             caller=contracts.CallerIdentity(user_id="u1", tenant_id="t1", role="analyst"),
             target_selector={"bridge_pid": 2001, "bridge_port": 8766,
                              "arcmap_pid": 2000, "hwnd": 3000,
-                             "deployment_hash": "a" * 64},
+                             "deployment_hash": "a" * 64}, model_plan=_plan().model_dump(mode="json"),
+            model_binding_summary={role: model_binding_evidence(_connection(), _plan().binding_for(role)) for role in ("compiler", "planner", "auditor", "repairer")},
         ))["run_id"]
 
 
@@ -180,7 +182,9 @@ class CacheIdentityTest(_Base):
         _runtime(self.store, base_adapter).invoke(_request(), CONTRACT)
         for connection, plan in variants:
             adapter = _CountingAdapter(provider_type=connection.provider_type)
-            _runtime(self.store, adapter, connection, plan).invoke(_request(), CONTRACT)
+            _runtime(self.store, adapter, connection, plan).invoke(
+                _request(model_plan=plan,
+                         model_binding_summary={role: model_binding_evidence(connection, plan.binding_for(role)) for role in ("compiler", "planner", "auditor", "repairer")}), CONTRACT)
             self.assertEqual(1, adapter.call_count)
 
 
@@ -202,8 +206,11 @@ class RoleRoutingTest(_Base):
             self.store, first, first_connection, plan,
             extra_routes=((second_connection, second),),
         )
-        runtime.invoke(_request(role="compiler"), CONTRACT)
-        runtime.invoke(_request(role="planner", user_input="planner"), CONTRACT)
+        summary = {role: model_binding_evidence(
+            first_connection if plan.binding_for(role).connection_id == first_connection.connection_id else second_connection,
+            plan.binding_for(role)) for role in ("compiler", "planner", "auditor", "repairer")}
+        runtime.invoke(_request(role="compiler", model_plan=plan, model_binding_summary=summary), CONTRACT)
+        runtime.invoke(_request(role="planner", user_input="planner", model_plan=plan, model_binding_summary=summary), CONTRACT)
         self.assertEqual((1, 1), (first.call_count, second.call_count))
         self.assertEqual("CompilerModel", first.calls[0].model_id)
         self.assertEqual("PlannerModel", second.calls[0].model_id)
@@ -212,6 +219,39 @@ class RoleRoutingTest(_Base):
         registry = ProviderRegistry()
         with self.assertRaises(LookupError):
             ModelRuntime(registry, _plan(), self.store)
+
+    def test_forged_binding_summary_fails_before_provider_call(self):
+        adapter = _CountingAdapter()
+        runtime = _runtime(self.store, adapter)
+        summary = {role: model_binding_evidence(
+            _connection(), _plan().binding_for(role),
+        ) for role in ("compiler", "planner", "auditor", "repairer")}
+        summary["planner"] = dict(summary["planner"], deployment_fingerprint="forged")
+        with self.assertRaisesRegex(RuntimeError, "sealed model binding"):
+            runtime.invoke(_request(model_binding_summary=summary), CONTRACT)
+        self.assertEqual(0, adapter.call_count)
+
+    def test_sealed_plan_can_invoke_a_registered_non_default_route(self):
+        default_adapter = _CountingAdapter("default", "fake")
+        alternate_adapter = _CountingAdapter("alternate", "local")
+        default_connection = _connection("default", "fake", "Fake",
+                                         "http://default.invalid/v1")
+        alternate_connection = _connection("alternate", "local", "Local",
+                                           "http://alternate.invalid/v1")
+        runtime = _runtime(
+            self.store, default_adapter, default_connection,
+            _plan("default", "Fake"),
+            extra_routes=((alternate_connection, alternate_adapter),),
+        )
+        selections = {role: {"provider": "local", "model": "Local"}
+                      for role in ("compiler", "planner", "auditor", "repairer")}
+        sealed = runtime.seal_task_plan(selections)
+        result = runtime.invoke(_request(
+            model_plan=sealed,
+            model_binding_summary=runtime.binding_summary(sealed),
+        ), CONTRACT)
+        self.assertTrue(result.succeeded)
+        self.assertEqual((0, 1), (default_adapter.call_count, alternate_adapter.call_count))
 
     def test_provider_failure_never_switches_connection(self):
         failing = _CountingAdapter(error=ProviderError("transport", "offline"))
@@ -226,14 +266,11 @@ class RoleRoutingTest(_Base):
 
 
 class ContractAndRegistryTest(_Base):
-    def test_installed_minimax_is_a_default_plan_not_a_runtime_constraint(self):
-        configuration = ModelConfigurationStore(
-            path=Path(tempfile.mkdtemp()) / "model_configuration.json",
-        ).load()
-        installed = configuration.plan
-        self.assertTrue(all(binding.model_id == MINIMAX_MODEL
-                            for binding in installed.bindings()))
-        self.assertEqual("minimax", configuration.connections[0].provider_type)
+    def test_missing_model_configuration_is_rejected(self):
+        with self.assertRaises(ValueError):
+            ModelConfigurationStore(
+                path=Path(tempfile.mkdtemp()) / "model_configuration.json",
+            ).load()
 
         compiler = _plan("compiler-conn", "CompilerModel").compiler
         planner = _plan("planner-conn", "PlannerModel")
@@ -354,9 +391,13 @@ class MiniMaxAdapterNormalizationTest(unittest.TestCase):
             def get(self, credential_ref):
                 raise KeyError(credential_ref)
 
-        connection = ModelConfigurationStore(
-            path=Path(tempfile.mkdtemp()) / "model_configuration.json",
-        ).load().connections[0]
+        connection = ProviderConnection(
+            connection_id="minimax-official", provider_type="minimax",
+            endpoint="https://api.minimaxi.com/v1",
+            credential_ref="credential:minimax-official",
+            enabled_models=(MINIMAX_MODEL,),
+            deployment_fingerprint="minimax-public-api-v1",
+        )
         adapter = MiniMaxAdapter(connection, MissingVault())
         invocation = ProviderInvocation(
             model_id=MINIMAX_MODEL,

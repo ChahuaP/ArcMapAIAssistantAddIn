@@ -51,6 +51,17 @@ class VersionTests(unittest.TestCase):
         self.assertIn('Join-Path $repoRoot "VERSION"', build)
         self.assertIn('Join-Path $repoRoot "operation_catalog"', build)
 
+    def test_setup_has_one_authoritative_postinstall_exit_contract(self):
+        """The elevated Setup process owns installation and propagates script failure."""
+        setup = (ROOT / "packaging" / "GeoPilotSetup.iss").read_text(encoding="utf-8-sig")
+        install = (ROOT / "packaging" / "install.ps1").read_text(encoding="utf-8-sig")
+
+        self.assertEqual(setup.count(r"packaging\install.ps1"), 1)
+        self.assertIn("InstallScriptExitCode := ResultCode;", setup)
+        self.assertIn("if InstallScriptExitCode <> 0 then", setup)
+        self.assertIn("$global:LASTEXITCODE = 0", install)
+        self.assertTrue(install.rstrip().endswith("exit 0"))
+
     def test_web_opener_uses_clean_local_url(self):
         opener = (ROOT / "gateway_py3" / "open_web.py").read_text(encoding="utf-8")
         build_script = (ROOT / "packaging" / "build_release.ps1").read_text(encoding="utf-8-sig")

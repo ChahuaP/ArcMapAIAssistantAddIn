@@ -7,6 +7,7 @@
     "packs/table.json",
     "packs/edit_geometry.json",
     "packs/data_management.json",
-    "packs/layout.json"
+    "packs/layout.json",
+    "packs/artifact.json"
   ]
 }

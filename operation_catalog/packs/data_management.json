@@ -25,10 +25,6 @@
           },
           "output_name": {
             "type": "string"
-          },
-          "output_workspace": {
-            "type": "string",
-            "x-geopilot-kind": "path"
           }
         },
         "additionalProperties": false
@@ -45,7 +41,7 @@
           "gdb"
         ],
         "default_format": "gdb",
-        "workspace": "mxd_default_or_output_workspace",
+        "workspace": "server_managed_gdb",
         "overwrite": false,
         "add_to_map": true
       },
@@ -95,10 +91,6 @@
             },
             "output_name": {
               "type": "string"
-            },
-            "output_workspace": {
-              "type": "string",
-              "x-geopilot-kind": "path"
             }
           },
           "additionalProperties": false
@@ -198,10 +190,6 @@
           },
           "output_name": {
             "type": "string"
-          },
-          "output_workspace": {
-            "type": "string",
-            "x-geopilot-kind": "path"
           }
         },
         "additionalProperties": false
@@ -218,7 +206,7 @@
           "gdb"
         ],
         "default_format": "gdb",
-        "workspace": "mxd_default_or_output_workspace",
+        "workspace": "server_managed_gdb",
         "overwrite": false,
         "add_to_map": true
       },
@@ -268,10 +256,6 @@
             },
             "output_name": {
               "type": "string"
-            },
-            "output_workspace": {
-              "type": "string",
-              "x-geopilot-kind": "path"
             }
           },
           "additionalProperties": false
@@ -743,8 +727,24 @@
             "effect": "add_static_fields",
             "target": "layer",
             "static_fields": [
-              "POINT_X",
-              "POINT_Y"
+              {
+                "name": "POINT_X",
+                "type": "double",
+                "nullable": true,
+                "length": null,
+                "precision": null,
+                "scale": null,
+                "domain": []
+              },
+              {
+                "name": "POINT_Y",
+                "type": "double",
+                "nullable": true,
+                "length": null,
+                "precision": null,
+                "scale": null,
+                "domain": []
+              }
             ],
             "parameter_field": "not_applicable"
           },
