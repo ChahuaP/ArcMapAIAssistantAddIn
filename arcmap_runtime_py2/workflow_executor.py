@@ -69,6 +69,10 @@ class WorkflowExecutionError(Exception):
 
 
 def execute(workflow_row, context, confirm_callback=None):
+    # Deferred silent execution must never surface GP dialogs: the overwrite
+    # confirmation is an invisible UI-thread prompt that hangs ArcMap
+    # (observed as AppHangB1 during buffer retries).
+    arcpy.env.overwriteOutput = True
     workflow = workflow_row["workflow"]
     expected_hash = workflow_row.get("content_hash") or u""
     if expected_hash:

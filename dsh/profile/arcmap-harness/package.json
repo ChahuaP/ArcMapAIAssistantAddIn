@@ -1,0 +1,17 @@
+{
+  "name": "dsh-profile-arcmap-web",
+  "private": true,
+  "dependencies": {
+    "@deepseek-ai/dsh-mcp-client": "0.1.2-alpha.3",
+    "arcmap-brand": "file:..\\..\\plugins\\arcmap-brand"
+  },
+  "dsh": {
+    "profile": {
+      "bundles": [
+        "@deepseek-ai/dsh-base",
+        "@deepseek-ai/dsh-web-app"
+      ],
+      "patchReload": "live"
+    }
+  }
+}

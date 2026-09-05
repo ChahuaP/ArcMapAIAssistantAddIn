@@ -5,6 +5,7 @@ import json
 import os
 import pythonaddins
 import sys
+import time
 
 
 RUNTIME_MODULE = "arcmap_ai_assistant_runtime"
@@ -49,6 +50,19 @@ def installed_app_dir():
     return install_dir
 
 
+def _log_error(exc):
+    """Every suppressed onClick failure must leave a trace on disk."""
+    try:
+        import traceback as _tb
+        log_dir = os.path.join(os.environ.get("LOCALAPPDATA", ""), "ArcMapAIAssistant", "logs")
+        if not os.path.isdir(log_dir):
+            os.makedirs(log_dir)
+        with open(os.path.join(log_dir, "addin_error.log"), "ab") as stream:
+            stream.write(("[%s] %s " % (time.strftime("%Y-%m-%d %H:%M:%S"), exc)) + _tb.format_exc() + chr(10))
+    except Exception:
+        pass
+
+
 def show_message(text):
     pythonaddins.MessageBox(text, "ArcMap AI Assistant", 0)
 
@@ -87,5 +101,6 @@ class OpenAssistantButton(object):
             runtime.bind_ui_thread()
             runtime.open_or_handle_bridge_command()
         except Exception as exc:
+            _log_error(exc)
             if not runtime or not getattr(runtime, "suppress_last_error_popup", lambda: False)():
                 show_message(u"执行失败：%s" % exc)

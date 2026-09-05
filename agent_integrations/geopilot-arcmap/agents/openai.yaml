@@ -1,4 +1,0 @@
-interface:
-  display_name: "GeoPilot ArcMap"
-  short_description: "Operate ArcMap through local GeoPilot Bridge."
-  default_prompt: "Use GeoPilot ArcMap to inspect gateway health and capabilities, then guide me through the controlled web-console workflow."

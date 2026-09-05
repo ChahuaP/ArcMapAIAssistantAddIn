@@ -84,13 +84,18 @@ class LineageFact(object):
             raise SemanticAbiError("LineageFact is incomplete.")
 
 
+def _is_finite(value):
+    # math.isfinite is Python-3-only; ArcMap runs 2.7.
+    return value == value and value not in (float("inf"), float("-inf"))
+
+
 def quantity(value, expected_dimension=None):
     if not isinstance(value, dict) or set(value) != set(("value", "unit", "dimension", "tolerance", "crs")):
         raise SemanticAbiError("Quantity must contain exactly value, unit, dimension, tolerance, crs.")
     units = {"length": LENGTH_UNITS, "area": AREA_UNITS, "angle": ANGLE_UNITS}
     if value["dimension"] not in units or value["unit"] not in units[value["dimension"]] or (expected_dimension is not None and value["dimension"] != expected_dimension):
         raise SemanticAbiError("Quantity uses an unsupported dimension or unit.")
-    if isinstance(value["value"], bool) or not isinstance(value["value"], (int, float)) or not math.isfinite(float(value["value"])) or value["value"] < 0:
+    if isinstance(value["value"], bool) or not isinstance(value["value"], (int, float)) or not _is_finite(float(value["value"])) or value["value"] < 0:
         raise SemanticAbiError("Quantity value must be finite and non-negative.")
     if isinstance(value["tolerance"], bool) or not isinstance(value["tolerance"], (int, float)) or value["tolerance"] < 0:
         raise SemanticAbiError("Quantity tolerance must be non-negative.")

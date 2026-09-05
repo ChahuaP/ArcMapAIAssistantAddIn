@@ -1,5 +1,10 @@
 # -*- coding: utf-8 -*-
 from __future__ import absolute_import
+try:
+    basestring
+except NameError:  # Python 3 (syntax gate)
+    basestring = str
+
 
 import os
 import re
@@ -171,6 +176,26 @@ def safe_output_name(name):
     ):
         raise OperationError("Invalid output_name: %s" % name)
     return text
+
+
+def dataset(layer_or_path):
+    """Resolve a live Layer object to its datasource path for analysis tools.
+
+    GP analysis on a live MxDocument-bound Layer object crashed ArcMap
+    natively (observed 0x800706BE during Buffer on the UI thread); the same
+    buffer on the datasource path runs clean standalone. Analysis operates
+    on data, not on map state, so hand the tools the path.
+    """
+    data_source = getattr(layer_or_path, "dataSource", None)
+    if isinstance(data_source, basestring) and data_source:
+        return data_source
+    if hasattr(layer_or_path, "name"):
+        # A Layer object without a resolvable datasource (e.g. a layer whose
+        # source is broken) must not silently stringify to its display name —
+        # the GP subprocess would then receive "schools" as a path.
+        raise OperationError(
+            u"Layer has no readable datasource: %s" % layer_or_path.name)
+    return layer_or_path
 
 
 def output_feature_class(context, output_name):

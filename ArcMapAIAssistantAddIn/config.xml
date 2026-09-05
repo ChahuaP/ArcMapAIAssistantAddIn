@@ -14,12 +14,12 @@
   <AddIn language="PYTHON" library="ArcMapAIAssistant_addin.py" namespace="ArcMapAIAssistant_addin">
     <ArcMap>
       <Commands>
-        <Button caption="启动控制台"
+        <Button caption="ArcMap Harness"
                 category="ArcMap AI Assistant"
                 class="OpenAssistantButton"
                 id="ArcMapAIAssistant_addin.openAssistantButton"
-                message="Start GeoPilot console"
-                tip="启动 GeoPilot 控制台">
+                message="Start ArcMap Harness"
+                tip="启动 ArcMap Harness 控制台">
           <Help heading="ArcMap AI Assistant" />
         </Button>
       </Commands>

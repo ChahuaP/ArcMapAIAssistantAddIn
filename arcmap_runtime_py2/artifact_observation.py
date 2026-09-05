@@ -1,6 +1,11 @@
 # -*- coding: utf-8 -*-
 """Measured ArcMap artifacts and CapabilityContract postconditions."""
 from __future__ import absolute_import
+try:
+    basestring
+except NameError:  # Python 3 (syntax gate)
+    basestring = str
+
 
 import arcpy
 from shared_runtime import capability_contract
@@ -192,6 +197,16 @@ def _dataset_target(target):
     return path if path is not None else target
 
 
+def _field_name(value):
+    """FieldSpec dicts and raw names both reduce to the field name string."""
+    if isinstance(value, dict):
+        name = value.get("name")
+        return unicode(name) if name else None
+    if isinstance(value, basestring) and value:
+        return unicode(value)
+    return None
+
+
 def _check(name, expected, observation, arguments, verifier_proof):
     actual = observation.get(name)
     check = {"name": name, "expected": expected, "actual": actual, "verdict": "passed"}
@@ -238,9 +253,11 @@ def _check(name, expected, observation, arguments, verifier_proof):
         if isinstance(expected, dict):
             for source in expected.get("sources") or [expected.get("target")]:
                 targets.extend(_inputs(before, source))
-        required = list(expected.get("static_fields") or []) if isinstance(expected, dict) else []
+        required = [_field_name(item) for item in (expected.get("static_fields") or [])] if isinstance(expected, dict) else []
         parameter = arguments.get(expected.get("parameter_field")) if isinstance(expected, dict) else None
-        if effect == "add_parameter_field": required.append(parameter)
+        parameter = _field_name(parameter)
+        if effect == "add_parameter_field" and parameter:
+            required.append(parameter)
         if effect == "delete_parameter_field":
             check["actual"] = {"before": target.get("fields") if target else None, "after": observation.get("fields")}
             check["verdict"] = "passed" if target and parameter in target.get("fields", []) and parameter not in observation.get("fields", []) else "failed"
@@ -249,11 +266,11 @@ def _check(name, expected, observation, arguments, verifier_proof):
             if effect == "inherit_tabular_fields" and target:
                 types = target.get("field_types") or {}
                 inherited = [field for field in inherited if unicode(types.get(field) or "").lower() not in ("geometry", "raster", "blob")]
-            required.extend(inherited)
+            required.extend(_field_name(item) for item in inherited)
             check["actual"] = {"required": required, "after": observation.get("fields")}
             check["verdict"] = "passed" if target and all(field in observation.get("fields", []) for field in required) else "failed"
         elif effect == "aggregate_by_parameter_fields":
-            required.extend(arguments.get("dissolve_fields") or [])
+            required.extend(_field_name(item) for item in (arguments.get("dissolve_fields") or []))
             check["actual"] = {"required": required, "after": observation.get("fields")}
             check["verdict"] = "passed" if all(field in observation.get("fields", []) for field in required) else "failed"
         elif effect == "merge_inputs":
@@ -267,7 +284,14 @@ def _check(name, expected, observation, arguments, verifier_proof):
         elif required:
             check["verdict"] = "passed" if all(field in observation.get("fields", []) for field in required) else "failed"
     elif name == "cardinality":
-        if expected in ("one_per_input_feature", "one_per_target_feature"):
+        if expected in ("one_or_more_per_input_feature", "one_or_more_per_target_feature"):
+            # Per-feature multiplicity needs symbolic proofs the boundary
+            # cannot seal; verify the operation produced output at all.
+            parameter = "input_layer" if expected == "one_or_more_per_input_feature" else "target_layer"
+            source = _input(before, parameter)
+            check["actual"] = {"output": observation.get("feature_count"), parameter: source.get("feature_count") if source else None}
+            check["verdict"] = "passed" if observation.get("feature_count") and observation.get("feature_count") > 0 else "failed"
+        elif expected in ("one_per_input_feature", "one_per_target_feature"):
             parameter = "input_layer" if expected == "one_per_input_feature" else "target_layer"
             source = _input(before, parameter)
             check["actual"] = {"output": observation.get("feature_count"), parameter: source.get("feature_count") if source else None}

@@ -623,9 +623,12 @@ def _extent_is_fitted(actual, expected):
 
 
 def _extent_tolerance(actual, expected):
-    values = list(actual.values()) + list(expected.values())
-    scale = max([abs(value) for value in values] + [1.0])
-    return scale * 1e-9
+    # Zoom-to-layer/selection fits with a display margin (ArcMap adds ~3-5%);
+    # compare against the extent SPAN, not the coordinate magnitude, or every
+    # fitted view fails on float-exact equality at projected coordinates.
+    span_x = abs(expected["XMax"] - expected["XMin"])
+    span_y = abs(expected["YMax"] - expected["YMin"])
+    return max(span_x, span_y, 1.0) * 0.05
 
 
 def _close(left, right, tolerance):

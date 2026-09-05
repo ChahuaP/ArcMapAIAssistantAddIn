@@ -1,69 +1,59 @@
-# GeoPilot
+# ArcMap Harness
 
-GeoPilot 是面向 ArcMap（ArcGIS Desktop）的本地 AI GIS 执行系统。自然语言只用于产生受限的结构化合同；GIS 操作只能经 CapabilityRegistry、租约绑定的 ArcMap Runtime、隔离暂存和独立验收执行。
+运行在 ArcMap 上的政务 GIS 智能执行系统：dsh（DeepSeek Harness）自主 Agent 作为大脑，边界服务器（`server/`）作为模型与 ArcMap 之间的**唯一通道**。自然语言驱动地图操作；模型不直接编写或运行 Python，一切 GIS 操作经边界工具、Bridge 租约、暂存执行与独立验收完成。
 
-## 唯一生产链
+## 架构
 
 ```text
-Web Console -> HTTP Adapter -> GeoPilotKernel / JournalStore
--> frozen context lease -> TaskContract -> ProofGraph-verified plan
--> explicit authorization -> ArcMap Python 2 staged execution
--> independent ArcPy probe -> AcceptancePublisher -> atomic publication
+浏览器 / dsh web（ArcMap Harness 品牌化控制台，MiniMax-M3）
+  ↓ MCP（stdio）
+server/  边界服务器（56 个原生操作工具 + 4 个基础设施工具）
+  ├─ 三态 pre-check：proven / unresolved（向用户澄清）/ violated（拒绝）
+  ├─ op journal（op 级 GIS 事实日志）
+  └─ Py2/Bridge 回调面（127.0.0.1:8765）
+  ↓ Bridge 租约协议（127.0.0.1:8766）
+C# Bridge（ArcMap 进程内）→ ArcMap Python 2 runtime（暂存执行 → 独立验收 probe → 原子发布）
 ```
 
-每个 run 独立于 session、调用者、目标 ArcMap 和上下文摘要。JournalStore 追加记录请求、合同、证明、授权、回执、探针和发布事实；回执只能证明调度，不能证明 GIS 语义。任何未证明或违反的必须义务均不得发布。
+**红线**：拒绝类强制全部在边界；dsh 侧插件只做询问（审批）、呈现与品牌。`code-runtime`（代码执行通道）在组合中显式禁用——模型无法绕过 ArcMap 门。
 
-## 合同和验证
+## 工具面（B 结构）
 
-- `shared_runtime.semantic_abi` 是 Python 3 / ArcGIS Python 2 共用的 GIS 语义 ABI：`Quantity`、`FieldSpec`、`SpatialPredicate` 与 `LineageFact`。
-- 操作目录包含 9 个 pack 的可执行能力。每个能力必须有输入、参数、前置/后置条件、语义效果、输出、血缘、副作用、授权和验收合同，否则 CapabilityRegistry 拒绝注册。
-- WorkflowVerifier 为请求/合同/实体/字段/选择/空间关系/单位/顺序/输出/血缘/副作用/授权生成唯一三态 ProofGraph：`Proven`、`Unresolved` 或 `Violated`。
-- G3 只审计 G2 的同一 Intent、Context、CapabilitySnapshot 和 baseline；它只能引用已有 `proof_id`，不能生成替代规划。任何修订必须保持输入、输出、已证明事实和授权范围，并通过单调验证。
-- 澄清是唯一的闭环：`POST /api/v1/runs/{id}/clarifications` 提交绑定 run、session、caller、request/context digest 与 clarification id 的答案。普通 `/resume` 不会重放澄清。
+56 个操作从 `operation_catalog`（9 pack）**自动生成**为独立 MCP 工具（`layer__add_layer`、`analysis__buffer`、`context__list_layers`…），工具列表即能力清单；另有 `get_map_context`（实时重捕）、`get_boundary_status`（连接状态）、`verify_result`（独立验收）、`get_operation_history`（操作日志）四个基础设施工具。缺必填参数返回 unresolved 义务，Agent 向用户澄清后重调。
 
-## 模型连接
-
-生产模型调用为 `ModelRuntime -> ProviderRegistry -> ProviderAdapter`。MiniMax、DeepSeek、Qwen、智谱、Ollama、本地部署和 OpenAI-compatible 连接都必须显式配置；不存在自动换模型或隐式 fallback。第三章正式实验由 ExperimentSupervisor 单独锁定 `provider=minimax`、`model=MiniMax-M3`，该限制不改变日常生产连接。
-
-凭据只保存为 CurrentUser DPAPI 引用，任务与日志绝不保存明文 key。
-
-## 运行
-
-- Windows 10/11 x64、ArcGIS Desktop / ArcMap 10.x（Python 2.7）
-- Python 3.11 网关
-- 已加载的 ArcMap Bridge 和显式配置的模型连接
+## 构建与安装
 
 ```powershell
-python -m gateway_py3
+pwsh -NoProfile -File packaging\build_harness.ps1     # 构建到 build/harness-staging（含语法门禁）
+pwsh -NoProfile -File packaging\install_harness.ps1   # 安装替换（UAC）：Program Files\GeoPilot\harness + Add-in + dsh profile
 ```
 
-网关只监听 `127.0.0.1:8765`。不要直接调用 Bridge 回调或从 shell 执行 ArcPy；它们会绕过租约、授权、暂存、验收和原子发布。
+安装后点 ArcMap 工具栏 **ArcMap Harness** 按钮 → 启动控制台（深浅色主题跟随 dsh 原生）。
 
 ## 测试
 
 ```powershell
-python -m unittest discover -s tests -p "test_*.py"
-
-$env:PYTHONPATH = (Get-Location).Path
-& 'C:\Python27\ArcGIS10.2\python.exe' -m unittest discover -s tests\python2_runtime -p 'test_*_py2.py'
-
-Get-ChildItem gateway_py3\web -Filter *.js | ForEach-Object { node --check $_.FullName }
-git diff --check
+python -m unittest discover -s tests/server -p "test_*.py"
 ```
-
-测试不调用真实模型或运行实验。正式实验只能通过 `python -m experiments.supervisor` 的受监督 runtime gate 进入。
-
-当前架构与 Bridge 协议分别见 [目标架构](docs/GEOPILOT_TARGET_ARCHITECTURE.md) 和 [Bridge 租约协议](docs/GEOPILOT_BRIDGE_LEASE_PROTOCOL.md)。
 
 ## 目录
 
 ```text
-gateway_py3/kernel/       Kernel、不可变合同与 JournalStore
-gateway_py3/intelligence/ TaskCompiler、规划和受限审计
-gateway_py3/runtime/      Bridge、上下文、验收与发布
-arcmap_runtime_py2/       ArcPy 执行、探针和 durable outbox
-operation_catalog/        严格验证的 9-pack 能力目录
-experiments/supervisor/   G2/G3 受监督实验入口
-shared_runtime/           Python 2/3 共用合同
-tests/                    Python 3 与 ArcMap Python 2 合同测试
+server/                 边界服务器（自包含：目录/生成/审查/日志/回调面）
+arcmap_runtime_py2/     ArcMap Py2 执行、验收 probe、durable outbox
+ArcMapBridgeExternal/   C# Bridge（租约协议）
+ArcMapAIAssistantAddIn/ ArcMap Add-in（ArcMap Harness 按钮）
+operation_catalog/      56 能力目录（唯一能力事实源）
+shared_runtime/         Py2/Py3 共享语义合同
+dsh/                    品牌插件、状态面板、profile 组合
+packaging/              构建与安装脚本
+docs/adr/               架构决策记录
 ```
+
+## 关键约束
+
+- `VERSION` 钉在 **2.0.0**：已安装的 Py2 Add-in 以此校验回调服务器身份，升级需同步两端。
+- MiniMax 走官方 Anthropic 兼容端点（`api.minimaxi.com/anthropic`）；OpenAI 兼容端点缺 SSE `[DONE]` 哨兵，禁用。
+- dsh 版本钉 `0.1.2-alpha.3`；升级需跑场景回归。
+
+架构决策与证据见 [ADR 0002](docs/adr/0002-arcmap-harness-boundary.md)。

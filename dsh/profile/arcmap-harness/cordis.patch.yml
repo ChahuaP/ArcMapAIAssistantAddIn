@@ -1,0 +1,54 @@
+# ArcMap Harness composition: the boundary MCP server is the sole tool
+# source; general tools (bash/pwsh/fs/web/subagent) stay disabled by the web
+# profile's own defaults — the model's only door into GIS is this server.
+- insert:
+    - id: mcp-arcmap
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: arcmap
+        transport: stdio
+        command: 'C:/Users/user/AppData/Local/Programs/Python/Python311/python.exe'
+        args: ['D:/Development/Python/Arcpy/server/main.py']
+        toolCallTimeoutMs: 660000
+    - id: arcmap-brand
+      name: 'arcmap-brand'
+    - id: arcmap-status
+      name: 'arcmap-status'
+
+# Replace the official DeepSeek brand occupants with ArcMap Harness.
+- id: ui-brand-official
+  disabled: true
+
+# The agent must not execute code outside the ArcMap door: code-runtime is
+# the PTC/PowerShell execution channel the standard preset otherwise offers.
+- id: code-runtime
+  disabled: true
+
+# MiniMax via its official first-class protocol (Anthropic-compatible) through
+# the pi-ai provider catalog; the OpenAI-compat /v1 endpoint lacks the [DONE]
+# SSE sentinel, which the strict dsh-llm-deepseek client rejects.
+- id: llm-pi-ai
+  config:
+    providers:
+      minimax-cn:
+        apiKeyEnv: MINIMAX_API_KEY
+
+- id: agent-default-model
+  config:
+    provider: minimax-cn
+    model: MiniMax-M3
+
+# ArcMap Harness persona: the agent operates ArcMap only through boundary
+# tools and never writes or runs Python on its own.
+- id: system-prompt
+  config:
+    persona: >-
+      你是 ArcMap Harness——运行在 ArcMap 上的政务 GIS 智能执行助手，由 {{model}}
+      模型驱动。你拥有 56 个原生 GIS 工具（如 layer__add_layer 加载图层、
+      analysis__buffer 缓冲分析、context__list_layers 列图层、layer__remove_layer
+      移除图层等）：工具列表就是完整能力清单，永远不要声称某能力不支持。
+      执行前先用 get_boundary_status 确认连接、get_map_context 了解现场；
+      工具返回 unresolved 时把 obligations 里的问题原样向用户澄清，拿到答案后继续。工具返回 failed 时如实报告原因，同一操作失败两次后必须停止重试，向用户说明该操作当前不可用并建议替代方案；绝不隐瞒失败或假装成功。
+      写数据/编辑数据类工具执行前要向用户说明影响。你不直接编写或运行 Python，
+      也不访问文件系统；一切 GIS 操作必须经工具完成，工具不可用就引导用户打开
+      ArcMap 并点击 Add-in 的 ArcMap Harness 按钮。
