@@ -1,17 +1,42 @@
 # ArcMap Harness console launcher: ensure the web console is running and open
 # it in the default browser. Called by OpenAssistantWeb.cmd (ArcMap Add-in).
-# Requires: dsh on PATH, DSH profile deployed by install_harness.ps1.
+# Fully self-contained: uses the bundled Node + dsh under <harness>\runtime.
 param(
     [int]$Port = 3180
 )
 $ErrorActionPreference = 'Stop'
 
+$Harness = $PSScriptRoot
+$NodeExe = Join-Path $Harness 'runtime\node\node.exe'
+$DshBin = Join-Path $Harness 'runtime\dsh\node_modules\@deepseek-ai\dsh\lib\bin.js'
 $AppData = Join-Path $env:LOCALAPPDATA 'ArcMapAIAssistant'
 $DshHome = Join-Path $AppData 'dsh-home'
 $LogsDir = Join-Path $AppData 'logs'
 $WebLog = Join-Path $LogsDir 'harness_web.log'
 $UrlFile = Join-Path $AppData 'harness_url.txt'
 New-Item -ItemType Directory -Force -Path $LogsDir | Out-Null
+
+if (-not (Test-Path -LiteralPath $NodeExe)) { throw "缺少内置 Node 运行时：$NodeExe" }
+if (-not (Test-Path -LiteralPath $DshBin)) { throw "缺少内置 dsh：$DshBin" }
+
+# First-run convenience: prompt once for the model key if it is not configured.
+$EnvFile = Join-Path $DshHome '.env'
+$hasKey = $false
+if (Test-Path -LiteralPath $EnvFile) {
+    $hasKey = [bool](Select-String -Path $EnvFile -Pattern '^\s*MINIMAX_API_KEY\s*=\s*\S' -Quiet -ErrorAction SilentlyContinue)
+}
+if (-not $hasKey -and -not $env:MINIMAX_API_KEY) {
+    try {
+        Add-Type -AssemblyName Microsoft.VisualBasic -ErrorAction SilentlyContinue
+        $key = [Microsoft.VisualBasic.Interaction]::InputBox(
+            "首次使用请输入 MiniMax API Key（用于驱动 GIS 助手）。`n可留空，稍后也可在 dsh 设置中填写。",
+            'ArcMap Harness 配置', '')
+        if ($key -and $key.Trim()) {
+            New-Item -ItemType Directory -Force -Path $DshHome | Out-Null
+            Set-Content -Path $EnvFile -Value ('MINIMAX_API_KEY=' + $key.Trim()) -Encoding ASCII
+        }
+    } catch { }
+}
 
 function Test-PortListening([int]$Number) {
     $client = New-Object Net.Sockets.TcpClient
@@ -43,13 +68,11 @@ function Stop-HarnessWeb {
 function Start-HarnessWeb {
     Stop-HarnessWeb
     Remove-Item -LiteralPath $WebLog -Force -ErrorAction SilentlyContinue
-    $dsh = Join-Path $env:APPDATA 'npm\dsh.cmd'
-    if (-not (Test-Path -LiteralPath $dsh)) { throw "dsh 不存在：$dsh。请先安装 npm 全局 @deepseek-ai/dsh。" }
     $env:DSH_HOME = $DshHome
-    Start-Process -FilePath $dsh `
-        -ArgumentList @('--profile', 'arcmap-harness', '--no-open', '--port', "$Port") `
+    Start-Process -FilePath $NodeExe `
+        -ArgumentList @("`"$DshBin`"", '--profile', 'arcmap-harness', '--no-open', '--port', "$Port") `
         -WindowStyle Hidden -RedirectStandardOutput $WebLog -RedirectStandardError ($WebLog + '.err')
-    $deadline = (Get-Date).AddSeconds(45)
+    $deadline = (Get-Date).AddSeconds(60)
     while ((Get-Date) -lt $deadline) {
         if (Test-Path -LiteralPath $WebLog) {
             $match = Select-String -LiteralPath $WebLog -Pattern 'dsh web: (http://\S+)' |

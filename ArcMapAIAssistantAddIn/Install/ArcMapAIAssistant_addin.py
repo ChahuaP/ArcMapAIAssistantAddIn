@@ -24,7 +24,7 @@ except NameError:
 def installed_runtime_path():
     install_dir = installed_app_dir()
     if not install_dir:
-        raise RuntimeError("GeoPilot install config is missing install_dir.")
+        raise RuntimeError("ArcMap Harness install config is missing install_dir.")
     return os.path.join(install_dir, "arcmap_runtime_py2")
 
 
@@ -43,10 +43,10 @@ def installed_app_dir():
         raw = raw.lstrip(u"\ufeff")
         payload = json.loads(raw)
     except Exception as exc:
-        raise RuntimeError("Invalid GeoPilot install config: %s" % exc)
+        raise RuntimeError("Invalid ArcMap Harness install config: %s" % exc)
     install_dir = payload.get("install_dir", "")
     if not isinstance(install_dir, basestring) or not install_dir:
-        raise RuntimeError("GeoPilot install config is missing install_dir.")
+        raise RuntimeError("ArcMap Harness install config is missing install_dir.")
     return install_dir
 
 

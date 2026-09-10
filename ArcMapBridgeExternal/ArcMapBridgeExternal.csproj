@@ -4,7 +4,7 @@
     <Configuration Condition="'$(Configuration)' == ''">Release</Configuration>
     <Platform Condition="'$(Platform)' == ''">x86</Platform>
     <OutputType>Exe</OutputType>
-    <RootNamespace>GeoPilot.ArcMapBridgeExternal</RootNamespace>
+    <RootNamespace>ArcMapHarness.ArcMapBridgeExternal</RootNamespace>
     <AssemblyName>ArcMapBridge</AssemblyName>
     <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>

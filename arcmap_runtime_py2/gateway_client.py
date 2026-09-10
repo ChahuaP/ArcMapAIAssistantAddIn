@@ -3,20 +3,15 @@ from __future__ import absolute_import
 
 import json
 import os
-import subprocess
 import time
 import urllib2
 
 try:
-    import path_utils
     import deployment_identity
     import release
-    from shared_runtime import platform_paths
 except ImportError:
-    from . import path_utils
     from . import deployment_identity
     from . import release
-    from shared_runtime import platform_paths
 
 
 try:
@@ -26,8 +21,6 @@ except NameError:
 
 
 BASE_URL = "http://127.0.0.1:8765"
-REPO_ROOT = path_utils.abspath(path_utils.join_path(os.path.dirname(__file__), ".."))
-CREATE_NO_WINDOW = 0x08000000
 
 
 def health():
@@ -60,22 +53,25 @@ def register_arcmap_bridge(bridge_pid, bridge_port, summary=None):
     })
 
 
-def ensure_running():
-    payload = _health_payload(timeout=2)
-    if _is_expected_version(payload):
-        return
-    if payload:
-        stop_gateway()
-    start_gateway()
-    deadline = time.time() + 15
-    while time.time() < deadline:
-        if _is_expected_version(_health_payload(timeout=2)):
+def ensure_running(timeout=15.0):
+    """Wait for the boundary server's callback surface (8765) to be healthy.
+
+    The boundary server is started by the dsh console (``server/main.py`` ->
+    ``start_callback_server``); the Py2 runtime never launches it. This only
+    verifies the connection so the Add-in can report a clear error instead of
+    hanging.
+    """
+    deadline = time.time() + timeout
+    while True:
+        payload = _health_payload(timeout=2)
+        if _is_expected_version(payload):
             return
+        if payload:
+            raise RuntimeError(u"边界服务器版本不匹配：当前 %s，需要 %s。请重新安装最新版。" % (payload.get("app_version", u"未知"), release.APP_VERSION))
+        if time.time() >= deadline:
+            break
         time.sleep(0.5)
-    payload = _health_payload(timeout=2)
-    if payload and not _is_expected_version(payload):
-        raise RuntimeError(u"本地网关版本不匹配：当前 %s，需要 %s。请重新安装最新版。" % (payload.get("app_version", u"未知"), release.APP_VERSION))
-    raise RuntimeError(u"本地网关启动失败。请双击 StartGateway.cmd 查看错误。")
+    raise RuntimeError(u"边界服务器未连接：127.0.0.1:8765。请先打开 ArcMap 并点击 Add-in 的 ArcMap Harness 按钮。")
 
 
 
@@ -85,55 +81,6 @@ def is_running(timeout=2):
 
 def is_expected_version(timeout=2):
     return _is_expected_version(_health_payload(timeout=timeout))
-
-
-def stop_gateway():
-    if os.name != "nt":
-        return False
-    try:
-        output = subprocess.check_output(
-            ["netstat", "-ano", "-p", "tcp"],
-            creationflags=CREATE_NO_WINDOW
-        )
-        if not isinstance(output, unicode):
-            output = output.decode("mbcs", "replace")
-    except (subprocess.CalledProcessError, OSError):
-        return False
-    for line in output.splitlines():
-        parts = line.split()
-        if len(parts) >= 5 and parts[0].upper() == "TCP" and parts[1].endswith(":8765") and parts[3].upper() == "LISTENING":
-            pid = parts[4]
-            if pid.isdigit() and int(pid) != os.getpid():
-                subprocess.call(
-                    ["taskkill", "/PID", pid, "/F"],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    creationflags=CREATE_NO_WINDOW
-                )
-                return True
-    return False
-
-
-def start_gateway():
-    log_dir = platform_paths.localappdata_path("logs")
-    if not path_utils.isdir(log_dir):
-        path_utils.makedirs(log_dir)
-    stdout_path = path_utils.join_path(log_dir, "gateway_stdout.log")
-    stderr_path = path_utils.join_path(log_dir, "gateway_stderr.log")
-    stdout = path_utils.open_binary(stdout_path, "ab")
-    stderr = path_utils.open_binary(stderr_path, "ab")
-
-    command = _gateway_command()
-    try:
-        subprocess.Popen(
-            command,
-            cwd=REPO_ROOT,
-            stdout=stdout,
-            stderr=stderr,
-            creationflags=CREATE_NO_WINDOW
-        )
-    except OSError as exc:
-        raise RuntimeError(u"无法启动本地网关：%s" % exc)
 
 
 def acknowledge_lease(run_id, lease_id, epoch, plan_hash, target):
@@ -181,7 +128,7 @@ def complete_sample(run_id, layer_ref, values, lease_id, epoch, plan_hash):
 def complete_acceptance_probe(run_id, document, lease_id, epoch, plan_hash, deployment_hash):
     actual = deployment_identity.deployment_hash()
     if deployment_hash != actual:
-        raise RuntimeError(u"Gateway/Bridge deployment identity does not match Py2 runtime.")
+        raise RuntimeError(u"Boundary/Bridge deployment identity does not match Py2 runtime.")
     return _post("/runs/%s/acceptance-probe" % run_id, {
         "document": document,
         "lease_id": lease_id,
@@ -206,13 +153,6 @@ def current_target():
         (name, int(matches[0].get(name) or 0))
         for name in ("bridge_pid", "bridge_port", "arcmap_pid", "hwnd")
     )
-
-
-def _gateway_command():
-    exe = path_utils.join_path(REPO_ROOT, "gateway", "ArcMapAIAssistantGateway.exe")
-    if not path_utils.isfile(exe):
-        raise RuntimeError(u"缺少本地网关 EXE：%s。请重新安装 GeoPilot。" % exe)
-    return [exe]
 
 
 def _get(path, timeout=30):
@@ -266,12 +206,12 @@ def _url_error_message(exc):
     errno = getattr(reason, "errno", None)
     text = _unicode_text(reason).lower()
     if errno == 10061 or u"connection refused" in text:
-        return u"本地网关未连接：127.0.0.1:8765 拒绝连接。请重新点击“启动控制台”。"
+        return u"边界服务器未连接：127.0.0.1:8765 拒绝连接。请先打开 ArcMap 并点击 Add-in 的 ArcMap Harness 按钮。"
     if errno == 10060 or u"timed out" in text or u"timeout" in text:
-        return u"本地网关响应超时。请确认 GeoPilot 网关正在运行。"
+        return u"边界服务器响应超时。请确认 ArcMap Harness 控制台正在运行。"
     if errno == 11001 or u"getaddrinfo" in text:
-        return u"本机地址解析失败，无法连接 GeoPilot 网关。请检查本机网络配置。"
-    return u"无法连接 GeoPilot 本地网关。请重新点击“启动控制台”。"
+        return u"本机地址解析失败，无法连接边界服务器。请检查本机网络配置。"
+    return u"无法连接 ArcMap Harness 边界服务器。请先打开 ArcMap 并点击 Add-in 的 ArcMap Harness 按钮。"
 
 
 def _unicode_text(value):

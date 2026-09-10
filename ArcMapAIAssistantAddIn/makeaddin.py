@@ -7,7 +7,7 @@ import zipfile
 
 CURRENT_PATH = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(CURRENT_PATH)
-VERSION_TOKEN = "__GEOPILOT_VERSION__"
+VERSION_TOKEN = "__HARNESS_VERSION__"
 OUT_ZIP_NAME = os.path.join(
     CURRENT_PATH,
     os.path.basename(CURRENT_PATH) + ".esriaddin"

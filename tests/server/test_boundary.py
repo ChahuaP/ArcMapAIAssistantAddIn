@@ -9,8 +9,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from pathlib import Path
-
 from server.catalog import Catalog
 from server import codegen
 from server.journal import OpJournal
@@ -362,8 +360,6 @@ class QuantityAndLayerResolutionTests(unittest.TestCase):
 
     def test_py2_quantity_finiteness(self):
         # emulate the ABI check on this (py3) interpreter via the same helper
-        import sys
-        sys.path.insert(0, r"D:\Development\Python\Arcpy")
         from shared_runtime.semantic_abi import _is_finite
         self.assertTrue(_is_finite(800.0))
         self.assertFalse(_is_finite(float("nan")))

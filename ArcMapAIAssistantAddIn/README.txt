@@ -1,9 +1,9 @@
 ArcMap AI Assistant Add-In
 ==========================
 
-This is the ArcMap Python add-in shell for GeoPilot.
+This is the ArcMap Python add-in shell for ArcMap Harness.
 It exposes one native ArcMap toolbar button that starts the local console.
-Gateway and ArcMap Bridge reuse the same command internally for silent sync
+The ArcMap Bridge reuses the same command internally for silent sync
 and workflow execution.
 
 Install for development:
@@ -12,7 +12,7 @@ Install for development:
 2. Double-click ArcMapAIAssistantAddIn.esriaddin.
 3. Open ArcMap.
 4. If the toolbar is not visible, enable it from Customize > Toolbars > ArcMap AI Assistant.
-5. Click the toolbar button to start GeoPilot and open the console.
+5. Click the toolbar button to start ArcMap Harness and open the console.
 
 Runtime path:
 

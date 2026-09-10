@@ -14,7 +14,7 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Linq;
 
-namespace GeoPilot.ArcMapBridgeExternal
+namespace ArcMapHarness.ArcMapBridgeExternal
 {
     internal static class Program
     {

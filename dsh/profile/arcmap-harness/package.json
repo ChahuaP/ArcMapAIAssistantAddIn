@@ -1,9 +1,10 @@
 {
-  "name": "dsh-profile-arcmap-web",
+  "name": "dsh-profile-arcmap-harness",
   "private": true,
   "dependencies": {
     "@deepseek-ai/dsh-mcp-client": "0.1.2-alpha.3",
-    "arcmap-brand": "file:..\\..\\plugins\\arcmap-brand"
+    "arcmap-brand": "file:..\\..\\plugins\\arcmap-brand",
+    "arcmap-status": "file:..\\..\\plugins\\arcmap-status"
   },
   "dsh": {
     "profile": {

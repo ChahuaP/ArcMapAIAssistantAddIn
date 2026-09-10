@@ -1,4 +1,4 @@
-"""Closed, executable capability contracts for every GeoPilot operation."""
+"""Closed, executable capability contracts for every catalog operation."""
 from __future__ import annotations
 
 from copy import deepcopy
