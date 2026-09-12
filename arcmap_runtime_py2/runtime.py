@@ -99,10 +99,13 @@ def open_or_handle_bridge_command():
 
 def open_assistant():
     _clear_silent_state()
-    gateway_client.ensure_running()
+    # The console owns the boundary server (8765) and open_web() starts it when
+    # missing (the launcher is idempotent). Nothing on this path calls the
+    # gateway, so the ArcMap UI thread never waits on the console boot; the
+    # console reports its own connection state once it comes up.
+    open_web()
     bridge_process.ensure_running(BRIDGE_EXE)
     _sync_current_context()
-    open_web()
 
 
 def _run_silent_command(command):

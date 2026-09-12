@@ -71,7 +71,7 @@ def ensure_running(timeout=15.0):
         if time.time() >= deadline:
             break
         time.sleep(0.5)
-    raise RuntimeError(u"边界服务器未连接：127.0.0.1:8765。请先打开 ArcMap 并点击 Add-in 的 ArcMap Harness 按钮。")
+    raise RuntimeError(u"边界服务器未连接：127.0.0.1:8765。ArcMap Harness 控制台可能启动失败，请查看日志：%LOCALAPPDATA%\\ArcMapAIAssistant\\logs\\harness_web.log")
 
 
 
