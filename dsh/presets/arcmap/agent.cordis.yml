@@ -37,13 +37,11 @@
 - id: tool-jobs
   name: '@deepseek-ai/dsh-tool-jobs'
 
-# ── skills ──────────────────────────────────────────────────────────────────
-
-- id: skill-filesystem
-  name: '@deepseek-ai/dsh-skill-filesystem'
-
-- id: tool-skill
-  name: '@deepseek-ai/dsh-tool-skill'
+# No skill rows: the skill catalog would inject the operator's global
+# `~/.agents/skills` into the console and hand the model a second, non-GIS
+# tool surface. The boundary MCP server is the sole tool source, and the
+# persona already tells the model the tool list is the complete capability
+# set.
 
 # ── goals ───────────────────────────────────────────────────────────────────
 

@@ -148,6 +148,19 @@ robocopy $profileSource $profileNodeModules /E /R:2 /W:1 /NFL /NDL /NJH /NJS | O
 if ($LASTEXITCODE -ge 8) { throw "robocopy dsh profile failed: $LASTEXITCODE" }
 $LASTEXITCODE = 0
 
+# One module instance per @deepseek-ai package. The staged profile tree carries
+# its own copies (dsh-mcp-client's dependencies); a second dsh-tools instance
+# means a second module symbol, and the agent loop's scheduler lookup by symbol
+# misses the tools service registered from the runtime tree — the first tool
+# call of every run dies with "Cannot read properties of undefined (reading
+# 'prepare')". Junction the scope onto the runtime tree so the profile resolves
+# every @deepseek-ai import to the very instance the harness itself runs.
+$scopeLink = Join-Path $profileNodeModules '@deepseek-ai'
+$scopeTarget = Join-Path $HarnessDir 'runtime\dsh\node_modules\@deepseek-ai'
+if (-not (Test-Path -LiteralPath $scopeTarget)) { throw "runtime @deepseek-ai 缺失：$scopeTarget" }
+if (Test-Path -LiteralPath $scopeLink) { Remove-Item -LiteralPath $scopeLink -Recurse -Force }
+New-Item -ItemType Junction -Path $scopeLink -Target $scopeTarget | Out-Null
+
 $manifest = @'
 {
   "name": "dsh-profile-arcmap-harness",
