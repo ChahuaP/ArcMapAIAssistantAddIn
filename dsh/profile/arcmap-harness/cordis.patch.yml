@@ -31,11 +31,61 @@
 # MiniMax via its official first-class protocol (Anthropic-compatible) through
 # the pi-ai provider catalog; the OpenAI-compat /v1 endpoint lacks the [DONE]
 # SSE sentinel, which the strict dsh-llm-deepseek client rejects.
+# Additional providers are optional and surfaced in the console model picker;
+# the default model stays MiniMax-M3.
 - id: llm-pi-ai
   config:
     providers:
       minimax-cn:
         apiKeyEnv: MINIMAX_API_KEY
+      deepseek:
+        apiKeyEnv: DEEPSEEK_API_KEY
+      qwen:
+        displayName: 通义千问
+        api: openai-completions
+        baseURL: https://dashscope.aliyuncs.com/compatible-mode/v1
+        apiKeyEnv: QWEN_API_KEY
+        defaultContextWindow: 131072
+        defaultMaxTokens: 8192
+        models:
+          - id: qwen-max
+            name: qwen-max
+          - id: qwen-plus
+            name: qwen-plus
+          - id: qwen2.5-7b-instruct
+            name: qwen2.5-7b-instruct
+      zhipu:
+        displayName: 智谱 GLM
+        api: openai-completions
+        baseURL: https://open.bigmodel.cn/api/paas/v4
+        apiKeyEnv: ZHIPU_API_KEY
+        defaultContextWindow: 131072
+        defaultMaxTokens: 8192
+        models:
+          - id: glm-4-plus
+            name: glm-4-plus
+          - id: glm-4-flash
+            name: glm-4-flash
+      ollama:
+        displayName: 本地 Ollama
+        api: openai-completions
+        baseURL: http://127.0.0.1:11434/v1
+        apiKeyEnv: OLLAMA_API_KEY
+        defaultContextWindow: 32768
+        defaultMaxTokens: 8192
+        models:
+          - id: qwen2.5:7b
+            name: qwen2.5:7b（本地）
+
+# The deployment persona (below) owns the agent identity. The shipped `standard`
+# preset also registers `deployment:persona` from its own `dsh-persona` row; on
+# a session resume / preset re-mount that second registration is unscoped and
+# collides with the deployment persona. The `arcmap` preset is the standard
+# composition with that one persona row removed, so the Harness persona applies
+# without a duplicate registration.
+- id: agent-presets
+  config:
+    default: arcmap
 
 - id: agent-default-model
   config:

@@ -112,6 +112,8 @@ robocopy (Split-Path $pythonExe -Parent) (Join-Path $rt 'python') /MIR /R:2 /W:1
 # profile: ship node_modules + plugins; package.json/cordis are written at install
 robocopy (Join-Path $profileDir 'profiles\arcmap-harness\node_modules') (Join-Path $harness 'dsh-profile\node_modules') /MIR /R:2 /W:1 /NFL /NDL /NJH /NJS | Out-Null
 robocopy (Join-Path $profileDir 'plugins') (Join-Path $harness 'dsh-profile\plugins') /MIR /R:2 /W:1 /NFL /NDL /NJH /NJS | Out-Null
+# shipped agent preset (arcmap: the standard composition minus its persona row)
+robocopy (Join-Path $repo 'dsh\presets') (Join-Path $harness 'dsh-profile\presets') /MIR /R:2 /W:1 /NFL /NDL /NJH /NJS | Out-Null
 
 $mb = [math]::Round((Get-ChildItem $rt -Recurse -File | Measure-Object Length -Sum).Sum / 1MB, 1)
 Write-Output "runtime staged: node + dsh + python ($mb MB)"

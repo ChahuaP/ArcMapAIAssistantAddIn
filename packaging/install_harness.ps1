@@ -198,6 +198,51 @@ $patch = @"
     providers:
       minimax-cn:
         apiKeyEnv: MINIMAX_API_KEY
+      deepseek:
+        apiKeyEnv: DEEPSEEK_API_KEY
+      qwen:
+        displayName: 通义千问
+        api: openai-completions
+        baseURL: https://dashscope.aliyuncs.com/compatible-mode/v1
+        apiKeyEnv: QWEN_API_KEY
+        defaultContextWindow: 131072
+        defaultMaxTokens: 8192
+        models:
+          - id: qwen-max
+            name: qwen-max
+          - id: qwen-plus
+            name: qwen-plus
+          - id: qwen2.5-7b-instruct
+            name: qwen2.5-7b-instruct
+      zhipu:
+        displayName: 智谱 GLM
+        api: openai-completions
+        baseURL: https://open.bigmodel.cn/api/paas/v4
+        apiKeyEnv: ZHIPU_API_KEY
+        defaultContextWindow: 131072
+        defaultMaxTokens: 8192
+        models:
+          - id: glm-4-plus
+            name: glm-4-plus
+          - id: glm-4-flash
+            name: glm-4-flash
+      ollama:
+        displayName: 本地 Ollama
+        api: openai-completions
+        baseURL: http://127.0.0.1:11434/v1
+        apiKeyEnv: OLLAMA_API_KEY
+        defaultContextWindow: 32768
+        defaultMaxTokens: 8192
+        models:
+          - id: qwen2.5:7b
+            name: qwen2.5:7b（本地）
+
+# The deployment persona owns the identity; the shipped standard preset also
+# registers deployment:persona and collides on a session resume / preset
+# re-mount. The `arcmap` preset drops that one persona row.
+- id: agent-presets
+  config:
+    default: arcmap
 
 - id: agent-default-model
   config:
@@ -229,6 +274,12 @@ foreach ($plugin in 'arcmap-brand', 'arcmap-status') {
     if ($LASTEXITCODE -ge 8) { throw "robocopy $plugin plugin failed: $LASTEXITCODE" }
     $LASTEXITCODE = 0
 }
+
+# Deploy the shipped `arcmap` agent preset (standard minus its persona row).
+$presetDir = Join-Path $DshHome '.agent-presets\arcmap'
+if (Test-Path -LiteralPath $presetDir) { Remove-Item -LiteralPath $presetDir -Recurse -Force -ErrorAction SilentlyContinue }
+New-Item -ItemType Directory -Force -Path $presetDir | Out-Null
+Copy-Item (Join-Path $Stage 'harness\dsh-profile\presets\arcmap\agent.cordis.yml') (Join-Path $presetDir 'agent.cordis.yml') -Force
 
 # Seed the provider key from the current environment once, if set.
 $envFile = Join-Path $DshHome '.env'
