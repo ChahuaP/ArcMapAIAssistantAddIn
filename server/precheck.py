@@ -46,9 +46,13 @@ def _fill_semantics(value: Any, spec: Any) -> Any:
                 value["unit"] = lowered
             else:
                 value["unit"] = _UNIT_ALIASES.get(lowered, unit.strip())
-        value.setdefault("dimension", "length")
         value.setdefault("tolerance", 0.0)
         value.setdefault("crs", None)
+        dimension_spec = (spec.get("properties") or {}).get("dimension") or {}
+        if dimension_spec.get("const") is not None:
+            value["dimension"] = dimension_spec["const"]
+        else:
+            value.setdefault("dimension", "length")
         if isinstance(value.get("tolerance"), str):
             try:
                 value["tolerance"] = float(value["tolerance"])
@@ -241,6 +245,8 @@ def _layer_violations(arguments: Dict[str, Any], properties: Dict[str, Any],
 
 def _type_violation(name: str, value: Any, property_schema: Dict[str, Any]) -> Optional[str]:
     expected = property_schema.get("type")
+    if isinstance(expected, list):
+        expected = next((item for item in expected if item != "null"), None)
     if expected is None or value is None:
         return None
     python_type = _TYPE_NAMES.get(expected)

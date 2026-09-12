@@ -69,6 +69,23 @@ class PrecheckTests(unittest.TestCase):
         verdict = check(self.card, arguments, self.context)
         self.assertEqual(verdict["status"], "violated")
 
+    def test_union_type_property_does_not_crash(self):
+        card = {
+            "operation_id": "test.union",
+            "parameters_schema": {
+                "type": "object",
+                "required": [],
+                "additionalProperties": False,
+                "properties": {"search_distance": {"type": ["object", "null"]}},
+            },
+        }
+        self.assertEqual(
+            check(card, {"search_distance": {"value": 1}}, {"layers": []})["status"],
+            "proven")
+        self.assertEqual(
+            check(card, {"search_distance": "bad"}, {"layers": []})["status"],
+            "violated")
+
     def _filled_arguments(self, layer_override=None, type_override=False):
         schema = self.card["parameters_schema"]
         arguments = {}
@@ -331,6 +348,18 @@ class QuantityAndLayerResolutionTests(unittest.TestCase):
         self.assertIsNone(quantity["crs"])
         self.assertEqual(set(quantity),
                          {"value", "unit", "dimension", "tolerance", "crs"})
+
+    def test_quantity_dimension_is_forced_to_schema_const(self):
+        schema = {"type": "object", "properties": {
+            "distance": {"type": "object", "x-geopilot-semantic": "quantity",
+                         "properties": {"value": {"type": "number"},
+                                        "unit": {"type": "string"},
+                                        "dimension": {"const": "length"},
+                                        "tolerance": {"type": "number"},
+                                        "crs": {"type": ["string", "null"]}}}}}
+        fixed = precheck_coerce(schema, {"distance": {
+            "value": 100, "unit": "meters", "dimension": "Linear"}})
+        self.assertEqual(fixed["distance"]["dimension"], "length")
 
     def test_field_spec_defaults_completed(self):
         schema = {"type": "object", "properties": {
