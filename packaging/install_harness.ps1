@@ -239,10 +239,14 @@ $patch = @"
 
 # The deployment persona owns the identity; the shipped standard preset also
 # registers deployment:persona and collides on a session resume / preset
-# re-mount. The `arcmap` preset drops that one persona row.
+# re-mount. The `arcmap` preset drops that one persona row. The shipped root
+# stays out of the roster because every shipped preset carries a persona row
+# and a shipped root is scanned before any other root, so a deployment preset
+# can never shadow one.
 - id: agent-presets
   config:
     default: arcmap
+    includeShippedRoot: false
 
 - id: agent-default-model
   config:

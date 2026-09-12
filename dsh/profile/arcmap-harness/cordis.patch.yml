@@ -83,9 +83,15 @@
 # collides with the deployment persona. The `arcmap` preset is the standard
 # composition with that one persona row removed, so the Harness persona applies
 # without a duplicate registration.
+#
+# The shipped root stays out of the roster: every shipped preset carries a
+# persona row, and a shipped root is scanned before any other root, so a
+# deployment preset can never shadow one. Excluding the root is what makes the
+# collision unreachable from the console's preset picker as well.
 - id: agent-presets
   config:
     default: arcmap
+    includeShippedRoot: false
 
 - id: agent-default-model
   config:
