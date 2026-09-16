@@ -121,6 +121,8 @@ def execute(workflow_row, context, confirm_callback=None):
                             output_path,
                             output_policy_type(operation.get("output_policy") or {}),
                         )
+                        if _result_adds_to_map(operation, result):
+                            session.publish_output(registered_step_id)
                     publication_state = _publication_state(operation, result)
                     try:
                         observation = artifact_observation.observe_and_verify(
@@ -346,7 +348,7 @@ def _result_output_paths(operation, result):
 
 def _publication_state(operation, result):
     if _result_adds_to_map(operation, result):
-        return "scheduled"
+        return "published"
     if operation.get("side_effects") == "changes_map":
         declared = (((operation.get("capability_contract") or {}).get("outputs") or {}).get("map_publication"))
         return declared if declared in ("published", "map_state_updated") else "map_state_updated"

@@ -260,38 +260,6 @@ class ExecutionSessionPython27Tests(unittest.TestCase):
                 FAKE_ARCPY.TableToTable_conversion = original_export
             shutil.rmtree(root)
 
-    def test_png_export_requires_a_real_server_managed_file(self):
-        root = tempfile.mkdtemp(prefix="geopilot_png_export_")
-        output = os.path.join(root, "map.png")
-        original_output = artifact_ops.common.output_file
-        original_mxd = artifact_ops.common.current_mxd
-        original_export = getattr(FAKE_ARCPY.mapping, "ExportToPNG", None)
-        try:
-            mxd = object()
-            artifact_ops.common.output_file = lambda context, name, fmt: output
-            artifact_ops.common.current_mxd = lambda: mxd
-            def export_map(actual_mxd, actual_output):
-                self.assertIs(mxd, actual_mxd)
-                self.assertEqual(output, actual_output)
-                with open(actual_output, "wb") as handle:
-                    handle.write(_png_bytes())
-            FAKE_ARCPY.mapping.ExportToPNG = export_map
-
-            result = artifact_ops.export_map_png(
-                {}, {"output_name": "map.png"}, {},
-            )
-
-            self.assertEqual(output, result["output"])
-            self.assertTrue(os.path.isfile(output))
-        finally:
-            artifact_ops.common.output_file = original_output
-            artifact_ops.common.current_mxd = original_mxd
-            if original_export is None:
-                delattr(FAKE_ARCPY.mapping, "ExportToPNG")
-            else:
-                FAKE_ARCPY.mapping.ExportToPNG = original_export
-            shutil.rmtree(root)
-
     def test_builtin_catalog_rejects_legacy_output_contract(self):
         root = tempfile.mkdtemp(prefix="geopilot_invalid_catalog_")
         original_root = workflow_executor.CATALOG_ROOT

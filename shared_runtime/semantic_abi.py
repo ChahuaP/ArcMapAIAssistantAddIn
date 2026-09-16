@@ -95,11 +95,11 @@ def quantity(value, expected_dimension=None):
     units = {"length": LENGTH_UNITS, "area": AREA_UNITS, "angle": ANGLE_UNITS}
     if value["dimension"] not in units or value["unit"] not in units[value["dimension"]] or (expected_dimension is not None and value["dimension"] != expected_dimension):
         raise SemanticAbiError("Quantity uses an unsupported dimension or unit.")
-    if isinstance(value["value"], bool) or not isinstance(value["value"], (int, float)) or not _is_finite(float(value["value"])) or value["value"] < 0:
+    if isinstance(value["value"], bool) or not isinstance(value["value"], (int, float)) or not _is_finite(float(value["value"])) or (value["dimension"] != "angle" and value["value"] < 0):
         raise SemanticAbiError("Quantity value must be finite and non-negative.")
-    if isinstance(value["tolerance"], bool) or not isinstance(value["tolerance"], (int, float)) or value["tolerance"] < 0:
+    if isinstance(value["tolerance"], bool) or not isinstance(value["tolerance"], (int, float)) or not _is_finite(float(value["tolerance"])) or value["tolerance"] < 0:
         raise SemanticAbiError("Quantity tolerance must be non-negative.")
-    if value["unit"] in ("map_units", "degrees", "map_units_squared", "square_degrees") and not value["crs"]:
+    if value["dimension"] != "angle" and value["unit"] in ("map_units", "degrees", "map_units_squared", "square_degrees") and not value["crs"]:
         raise SemanticAbiError("Map-unit and angular Quantity values require CRS evidence.")
     return value
 

@@ -34,13 +34,42 @@
           },
           "spatial_reference_layer": {
             "type": "string",
-            "x-geopilot-kind": "layer"
+            "x-geopilot-kind": "layer",
+            "description": "继承此现有图层的坐标系；与 wkid 二选一。"
           },
           "wkid": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": 1,
+            "description": "坐标系 EPSG 代码，例如 3857。用户指定时必须填写；与 spatial_reference_layer 二选一。"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "oneOf": [
+              {
+                "required": [
+                  "wkid"
+                ],
+                "not": {
+                  "required": [
+                    "spatial_reference_layer"
+                  ]
+                }
+              },
+              {
+                "required": [
+                  "spatial_reference_layer"
+                ],
+                "not": {
+                  "required": [
+                    "wkid"
+                  ]
+                }
+              }
+            ]
+          }
+        ]
       },
       "context_requirements": {
         "requires_layers": false,
@@ -109,13 +138,42 @@
             },
             "spatial_reference_layer": {
               "type": "string",
-              "x-geopilot-kind": "layer"
+              "x-geopilot-kind": "layer",
+              "description": "继承此现有图层的坐标系；与 wkid 二选一。"
             },
             "wkid": {
-              "type": "integer"
+              "type": "integer",
+              "minimum": 1,
+              "description": "坐标系 EPSG 代码，例如 3857。用户指定时必须填写；与 spatial_reference_layer 二选一。"
             }
           },
-          "additionalProperties": false
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "oneOf": [
+                {
+                  "required": [
+                    "wkid"
+                  ],
+                  "not": {
+                    "required": [
+                      "spatial_reference_layer"
+                    ]
+                  }
+                },
+                {
+                  "required": [
+                    "spatial_reference_layer"
+                  ],
+                  "not": {
+                    "required": [
+                      "wkid"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
         },
         "outputs": {
           "kind": "feature_class",
@@ -208,23 +266,67 @@
           "points": {
             "type": "array",
             "items": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "x": {
+                  "type": "number"
+                },
+                "y": {
+                  "type": "number"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "x",
+                "y"
+              ],
+              "additionalProperties": false
             },
-            "minItems": 1,
-            "x-geopilot-kind": "layer"
+            "minItems": 1
           },
           "output_name": {
             "type": "string"
           },
           "spatial_reference_layer": {
             "type": "string",
-            "x-geopilot-kind": "layer"
+            "x-geopilot-kind": "layer",
+            "description": "继承此现有图层的坐标系；与 wkid 二选一。"
           },
           "wkid": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": 1,
+            "description": "坐标系 EPSG 代码，例如 3857。用户指定时必须填写；与 spatial_reference_layer 二选一。"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "oneOf": [
+              {
+                "required": [
+                  "wkid"
+                ],
+                "not": {
+                  "required": [
+                    "spatial_reference_layer"
+                  ]
+                }
+              },
+              {
+                "required": [
+                  "spatial_reference_layer"
+                ],
+                "not": {
+                  "required": [
+                    "wkid"
+                  ]
+                }
+              }
+            ]
+          }
+        ]
       },
       "context_requirements": {
         "requires_layers": false,
@@ -304,23 +406,67 @@
             "points": {
               "type": "array",
               "items": {
-                "type": "object"
+                "type": "object",
+                "properties": {
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y"
+                ],
+                "additionalProperties": false
               },
-              "minItems": 1,
-              "x-geopilot-kind": "layer"
+              "minItems": 1
             },
             "output_name": {
               "type": "string"
             },
             "spatial_reference_layer": {
               "type": "string",
-              "x-geopilot-kind": "layer"
+              "x-geopilot-kind": "layer",
+              "description": "继承此现有图层的坐标系；与 wkid 二选一。"
             },
             "wkid": {
-              "type": "integer"
+              "type": "integer",
+              "minimum": 1,
+              "description": "坐标系 EPSG 代码，例如 3857。用户指定时必须填写；与 spatial_reference_layer 二选一。"
             }
           },
-          "additionalProperties": false
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "oneOf": [
+                {
+                  "required": [
+                    "wkid"
+                  ],
+                  "not": {
+                    "required": [
+                      "spatial_reference_layer"
+                    ]
+                  }
+                },
+                {
+                  "required": [
+                    "spatial_reference_layer"
+                  ],
+                  "not": {
+                    "required": [
+                      "wkid"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
         },
         "outputs": {
           "kind": "feature_class",
@@ -417,10 +563,25 @@
           "points": {
             "type": "array",
             "items": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "x": {
+                  "type": "number"
+                },
+                "y": {
+                  "type": "number"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "x",
+                "y"
+              ],
+              "additionalProperties": false
             },
-            "minItems": 1,
-            "x-geopilot-kind": "layer"
+            "minItems": 1
           }
         },
         "additionalProperties": false
@@ -503,10 +664,25 @@
             "points": {
               "type": "array",
               "items": {
-                "type": "object"
+                "type": "object",
+                "properties": {
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y"
+                ],
+                "additionalProperties": false
               },
-              "minItems": 1,
-              "x-geopilot-kind": "layer"
+              "minItems": 1
             }
           },
           "additionalProperties": false
@@ -601,18 +777,65 @@
           "coordinates": {
             "type": "array",
             "items": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "x": {
+                  "type": "number"
+                },
+                "y": {
+                  "type": "number"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "x",
+                "y"
+              ],
+              "additionalProperties": false
             },
-            "minItems": 2,
-            "x-geopilot-kind": "layer"
+            "minItems": 2
           },
           "features": {
             "type": "array",
-            "items": {
-              "type": "object"
-            },
             "minItems": 1,
-            "x-geopilot-kind": "layer"
+            "items": {
+              "type": "object",
+              "properties": {
+                "coordinates": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "x": {
+                        "type": "number"
+                      },
+                      "y": {
+                        "type": "number"
+                      },
+                      "name": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "x",
+                      "y"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "minItems": 2
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "coordinates"
+              ],
+              "additionalProperties": false
+            },
+            "description": "批量创建时使用，每项填写完整要素参数；与顶层单个几何参数二选一。"
           },
           "output_name": {
             "type": "string"
@@ -622,13 +845,68 @@
           },
           "spatial_reference_layer": {
             "type": "string",
-            "x-geopilot-kind": "layer"
+            "x-geopilot-kind": "layer",
+            "description": "继承此现有图层的坐标系；与 wkid 二选一。"
           },
           "wkid": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": 1,
+            "description": "坐标系 EPSG 代码，例如 3857。用户指定时必须填写；与 spatial_reference_layer 二选一。"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "oneOf": [
+          {
+            "required": [
+              "features"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "coordinates"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "required": [
+              "coordinates"
+            ],
+            "not": {
+              "required": [
+                "features"
+              ]
+            }
+          }
+        ],
+        "allOf": [
+          {
+            "oneOf": [
+              {
+                "required": [
+                  "wkid"
+                ],
+                "not": {
+                  "required": [
+                    "spatial_reference_layer"
+                  ]
+                }
+              },
+              {
+                "required": [
+                  "spatial_reference_layer"
+                ],
+                "not": {
+                  "required": [
+                    "wkid"
+                  ]
+                }
+              }
+            ]
+          }
+        ]
       },
       "context_requirements": {
         "requires_layers": false,
@@ -758,18 +1036,65 @@
             "coordinates": {
               "type": "array",
               "items": {
-                "type": "object"
+                "type": "object",
+                "properties": {
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y"
+                ],
+                "additionalProperties": false
               },
-              "minItems": 2,
-              "x-geopilot-kind": "layer"
+              "minItems": 2
             },
             "features": {
               "type": "array",
-              "items": {
-                "type": "object"
-              },
               "minItems": 1,
-              "x-geopilot-kind": "layer"
+              "items": {
+                "type": "object",
+                "properties": {
+                  "coordinates": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "x": {
+                          "type": "number"
+                        },
+                        "y": {
+                          "type": "number"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "x",
+                        "y"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "minItems": 2
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "coordinates"
+                ],
+                "additionalProperties": false
+              },
+              "description": "批量创建时使用，每项填写完整要素参数；与顶层单个几何参数二选一。"
             },
             "output_name": {
               "type": "string"
@@ -779,13 +1104,68 @@
             },
             "spatial_reference_layer": {
               "type": "string",
-              "x-geopilot-kind": "layer"
+              "x-geopilot-kind": "layer",
+              "description": "继承此现有图层的坐标系；与 wkid 二选一。"
             },
             "wkid": {
-              "type": "integer"
+              "type": "integer",
+              "minimum": 1,
+              "description": "坐标系 EPSG 代码，例如 3857。用户指定时必须填写；与 spatial_reference_layer 二选一。"
             }
           },
-          "additionalProperties": false
+          "additionalProperties": false,
+          "oneOf": [
+            {
+              "required": [
+                "features"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "coordinates"
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "required": [
+                "coordinates"
+              ],
+              "not": {
+                "required": [
+                  "features"
+                ]
+              }
+            }
+          ],
+          "allOf": [
+            {
+              "oneOf": [
+                {
+                  "required": [
+                    "wkid"
+                  ],
+                  "not": {
+                    "required": [
+                      "spatial_reference_layer"
+                    ]
+                  }
+                },
+                {
+                  "required": [
+                    "spatial_reference_layer"
+                  ],
+                  "not": {
+                    "required": [
+                      "wkid"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
         },
         "outputs": {
           "kind": "feature_class",
@@ -881,24 +1261,97 @@
           "coordinates": {
             "type": "array",
             "items": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "x": {
+                  "type": "number"
+                },
+                "y": {
+                  "type": "number"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "x",
+                "y"
+              ],
+              "additionalProperties": false
             },
-            "minItems": 2,
-            "x-geopilot-kind": "layer"
+            "minItems": 2
           },
           "features": {
             "type": "array",
-            "items": {
-              "type": "object"
-            },
             "minItems": 1,
-            "x-geopilot-kind": "layer"
+            "items": {
+              "type": "object",
+              "properties": {
+                "coordinates": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "x": {
+                        "type": "number"
+                      },
+                      "y": {
+                        "type": "number"
+                      },
+                      "name": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "x",
+                      "y"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "minItems": 2
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "coordinates"
+              ],
+              "additionalProperties": false
+            },
+            "description": "批量创建时使用，每项填写完整要素参数；与顶层单个几何参数二选一。"
           },
           "name": {
             "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "oneOf": [
+          {
+            "required": [
+              "features"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "coordinates"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "required": [
+              "coordinates"
+            ],
+            "not": {
+              "required": [
+                "features"
+              ]
+            }
+          }
+        ]
       },
       "context_requirements": {
         "requires_layers": true
@@ -991,24 +1444,97 @@
             "coordinates": {
               "type": "array",
               "items": {
-                "type": "object"
+                "type": "object",
+                "properties": {
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y"
+                ],
+                "additionalProperties": false
               },
-              "minItems": 2,
-              "x-geopilot-kind": "layer"
+              "minItems": 2
             },
             "features": {
               "type": "array",
-              "items": {
-                "type": "object"
-              },
               "minItems": 1,
-              "x-geopilot-kind": "layer"
+              "items": {
+                "type": "object",
+                "properties": {
+                  "coordinates": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "x": {
+                          "type": "number"
+                        },
+                        "y": {
+                          "type": "number"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "x",
+                        "y"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "minItems": 2
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "coordinates"
+                ],
+                "additionalProperties": false
+              },
+              "description": "批量创建时使用，每项填写完整要素参数；与顶层单个几何参数二选一。"
             },
             "name": {
               "type": "string"
             }
           },
-          "additionalProperties": false
+          "additionalProperties": false,
+          "oneOf": [
+            {
+              "required": [
+                "features"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "coordinates"
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "required": [
+                "coordinates"
+              ],
+              "not": {
+                "required": [
+                  "features"
+                ]
+              }
+            }
+          ]
         },
         "outputs": {
           "kind": "none",
@@ -1100,18 +1626,65 @@
           "coordinates": {
             "type": "array",
             "items": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "x": {
+                  "type": "number"
+                },
+                "y": {
+                  "type": "number"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "x",
+                "y"
+              ],
+              "additionalProperties": false
             },
-            "minItems": 3,
-            "x-geopilot-kind": "layer"
+            "minItems": 3
           },
           "features": {
             "type": "array",
-            "items": {
-              "type": "object"
-            },
             "minItems": 1,
-            "x-geopilot-kind": "layer"
+            "items": {
+              "type": "object",
+              "properties": {
+                "coordinates": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "x": {
+                        "type": "number"
+                      },
+                      "y": {
+                        "type": "number"
+                      },
+                      "name": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "x",
+                      "y"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "minItems": 3
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "coordinates"
+              ],
+              "additionalProperties": false
+            },
+            "description": "批量创建时使用，每项填写完整要素参数；与顶层单个几何参数二选一。"
           },
           "output_name": {
             "type": "string"
@@ -1121,13 +1694,68 @@
           },
           "spatial_reference_layer": {
             "type": "string",
-            "x-geopilot-kind": "layer"
+            "x-geopilot-kind": "layer",
+            "description": "继承此现有图层的坐标系；与 wkid 二选一。"
           },
           "wkid": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": 1,
+            "description": "坐标系 EPSG 代码，例如 3857。用户指定时必须填写；与 spatial_reference_layer 二选一。"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "oneOf": [
+          {
+            "required": [
+              "features"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "coordinates"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "required": [
+              "coordinates"
+            ],
+            "not": {
+              "required": [
+                "features"
+              ]
+            }
+          }
+        ],
+        "allOf": [
+          {
+            "oneOf": [
+              {
+                "required": [
+                  "wkid"
+                ],
+                "not": {
+                  "required": [
+                    "spatial_reference_layer"
+                  ]
+                }
+              },
+              {
+                "required": [
+                  "spatial_reference_layer"
+                ],
+                "not": {
+                  "required": [
+                    "wkid"
+                  ]
+                }
+              }
+            ]
+          }
+        ]
       },
       "context_requirements": {
         "requires_layers": false,
@@ -1281,18 +1909,65 @@
             "coordinates": {
               "type": "array",
               "items": {
-                "type": "object"
+                "type": "object",
+                "properties": {
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y"
+                ],
+                "additionalProperties": false
               },
-              "minItems": 3,
-              "x-geopilot-kind": "layer"
+              "minItems": 3
             },
             "features": {
               "type": "array",
-              "items": {
-                "type": "object"
-              },
               "minItems": 1,
-              "x-geopilot-kind": "layer"
+              "items": {
+                "type": "object",
+                "properties": {
+                  "coordinates": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "x": {
+                          "type": "number"
+                        },
+                        "y": {
+                          "type": "number"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "x",
+                        "y"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "minItems": 3
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "coordinates"
+                ],
+                "additionalProperties": false
+              },
+              "description": "批量创建时使用，每项填写完整要素参数；与顶层单个几何参数二选一。"
             },
             "output_name": {
               "type": "string"
@@ -1302,13 +1977,68 @@
             },
             "spatial_reference_layer": {
               "type": "string",
-              "x-geopilot-kind": "layer"
+              "x-geopilot-kind": "layer",
+              "description": "继承此现有图层的坐标系；与 wkid 二选一。"
             },
             "wkid": {
-              "type": "integer"
+              "type": "integer",
+              "minimum": 1,
+              "description": "坐标系 EPSG 代码，例如 3857。用户指定时必须填写；与 spatial_reference_layer 二选一。"
             }
           },
-          "additionalProperties": false
+          "additionalProperties": false,
+          "oneOf": [
+            {
+              "required": [
+                "features"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "coordinates"
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "required": [
+                "coordinates"
+              ],
+              "not": {
+                "required": [
+                  "features"
+                ]
+              }
+            }
+          ],
+          "allOf": [
+            {
+              "oneOf": [
+                {
+                  "required": [
+                    "wkid"
+                  ],
+                  "not": {
+                    "required": [
+                      "spatial_reference_layer"
+                    ]
+                  }
+                },
+                {
+                  "required": [
+                    "spatial_reference_layer"
+                  ],
+                  "not": {
+                    "required": [
+                      "wkid"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
         },
         "outputs": {
           "kind": "feature_class",
@@ -1404,24 +2134,97 @@
           "coordinates": {
             "type": "array",
             "items": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "x": {
+                  "type": "number"
+                },
+                "y": {
+                  "type": "number"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "x",
+                "y"
+              ],
+              "additionalProperties": false
             },
-            "minItems": 3,
-            "x-geopilot-kind": "layer"
+            "minItems": 3
           },
           "features": {
             "type": "array",
-            "items": {
-              "type": "object"
-            },
             "minItems": 1,
-            "x-geopilot-kind": "layer"
+            "items": {
+              "type": "object",
+              "properties": {
+                "coordinates": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "x": {
+                        "type": "number"
+                      },
+                      "y": {
+                        "type": "number"
+                      },
+                      "name": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "x",
+                      "y"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "minItems": 3
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "coordinates"
+              ],
+              "additionalProperties": false
+            },
+            "description": "批量创建时使用，每项填写完整要素参数；与顶层单个几何参数二选一。"
           },
           "name": {
             "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "oneOf": [
+          {
+            "required": [
+              "features"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "coordinates"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "required": [
+              "coordinates"
+            ],
+            "not": {
+              "required": [
+                "features"
+              ]
+            }
+          }
+        ]
       },
       "context_requirements": {
         "requires_layers": true
@@ -1522,24 +2325,97 @@
             "coordinates": {
               "type": "array",
               "items": {
-                "type": "object"
+                "type": "object",
+                "properties": {
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y"
+                ],
+                "additionalProperties": false
               },
-              "minItems": 3,
-              "x-geopilot-kind": "layer"
+              "minItems": 3
             },
             "features": {
               "type": "array",
-              "items": {
-                "type": "object"
-              },
               "minItems": 1,
-              "x-geopilot-kind": "layer"
+              "items": {
+                "type": "object",
+                "properties": {
+                  "coordinates": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "x": {
+                          "type": "number"
+                        },
+                        "y": {
+                          "type": "number"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "x",
+                        "y"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "minItems": 3
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "coordinates"
+                ],
+                "additionalProperties": false
+              },
+              "description": "批量创建时使用，每项填写完整要素参数；与顶层单个几何参数二选一。"
             },
             "name": {
               "type": "string"
             }
           },
-          "additionalProperties": false
+          "additionalProperties": false,
+          "oneOf": [
+            {
+              "required": [
+                "features"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "coordinates"
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "required": [
+                "coordinates"
+              ],
+              "not": {
+                "required": [
+                  "features"
+                ]
+              }
+            }
+          ]
         },
         "outputs": {
           "kind": "none",
@@ -1654,13 +2530,42 @@
           },
           "spatial_reference_layer": {
             "type": "string",
-            "x-geopilot-kind": "layer"
+            "x-geopilot-kind": "layer",
+            "description": "继承此现有图层的坐标系；与 wkid 二选一。"
           },
           "wkid": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": 1,
+            "description": "坐标系 EPSG 代码，例如 3857。用户指定时必须填写；与 spatial_reference_layer 二选一。"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "oneOf": [
+              {
+                "required": [
+                  "wkid"
+                ],
+                "not": {
+                  "required": [
+                    "spatial_reference_layer"
+                  ]
+                }
+              },
+              {
+                "required": [
+                  "spatial_reference_layer"
+                ],
+                "not": {
+                  "required": [
+                    "wkid"
+                  ]
+                }
+              }
+            ]
+          }
+        ]
       },
       "context_requirements": {
         "requires_layers": false,
@@ -1742,13 +2647,42 @@
             },
             "spatial_reference_layer": {
               "type": "string",
-              "x-geopilot-kind": "layer"
+              "x-geopilot-kind": "layer",
+              "description": "继承此现有图层的坐标系；与 wkid 二选一。"
             },
             "wkid": {
-              "type": "integer"
+              "type": "integer",
+              "minimum": 1,
+              "description": "坐标系 EPSG 代码，例如 3857。用户指定时必须填写；与 spatial_reference_layer 二选一。"
             }
           },
-          "additionalProperties": false
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "oneOf": [
+                {
+                  "required": [
+                    "wkid"
+                  ],
+                  "not": {
+                    "required": [
+                      "spatial_reference_layer"
+                    ]
+                  }
+                },
+                {
+                  "required": [
+                    "spatial_reference_layer"
+                  ],
+                  "not": {
+                    "required": [
+                      "wkid"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
         },
         "outputs": {
           "kind": "feature_class",
@@ -1849,7 +2783,8 @@
             "properties": {
               "value": {
                 "type": "number",
-                "minimum": 0
+                "minimum": 0,
+                "exclusiveMinimum": 0
               },
               "unit": {
                 "type": "string",
@@ -1884,7 +2819,8 @@
             "additionalProperties": false
           },
           "sides": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": 3
           },
           "start_angle_degrees": {
             "type": "object",
@@ -1918,11 +2854,104 @@
           },
           "features": {
             "type": "array",
-            "items": {
-              "type": "object"
-            },
             "minItems": 1,
-            "x-geopilot-kind": "layer"
+            "items": {
+              "type": "object",
+              "properties": {
+                "center_x": {
+                  "type": "number"
+                },
+                "center_y": {
+                  "type": "number"
+                },
+                "radius": {
+                  "type": "object",
+                  "x-geopilot-semantic": "quantity",
+                  "properties": {
+                    "value": {
+                      "type": "number",
+                      "minimum": 0,
+                      "exclusiveMinimum": 0
+                    },
+                    "unit": {
+                      "type": "string",
+                      "enum": [
+                        "meters",
+                        "kilometers",
+                        "map_units",
+                        "degrees"
+                      ]
+                    },
+                    "dimension": {
+                      "const": "length"
+                    },
+                    "tolerance": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "crs": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "value",
+                    "unit",
+                    "dimension",
+                    "tolerance",
+                    "crs"
+                  ],
+                  "additionalProperties": false
+                },
+                "sides": {
+                  "type": "integer",
+                  "minimum": 3
+                },
+                "start_angle_degrees": {
+                  "type": "object",
+                  "x-geopilot-semantic": "angle",
+                  "properties": {
+                    "value": {
+                      "type": "number"
+                    },
+                    "unit": {
+                      "const": "degrees"
+                    },
+                    "dimension": {
+                      "const": "angle"
+                    },
+                    "tolerance": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "crs": {
+                      "const": null
+                    }
+                  },
+                  "required": [
+                    "value",
+                    "unit",
+                    "dimension",
+                    "tolerance",
+                    "crs"
+                  ],
+                  "additionalProperties": false
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "center_x",
+                "center_y",
+                "radius",
+                "sides"
+              ],
+              "additionalProperties": false
+            },
+            "description": "批量创建时使用，每项填写完整要素参数；与顶层单个几何参数二选一。"
           },
           "name": {
             "type": "string"
@@ -1932,13 +2961,86 @@
           },
           "spatial_reference_layer": {
             "type": "string",
-            "x-geopilot-kind": "layer"
+            "x-geopilot-kind": "layer",
+            "description": "继承此现有图层的坐标系；与 wkid 二选一。"
           },
           "wkid": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": 1,
+            "description": "坐标系 EPSG 代码，例如 3857。用户指定时必须填写；与 spatial_reference_layer 二选一。"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "oneOf": [
+          {
+            "required": [
+              "features"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "center_x"
+                  ]
+                },
+                {
+                  "required": [
+                    "center_y"
+                  ]
+                },
+                {
+                  "required": [
+                    "radius"
+                  ]
+                },
+                {
+                  "required": [
+                    "sides"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "required": [
+              "center_x",
+              "center_y",
+              "radius",
+              "sides"
+            ],
+            "not": {
+              "required": [
+                "features"
+              ]
+            }
+          }
+        ],
+        "allOf": [
+          {
+            "oneOf": [
+              {
+                "required": [
+                  "wkid"
+                ],
+                "not": {
+                  "required": [
+                    "spatial_reference_layer"
+                  ]
+                }
+              },
+              {
+                "required": [
+                  "spatial_reference_layer"
+                ],
+                "not": {
+                  "required": [
+                    "wkid"
+                  ]
+                }
+              }
+            ]
+          }
+        ]
       },
       "context_requirements": {
         "requires_layers": false,
@@ -2059,7 +3161,8 @@
               "properties": {
                 "value": {
                   "type": "number",
-                  "minimum": 0
+                  "minimum": 0,
+                  "exclusiveMinimum": 0
                 },
                 "unit": {
                   "type": "string",
@@ -2094,7 +3197,8 @@
               "additionalProperties": false
             },
             "sides": {
-              "type": "integer"
+              "type": "integer",
+              "minimum": 3
             },
             "start_angle_degrees": {
               "type": "object",
@@ -2128,11 +3232,104 @@
             },
             "features": {
               "type": "array",
-              "items": {
-                "type": "object"
-              },
               "minItems": 1,
-              "x-geopilot-kind": "layer"
+              "items": {
+                "type": "object",
+                "properties": {
+                  "center_x": {
+                    "type": "number"
+                  },
+                  "center_y": {
+                    "type": "number"
+                  },
+                  "radius": {
+                    "type": "object",
+                    "x-geopilot-semantic": "quantity",
+                    "properties": {
+                      "value": {
+                        "type": "number",
+                        "minimum": 0,
+                        "exclusiveMinimum": 0
+                      },
+                      "unit": {
+                        "type": "string",
+                        "enum": [
+                          "meters",
+                          "kilometers",
+                          "map_units",
+                          "degrees"
+                        ]
+                      },
+                      "dimension": {
+                        "const": "length"
+                      },
+                      "tolerance": {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      "crs": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "value",
+                      "unit",
+                      "dimension",
+                      "tolerance",
+                      "crs"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "sides": {
+                    "type": "integer",
+                    "minimum": 3
+                  },
+                  "start_angle_degrees": {
+                    "type": "object",
+                    "x-geopilot-semantic": "angle",
+                    "properties": {
+                      "value": {
+                        "type": "number"
+                      },
+                      "unit": {
+                        "const": "degrees"
+                      },
+                      "dimension": {
+                        "const": "angle"
+                      },
+                      "tolerance": {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      "crs": {
+                        "const": null
+                      }
+                    },
+                    "required": [
+                      "value",
+                      "unit",
+                      "dimension",
+                      "tolerance",
+                      "crs"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "center_x",
+                  "center_y",
+                  "radius",
+                  "sides"
+                ],
+                "additionalProperties": false
+              },
+              "description": "批量创建时使用，每项填写完整要素参数；与顶层单个几何参数二选一。"
             },
             "name": {
               "type": "string"
@@ -2142,13 +3339,86 @@
             },
             "spatial_reference_layer": {
               "type": "string",
-              "x-geopilot-kind": "layer"
+              "x-geopilot-kind": "layer",
+              "description": "继承此现有图层的坐标系；与 wkid 二选一。"
             },
             "wkid": {
-              "type": "integer"
+              "type": "integer",
+              "minimum": 1,
+              "description": "坐标系 EPSG 代码，例如 3857。用户指定时必须填写；与 spatial_reference_layer 二选一。"
             }
           },
-          "additionalProperties": false
+          "additionalProperties": false,
+          "oneOf": [
+            {
+              "required": [
+                "features"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "center_x"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "center_y"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "radius"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "sides"
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "required": [
+                "center_x",
+                "center_y",
+                "radius",
+                "sides"
+              ],
+              "not": {
+                "required": [
+                  "features"
+                ]
+              }
+            }
+          ],
+          "allOf": [
+            {
+              "oneOf": [
+                {
+                  "required": [
+                    "wkid"
+                  ],
+                  "not": {
+                    "required": [
+                      "spatial_reference_layer"
+                    ]
+                  }
+                },
+                {
+                  "required": [
+                    "spatial_reference_layer"
+                  ],
+                  "not": {
+                    "required": [
+                      "wkid"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
         },
         "outputs": {
           "kind": "feature_class",
@@ -2252,7 +3522,8 @@
             "properties": {
               "value": {
                 "type": "number",
-                "minimum": 0
+                "minimum": 0,
+                "exclusiveMinimum": 0
               },
               "unit": {
                 "type": "string",
@@ -2287,7 +3558,8 @@
             "additionalProperties": false
           },
           "sides": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": 3
           },
           "start_angle_degrees": {
             "type": "object",
@@ -2321,17 +3593,154 @@
           },
           "features": {
             "type": "array",
-            "items": {
-              "type": "object"
-            },
             "minItems": 1,
-            "x-geopilot-kind": "layer"
+            "items": {
+              "type": "object",
+              "properties": {
+                "center_x": {
+                  "type": "number"
+                },
+                "center_y": {
+                  "type": "number"
+                },
+                "radius": {
+                  "type": "object",
+                  "x-geopilot-semantic": "quantity",
+                  "properties": {
+                    "value": {
+                      "type": "number",
+                      "minimum": 0,
+                      "exclusiveMinimum": 0
+                    },
+                    "unit": {
+                      "type": "string",
+                      "enum": [
+                        "meters",
+                        "kilometers",
+                        "map_units",
+                        "degrees"
+                      ]
+                    },
+                    "dimension": {
+                      "const": "length"
+                    },
+                    "tolerance": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "crs": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "value",
+                    "unit",
+                    "dimension",
+                    "tolerance",
+                    "crs"
+                  ],
+                  "additionalProperties": false
+                },
+                "sides": {
+                  "type": "integer",
+                  "minimum": 3
+                },
+                "start_angle_degrees": {
+                  "type": "object",
+                  "x-geopilot-semantic": "angle",
+                  "properties": {
+                    "value": {
+                      "type": "number"
+                    },
+                    "unit": {
+                      "const": "degrees"
+                    },
+                    "dimension": {
+                      "const": "angle"
+                    },
+                    "tolerance": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "crs": {
+                      "const": null
+                    }
+                  },
+                  "required": [
+                    "value",
+                    "unit",
+                    "dimension",
+                    "tolerance",
+                    "crs"
+                  ],
+                  "additionalProperties": false
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "center_x",
+                "center_y",
+                "radius",
+                "sides"
+              ],
+              "additionalProperties": false
+            },
+            "description": "批量创建时使用，每项填写完整要素参数；与顶层单个几何参数二选一。"
           },
           "name": {
             "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "oneOf": [
+          {
+            "required": [
+              "features"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "center_x"
+                  ]
+                },
+                {
+                  "required": [
+                    "center_y"
+                  ]
+                },
+                {
+                  "required": [
+                    "radius"
+                  ]
+                },
+                {
+                  "required": [
+                    "sides"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "required": [
+              "center_x",
+              "center_y",
+              "radius",
+              "sides"
+            ],
+            "not": {
+              "required": [
+                "features"
+              ]
+            }
+          }
+        ]
       },
       "context_requirements": {
         "requires_layers": true
@@ -2418,7 +3827,8 @@
               "properties": {
                 "value": {
                   "type": "number",
-                  "minimum": 0
+                  "minimum": 0,
+                  "exclusiveMinimum": 0
                 },
                 "unit": {
                   "type": "string",
@@ -2453,7 +3863,8 @@
               "additionalProperties": false
             },
             "sides": {
-              "type": "integer"
+              "type": "integer",
+              "minimum": 3
             },
             "start_angle_degrees": {
               "type": "object",
@@ -2487,17 +3898,154 @@
             },
             "features": {
               "type": "array",
-              "items": {
-                "type": "object"
-              },
               "minItems": 1,
-              "x-geopilot-kind": "layer"
+              "items": {
+                "type": "object",
+                "properties": {
+                  "center_x": {
+                    "type": "number"
+                  },
+                  "center_y": {
+                    "type": "number"
+                  },
+                  "radius": {
+                    "type": "object",
+                    "x-geopilot-semantic": "quantity",
+                    "properties": {
+                      "value": {
+                        "type": "number",
+                        "minimum": 0,
+                        "exclusiveMinimum": 0
+                      },
+                      "unit": {
+                        "type": "string",
+                        "enum": [
+                          "meters",
+                          "kilometers",
+                          "map_units",
+                          "degrees"
+                        ]
+                      },
+                      "dimension": {
+                        "const": "length"
+                      },
+                      "tolerance": {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      "crs": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "value",
+                      "unit",
+                      "dimension",
+                      "tolerance",
+                      "crs"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "sides": {
+                    "type": "integer",
+                    "minimum": 3
+                  },
+                  "start_angle_degrees": {
+                    "type": "object",
+                    "x-geopilot-semantic": "angle",
+                    "properties": {
+                      "value": {
+                        "type": "number"
+                      },
+                      "unit": {
+                        "const": "degrees"
+                      },
+                      "dimension": {
+                        "const": "angle"
+                      },
+                      "tolerance": {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      "crs": {
+                        "const": null
+                      }
+                    },
+                    "required": [
+                      "value",
+                      "unit",
+                      "dimension",
+                      "tolerance",
+                      "crs"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "center_x",
+                  "center_y",
+                  "radius",
+                  "sides"
+                ],
+                "additionalProperties": false
+              },
+              "description": "批量创建时使用，每项填写完整要素参数；与顶层单个几何参数二选一。"
             },
             "name": {
               "type": "string"
             }
           },
-          "additionalProperties": false
+          "additionalProperties": false,
+          "oneOf": [
+            {
+              "required": [
+                "features"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "center_x"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "center_y"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "radius"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "sides"
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "required": [
+                "center_x",
+                "center_y",
+                "radius",
+                "sides"
+              ],
+              "not": {
+                "required": [
+                  "features"
+                ]
+              }
+            }
+          ]
         },
         "outputs": {
           "kind": "none",
@@ -2598,7 +4146,8 @@
             "properties": {
               "value": {
                 "type": "number",
-                "minimum": 0
+                "minimum": 0,
+                "exclusiveMinimum": 0
               },
               "unit": {
                 "type": "string",
@@ -2641,7 +4190,8 @@
             "properties": {
               "value": {
                 "type": "number",
-                "minimum": 0
+                "minimum": 0,
+                "exclusiveMinimum": 0
               },
               "unit": {
                 "type": "string",
@@ -2676,7 +4226,9 @@
             "additionalProperties": false
           },
           "point_count": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": 3,
+            "default": 5
           },
           "start_angle_degrees": {
             "type": "object",
@@ -2710,11 +4262,148 @@
           },
           "features": {
             "type": "array",
-            "items": {
-              "type": "object"
-            },
             "minItems": 1,
-            "x-geopilot-kind": "layer"
+            "items": {
+              "type": "object",
+              "properties": {
+                "center_x": {
+                  "type": "number"
+                },
+                "center_y": {
+                  "type": "number"
+                },
+                "outer_radius": {
+                  "type": "object",
+                  "x-geopilot-semantic": "quantity",
+                  "properties": {
+                    "value": {
+                      "type": "number",
+                      "minimum": 0,
+                      "exclusiveMinimum": 0
+                    },
+                    "unit": {
+                      "type": "string",
+                      "enum": [
+                        "meters",
+                        "kilometers",
+                        "map_units",
+                        "degrees"
+                      ]
+                    },
+                    "dimension": {
+                      "const": "length"
+                    },
+                    "tolerance": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "crs": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "value",
+                    "unit",
+                    "dimension",
+                    "tolerance",
+                    "crs"
+                  ],
+                  "additionalProperties": false
+                },
+                "inner_radius": {
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "x-geopilot-semantic": "quantity",
+                  "properties": {
+                    "value": {
+                      "type": "number",
+                      "minimum": 0,
+                      "exclusiveMinimum": 0
+                    },
+                    "unit": {
+                      "type": "string",
+                      "enum": [
+                        "meters",
+                        "kilometers",
+                        "map_units",
+                        "degrees"
+                      ]
+                    },
+                    "dimension": {
+                      "const": "length"
+                    },
+                    "tolerance": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "crs": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "value",
+                    "unit",
+                    "dimension",
+                    "tolerance",
+                    "crs"
+                  ],
+                  "additionalProperties": false
+                },
+                "point_count": {
+                  "type": "integer",
+                  "minimum": 3,
+                  "default": 5
+                },
+                "start_angle_degrees": {
+                  "type": "object",
+                  "x-geopilot-semantic": "angle",
+                  "properties": {
+                    "value": {
+                      "type": "number"
+                    },
+                    "unit": {
+                      "const": "degrees"
+                    },
+                    "dimension": {
+                      "const": "angle"
+                    },
+                    "tolerance": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "crs": {
+                      "const": null
+                    }
+                  },
+                  "required": [
+                    "value",
+                    "unit",
+                    "dimension",
+                    "tolerance",
+                    "crs"
+                  ],
+                  "additionalProperties": false
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "center_x",
+                "center_y",
+                "outer_radius"
+              ],
+              "additionalProperties": false
+            },
+            "description": "批量创建时使用，每项填写完整要素参数；与顶层单个几何参数二选一。"
           },
           "name": {
             "type": "string"
@@ -2724,13 +4413,80 @@
           },
           "spatial_reference_layer": {
             "type": "string",
-            "x-geopilot-kind": "layer"
+            "x-geopilot-kind": "layer",
+            "description": "继承此现有图层的坐标系；与 wkid 二选一。"
           },
           "wkid": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": 1,
+            "description": "坐标系 EPSG 代码，例如 3857。用户指定时必须填写；与 spatial_reference_layer 二选一。"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "oneOf": [
+          {
+            "required": [
+              "features"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "center_x"
+                  ]
+                },
+                {
+                  "required": [
+                    "center_y"
+                  ]
+                },
+                {
+                  "required": [
+                    "outer_radius"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "required": [
+              "center_x",
+              "center_y",
+              "outer_radius"
+            ],
+            "not": {
+              "required": [
+                "features"
+              ]
+            }
+          }
+        ],
+        "allOf": [
+          {
+            "oneOf": [
+              {
+                "required": [
+                  "wkid"
+                ],
+                "not": {
+                  "required": [
+                    "spatial_reference_layer"
+                  ]
+                }
+              },
+              {
+                "required": [
+                  "spatial_reference_layer"
+                ],
+                "not": {
+                  "required": [
+                    "wkid"
+                  ]
+                }
+              }
+            ]
+          }
+        ]
       },
       "context_requirements": {
         "requires_layers": false,
@@ -2848,7 +4604,8 @@
               "properties": {
                 "value": {
                   "type": "number",
-                  "minimum": 0
+                  "minimum": 0,
+                  "exclusiveMinimum": 0
                 },
                 "unit": {
                   "type": "string",
@@ -2891,7 +4648,8 @@
               "properties": {
                 "value": {
                   "type": "number",
-                  "minimum": 0
+                  "minimum": 0,
+                  "exclusiveMinimum": 0
                 },
                 "unit": {
                   "type": "string",
@@ -2926,7 +4684,9 @@
               "additionalProperties": false
             },
             "point_count": {
-              "type": "integer"
+              "type": "integer",
+              "minimum": 3,
+              "default": 5
             },
             "start_angle_degrees": {
               "type": "object",
@@ -2960,11 +4720,148 @@
             },
             "features": {
               "type": "array",
-              "items": {
-                "type": "object"
-              },
               "minItems": 1,
-              "x-geopilot-kind": "layer"
+              "items": {
+                "type": "object",
+                "properties": {
+                  "center_x": {
+                    "type": "number"
+                  },
+                  "center_y": {
+                    "type": "number"
+                  },
+                  "outer_radius": {
+                    "type": "object",
+                    "x-geopilot-semantic": "quantity",
+                    "properties": {
+                      "value": {
+                        "type": "number",
+                        "minimum": 0,
+                        "exclusiveMinimum": 0
+                      },
+                      "unit": {
+                        "type": "string",
+                        "enum": [
+                          "meters",
+                          "kilometers",
+                          "map_units",
+                          "degrees"
+                        ]
+                      },
+                      "dimension": {
+                        "const": "length"
+                      },
+                      "tolerance": {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      "crs": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "value",
+                      "unit",
+                      "dimension",
+                      "tolerance",
+                      "crs"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "inner_radius": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "x-geopilot-semantic": "quantity",
+                    "properties": {
+                      "value": {
+                        "type": "number",
+                        "minimum": 0,
+                        "exclusiveMinimum": 0
+                      },
+                      "unit": {
+                        "type": "string",
+                        "enum": [
+                          "meters",
+                          "kilometers",
+                          "map_units",
+                          "degrees"
+                        ]
+                      },
+                      "dimension": {
+                        "const": "length"
+                      },
+                      "tolerance": {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      "crs": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "value",
+                      "unit",
+                      "dimension",
+                      "tolerance",
+                      "crs"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "point_count": {
+                    "type": "integer",
+                    "minimum": 3,
+                    "default": 5
+                  },
+                  "start_angle_degrees": {
+                    "type": "object",
+                    "x-geopilot-semantic": "angle",
+                    "properties": {
+                      "value": {
+                        "type": "number"
+                      },
+                      "unit": {
+                        "const": "degrees"
+                      },
+                      "dimension": {
+                        "const": "angle"
+                      },
+                      "tolerance": {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      "crs": {
+                        "const": null
+                      }
+                    },
+                    "required": [
+                      "value",
+                      "unit",
+                      "dimension",
+                      "tolerance",
+                      "crs"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "center_x",
+                  "center_y",
+                  "outer_radius"
+                ],
+                "additionalProperties": false
+              },
+              "description": "批量创建时使用，每项填写完整要素参数；与顶层单个几何参数二选一。"
             },
             "name": {
               "type": "string"
@@ -2974,13 +4871,80 @@
             },
             "spatial_reference_layer": {
               "type": "string",
-              "x-geopilot-kind": "layer"
+              "x-geopilot-kind": "layer",
+              "description": "继承此现有图层的坐标系；与 wkid 二选一。"
             },
             "wkid": {
-              "type": "integer"
+              "type": "integer",
+              "minimum": 1,
+              "description": "坐标系 EPSG 代码，例如 3857。用户指定时必须填写；与 spatial_reference_layer 二选一。"
             }
           },
-          "additionalProperties": false
+          "additionalProperties": false,
+          "oneOf": [
+            {
+              "required": [
+                "features"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "center_x"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "center_y"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "outer_radius"
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "required": [
+                "center_x",
+                "center_y",
+                "outer_radius"
+              ],
+              "not": {
+                "required": [
+                  "features"
+                ]
+              }
+            }
+          ],
+          "allOf": [
+            {
+              "oneOf": [
+                {
+                  "required": [
+                    "wkid"
+                  ],
+                  "not": {
+                    "required": [
+                      "spatial_reference_layer"
+                    ]
+                  }
+                },
+                {
+                  "required": [
+                    "spatial_reference_layer"
+                  ],
+                  "not": {
+                    "required": [
+                      "wkid"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
         },
         "outputs": {
           "kind": "feature_class",
@@ -3085,7 +5049,8 @@
             "properties": {
               "value": {
                 "type": "number",
-                "minimum": 0
+                "minimum": 0,
+                "exclusiveMinimum": 0
               },
               "unit": {
                 "type": "string",
@@ -3128,7 +5093,8 @@
             "properties": {
               "value": {
                 "type": "number",
-                "minimum": 0
+                "minimum": 0,
+                "exclusiveMinimum": 0
               },
               "unit": {
                 "type": "string",
@@ -3163,7 +5129,9 @@
             "additionalProperties": false
           },
           "point_count": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": 3,
+            "default": 5
           },
           "start_angle_degrees": {
             "type": "object",
@@ -3197,17 +5165,192 @@
           },
           "features": {
             "type": "array",
-            "items": {
-              "type": "object"
-            },
             "minItems": 1,
-            "x-geopilot-kind": "layer"
+            "items": {
+              "type": "object",
+              "properties": {
+                "center_x": {
+                  "type": "number"
+                },
+                "center_y": {
+                  "type": "number"
+                },
+                "outer_radius": {
+                  "type": "object",
+                  "x-geopilot-semantic": "quantity",
+                  "properties": {
+                    "value": {
+                      "type": "number",
+                      "minimum": 0,
+                      "exclusiveMinimum": 0
+                    },
+                    "unit": {
+                      "type": "string",
+                      "enum": [
+                        "meters",
+                        "kilometers",
+                        "map_units",
+                        "degrees"
+                      ]
+                    },
+                    "dimension": {
+                      "const": "length"
+                    },
+                    "tolerance": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "crs": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "value",
+                    "unit",
+                    "dimension",
+                    "tolerance",
+                    "crs"
+                  ],
+                  "additionalProperties": false
+                },
+                "inner_radius": {
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "x-geopilot-semantic": "quantity",
+                  "properties": {
+                    "value": {
+                      "type": "number",
+                      "minimum": 0,
+                      "exclusiveMinimum": 0
+                    },
+                    "unit": {
+                      "type": "string",
+                      "enum": [
+                        "meters",
+                        "kilometers",
+                        "map_units",
+                        "degrees"
+                      ]
+                    },
+                    "dimension": {
+                      "const": "length"
+                    },
+                    "tolerance": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "crs": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "value",
+                    "unit",
+                    "dimension",
+                    "tolerance",
+                    "crs"
+                  ],
+                  "additionalProperties": false
+                },
+                "point_count": {
+                  "type": "integer",
+                  "minimum": 3,
+                  "default": 5
+                },
+                "start_angle_degrees": {
+                  "type": "object",
+                  "x-geopilot-semantic": "angle",
+                  "properties": {
+                    "value": {
+                      "type": "number"
+                    },
+                    "unit": {
+                      "const": "degrees"
+                    },
+                    "dimension": {
+                      "const": "angle"
+                    },
+                    "tolerance": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "crs": {
+                      "const": null
+                    }
+                  },
+                  "required": [
+                    "value",
+                    "unit",
+                    "dimension",
+                    "tolerance",
+                    "crs"
+                  ],
+                  "additionalProperties": false
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "center_x",
+                "center_y",
+                "outer_radius"
+              ],
+              "additionalProperties": false
+            },
+            "description": "批量创建时使用，每项填写完整要素参数；与顶层单个几何参数二选一。"
           },
           "name": {
             "type": "string"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "oneOf": [
+          {
+            "required": [
+              "features"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "center_x"
+                  ]
+                },
+                {
+                  "required": [
+                    "center_y"
+                  ]
+                },
+                {
+                  "required": [
+                    "outer_radius"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "required": [
+              "center_x",
+              "center_y",
+              "outer_radius"
+            ],
+            "not": {
+              "required": [
+                "features"
+              ]
+            }
+          }
+        ]
       },
       "context_requirements": {
         "requires_layers": true
@@ -3303,7 +5446,8 @@
               "properties": {
                 "value": {
                   "type": "number",
-                  "minimum": 0
+                  "minimum": 0,
+                  "exclusiveMinimum": 0
                 },
                 "unit": {
                   "type": "string",
@@ -3346,7 +5490,8 @@
               "properties": {
                 "value": {
                   "type": "number",
-                  "minimum": 0
+                  "minimum": 0,
+                  "exclusiveMinimum": 0
                 },
                 "unit": {
                   "type": "string",
@@ -3381,7 +5526,9 @@
               "additionalProperties": false
             },
             "point_count": {
-              "type": "integer"
+              "type": "integer",
+              "minimum": 3,
+              "default": 5
             },
             "start_angle_degrees": {
               "type": "object",
@@ -3415,17 +5562,192 @@
             },
             "features": {
               "type": "array",
-              "items": {
-                "type": "object"
-              },
               "minItems": 1,
-              "x-geopilot-kind": "layer"
+              "items": {
+                "type": "object",
+                "properties": {
+                  "center_x": {
+                    "type": "number"
+                  },
+                  "center_y": {
+                    "type": "number"
+                  },
+                  "outer_radius": {
+                    "type": "object",
+                    "x-geopilot-semantic": "quantity",
+                    "properties": {
+                      "value": {
+                        "type": "number",
+                        "minimum": 0,
+                        "exclusiveMinimum": 0
+                      },
+                      "unit": {
+                        "type": "string",
+                        "enum": [
+                          "meters",
+                          "kilometers",
+                          "map_units",
+                          "degrees"
+                        ]
+                      },
+                      "dimension": {
+                        "const": "length"
+                      },
+                      "tolerance": {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      "crs": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "value",
+                      "unit",
+                      "dimension",
+                      "tolerance",
+                      "crs"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "inner_radius": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "x-geopilot-semantic": "quantity",
+                    "properties": {
+                      "value": {
+                        "type": "number",
+                        "minimum": 0,
+                        "exclusiveMinimum": 0
+                      },
+                      "unit": {
+                        "type": "string",
+                        "enum": [
+                          "meters",
+                          "kilometers",
+                          "map_units",
+                          "degrees"
+                        ]
+                      },
+                      "dimension": {
+                        "const": "length"
+                      },
+                      "tolerance": {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      "crs": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "value",
+                      "unit",
+                      "dimension",
+                      "tolerance",
+                      "crs"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "point_count": {
+                    "type": "integer",
+                    "minimum": 3,
+                    "default": 5
+                  },
+                  "start_angle_degrees": {
+                    "type": "object",
+                    "x-geopilot-semantic": "angle",
+                    "properties": {
+                      "value": {
+                        "type": "number"
+                      },
+                      "unit": {
+                        "const": "degrees"
+                      },
+                      "dimension": {
+                        "const": "angle"
+                      },
+                      "tolerance": {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      "crs": {
+                        "const": null
+                      }
+                    },
+                    "required": [
+                      "value",
+                      "unit",
+                      "dimension",
+                      "tolerance",
+                      "crs"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "center_x",
+                  "center_y",
+                  "outer_radius"
+                ],
+                "additionalProperties": false
+              },
+              "description": "批量创建时使用，每项填写完整要素参数；与顶层单个几何参数二选一。"
             },
             "name": {
               "type": "string"
             }
           },
-          "additionalProperties": false
+          "additionalProperties": false,
+          "oneOf": [
+            {
+              "required": [
+                "features"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "center_x"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "center_y"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "outer_radius"
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "required": [
+                "center_x",
+                "center_y",
+                "outer_radius"
+              ],
+              "not": {
+                "required": [
+                  "features"
+                ]
+              }
+            }
+          ]
         },
         "outputs": {
           "kind": "none",

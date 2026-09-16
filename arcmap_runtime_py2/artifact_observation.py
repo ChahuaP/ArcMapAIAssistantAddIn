@@ -311,9 +311,7 @@ def _check(name, expected, observation, arguments, verifier_proof):
         else:
             check["verdict"] = "passed" if source and observation.get("selection_count") is not None else "failed"
     elif name == "map_publication":
-        if expected == "published" and actual == "scheduled":
-            check["verdict"] = "scheduled"
-        elif expected in ("published", "map_state_updated"):
+        if expected in ("published", "map_state_updated"):
             check["verdict"] = "passed" if actual == expected else "failed"
     return check
 

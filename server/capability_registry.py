@@ -200,7 +200,13 @@ class CapabilityRegistry:
             seen.add(item["parameter"])
             if item["parameter"] not in parameters:
                 raise CapabilityContractError("%s.inputs[%d].parameter is not executable." % (operation_id, index))
-            if parameter_specs[item["parameter"]].get("x-geopilot-kind") != "layer":
+            inline_geometry = (isinstance(item['data_kind'], list) and bool(item['data_kind'])
+                               and set(item['data_kind']) <= {'coordinate_sequence', 'feature_definition'})
+            parameter_spec = parameter_specs[item['parameter']]
+            if inline_geometry:
+                if parameter_spec.get('type') != 'array' or parameter_spec.get('x-geopilot-kind'):
+                    raise CapabilityContractError('%s inline geometry must be an array, not a layer reference.' % operation_id)
+            elif parameter_spec.get("x-geopilot-kind") != "layer":
                 raise CapabilityContractError(
                     "%s.inputs[%d].parameter must declare x-geopilot-kind=layer."
                     % (operation_id, index)
@@ -352,4 +358,3 @@ class CapabilityRegistry:
     def planning_card(self, operation: Dict[str, Any]) -> Dict[str, Any]:
         contract = self.get(operation["id"])
         return {"id": operation["id"], "summary": operation["summary"], "examples": operation.get("examples", [])[:2], **contract}
-

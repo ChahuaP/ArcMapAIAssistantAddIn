@@ -2,7 +2,8 @@
 # it in the default browser. Called by OpenAssistantWeb.cmd (ArcMap Add-in).
 # Fully self-contained: uses the bundled Node + dsh under <harness>\runtime.
 param(
-    [int]$Port = 3180
+    [int]$Port = 3180,
+    [switch]$NoOpen
 )
 $ErrorActionPreference = 'Stop'
 
@@ -97,5 +98,5 @@ if ($portUp -and $haveUrl) {
 if (-not $url) {
     $url = Start-HarnessWeb
 }
-Start-Process $url
-Write-Output "ArcMap Harness: $url"
+if (-not $NoOpen) { Start-Process $url }
+Write-Output "ArcMap Harness 已就绪：http://127.0.0.1:$Port/"

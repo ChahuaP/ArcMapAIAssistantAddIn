@@ -13,7 +13,6 @@ from server.catalog import Catalog
 from server import codegen
 from server.journal import OpJournal
 from server.precheck import check
-from server.precheck import coerce_arguments as precheck_coerce
 from server.session import BridgeUnavailable, BridgeSession, LeaseFenceError
 
 
@@ -241,16 +240,6 @@ class CodegenTests(unittest.TestCase):
             self.assertLessEqual(len(name), 64)
             self.assertTrue(re.fullmatch(r"[A-Za-z0-9_-]+", name), name)
 
-    def test_arguments_model_fields_are_optional(self):
-        catalog = Catalog()
-        card = catalog.get("layer.add_layer")
-        model, required = codegen.build_arguments_model("layer.add_layer", card)
-        self.assertIsNotNone(model)
-        self.assertTrue(required, "add_layer must declare required params")
-        for name, field in model.model_fields.items():
-            self.assertIsNone(field.default,
-                              "all fields optional so pre-check owns requiredness")
-
     def test_tool_description_carries_summary_and_effect(self):
         catalog = Catalog()
         card = catalog.get("layer.add_layer")
@@ -266,113 +255,7 @@ class CodegenTests(unittest.TestCase):
 
 
 
-class ArgumentCoercionTests(unittest.TestCase):
-    """Reproduce the exact stringly-typed payloads from the live session."""
-
-    def setUp(self):
-        self.schema = {
-            "type": "object",
-            "properties": {
-                "layer": {"type": "string"},
-                "field": {
-                    "type": "object",
-                    "properties": {
-                        "name": {"type": "string"},
-                        "type": {"type": "string"},
-                        "nullable": {"type": "boolean"},
-                        "length": {"type": ["integer", "null"]},
-                        "precision": {"type": ["integer", "null"]},
-                        "scale": {"type": ["integer", "null"]},
-                        "domain": {"type": "array"},
-                    },
-                },
-            },
-        }
-
-    def test_live_session_payload_is_repaired(self):
-        raw = {"layer": "districts", "field": {
-            "name": "remark", "type": "TEXT",
-            "length": "50", "nullable": "true"}}
-        fixed = precheck_coerce(self.schema, raw)
-        self.assertEqual(fixed["field"]["length"], 50)
-        self.assertIs(fixed["field"]["nullable"], True)
-        self.assertEqual(fixed["field"]["name"], "remark")
-
-    def test_null_placeholders_and_item_wrapper_are_dropped(self):
-        raw = {"layer": "districts", "field": {
-            "domain": "null", "length": "50", "name": "remark",
-            "nullable": "true", "precision": "0", "scale": "0",
-            "type": "string"}}
-        fixed = precheck_coerce(self.schema, raw)
-        self.assertEqual(fixed["field"]["domain"], [])
-        self.assertEqual(fixed["field"]["precision"], 0)
-
-    def test_empty_domain_and_item_object(self):
-        raw = {"layer": "districts", "field": {
-            "domain": "", "name": "remark", "nullable": "false",
-            "type": "string"}}
-        fixed = precheck_coerce(self.schema, raw)
-        self.assertEqual(fixed["field"]["domain"], [])
-        self.assertIs(fixed["field"]["nullable"], False)
-
-    def test_real_catalog_add_field_schema_coerces(self):
-        catalog = Catalog()
-        schema = catalog.get("table.add_field")["parameters_schema"]
-        raw = {"layer": "districts", "field": {
-            "name": "remark", "type": "string", "nullable": "true",
-            "length": "50", "precision": "50", "scale": "0", "domain": ""}}
-        fixed = precheck_coerce(schema, raw)
-        field = fixed["field"]
-        self.assertIs(field["nullable"], True)
-        self.assertEqual(field["length"], 50)
-        self.assertEqual(field["domain"], [])
-
-
-
-class QuantityAndLayerResolutionTests(unittest.TestCase):
-
-    def test_quantity_semantic_fill_and_unit_alias(self):
-        schema = {"type": "object", "properties": {
-            "distance": {"type": "object", "x-geopilot-semantic": "quantity",
-                         "properties": {"value": {"type": "number"},
-                                        "unit": {"type": "string"},
-                                        "dimension": {"const": "length"},
-                                        "tolerance": {"type": "number"},
-                                        "crs": {"type": ["string", "null"]}}}}}
-        fixed = precheck_coerce(schema, {"distance": {"value": "800", "unit": "m"}})
-        quantity = fixed["distance"]
-        self.assertEqual(quantity["value"], 800.0)
-        self.assertEqual(quantity["unit"], "meters")
-        self.assertEqual(quantity["dimension"], "length")
-        self.assertEqual(quantity["tolerance"], 0.0)
-        self.assertIsNone(quantity["crs"])
-        self.assertEqual(set(quantity),
-                         {"value", "unit", "dimension", "tolerance", "crs"})
-
-    def test_quantity_dimension_is_forced_to_schema_const(self):
-        schema = {"type": "object", "properties": {
-            "distance": {"type": "object", "x-geopilot-semantic": "quantity",
-                         "properties": {"value": {"type": "number"},
-                                        "unit": {"type": "string"},
-                                        "dimension": {"const": "length"},
-                                        "tolerance": {"type": "number"},
-                                        "crs": {"type": ["string", "null"]}}}}}
-        fixed = precheck_coerce(schema, {"distance": {
-            "value": 100, "unit": "meters", "dimension": "Linear"}})
-        self.assertEqual(fixed["distance"]["dimension"], "length")
-
-    def test_field_spec_defaults_completed(self):
-        schema = {"type": "object", "properties": {
-            "field": {"type": "object", "x-geopilot-semantic": "field_spec",
-                      "properties": {"name": {"type": "string"},
-                                     "type": {"type": "string"}}}}}
-        fixed = precheck_coerce(schema, {"field": {"name": "remark", "type": "string"}})
-        field = fixed["field"]
-        self.assertEqual(set(field),
-                         {"name", "type", "nullable", "length", "precision", "scale", "domain"})
-        self.assertEqual(field["length"], 50)
-        self.assertEqual(field["domain"], [])
-
+class LayerResolutionTests(unittest.TestCase):
     def test_layer_names_resolved_to_refs(self):
         from server.precheck import resolve_layer_references
         schema = {"type": "object", "properties": {

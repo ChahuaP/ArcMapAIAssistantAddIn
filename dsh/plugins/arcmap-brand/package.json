@@ -16,5 +16,6 @@
       ],
       "platform": "web"
     }
-  }
+  },
+  "type": "module"
 }

@@ -64,7 +64,7 @@ function Get-Python {
         $site = Join-Path $dst 'Lib\site-packages'
         New-Item -ItemType Directory -Force -Path $site | Out-Null
         # Use the build machine's pip to resolve cp311 wheels into the embed.
-        python -m pip install --target $site --no-warn-script-location fastmcp==3.1.0 pydantic==2.12.5 2>&1 | Select-Object -Last 2 | ForEach-Object { Write-Host $_ }
+        python -m pip install --target $site --no-warn-script-location -r (Join-Path $repo 'requirements.txt') 2>&1 | Select-Object -Last 2 | ForEach-Object { Write-Host $_ }
         if ($LASTEXITCODE -ne 0) { throw "pip install into embeddable python failed: $LASTEXITCODE" }
         @('python311.zip', '.', 'Lib\site-packages', 'import site') |
             Set-Content (Join-Path $dst 'python311._pth') -Encoding ASCII
@@ -111,8 +111,8 @@ robocopy $dshDir (Join-Path $rt 'dsh') /MIR /R:2 /W:1 /NFL /NDL /NJH /NJS | Out-
 robocopy (Split-Path $pythonExe -Parent) (Join-Path $rt 'python') /MIR /R:2 /W:1 /NFL /NDL /NJH /NJS | Out-Null
 # profile: ship node_modules + plugins; package.json/cordis are written at install
 robocopy (Join-Path $profileDir 'profiles\arcmap-harness\node_modules') (Join-Path $harness 'dsh-profile\node_modules') /MIR /R:2 /W:1 /NFL /NDL /NJH /NJS | Out-Null
-robocopy (Join-Path $profileDir 'plugins') (Join-Path $harness 'dsh-profile\plugins') /MIR /R:2 /W:1 /NFL /NDL /NJH /NJS | Out-Null
-# shipped agent preset (arcmap: the standard composition minus its persona row)
+robocopy (Join-Path $repo 'dsh\plugins') (Join-Path $harness 'dsh-profile\plugins') /MIR /R:2 /W:1 /NFL /NDL /NJH /NJS | Out-Null
+# GIS-only agent preset
 robocopy (Join-Path $repo 'dsh\presets') (Join-Path $harness 'dsh-profile\presets') /MIR /R:2 /W:1 /NFL /NDL /NJH /NJS | Out-Null
 
 $mb = [math]::Round((Get-ChildItem $rt -Recurse -File | Measure-Object Length -Sum).Sum / 1MB, 1)

@@ -10,13 +10,21 @@ from shared_runtime import semantic_abi
 
 def add_field(context, arguments, step_outputs):
     layer = common.find_layer(context, arguments["layer"], step_outputs)
-    specification = semantic_abi.field_spec(arguments["field"])
+    return add_field_to_layer(layer, arguments['field'])
+
+
+def add_field_to_layer(layer, field):
+    specification = semantic_abi.field_spec(field)
     field_name = common.safe_output_name(specification["name"])
     if condition_utils.field_exists(layer, field_name):
         raise common.OperationError(u"字段已存在：%s" % field_name)
     field_type = semantic_abi.field_type_to_arcpy(specification)
-    field_length = specification["precision"] if specification["type"] == "string" else None
-    arcpy.AddField_management(layer, field_name, field_type, "", "", field_length or "", "NULLABLE" if specification["nullable"] else "NON_NULLABLE")
+    field_length = specification["length"] if specification["type"] == "string" else None
+    arcpy.AddField_management(layer, field_name, field_type,
+                              specification["precision"] if specification["precision"] is not None else "",
+                              specification["scale"] if specification["scale"] is not None else "",
+                              field_length if field_length is not None else "", "",
+                              "NULLABLE" if specification["nullable"] else "NON_NULLABLE")
     return {"layer": layer.name, "field_name": field_name, "field_type": field_type}
 
 

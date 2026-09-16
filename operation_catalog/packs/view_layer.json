@@ -579,7 +579,8 @@
             ]
           },
           "reference_layer": {
-            "type": "string"
+            "type": "string",
+            "x-geopilot-kind": "layer"
           }
         },
         "additionalProperties": false
@@ -655,7 +656,8 @@
               ]
             },
             "reference_layer": {
-              "type": "string"
+              "type": "string",
+              "x-geopilot-kind": "layer"
             }
           },
           "additionalProperties": false

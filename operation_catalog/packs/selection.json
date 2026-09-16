@@ -30,7 +30,71 @@
             "x-geopilot-kind": "layer"
           },
           "where": {
-            "type": "object"
+            "type": "object",
+            "properties": {
+              "op": {
+                "type": "string",
+                "enum": [
+                  "eq",
+                  "ne",
+                  "gt",
+                  "gte",
+                  "lt",
+                  "lte",
+                  "like",
+                  "between",
+                  "in",
+                  "is_null",
+                  "is_not_null",
+                  "and",
+                  "or",
+                  "not"
+                ]
+              },
+              "field": {
+                "type": "string",
+                "minLength": 1
+              },
+              "value": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
+              },
+              "value_field": {
+                "type": "string",
+                "minLength": 1
+              },
+              "values": {
+                "type": "array",
+                "items": {
+                  "type": [
+                    "string",
+                    "number",
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "minItems": 1
+              },
+              "conditions": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/condition"
+                },
+                "minItems": 2
+              },
+              "condition": {
+                "$ref": "#/$defs/condition"
+              }
+            },
+            "required": [
+              "op"
+            ],
+            "additionalProperties": false,
+            "description": "属性条件。等于示例：{\"op\":\"eq\",\"field\":\"name\",\"value\":\"南京\"}。and/or 用 conditions 数组；not 用 condition；in/between 用 values。"
           },
           "selection_type": {
             "type": "string",
@@ -44,7 +108,76 @@
             "x-geopilot-semantic": "selection_type"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "$defs": {
+          "condition": {
+            "type": "object",
+            "properties": {
+              "op": {
+                "type": "string",
+                "enum": [
+                  "eq",
+                  "ne",
+                  "gt",
+                  "gte",
+                  "lt",
+                  "lte",
+                  "like",
+                  "between",
+                  "in",
+                  "is_null",
+                  "is_not_null",
+                  "and",
+                  "or",
+                  "not"
+                ]
+              },
+              "field": {
+                "type": "string",
+                "minLength": 1
+              },
+              "value": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean",
+                  "null"
+                ]
+              },
+              "value_field": {
+                "type": "string",
+                "minLength": 1
+              },
+              "values": {
+                "type": "array",
+                "items": {
+                  "type": [
+                    "string",
+                    "number",
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "minItems": 1
+              },
+              "conditions": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/condition"
+                },
+                "minItems": 2
+              },
+              "condition": {
+                "$ref": "#/$defs/condition"
+              }
+            },
+            "required": [
+              "op"
+            ],
+            "additionalProperties": false,
+            "description": "属性条件。等于示例：{\"op\":\"eq\",\"field\":\"name\",\"value\":\"南京\"}。and/or 用 conditions 数组；not 用 condition；in/between 用 values。"
+          }
+        }
       },
       "context_requirements": {
         "requires_layers": true,
@@ -105,7 +238,71 @@
               "x-geopilot-kind": "layer"
             },
             "where": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "op": {
+                  "type": "string",
+                  "enum": [
+                    "eq",
+                    "ne",
+                    "gt",
+                    "gte",
+                    "lt",
+                    "lte",
+                    "like",
+                    "between",
+                    "in",
+                    "is_null",
+                    "is_not_null",
+                    "and",
+                    "or",
+                    "not"
+                  ]
+                },
+                "field": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "value": {
+                  "type": [
+                    "string",
+                    "number",
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "value_field": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "values": {
+                  "type": "array",
+                  "items": {
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "minItems": 1
+                },
+                "conditions": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/condition"
+                  },
+                  "minItems": 2
+                },
+                "condition": {
+                  "$ref": "#/$defs/condition"
+                }
+              },
+              "required": [
+                "op"
+              ],
+              "additionalProperties": false,
+              "description": "属性条件。等于示例：{\"op\":\"eq\",\"field\":\"name\",\"value\":\"南京\"}。and/or 用 conditions 数组；not 用 condition；in/between 用 values。"
             },
             "selection_type": {
               "type": "string",
@@ -119,7 +316,76 @@
               "x-geopilot-semantic": "selection_type"
             }
           },
-          "additionalProperties": false
+          "additionalProperties": false,
+          "$defs": {
+            "condition": {
+              "type": "object",
+              "properties": {
+                "op": {
+                  "type": "string",
+                  "enum": [
+                    "eq",
+                    "ne",
+                    "gt",
+                    "gte",
+                    "lt",
+                    "lte",
+                    "like",
+                    "between",
+                    "in",
+                    "is_null",
+                    "is_not_null",
+                    "and",
+                    "or",
+                    "not"
+                  ]
+                },
+                "field": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "value": {
+                  "type": [
+                    "string",
+                    "number",
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "value_field": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "values": {
+                  "type": "array",
+                  "items": {
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "minItems": 1
+                },
+                "conditions": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/condition"
+                  },
+                  "minItems": 2
+                },
+                "condition": {
+                  "$ref": "#/$defs/condition"
+                }
+              },
+              "required": [
+                "op"
+              ],
+              "additionalProperties": false,
+              "description": "属性条件。等于示例：{\"op\":\"eq\",\"field\":\"name\",\"value\":\"南京\"}。and/or 用 conditions 数组；not 用 condition；in/between 用 values。"
+            }
+          }
         },
         "outputs": {
           "kind": "map_state",

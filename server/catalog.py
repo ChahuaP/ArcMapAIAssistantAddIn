@@ -8,8 +8,6 @@ passing registry closure.
 from __future__ import annotations
 
 from typing import Any, Dict, List
-
-from .capability_registry import CapabilityRegistry
 from .catalog_loader import OperationCatalog
 
 _EFFECT_TO_LEVEL = {
@@ -28,7 +26,7 @@ class Catalog:
         operations = list(loader.all_operations())
         # Registry closure is the review gate: an operation that fails the
         # capability contract must never be exposed as a tool.
-        self._registry = CapabilityRegistry(operations)
+        self._registry = loader.capabilities
         self._cards: Dict[str, Dict[str, Any]] = {
             operation["id"]: operation for operation in operations
         }

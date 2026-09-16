@@ -42,6 +42,7 @@ Source: "{#MySourceDir}\*"; DestDir: "{tmp}\harness-package"; Flags: recursesubd
 Source: "uninstall_harness.ps1"; DestDir: "{app}\packaging"; Flags: ignoreversion
 ; Helpers extracted on demand and never installed.
 Source: "install_harness.ps1"; Flags: dontcopy
+Source: "install_profile.ps1"; Flags: dontcopy
 Source: "legacy_cleanup.ps1"; Flags: dontcopy
 
 [Icons]
@@ -91,6 +92,7 @@ begin
   if CurStep = ssPostInstall then
   begin
     ExtractTemporaryFile('install_harness.ps1');
+    ExtractTemporaryFile('install_profile.ps1');
     Params := '-NoElevate -Stage "' + ExpandConstant('{tmp}\harness-package') +
               '" -InstallDir "' + ExpandConstant('{app}') + '"';
     Code := RunPs(ExpandConstant('{tmp}\install_harness.ps1'), Params);

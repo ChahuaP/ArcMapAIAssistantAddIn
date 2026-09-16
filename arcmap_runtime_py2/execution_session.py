@@ -26,10 +26,12 @@ _ACTIVE_SESSION = None
 class ExecutionSession(object):
     """Owns run-scoped outputs and detached layers during workflow execution."""
 
-    def __init__(self):
+    def __init__(self, map_document=None):
+        self._map_document = map_document
         self._outputs = []
         self._output_by_step = {}
         self._runtime_layers = {}
+        self._published_layers = []
         self._add_outputs_to_map = None
         self._layer_prefix = u"geopilot_" + unicode(uuid.uuid4()).replace(u"-", u"")[:12]
 
@@ -50,6 +52,7 @@ class ExecutionSession(object):
         try:
             failures.extend(self._delete_runtime_layers())
             if exc_type is not None:
+                failures.extend(self._remove_published_layers())
                 failures.extend(self._delete_registered_outputs())
         finally:
             try:
@@ -87,7 +90,7 @@ class ExecutionSession(object):
         layer = self._runtime_layers.get(step_id)
         if layer is None:
             name = self._runtime_layer_name(step_id)
-            mxd, data_frame = _active_map()
+            mxd, data_frame = _active_map(self._map_document)
             source_layer = arcpy.mapping.Layer(path)
             source_layer.name = name
             source_layer.visible = False
@@ -102,6 +105,32 @@ class ExecutionSession(object):
             self._runtime_layers[step_id] = layer
         return layer
 
+    def publish_output(self, step_id):
+        """Publish once and verify the actual map before reporting success."""
+        record = self._output_by_step[step_id]
+        path = record['path']
+        mxd, frame = _active_map(self._map_document)
+        layer = arcpy.mapping.Layer(path)
+        arcpy.mapping.AddLayer(frame, layer, 'AUTO_ARRANGE')
+        matches = [item for item in arcpy.mapping.ListLayers(mxd, '', frame)
+                   if item.supports('DATASOURCE')
+                   and _normalize_path(item.dataSource) == _normalize_path(path)]
+        self._published_layers.extend((frame, item) for item in matches)
+        if len(matches) != 1:
+            raise RuntimeError('Output publication did not produce exactly one layer: %s' % path)
+        arcpy.RefreshTOC()
+        arcpy.RefreshActiveView()
+
+    def _remove_published_layers(self):
+        failures = []
+        for frame, layer in reversed(self._published_layers):
+            try:
+                arcpy.mapping.RemoveLayer(frame, layer)
+            except Exception as exc:
+                failures.append('rollback map publication: %s' % exc)
+        self._published_layers = []
+        return failures
+
     def _runtime_layer_name(self, step_id):
         safe = u"".join(ch if (ch.isalnum() or ch == u"_") else u"_" for ch in step_id)
         return self._layer_prefix + u"_" + safe
@@ -111,7 +140,7 @@ class ExecutionSession(object):
         if not self._runtime_layers:
             return failures
         try:
-            _mxd, data_frame = _active_map()
+            _mxd, data_frame = _active_map(self._map_document)
         except Exception as exc:
             data_frame = None
             failures.append("open active map: %s" % exc)
@@ -184,12 +213,15 @@ def current():
     return _ACTIVE_SESSION
 
 
-def _active_map():
-    mxd = arcpy.mapping.MapDocument("CURRENT")
+def _active_map(mxd=None):
+    mxd = mxd if mxd is not None else arcpy.mapping.MapDocument("CURRENT")
     frames = arcpy.mapping.ListDataFrames(mxd)
     if not frames:
         raise RuntimeError("Current MXD has no data frame.")
-    return mxd, frames[0]
+    frame = mxd.activeDataFrame
+    if frame not in frames:
+        raise RuntimeError('Current MXD active data frame is unavailable.')
+    return mxd, frame
 
 
 def _normalize_path(path):

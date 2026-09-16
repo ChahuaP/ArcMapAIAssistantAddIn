@@ -1,3 +1,4 @@
 # ArcMap Harness boundary server dependencies.
 fastmcp==3.1.0
 pydantic==2.12.5
+jsonschema==4.26.0

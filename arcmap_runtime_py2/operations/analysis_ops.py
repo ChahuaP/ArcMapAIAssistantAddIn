@@ -8,75 +8,30 @@ from .common import OperationError, dataset
 from shared_runtime import semantic_abi
 
 
-# -*- coding: utf-8 -*-
-"""Analysis tools run in a dedicated ArcGIS Python subprocess.
-
-In-process GP analysis inside the COM-initiated UI callback kills ArcMap
-natively (observed with Buffer); the identical call in a standalone ArcGIS
-Python process succeeds. Heavy analysis therefore runs out of process: the
-subprocess writes outputs to the same staging GDB, and the map only ADDs the
-finished result afterwards.
-"""
-import io
+# Buffer stays outside the COM callback: in-process GP can crash ArcMap.
 import json
 import os
 import subprocess
+import sys
 import tempfile
 
-_ARCGIS_PY = u"C:\Python27\ArcGIS10.2\python.exe"
 
-
-def unicode_repr(value):
-    # py2 repr(u'x') already yields u'x'; the double-u came from our prefix.
-    return repr(unicode(value))
-
-
-def _run_gp(tool, arguments_json):
-    """Run one GP tool in a standalone ArcGIS Python subprocess.
-
-    In-process GP analysis inside the COM-initiated UI callback kills ArcMap
-    natively (observed with Buffer); the identical call standalone succeeds.
-    Paths travel via a UTF-8 JSON argument file so no string escaping can
-    corrupt them.
-    """
-    if not os.path.isfile(_ARCGIS_PY):
-        return False
-    script_path = tempfile.mktemp(suffix=".py", prefix="gp_")
-    args_path = script_path + ".json"
-    with open(args_path, "wb") as stream:
-        stream.write(arguments_json.encode("utf-8"))
-    runner = (
-        u"# -*- coding: utf-8 -*-" + unichr(10)
-        + u"import arcpy, json, io" + unichr(10)
-        + u"arcpy.env.overwriteOutput = True" + unichr(10)
-        + u"with io.open(" + unicode_repr(args_path) + u", 'r', encoding='utf-8') as f:" + unichr(10)
-        + u"    args = json.load(f)" + unichr(10)
-        + u"getattr(arcpy, args['tool'])(*args['args'])" + unichr(10)
-        + u"print('GP-OK')" + unichr(10)
-    )
-    with io.open(script_path, "w", encoding="utf-8") as stream:
-        stream.write(runner)
+def run_buffer(input_path, output_path, distance):
+    python_exe = os.path.join(sys.prefix, "python.exe")
+    if not os.path.isfile(python_exe):
+        raise common.OperationError(u"ArcGIS Python interpreter is unavailable: %s" % python_exe)
+    worker = os.path.join(os.path.dirname(__file__), "gp_worker.py")
+    descriptor, args_path = tempfile.mkstemp(suffix=".json", prefix="arcmap-buffer-")
     try:
-        proc = subprocess.Popen(
-            [_ARCGIS_PY, script_path],
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            creationflags=0x08000000)
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(json.dumps([input_path, output_path, distance], ensure_ascii=False).encode("utf-8"))
+        proc = subprocess.Popen([python_exe, worker, args_path], stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, creationflags=0x08000000)
         output, _ = proc.communicate()
-        if isinstance(output, str):
-            try:
-                output = output.decode("utf-8", "replace")
-            except Exception:
-                output = output.decode("gbk", "replace")
-        if proc.returncode != 0 or u"GP-OK" not in (output or u""):
-            raise common.OperationError(
-                u"GP subprocess failed: %s" % (output or u"")[-400:])
-        return True
+        if proc.returncode != 0 or b"GP-OK" not in output:
+            raise common.OperationError(u"Buffer subprocess failed: %s" % output.decode("utf-8", "replace")[-2000:])
     finally:
-        for path in (script_path, args_path):
-            try:
-                os.unlink(path)
-            except OSError:
-                pass
+        os.unlink(args_path)
 
 
 def _output(context, arguments):
@@ -86,33 +41,11 @@ def _output(context, arguments):
     )
 
 
-def _add_to_map(output):
-    """Bring a finished GP-subprocess output onto the active data frame.
-
-    Analysis results live in the server-managed staging GDB; without this the
-    operation executes but the user sees nothing change in ArcMap.
-    """
-    try:
-        mxd = common.current_mxd()
-        df = common.active_data_frame(mxd)
-        layer = arcpy.mapping.Layer(output)
-        arcpy.mapping.AddLayer(df, layer, "AUTO_ARRANGE")
-        return True
-    except Exception:
-        return False
-
-
 def buffer(context, arguments, step_outputs):
     layer = common.find_layer(context, arguments["input_layer"], step_outputs)
     output = _output(context, arguments)
     distance = semantic_abi.quantity_to_arcpy(arguments["distance"])
-    payload = json.dumps({
-        "tool": "Buffer_analysis",
-        "args": [unicode(dataset(layer)), unicode(output), unicode(distance)],
-    }, ensure_ascii=False)
-    if not _run_gp("Buffer_analysis", payload):
-        arcpy.Buffer_analysis(dataset(layer), output, distance)
-    _add_to_map(output)
+    run_buffer(unicode(dataset(layer)), unicode(output), unicode(distance))
     return {"output": output}
 
 

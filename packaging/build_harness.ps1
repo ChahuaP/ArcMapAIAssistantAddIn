@@ -53,6 +53,7 @@ Copy-Item (Join-Path $repo 'arcmap_runtime_py2\deployment_identity.json') (Join-
 # Launcher that the ArcMap Add-in invokes (co-located with runtime.py).
 Copy-Item (Join-Path $repo 'packaging\harness\OpenAssistantWeb.cmd') $harness
 Copy-Item (Join-Path $repo 'packaging\harness\launch_harness.ps1') $harness
+Copy-Item (Join-Path $repo 'packaging\harness\configure_ollama.ps1') $harness
 
 # Fully self-contained runtime (portable Node + standalone dsh + embeddable
 # Python + pre-built dsh profile) so the installer needs no user environment.

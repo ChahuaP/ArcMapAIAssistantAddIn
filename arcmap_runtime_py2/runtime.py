@@ -324,8 +324,8 @@ def _persist_publish_and_deliver(run_id, target, status, result, lease_id, epoch
         heartbeat.stop()
         _log_event(u"execution.outbox_persist_failed", _exception_text(exc))
         raise
-    # Py2 only stages outputs to disk.  The Gateway independently accepts and
-    # publishes them after the receipt is delivered.
+    # Execution has verified and published outputs. Delivery retries must
+    # never execute geoprocessing or add layers again.
     try:
         acknowledged = EXECUTION_OUTBOX.deliver(entry, gateway_client)
     except Exception as exc:
@@ -348,7 +348,7 @@ def _drain_execution_outbox(target=None):
     for entry in entries:
         if not _same_target(entry["target"], target):
             continue
-        # Drain only retries delivery — there is no publish step on Py2.
+        # Drain only retries delivery; publication already completed.
         try:
             acknowledged = EXECUTION_OUTBOX.deliver(entry, gateway_client)
         except Exception as exc:

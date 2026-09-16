@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any, Dict, Iterable, List
+from jsonschema import Draft202012Validator
 
 from .paths import CATALOG_ROOT
 from .capability_registry import CapabilityRegistry
@@ -42,6 +43,7 @@ class OperationCatalog:
         if operation_id in self.operations:
             raise CatalogError(f"Duplicate operation id: {operation_id}")
         try:
+            Draft202012Validator.check_schema(operation.get('parameters_schema'))
             validate_parameter_schema(operation.get("parameters_schema"))
             validate_output_policy(
                 operation.get("output_policy"), operation.get("side_effects")
