@@ -1,97 +1,56 @@
-# Build the ArcMap Harness deployment into build/harness-staging.
-# Run from the repo root: pwsh -NoProfile -File packaging\build_harness.ps1
-# Output layout (self-contained under harness/, mirrors the runtime import
-# layout so a single install root works for both the Py3 boundary server and
-# the ArcMap Py2 runtime):
-#   harness/server, harness/shared_runtime, harness/operation_catalog,
-#   harness/arcmap_runtime_py2, harness/bridge, harness/dsh, harness/VERSION,
-#   harness/OpenAssistantWeb.cmd, harness/launch_harness.ps1
-#   ArcMapAIAssistantAddIn.esriaddin, harness_identity.json
+# Build the current runnable baseline. Independent Guizhi application replaces
+# this composition in the later architecture rounds.
 param(
-    [switch]$SkipBridge
+    [Parameter(Mandatory)][string]$BuildRoot,
+    [Parameter(Mandatory)][string]$CacheRoot,
+    [string]$BuildPython = 'python'
 )
 $ErrorActionPreference = 'Stop'
-$repo = Split-Path $PSScriptRoot -Parent  # repo root
-$stage = Join-Path $repo 'build\harness-staging'
+. (Join-Path $PSScriptRoot 'build_paths.ps1')
+$repo = Split-Path $PSScriptRoot -Parent
+$BuildRoot = Assert-ExternalBuildPath $BuildRoot $repo
+$CacheRoot = Assert-ExternalBuildPath $CacheRoot $repo
+$stage = Join-Path $BuildRoot 'harness-staging'
 $harness = Join-Path $stage 'harness'
-
-if (Test-Path -LiteralPath $stage) { Remove-Item -Recurse -Force -LiteralPath $stage }
-New-Item -ItemType Directory -Force -Path $harness | Out-Null
-
-# The boundary server is self-contained: server/ + shared_runtime + catalog.
-robocopy (Join-Path $repo 'server') (Join-Path $harness 'server') /E /R:2 /W:1 /NFL /NDL /NJH /NJS /XD __pycache__ | Out-Null
-if ($LASTEXITCODE -ge 8) { throw "robocopy server failed: $LASTEXITCODE" }
-robocopy (Join-Path $repo 'shared_runtime') (Join-Path $harness 'shared_runtime') /E /R:2 /W:1 /NFL /NDL /NJH /NJS /XD __pycache__ | Out-Null
-if ($LASTEXITCODE -ge 8) { throw "robocopy shared_runtime failed: $LASTEXITCODE" }
-robocopy (Join-Path $repo 'operation_catalog') (Join-Path $harness 'operation_catalog') /E /R:2 /W:1 /NFL /NDL /NJH /NJS | Out-Null
-if ($LASTEXITCODE -ge 8) { throw "robocopy operation_catalog failed: $LASTEXITCODE" }
-robocopy (Join-Path $repo 'arcmap_runtime_py2') (Join-Path $harness 'arcmap_runtime_py2') /E /R:2 /W:1 /NFL /NDL /NJH /NJS /XD __pycache__ | Out-Null
-if ($LASTEXITCODE -ge 8) { throw "robocopy arcmap_runtime_py2 failed: $LASTEXITCODE" }
-Copy-Item (Join-Path $repo 'VERSION') (Join-Path $harness 'VERSION')
-
-# dsh composition sources (profile + brand plugin) ship with the deployment.
-robocopy (Join-Path $repo 'dsh') (Join-Path $harness 'dsh') /E /R:2 /W:1 /NFL /NDL /NJH /NJS /XD node_modules | Out-Null
-if ($LASTEXITCODE -ge 8) { throw "robocopy dsh failed: $LASTEXITCODE" }
-
-# C# Bridge: build and stage next to the Py2 runtime so runtime.py resolves
-# <install>\bridge\ArcMapBridge.exe. Only shipped dependencies are copied (the
-# ESRI interop assemblies come from the local ArcGIS install); XML doc files
-# are dropped.
-if (-not $SkipBridge) {
-    & (Join-Path $repo 'ArcMapBridgeExternal\build.ps1') | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw 'ArcMapBridgeExternal\build.ps1 failed' }
+if (Test-Path -LiteralPath $stage) { throw "Use a new build root; stage already exists: $stage" }
+[IO.Directory]::CreateDirectory($harness) | Out-Null
+foreach ($directory in 'server', 'shared_runtime', 'operation_catalog', 'arcmap_runtime_py2', 'dsh') {
+    Copy-BuildTree (Join-Path $repo $directory) (Join-Path $harness $directory) @('/XD', '__pycache__', 'node_modules', '/XF', '*.pyc', '*.pyo')
 }
-$bridgeOut = Join-Path $repo 'ArcMapBridgeExternal\bin\Release'
-if (-not (Test-Path (Join-Path $bridgeOut 'ArcMapBridge.exe'))) {
-    throw "Bridge output missing: $bridgeOut\ArcMapBridge.exe"
+Copy-Item -LiteralPath (Join-Path $repo 'VERSION') -Destination $harness
+
+$bridgeBuild = Join-Path $BuildRoot 'bridge'
+& (Join-Path $repo 'ArcMapBridgeExternal\build.ps1') -BuildRoot $bridgeBuild
+if ($LASTEXITCODE -ne 0) { throw 'Bridge build failed' }
+Copy-BuildTree (Join-Path $bridgeBuild 'bin\Release') (Join-Path $harness 'bridge') @('/XF', '*.xml', '*.pdb')
+Copy-Item -LiteralPath (Join-Path $repo 'arcmap_runtime_py2\deployment_identity.json') -Destination (Join-Path $harness 'bridge\deployment_identity.json')
+foreach ($file in 'OpenAssistantWeb.cmd', 'launch_harness.ps1', 'configure_ollama.ps1') {
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot "harness\$file") -Destination $harness
 }
-robocopy $bridgeOut (Join-Path $harness 'bridge') /E /R:2 /W:1 /NFL /NDL /NJH /NJS /XF *.xml *.pdb | Out-Null
-if ($LASTEXITCODE -ge 8) { throw "robocopy bridge failed: $LASTEXITCODE" }
-# Bridge and Py2 runtime must share the same immutable deployment identity.
-Copy-Item (Join-Path $repo 'arcmap_runtime_py2\deployment_identity.json') (Join-Path $harness 'bridge\deployment_identity.json') -Force
+& (Join-Path $PSScriptRoot 'build_runtime.ps1') -Stage $stage -CacheRoot $CacheRoot -BuildPython $BuildPython
+if ($LASTEXITCODE -ne 0) { throw 'Runtime build failed' }
+$python = Join-Path $harness 'runtime\python\python.exe'
+& $python -I -B (Join-Path $repo 'ArcMapAIAssistantAddIn\makeaddin.py') --output (Join-Path $stage 'ArcMapAIAssistantAddIn.esriaddin')
+if ($LASTEXITCODE -ne 0) { throw 'Add-in packaging failed' }
 
-# Launcher that the ArcMap Add-in invokes (co-located with runtime.py).
-Copy-Item (Join-Path $repo 'packaging\harness\OpenAssistantWeb.cmd') $harness
-Copy-Item (Join-Path $repo 'packaging\harness\launch_harness.ps1') $harness
-Copy-Item (Join-Path $repo 'packaging\harness\configure_ollama.ps1') $harness
-
-# Fully self-contained runtime (portable Node + standalone dsh + embeddable
-# Python + pre-built dsh profile) so the installer needs no user environment.
-& (Join-Path $PSScriptRoot 'build_runtime.ps1') -Stage $stage
-
-# Rebuild the Add-in package (button caption "ArcMap Harness").
-Push-Location (Join-Path $repo 'ArcMapAIAssistantAddIn')
-try {
-    python makeaddin.py
-    if ($LASTEXITCODE -ne 0) { throw 'makeaddin.py failed' }
-} finally { Pop-Location }
-Copy-Item (Join-Path $repo 'ArcMapAIAssistantAddIn\ArcMapAIAssistantAddIn.esriaddin') $stage
-
-# Syntax gate: a staged file that cannot compile must never reach the machine.
-$pycache = Join-Path $env:TEMP ('harness-pycache-' + [guid]::NewGuid().ToString('N'))
-$env:PYTHONPYCACHEPREFIX = $pycache
-$gateDirs = @('server', 'shared_runtime', 'arcmap_runtime_py2') | ForEach-Object { Join-Path $harness $_ }
-$staged = Get-ChildItem -Recurse -Filter *.py $gateDirs | Select-Object -ExpandProperty FullName
-python -m py_compile @staged
-if ($LASTEXITCODE -ne 0) { throw 'py_compile failed on staged harness sources' }
-Remove-Item -Recurse -Force $pycache -ErrorAction SilentlyContinue
-
-# Deployment identity: version + build time + content digest.
-$version = (Get-Content (Join-Path $repo 'VERSION') -Raw).Trim()
-$files = Get-ChildItem -Recurse -File $stage |
-    Where-Object { $_.FullName -notmatch '\\harness\\runtime\\' } | Sort-Object FullName
-$hashes = foreach ($file in $files) {
-    (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+$version = (Get-Content -LiteralPath (Join-Path $repo 'VERSION') -Raw -Encoding UTF8).Trim()
+$files = Get-ChildItem -LiteralPath $stage -Recurse -File | Sort-Object FullName
+$entries = foreach ($file in $files) {
+    [ordered]@{ path = [IO.Path]::GetRelativePath($stage, $file.FullName).Replace('\', '/'); sha256 = (Get-FileHash -LiteralPath $file.FullName).Hash.ToLowerInvariant() }
 }
-$combined = ($hashes -join '')
-$sha = [System.Security.Cryptography.SHA256]::Create()
-$digest = [BitConverter]::ToString(
-    $sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($combined))).Replace('-', '').ToLowerInvariant()
 $identity = [ordered]@{
     harness_version = $version
-    built_at = (Get-Date).ToUniversalTime().ToString('o')
-    deployment_hash = $digest
+    built_at = [DateTime]::UtcNow.ToString('o')
+    source_commit = (& git -C $repo rev-parse HEAD)
+    source_index_tree = (& git -C $repo write-tree)
+    source_dirty = [bool](& git -C $repo status --porcelain)
+    runtime_lock_sha256 = (Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'runtime.lock.json')).Hash.ToLowerInvariant()
+    python_lock_sha256 = (Get-FileHash -LiteralPath (Join-Path $repo 'requirements.lock')).Hash.ToLowerInvariant()
     file_count = $files.Count
+    files = @($entries)
 }
-$identity | ConvertTo-Json | Set-Content (Join-Path $stage 'harness_identity.json') -Encoding UTF8
-Write-Output ("built: {0} v{1} ({2} files, hash {3})" -f $stage, $version, $files.Count, $digest.Substring(0, 12))
+$canonical = $entries | ConvertTo-Json -Depth 4 -Compress
+$identity.deployment_hash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($canonical))).ToLowerInvariant()
+$identity | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $stage 'harness_identity.json') -Encoding UTF8
+Write-Output "built: $stage v$version ($($files.Count) files)"
+$global:LASTEXITCODE = 0

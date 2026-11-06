@@ -1,3 +1,7 @@
+#if VER != 0x07010100
+  #error Inno Setup 7.1.1 is required
+#endif
+
 ; ArcMap Harness one-click installer.
 ; Build with packaging\build_installer.ps1 (runs build_harness.ps1 first, then
 ; ISCC). The installer automatically removes every previous GeoPilot /
@@ -8,10 +12,10 @@
   #define MyAppVersion Trim(FileRead(FileOpen(AddBackslash(SourcePath) + "..\VERSION")))
 #endif
 #ifndef MySourceDir
-  #define MySourceDir "..\build\harness-staging"
+  #error MySourceDir must be supplied by build_installer.ps1
 #endif
 #ifndef MyOutputDir
-  #define MyOutputDir "..\release"
+  #error MyOutputDir must be supplied by build_installer.ps1
 #endif
 
 [Setup]
@@ -60,7 +64,7 @@ begin
   else if FileExists(ExpandConstant('{pf32}\PowerShell\7\pwsh.exe')) then
     Result := ExpandConstant('{pf32}\PowerShell\7\pwsh.exe')
   else
-    Result := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
+    RaiseException('PowerShell 7 is required. Install PowerShell 7 before running this installer.');
 end;
 
 function RunPs(const ScriptFile, Params: String): Integer;

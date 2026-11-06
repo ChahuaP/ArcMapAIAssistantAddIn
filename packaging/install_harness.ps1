@@ -11,7 +11,7 @@
 #   %APPDATA%\ArcMapAIAssistant\install.json
 #   %LOCALAPPDATA%\ArcMapAIAssistant\dsh-home  (dsh profile, per-user)
 param(
-    [string]$Stage = '',
+    [Parameter(Mandatory)][string]$Stage,
     [string]$InstallDir = '',
     [switch]$NoElevate
 )
@@ -22,7 +22,6 @@ if (-not $NoElevate) {
     $identity = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
     if (-not $identity.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
         $repo = Split-Path $PSScriptRoot -Parent
-        if (-not $Stage) { $Stage = Join-Path $repo 'build\harness-staging' }
         $logDir = Join-Path $env:LOCALAPPDATA 'ArcMapAIAssistant\logs'
         New-Item -ItemType Directory -Force -Path $logDir | Out-Null
         $log = Join-Path $logDir 'install_harness.log'
@@ -39,7 +38,6 @@ New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 try { Start-Transcript -Path (Join-Path $logDir 'install_harness.log') -Append -Force | Out-Null } catch { }
 
 $repo = Split-Path $PSScriptRoot -Parent
-if (-not $Stage) { $Stage = Join-Path $repo 'build\harness-staging' }
 if (-not (Test-Path (Join-Path $Stage 'harness_identity.json'))) {
     throw "staging 缺少 harness_identity.json：$Stage。先运行 packaging\build_harness.ps1。"
 }

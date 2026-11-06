@@ -6,7 +6,7 @@
         serverName: arcmap
         transport: stdio
         command: 'python'
-        args: ['server/main.py']
+        args: ['-I', '-B', 'server/main.py']
         toolCallTimeoutMs: 660000
         failOnStartupError: true
     - id: arcmap-agent

@@ -1,4 +1,9 @@
-# ArcMap Harness boundary server dependencies.
+# Windows x64 / CPython 3.11 runtime roots; resolved artifacts are in requirements.lock.
 fastmcp==3.1.0
 pydantic==2.12.5
 jsonschema==4.26.0
+geopandas==1.1.2
+shapely==2.1.2
+pyproj==3.7.2
+pyogrio==0.12.1
+rasterio==1.4.4

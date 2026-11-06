@@ -32,7 +32,7 @@ Copy-Item (Join-Path $sourceRoot 'profile\arcmap-harness\package.json') (Join-Pa
 $patch = Get-Content -Raw -Encoding UTF8 (Join-Path $sourceRoot 'profile\arcmap-harness\cordis.patch.yml')
 $python = (Join-Path $HarnessDir 'runtime\python\python.exe').Replace('\', '/').Replace("'", "''")
 $server = (Join-Path $HarnessDir 'server\main.py').Replace('\', '/').Replace("'", "''")
-$patch = $patch.Replace("command: 'python'", "command: '$python'").Replace("args: ['server/main.py']", "args: ['$server']")
+$patch = $patch.Replace("command: 'python'", "command: '$python'").Replace("args: ['-I', '-B', 'server/main.py']", "args: ['-I', '-B', '$server']")
 Set-Content -LiteralPath (Join-Path $ProfileDir 'cordis.patch.yml') -Value $patch -Encoding UTF8
 
 foreach ($plugin in 'arcmap-brand', 'arcmap-status', 'arcmap-agent') {

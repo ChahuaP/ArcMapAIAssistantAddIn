@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "platform": "win-x64",
+  "python": {
+    "version": "3.11.9",
+    "url": "https://www.python.org/ftp/python/3.11.9/python-3.11.9-embed-amd64.zip",
+    "sha256": "009d6bf7e3b2ddca3d784fa09f90fe54336d5b60f0e0f305c37f400bf83cfd3b"
+  },
+  "node": {
+    "version": "24.20.0",
+    "url": "https://nodejs.org/dist/v24.20.0/win-x64/node.exe",
+    "sha256": "5c976096e04e5c2c1f091938926234cc9fbebfe9787ddd149351b3b0ecc707b5"
+  }
+}

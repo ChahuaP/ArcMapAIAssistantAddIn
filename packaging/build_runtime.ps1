@@ -1,98 +1,78 @@
-# Prepare the fully self-contained runtime that ships inside the installer:
-#   runtime\node\node.exe     portable Node
-#   runtime\dsh\...           standalone @deepseek-ai/dsh install
-#   runtime\python\...        embeddable Python 3.11 + fastmcp/pydantic
-# Heavy artifacts are cached under build\runtime-cache so repeated builds are
-# fast. Requires network on a cold cache.
+# Build a pinned Windows x64 runtime outside the source checkout.
 param(
-    [Parameter(Mandatory = $true)][string]$Stage,
-    [switch]$Force
+    [Parameter(Mandatory)][string]$Stage,
+    [Parameter(Mandatory)][string]$CacheRoot,
+    [string]$BuildPython = 'python'
 )
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'build_paths.ps1')
 $repo = Split-Path $PSScriptRoot -Parent
-$cache = Join-Path $repo 'build\runtime-cache'
-New-Item -ItemType Directory -Force -Path $cache | Out-Null
-$harness = Join-Path $Stage 'harness'
-New-Item -ItemType Directory -Force -Path $harness | Out-Null
-
-$dshManifest = Join-Path $PSScriptRoot 'dsh-runtime'
-$pythonVersion = '3.11.9'
-
-# -- Node (single self-contained binary) --------------------------------------
-function Get-Node {
-    $dst = Join-Path $cache 'node'
-    $exe = Join-Path $dst 'node.exe'
-    if ($Force -or -not (Test-Path $exe)) {
-        $src = (Get-Command node -ErrorAction Stop).Source
-        New-Item -ItemType Directory -Force -Path $dst | Out-Null
-        Copy-Item $src $exe -Force
-    }
-    return $exe
+$Stage = Assert-ExternalBuildPath $Stage $repo
+$CacheRoot = Assert-ExternalBuildPath $CacheRoot $repo
+if ($Stage -eq $CacheRoot -or $Stage.StartsWith($CacheRoot + '\', 'OrdinalIgnoreCase') -or $CacheRoot.StartsWith($Stage + '\', 'OrdinalIgnoreCase')) {
+    throw 'Stage and runtime cache must be separate trees'
 }
+[IO.Directory]::CreateDirectory($CacheRoot) | Out-Null
+$spec = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'runtime.lock.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+$actualPython = & $BuildPython -B -c 'import platform; print(platform.python_version())'
+if ($LASTEXITCODE -ne 0 -or $actualPython.Trim() -ne $spec.python.version) { throw "Build Python must be $($spec.python.version)" }
 
-# -- standalone dsh -----------------------------------------------------------
-function Get-Dsh {
-    $dst = Join-Path $cache 'dsh'
-    $bin = Join-Path $dst 'node_modules\@deepseek-ai\dsh\lib\bin.js'
-    $lock = Join-Path $dshManifest 'package-lock.json'
-    $lockHash = (Get-FileHash -LiteralPath $lock).Hash
-    $stamp = Join-Path $dst 'installed-lock.sha256'
-    if ($Force -or -not (Test-Path $bin) -or -not (Test-Path $stamp) -or
-        (Get-Content -LiteralPath $stamp -Raw).Trim() -ne $lockHash) {
-        New-Item -ItemType Directory -Force -Path $dst | Out-Null
-        if (Test-Path -LiteralPath $stamp) { Remove-Item -LiteralPath $stamp }
-        Copy-Item -LiteralPath $lock, (Join-Path $dshManifest 'package.json') -Destination $dst -Force
-        Push-Location $dst
-        try {
-            npm ci --engine-strict --ignore-scripts --no-audit --no-fund 2>&1 | ForEach-Object { Write-Host $_ }
-            if ($LASTEXITCODE -ne 0) { throw "npm ci for dsh failed: $LASTEXITCODE" }
-            & $nodeExe $bin --version | Out-Host
-            if ($LASTEXITCODE -ne 0) { throw 'Bundled Node cannot start dsh' }
-            Set-Content -LiteralPath $stamp -Value $lockHash -Encoding ASCII
-        } finally { Pop-Location }
-    }
-    return $dst
-}
-
-# -- embeddable Python + boundary dependencies --------------------------------
-function Get-Python {
-    $dst = Join-Path $cache 'python'
-    $exe = Join-Path $dst 'python.exe'
-    if ($Force -or -not (Test-Path $exe)) {
-        if (Test-Path $dst) { Remove-Item -Recurse -Force $dst }
-        New-Item -ItemType Directory -Force -Path $dst | Out-Null
-        $zip = Join-Path $cache "python-$pythonVersion-embed-amd64.zip"
-        if (-not (Test-Path $zip)) {
-            $url = "https://www.python.org/ftp/python/$pythonVersion/python-$pythonVersion-embed-amd64.zip"
-            Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
+function Get-LockedDownload($Entry, [string]$Destination) {
+    if (-not (Test-Path -LiteralPath $Destination)) {
+        [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($Destination)) | Out-Null
+        $partial = $Destination + '.download'
+        Invoke-WebRequest -Uri $Entry.url -OutFile $partial
+        if ((Get-FileHash -LiteralPath $partial -Algorithm SHA256).Hash.ToLowerInvariant() -ne $Entry.sha256) {
+            throw "Downloaded artifact checksum mismatch: $Destination"
         }
-        Expand-Archive -Path $zip -DestinationPath $dst -Force
-        $site = Join-Path $dst 'Lib\site-packages'
-        New-Item -ItemType Directory -Force -Path $site | Out-Null
-        # Use the build machine's pip to resolve cp311 wheels into the embed.
-        python -m pip install --target $site --no-warn-script-location -r (Join-Path $repo 'requirements.txt') 2>&1 | Select-Object -Last 2 | ForEach-Object { Write-Host $_ }
-        if ($LASTEXITCODE -ne 0) { throw "pip install into embeddable python failed: $LASTEXITCODE" }
-        @('python311.zip', '.', 'Lib\site-packages', 'import site') |
-            Set-Content (Join-Path $dst 'python311._pth') -Encoding ASCII
-        & $exe -c "import fastmcp, pydantic" 2>&1 | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw 'bundled python cannot import fastmcp/pydantic' }
+        [IO.File]::Move($partial, $Destination)
     }
-    return $exe
+    if ((Get-FileHash -LiteralPath $Destination -Algorithm SHA256).Hash.ToLowerInvariant() -ne $Entry.sha256) {
+        throw "Cached artifact checksum mismatch: $Destination"
+    }
+    return $Destination
 }
 
-# -- stage everything ---------------------------------------------------------
-$nodeExe = Get-Node
-$dshDir = Get-Dsh
-$pythonExe = Get-Python
+$node = Get-LockedDownload $spec.node (Join-Path $CacheRoot "node-$($spec.node.version)\node.exe")
+$nodeVersion = & $node --version
+if ($LASTEXITCODE -ne 0 -or $nodeVersion.Trim() -ne "v$($spec.node.version)") { throw 'Node version mismatch' }
+$pythonZip = Get-LockedDownload $spec.python (Join-Path $CacheRoot "downloads\python-$($spec.python.version)-embed-amd64.zip")
+$lock = Join-Path $repo 'requirements.lock'
+$lockHash = (Get-FileHash -LiteralPath $lock).Hash.ToLowerInvariant()
+$wheels = Join-Path $CacheRoot "wheels-$lockHash"
+[IO.Directory]::CreateDirectory($wheels) | Out-Null
+& $BuildPython -B -m pip --isolated download --disable-pip-version-check --only-binary=:all: --require-hashes --dest $wheels -r $lock
+if ($LASTEXITCODE -ne 0) { throw 'Locked wheel download failed' }
 
-$rt = Join-Path $harness 'runtime'
-robocopy (Split-Path $nodeExe -Parent) (Join-Path $rt 'node') /MIR /R:2 /W:1 /NFL /NDL /NJH /NJS | Out-Null
-if ($LASTEXITCODE -ge 8) { throw "robocopy Node runtime failed: $LASTEXITCODE" }
-robocopy $dshDir (Join-Path $rt 'dsh') /MIR /R:2 /W:1 /NFL /NDL /NJH /NJS /XF installed-lock.sha256 | Out-Null
-if ($LASTEXITCODE -ge 8) { throw "robocopy dsh runtime failed: $LASTEXITCODE" }
-robocopy (Split-Path $pythonExe -Parent) (Join-Path $rt 'python') /MIR /R:2 /W:1 /NFL /NDL /NJH /NJS | Out-Null
-if ($LASTEXITCODE -ge 8) { throw "robocopy Python runtime failed: $LASTEXITCODE" }
+$runtime = Join-Path $Stage 'harness\runtime'
+$pythonDir = Join-Path $runtime 'python'
+if (Test-Path -LiteralPath $runtime) { throw "Runtime stage must be new: $runtime" }
+[IO.Directory]::CreateDirectory($pythonDir) | Out-Null
+Expand-Archive -LiteralPath $pythonZip -DestinationPath $pythonDir
+$site = Join-Path $pythonDir 'Lib\site-packages'
+& $BuildPython -B -m pip --isolated install --disable-pip-version-check --ignore-installed --no-index --find-links $wheels --only-binary=:all: --require-hashes --no-compile --target $site -r $lock
+if ($LASTEXITCODE -ne 0) { throw 'Locked Python runtime installation failed' }
+@('python311.zip', '.', 'Lib\site-packages', 'import site') | Set-Content -LiteralPath (Join-Path $pythonDir 'python311._pth') -Encoding ASCII
+$pythonExe = Join-Path $pythonDir 'python.exe'
+& $pythonExe -I -B -c 'import sys; assert sys.flags.no_user_site; import fastmcp,pydantic,jsonschema,geopandas,shapely,pyproj,pyogrio,rasterio,win32api; print("Bundled Python and GIS imports passed")'
+if ($LASTEXITCODE -ne 0) { throw 'Bundled Python import check failed' }
 
-$mb = [math]::Round((Get-ChildItem $rt -Recurse -File | Measure-Object Length -Sum).Sum / 1MB, 1)
-Write-Output "runtime staged: node + dsh + python ($mb MB)"
+$nodeDir = Join-Path $runtime 'node'
+[IO.Directory]::CreateDirectory($nodeDir) | Out-Null
+Copy-Item -LiteralPath $node -Destination (Join-Path $nodeDir 'node.exe')
+$dsh = Join-Path $runtime 'dsh'
+[IO.Directory]::CreateDirectory($dsh) | Out-Null
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'dsh-runtime\package.json'), (Join-Path $PSScriptRoot 'dsh-runtime\package-lock.json') -Destination $dsh
+$previousPath = $env:PATH
+$previousCache = $env:npm_config_cache
+try {
+    $env:PATH = $nodeDir + ';' + $previousPath
+    $env:npm_config_cache = Join-Path $CacheRoot 'npm'
+    & npm ci --prefix $dsh --engine-strict --ignore-scripts --no-audit --no-fund
+    if ($LASTEXITCODE -ne 0) { throw 'Locked DSH installation failed' }
+    & $node (Join-Path $dsh 'node_modules\@deepseek-ai\dsh\lib\bin.js') --version
+    if ($LASTEXITCODE -ne 0) { throw 'Bundled DSH cannot start' }
+} finally { $env:PATH = $previousPath; $env:npm_config_cache = $previousCache }
+Copy-Item -LiteralPath $lock, (Join-Path $PSScriptRoot 'runtime.lock.json') -Destination $runtime
+Write-Output "runtime: $runtime"
 $global:LASTEXITCODE = 0

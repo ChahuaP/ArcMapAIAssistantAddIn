@@ -1,17 +1,22 @@
 param(
-    [string]$Configuration = "Release"
+    [string]$Configuration = "Release",
+    [Parameter(Mandatory)][string]$BuildRoot
 )
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Split-Path -Parent $root
+. (Join-Path $repoRoot 'packaging\build_paths.ps1')
+$BuildRoot = Assert-ExternalBuildPath $BuildRoot $repoRoot
 $project = Join-Path $root "ArcMapBridgeExternal.csproj"
 $versionPath = Join-Path $repoRoot "VERSION"
 $version = [System.IO.File]::ReadAllText($versionPath, [System.Text.Encoding]::ASCII).Trim()
 if ($version -notmatch '^\d+\.\d+\.\d+$') {
     throw "$versionPath 必须包含三段式版本号。"
 }
-$generatedDir = Join-Path $root "obj\Generated"
+$intermediate = Join-Path $BuildRoot 'obj'
+$generatedDir = Join-Path $BuildRoot 'generated'
+$output = Join-Path $BuildRoot "bin\$Configuration"
 New-Item -ItemType Directory -Path $generatedDir -Force | Out-Null
 [System.IO.File]::WriteAllLines(
     (Join-Path $generatedDir "AssemblyVersion.g.cs"),
@@ -41,12 +46,12 @@ if (-not $msbuild) {
     throw "找不到 MSBuild.exe。"
 }
 
-& $msbuild.Source $project "/p:Configuration=$Configuration" "/p:Platform=x86" "/t:Restore;Build" "/v:minimal"
+& $msbuild.Source $project "/p:Configuration=$Configuration" "/p:Platform=x86" "/p:BaseIntermediateOutputPath=$intermediate\" "/p:MSBuildProjectExtensionsPath=$intermediate\" "/p:OutputPath=$output\" "/p:GeneratedVersionFile=$generatedDir\AssemblyVersion.g.cs" "/p:RestorePackagesPath=$BuildRoot\nuget" "/p:RestorePackagesWithLockFile=true" "/p:NuGetLockFilePath=$root\packages.lock.json" "/p:RestoreLockedMode=true" "/t:Restore;Build" "/v:minimal"
 if ($LASTEXITCODE -ne 0) {
     throw "ArcMapBridge.exe 编译失败，退出码：$LASTEXITCODE"
 }
 
-$exe = Join-Path $root "bin\$Configuration\ArcMapBridge.exe"
+$exe = Join-Path $output 'ArcMapBridge.exe'
 if (-not (Test-Path -LiteralPath $exe)) {
     throw "ArcMapBridge.exe 未生成：$exe"
 }

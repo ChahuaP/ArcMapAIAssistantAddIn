@@ -1,0 +1,8 @@
+{
+  "name": "guizhi-desktop-runtime",
+  "private": true,
+  "version": "0.0.0",
+  "dependencies": {
+    "electron": "45.2.3"
+  }
+}
