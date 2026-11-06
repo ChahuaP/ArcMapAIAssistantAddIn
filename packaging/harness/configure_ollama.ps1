@@ -28,11 +28,19 @@ if ($SelectAsDefault) {
     if (-not (Test-Path $node)) { throw '设置默认模型时请运行安装目录中的 configure_ollama.ps1。' }
     @'
 const fs = require('node:fs'), path = require('node:path');
-const yaml = require(path.join(process.argv[3], 'yaml'));
-const file = path.join(process.argv[2], 'settings.yaml');
-const settings = fs.existsSync(file) ? yaml.parse(fs.readFileSync(file, 'utf8')) ?? {} : {};
-settings['agent-default-model'] = { provider: 'ollama', model: 'qwen2.5:7b-arcmap' };
-fs.writeFileSync(file, yaml.stringify(settings), 'utf8');
+const yaml = require(path.join(process.argv[3], 'js-yaml'));
+const file = path.join(process.argv[2], 'profiles', 'arcmap-harness', 'cordis.patch.yml');
+const patch = yaml.load(fs.readFileSync(file, 'utf8'));
+const entry = patch.find(row => row.id === 'agent-default-model');
+if (!entry) throw new Error('ArcMap Harness profile has no agent-default-model entry.');
+entry.config = { provider: 'ollama', model: 'qwen2.5:7b-arcmap' };
+const temporary = file + '.' + process.pid + '.tmp';
+try {
+    fs.writeFileSync(temporary, yaml.dump(patch), 'utf8');
+    fs.renameSync(temporary, file);
+} finally {
+    fs.rmSync(temporary, { force: true });
+}
 '@ | & $node - $DshHome $modules
     if ($LASTEXITCODE -ne 0) { throw '保存默认本地模型失败。' }
 }

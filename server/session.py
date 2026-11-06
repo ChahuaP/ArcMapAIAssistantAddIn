@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional
 from .bridge_discovery import list_bridge_targets
 from .contracts import canonical_json, digest
 from .paths import localappdata_dir
+from .verification import seal_request, verdict
 
 BRIDGE_TIMEOUT_SECONDS = 30.0
 RECEIPT_TIMEOUT_SECONDS = 600.0
@@ -44,7 +45,7 @@ class _Waiter:
 
 class _RunRecord:
     __slots__ = ("run_id", "op_id", "operation", "lease_id", "epoch", "plan_hash",
-                 "step", "staging_root", "content_hash", "target", "receipt")
+                 "step", "staging_root", "content_hash", "target", "receipt", "verification_request", "verification_error")
 
     def __init__(self, run_id: str, op_id: str, operation: str, lease_id: str,
                  epoch: int, plan_hash: str, step: Dict[str, Any],
@@ -60,6 +61,8 @@ class _RunRecord:
         self.content_hash = content_hash
         self.target = target
         self.receipt: Optional[Dict[str, Any]] = None
+        self.verification_request = None
+        self.verification_error = None
 
 
 class BridgeSession:
@@ -332,6 +335,13 @@ class BridgeSession:
                 staging_root=str(localappdata_dir() / "staging" / run_id),
                 content_hash=context.get("content_hash", ""), target=target,
             )
+            try:
+                record.verification_request = seal_request(card, arguments, context, record.staging_root)
+            except (ValueError, KeyError, TypeError) as exc:
+                if card['capability_contract']['outputs']['kind'] == 'feature_class':
+                    return {'status': 'violated', 'violations': [
+                        '无法建立独立验收条件，操作未派发：%s。请依据源数据坐标系和工具要求修正参数。' % exc]}
+                record.verification_error = str(exc)
             receipt_waiter = self._register(self._receipt_waiters, run_id)
             with self._lock:
                 self._runs[run_id] = record
@@ -380,18 +390,21 @@ class BridgeSession:
         if record is None:
             raise KeyError("op_id %s 没有对应的执行记录。" % op_id)
         target = record.target
-        waiter = self._register(self._probe_waiters, "%s:map" % record.run_id)
-        self._post(target["bridge_port"], "/acceptance-probe", {
+        if record.verification_request is None:
+            return {"status": "unavailable", "passed": False, "message": record.verification_error}
+        request = dict(record.verification_request)
+        waiter = self._register(self._probe_waiters, "%s:%s" % (record.run_id, request['output_id']))
+        request.update({
             "lease_id": record.lease_id, "epoch": record.epoch,
             "plan_hash": record.plan_hash, "run_id": record.run_id,
             "deployment_hash": self._resolve_deployment_hash(target), "hwnd": target["hwnd"],
-            "probe_type": "map_state", "output_id": "map",
-            "postcondition": (card.get("postconditions") or [{}])[0],
-            "arguments": record.step.get("arguments", {}),
         })
+        self._post(target["bridge_port"], "/acceptance-probe", request)
         if not waiter.event.wait(timeout=timeout):
             return {"status": "unavailable", "message": "验收探针未在 %ss 内返回。" % timeout}
-        return waiter.document or {"status": "unavailable"}
+        document = waiter.document or {"status": "unavailable"}
+        document['passed'] = verdict(document)
+        return document
 
     # -- callback entry points (invoked by callbacks.py) --------------------
 
@@ -436,6 +449,8 @@ class BridgeSession:
         self._deliver(self._sample_waiters, token, payload.get("values"))
 
     def receive_probe(self, run_id: str, payload: Dict[str, Any]) -> None:
+        record = self._record(run_id)
+        self._fence(record.lease_id, record.epoch, record.plan_hash, payload, "probe")
         document = payload.get("document") or {}
         probe_type = document.get("probe_type")
         output_id = "__unit__" if probe_type == "unit" else document.get("output_id", "")

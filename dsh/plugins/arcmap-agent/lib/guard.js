@@ -15,33 +15,52 @@ function callKey(call) {
   return JSON.stringify([call.name, canonical(args)]);
 }
 
-function failed(result) {
-  return result.message.content.some(block => block.type === 'tool-result' && (
-    block.isError || block.content.some(item => {
-      if (item.type !== 'text') return false;
-      try { return ['failed', 'violated', 'bridge_unavailable'].includes(JSON.parse(item.text).status); } catch { return false; }
-    })
-  ));
+function failureEvidence({ content, isError }) {
+  const evidence = [];
+  for (const item of content) {
+    if (item.type !== 'text') continue;
+    let value;
+    try { value = JSON.parse(item.text); } catch {
+      if (isError) evidence.push(item.text);
+      continue;
+    }
+    if (value === null || typeof value !== 'object') {
+      if (isError) evidence.push(item.text);
+      continue;
+    }
+    if (isError || ['failed', 'violated', 'bridge_unavailable', 'verification_failed'].includes(value.status)) {
+      // Operation IDs change on each attempt; only the actual rejection is
+      // evidence of a repeated failure. A new cause must reach the model.
+      evidence.push({ isError: Boolean(isError), status: value.status,
+        violations: value.violations, message: value.message, error: value.error,
+        verification: value.verification });
+    }
+  }
+  if (isError && !content.some(item => item.type === 'text')) {
+    evidence.push({ isError: true, content });
+  }
+  return evidence.length ? JSON.stringify(canonical(evidence)) : undefined;
 }
 
 export function stopReason(events, turn) {
   const current = events.filter(event => event.data?.turn === turn);
   const calls = current.filter(event => event.type === 'tool/call').map(event => event.data);
-  const results = current.filter(event => event.type === 'tool/result').map(event => event.data);
-  const indeterminate = results.some(result => result.message.content.some(block =>
-    block.type === 'tool-result' && block.content.some(item => {
-      if (item.type !== 'text') return false;
-      try { return JSON.parse(item.text).status === 'indeterminate'; } catch { return false; }
-    })));
+  const results = current.filter(event => event.type === 'tool/result').map(event => event.data.message);
+  const indeterminate = results.some(result => result.content.some(item => {
+    if (item.type !== 'text') return false;
+    try { return JSON.parse(item.text)?.status === 'indeterminate'; } catch { return false; }
+  }));
   if (indeterminate) return '操作已派发但结果尚未确认，本轮停止。请核查操作结果，禁止自动重放。';
   const keys = new Map(calls.map(call => [call.callId, callKey(call)]));
   const failures = new Map();
   for (const result of results) {
-    const key = keys.get(result.message.source.callId);
-    if (key && failed(result)) failures.set(key, (failures.get(key) ?? 0) + 1);
+    const call = keys.get(result.toolCallId);
+    const evidence = failureEvidence(result);
+    const key = JSON.stringify([call, evidence]);
+    if (call && evidence) failures.set(key, (failures.get(key) ?? 0) + 1);
   }
   if ([...failures.values()].some(count => count >= 2)) {
-    return '同一操作已失败两次，本轮已停止。请根据上方工具错误修正条件后再试。';
+    return '同一操作以相同参数遇到同一失败原因两次，本轮已停止。请根据上方工具错误修正条件后再试。';
   }
   const tail = calls.slice(-3);
   if (tail.length === 3 && tail.every(call => callKey(call) === callKey(tail[0]))) {

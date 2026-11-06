@@ -63,8 +63,8 @@ def find_layer(context, layer_value, step_outputs=None):
     if raw.startswith(u"layer:"):
         snapshot_layer = _context_layer_by_ref(context, raw)
         if snapshot_layer is not None:
-            return _find_live_snapshot_layer(snapshot_layer)
-        return _find_layer_by_ref(raw)
+            return _find_live_snapshot_layer(context, snapshot_layer)
+        return _find_layer_by_ref(context, raw)
     if raw.startswith(u"from_step:"):
         return _find_layer_from_step(raw[len(u"from_step:"):], step_outputs or {})
 
@@ -87,7 +87,7 @@ def find_layer(context, layer_value, step_outputs=None):
         if live_match is not None:
             return live_match
         raise OperationError(u"Layer metadata is not executable: %s" % raw)
-    return _find_live_snapshot_layer(matches[0])
+    return _find_live_snapshot_layer(context, matches[0])
 
 
 def _context_layer_by_ref(context, layer_ref):
@@ -100,27 +100,61 @@ def _context_layer_by_ref(context, layer_ref):
     return matches[0] if matches else None
 
 
-def _find_live_snapshot_layer(snapshot_layer):
-    for identity in (
-        snapshot_layer.get("data_source"),
-        snapshot_layer.get("long_name"),
-        snapshot_layer.get("name"),
+def _find_live_snapshot_layer(context, snapshot_layer):
+    layer_ref = snapshot_layer["layer_ref"]
+    layer = _find_layer_by_ref(context, layer_ref)
+    for key, actual in (
+        ("name", layer.name), ("long_name", layer.longName), ("data_source", _safe_data_source(layer)),
     ):
-        if identity:
-            layer = _find_live_layer_exact(identity)
-            if layer is not None:
-                return layer
-    raise OperationError(u"Layer no longer exists: %s" % snapshot_layer.get("layer_ref", ""))
+        expected = snapshot_layer.get(key)
+        if expected and _text(actual) != _text(expected):
+            raise OperationError(u"Map layer changed since capture: %s" % layer_ref)
+    return layer
 
 
-def _find_layer_by_ref(layer_ref):
-    index = int(layer_ref.split(":")[1])
-    mxd = current_mxd()
-    df = active_data_frame(mxd)
-    layers = arcpy.mapping.ListLayers(mxd, "", df)
-    if index >= len(layers):
+def _find_layer_by_ref(context, layer_ref):
+    positions = context.get("_layer_positions")
+    if positions is None:
+        index = int(layer_ref.split(":")[1])
+    elif layer_ref in positions:
+        index = positions[layer_ref]
+    else:
+        raise OperationError(u"Layer is no longer in the workflow map: %s" % layer_ref)
+    layers = _live_layers()
+    if not 0 <= index < len(layers):
         raise OperationError("Layer index no longer exists: %s" % layer_ref)
     return layers[index]
+
+
+def _live_layers():
+    mxd = current_mxd()
+    df = active_data_frame(mxd)
+    return arcpy.mapping.ListLayers(mxd, "", df)
+
+
+def capture_layer_bindings(context):
+    positions = context.get("_layer_positions")
+    if positions is None:
+        positions = dict((item["layer_ref"], int(item["layer_ref"].split(":")[1]))
+                         for item in context.get("layers", []) if item.get("layer_ref"))
+    if not positions:
+        return {}
+    layers = _live_layers()
+    return dict((ref, layers[index]) for ref, index in positions.items())
+
+
+def rebase_layer_positions(context, bindings):
+    # Compare the ArcObjects identity while both layer handles are alive. A
+    # dataset path or name can be shared by distinct layers.
+    positions = {}
+    if bindings:
+        layers = _live_layers()
+        for layer_ref, layer in bindings.items():
+            for index, current in enumerate(layers):
+                if current is layer or current == layer:
+                    positions[layer_ref] = index
+                    break
+    context["_layer_positions"] = positions
 
 
 def _assert_within_staging(context, path):

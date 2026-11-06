@@ -20,10 +20,6 @@ def looks_like_a_backup(filename):
     return bool(BACKUP_FILE_PATTERN.match(filename))
 
 
-def add_required_file(zip_file, filename):
-    zip_file.write(os.path.join(CURRENT_PATH, filename), filename)
-
-
 def add_versioned_config(zip_file):
     version_path = os.path.join(REPO_ROOT, "VERSION")
     with open(version_path, "r", encoding="ascii") as version_file:
@@ -64,8 +60,6 @@ def main():
     try:
         with zipfile.ZipFile(TEMP_ZIP_NAME, "w", zipfile.ZIP_DEFLATED) as zip_file:
             add_versioned_config(zip_file)
-            for filename in ("README.txt",):
-                add_required_file(zip_file, filename)
             for directory in ("Install",):
                 add_directory(zip_file, directory)
         with zipfile.ZipFile(TEMP_ZIP_NAME, "r") as zip_file:

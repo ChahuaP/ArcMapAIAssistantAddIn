@@ -15,14 +15,33 @@
       name: 'arcmap-brand'
     - id: arcmap-status
       name: 'arcmap-status'
+    - id: preset-arcmap
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: arcmap
+        plugins:
+          - id: tool-ask-user
+            name: '@deepseek-ai/dsh-tool-ask-user'
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: compaction-basic
+                name: '@deepseek-ai/dsh-compaction-basic'
+              - id: command-compact
+                name: '@deepseek-ai/dsh-command-compact'
+              - id: tool-result-pruner
+                name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+                config:
+                  thresholdChars: 8192
+                  headChars: 4096
+                  tailChars: 1024
 
 # Replace the official DeepSeek brand occupants with ArcMap Harness.
 - id: ui-brand-official
-  disabled: true
-
-# The agent must not execute code outside the ArcMap door: code-runtime is
-# the PTC/PowerShell execution channel the standard preset otherwise offers.
-- id: code-runtime
   disabled: true
 
 # MiniMax via its official first-class protocol (Anthropic-compatible) through
@@ -75,10 +94,21 @@
             name: Qwen2.5 7B
 
 # Only this deployment preset is selectable.
-- id: agent-presets
+- id: agent-preset-registry
   config:
     default: arcmap
-    includeShippedRoot: false
+
+- id: preset-standard
+  disabled: true
+
+- id: preset-ptc
+  disabled: true
+
+- id: preset-minimal
+  disabled: true
+
+- id: preset-cordis
+  disabled: true
 
 - id: agent-default-model
   config:
@@ -87,11 +117,15 @@
 
 - id: system-prompt
   config:
-    includeHarnessIdentity: false
     includeRuntimeContext: false
-    persona: ''
 
 # Disable global programming rows as well as removing them from the preset.
+- id: tool-working-directory
+  disabled: true
+
+- id: mcp-resources
+  disabled: true
+
 - id: tool-bash
   disabled: true
 
@@ -134,28 +168,19 @@
 - id: tool-subagent-control
   disabled: true
 
-- id: tool-subagent-list-agents
-  disabled: true
-
 - id: tool-subagent
   disabled: true
 
 - id: tool-subagent-fork
   disabled: true
 
-- id: workflow-worker-thread
+- id: workflow-ptc
   disabled: true
 
 - id: tool-workflow
   disabled: true
 
-- id: tool-ralph
-  disabled: true
-
 - id: tool-todo
-  disabled: true
-
-- id: tool-str-replace-editor
   disabled: true
 
 - id: tool-web

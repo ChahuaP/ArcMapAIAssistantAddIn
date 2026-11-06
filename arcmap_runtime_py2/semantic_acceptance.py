@@ -253,7 +253,7 @@ def _buffer(proof_id, predicate, bindings, document):
     value = strategy.get("buffer_value")
     if mode not in ("native_projected", "native_degrees") or value is None:
         return _unresolved(proof_id, u"buffer crs_strategy is not natively provable")
-    tolerance = float(quantity.get("tolerance", 0.0) or 0.0)
+    tolerance = float(bindings.get('linear_tolerance', 0.0) or 0.0)
 
     expected = []
     with arcpy.da.SearchCursor(source, ["SHAPE@"]) as rows:
@@ -273,21 +273,69 @@ def _buffer(proof_id, predicate, bindings, document):
         delta = _symmetric_area(left, right)
         if delta is None:
             return _unresolved(proof_id, u"buffer geometry comparison unavailable", {"index": index})
-        if delta > max(tolerance * tolerance, 1e-6):
+        if not _within_linear_tolerance(left, right, tolerance):
             return _violated(proof_id, u"buffer geometry/distance differs",
-                             {"index": index, "difference_area": delta})
+                             {"index": index, "difference_area": delta, "linear_tolerance": tolerance})
     return _proven(proof_id, {"method": "independent Geometry.buffer via " + unicode(mode),
-                              "distance": value, "count": len(actual)})
+                              "distance": value, "count": len(actual), "linear_tolerance": tolerance})
+
+
+def _within_linear_tolerance(expected, actual, tolerance):
+    """Bound symmetric-difference area and extent drift at a spatial tolerance.
+
+    Converting the linear allowance by the mean perimeter avoids buffering an
+    already curved result, which ArcGIS can discretize a second time.
+    """
+    delta = _symmetric_area(expected, actual)
+    if tolerance <= 0:
+        return delta is not None and delta <= 1e-6
+    area_limit = tolerance * (expected.length + actual.length) / 2.0 + math.pi * tolerance * tolerance
+    left, right = expected.extent, actual.extent
+    drift = max(abs(getattr(left, k) - getattr(right, k)) for k in ('XMin','YMin','XMax','YMax'))
+    return delta is not None and delta <= max(area_limit, 1e-6) and drift <= tolerance
 
 
 def _crs(proof_id, predicate, bindings, document):
     result = _dataset(bindings, "result", document) or _dataset(bindings, "subject", document) or _dataset(bindings, "target")
     expected = predicate.get("spatial_reference")
     if not result or not isinstance(expected, unicode): return _unresolved(proof_id, u"CRS evaluator lacks sealed dataset/reference")
-    observed = getattr(getattr(arcpy.Describe(result), "spatialReference", None), "name", None)
-    if not observed or expected.lower() not in observed.lower():
+    from arcmap_runtime_py2.spatial_reference import resolve
+    reference = resolve(expected)
+    actual = arcpy.Describe(result).spatialReference
+    observed = actual.name
+    matches = (actual.factoryCode == reference.factoryCode) if reference.factoryCode else (actual.exportToString() == reference.exportToString())
+    if not observed or not matches:
         return _violated(proof_id, u"coordinate reference differs", {"expected": expected, "actual": observed})
+    if predicate.get('kind') == 'project':
+        source = _dataset(bindings, 'source')
+        if not source:
+            return _unresolved(proof_id, u'project requires an independently readable source')
+        with arcpy.da.SearchCursor(source, ['SHAPE@']) as rows:
+            original = [row[0] for row in rows]
+        with arcpy.da.SearchCursor(result, ['SHAPE@']) as rows:
+            converted = [row[0] for row in rows]
+        if len(original) != len(converted):
+            return _violated(proof_id, u'project feature count differs')
+        tolerance = max(float(reference.XYTolerance or 0), 1e-9)
+        for before, after in zip(original, converted):
+            if not _projection_geometry_matches(before, after, reference, tolerance):
+                return _violated(proof_id, u'project geometry differs from independent transformation')
     return _proven(proof_id, {"spatial_reference": observed})
+
+
+def _projection_geometry_matches(before, after, reference, tolerance):
+    if before is None or after is None:
+        return False
+    if reference.type == 'Geographic':
+        extent = after.extent
+        if extent.XMin < -180 or extent.XMax > 180 or extent.YMin < -90 or extent.YMax > 90:
+            return False
+    expected = before.projectAs(reference)
+    if expected.type == 'polygon':
+        return _within_linear_tolerance(expected, after, tolerance)
+    if expected.type == 'point':
+        return expected.distanceTo(after) <= tolerance
+    return expected.equals(after)
 
 
 def _field(proof_id, predicate, bindings, document):
@@ -610,11 +658,27 @@ def _overlay(proof_id, predicate, bindings, document):
                               "overlay": method, "result_area": result_area})
 
 
+def _inherited_business_fields(fields, geometry_measure_fields):
+    managed = set(unicode(name).lower() for name in geometry_measure_fields if name)
+    return [name for name in fields if unicode(name).lower() not in managed]
+
+
 def _overlay_attribute_lineage(result, sources, paths, field_mapping, method):
     """Verify result attribute values trace to spatially-related source features."""
     if not field_mapping:
         # No provable per-source mapping was sealed; overlay lineage unverifiable.
         return _unresolved(u"acceptance:overlay", u"overlay has no sealed source field mapping")
+    # Geometry measures registered by the geodatabase are recalculated after
+    # an overlay. Their values are not inherited business attributes. Use
+    # dataset metadata, not reserved-looking names, to identify these fields.
+    from copy import deepcopy
+    field_mapping = deepcopy(field_mapping)
+    for index, path in enumerate(paths):
+        desc = arcpy.Describe(path)
+        managed = [getattr(desc, key, None) for key in ("areaFieldName", "lengthFieldName")]
+        for mapping in field_mapping:
+            if mapping.get("namespace") == u"source_%d" % index:
+                mapping["fields"] = _inherited_business_fields(mapping.get("fields", []), managed)
     # Build per-source identity + attribute fingerprints with shapes.
     source_features = []  # [{namespace, identity, shape, attrs:{name:value}}]
     for index, path in enumerate(paths):
@@ -641,10 +705,15 @@ def _overlay_attribute_lineage(result, sources, paths, field_mapping, method):
     result_fields = set(unicode(item.name).lower() for item in arcpy.ListFields(result))
     namespace_fields = {}
     for mapping in field_mapping:
-        namespace_fields[mapping.get(u"namespace")] = [unicode(f) for f in mapping.get(u"fields", []) if unicode(f).lower() in result_fields]
+        pairs = [(unicode(f), unicode(mapping.get(u"output_fields", {}).get(f, f)))
+                 for f in mapping.get(u"fields", [])]
+        missing = [output for source, output in pairs if output.lower() not in result_fields]
+        if missing:
+            return _violated(u"acceptance:overlay", u"overlay misses inherited attribute fields", {"fields": missing})
+        namespace_fields[mapping.get(u"namespace")] = pairs
     cursor_fields = []
     for names in namespace_fields.values():
-        for name in names:
+        for source_name, name in names:
             if name not in cursor_fields:
                 cursor_fields.append(name)
     cursor_fields.append(u"SHAPE@")
@@ -654,7 +723,7 @@ def _overlay_attribute_lineage(result, sources, paths, field_mapping, method):
                 values = list(row[:-1])
                 shape = row[-1]
                 for namespace, names in namespace_fields.items():
-                    for name in names:
+                    for source_name, name in names:
                         actual = values[cursor_fields.index(name)]
                         if actual is None or actual == u"":
                             # Overlay fills non-overlapping regions with empty
@@ -666,7 +735,7 @@ def _overlay_attribute_lineage(result, sources, paths, field_mapping, method):
                         for sf in source_features:
                             if sf[u"namespace"] != namespace or sf[u"shape"] is None or shape is None:
                                 continue
-                            if sf[u"attrs"].get(name) == actual and not shape.disjoint(sf[u"shape"]):
+                            if sf[u"attrs"].get(source_name) == actual and not shape.disjoint(sf[u"shape"]):
                                 explainable = True
                                 break
                         if not explainable:

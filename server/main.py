@@ -31,6 +31,7 @@ from server.journal import OpJournal  # noqa: E402
 from server.precheck import check as precheck
 from server.precheck import resolve_layer_references  # noqa: E402
 from server.tool_contract import model_schema, lower_arguments
+from server.tool_results import model_result
 from server.session import BridgeUnavailable, BridgeSession  # noqa: E402
 
 mcp = FastMCP("arcmap")
@@ -69,6 +70,21 @@ def _execute_operation_locked(operation_id: str, arguments: Dict[str, Any]) -> d
             context = None
         arguments = resolve_layer_references(schema, arguments, context)
         verdict = precheck(card, arguments, context)
+        if verdict['status'] == 'proven' and card.get('side_effects') in ('writes_data', 'edits_data'):
+            violations = []
+            layers = {layer['layer_ref']: layer for layer in (context or {}).get('layers', [])}
+            for name, spec in schema.get('properties', {}).items():
+                if spec.get('x-geopilot-kind') != 'layer' or name not in arguments:
+                    continue
+                refs = arguments[name] if isinstance(arguments[name], list) else [arguments[name]]
+                for ref in refs:
+                    path = layers.get(ref, {}).get('data_source')
+                    producer = _journal.output_acceptance(path) if path else None
+                    if producer is not None and not producer['accepted']:
+                        violations.append('输入 %s 来自未通过独立验收的操作 %s，不能用于后续处理。请改用已验收成果。'
+                                          % (name, producer['op_id']))
+            if violations:
+                verdict = {'status': 'violated', 'violations': violations}
     op_id = _journal.start_op(tool="operation", operation=operation_id,
                               arguments=arguments, precheck=verdict)
     _journal.event(op_id, "precheck", verdict)
@@ -82,9 +98,16 @@ def _execute_operation_locked(operation_id: str, arguments: Dict[str, Any]) -> d
                           outcome.get("lease_id", ""),
                           int(outcome.get("epoch") or 0),
                           outcome.get("plan_hash", ""))
+        if outcome.get('status') == 'executed' and card['capability_contract']['outputs']['kind'] == 'feature_class':
+            verification = _session.verify(op_id, card, timeout=120)
+            _journal.event(op_id, 'verify', verification)
+            outcome['verification'] = verification
+            if verification.get('passed') is not True:
+                outcome['status'] = 'verification_failed'
+                outcome['message'] = '成果未通过独立验收，不能报告任务成功。请依据验收证据处理。'
         _journal.finish_op(op_id, outcome.get("status", ""), outcome)
         _journal.event(op_id, "execution", outcome)
-        return dict(outcome, op_id=op_id)
+        return model_result(dict(outcome, op_id=op_id, operation_summary=card.get('summary', '')))
     except BridgeUnavailable as exc:
         _journal.finish_op(op_id, "bridge_unavailable", error=str(exc))
         return _unavailable(exc)
@@ -164,7 +187,7 @@ def verify_result(op_id: str) -> dict:
         with _operation_lock:
             document = _session.verify(op_id, card)
         _journal.event(op_id, "verify", document)
-        return {"status": "ok", "op_id": op_id, "probe": document}
+        return model_result({"status": "ok", "op_id": op_id, "probe": document})
     except BridgeUnavailable as exc:
         return _unavailable(exc)
     except Exception as exc:  # noqa: BLE001
@@ -174,12 +197,12 @@ def verify_result(op_id: str) -> dict:
 @mcp.tool
 def get_operation_history(limit: int = 10) -> dict:
     """查询最近的操作历史（op 级事实日志）：每次工具调用的 pre-check、执行与验收记录。"""
-    return {"status": "ok", "ops": _journal.recent(max(1, min(int(limit), 100)))}
+    return model_result({"status": "ok", "ops": _journal.recent(max(1, min(int(limit), 100)))})
 
 
 def main() -> None:
     start_callback_server(_session)
-    mcp.run()
+    mcp.run(show_banner=False)
 
 
 if __name__ == "__main__":

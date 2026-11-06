@@ -68,9 +68,7 @@ Start-Sleep -Milliseconds 800
 
 # -- deploy the self-contained harness tree -----------------------------------
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
-# dsh-profile is staged into Program Files only to reach the temp package; it is
-# deployed to the per-user dsh-home below, never left in the program tree.
-robocopy (Join-Path $Stage 'harness') $HarnessDir /MIR /R:2 /W:1 /NFL /NDL /NJH /NJS /XD __pycache__ dsh-profile | Out-Null
+robocopy (Join-Path $Stage 'harness') $HarnessDir /MIR /R:2 /W:1 /NFL /NDL /NJH /NJS /XD __pycache__ | Out-Null
 if ($LASTEXITCODE -ge 8) { throw "robocopy harness failed: $LASTEXITCODE" }
 Copy-Item (Join-Path $Stage 'harness_identity.json') (Join-Path $InstallDir 'harness_identity.json') -Force
 
@@ -126,8 +124,7 @@ if ($addinTargetDirs.Count -eq 0) {
 }
 Write-Output "addin packages replaced: $placed"
 
-# One profile source for full installs and console-only updates.
-& (Join-Path $PSScriptRoot 'install_profile.ps1') -Stage $Stage -HarnessDir $HarnessDir -CopyDependencies
+& (Join-Path $PSScriptRoot 'install_profile.ps1') -Stage $Stage -HarnessDir $HarnessDir
 $DshHome = Join-Path $env:LOCALAPPDATA 'ArcMapAIAssistant\dsh-home'
 $ProfileDir = Join-Path $DshHome 'profiles\arcmap-harness'
 

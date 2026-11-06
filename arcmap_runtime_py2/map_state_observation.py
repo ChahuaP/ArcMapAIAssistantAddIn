@@ -580,7 +580,9 @@ def _extent(value):
 def _extent_is_fitted(actual, expected):
     if actual is None or expected is None:
         return False
-    tolerance = _extent_tolerance(actual, expected)
+    # Display margins can change span but should preserve the center and
+    # cover the target. Use numeric tolerance for those two checks.
+    tolerance = 1e-7
     actual_center = (
         (actual["XMin"] + actual["XMax"]) / 2.0,
         (actual["YMin"] + actual["YMax"]) / 2.0,
@@ -613,22 +615,10 @@ def _extent_is_fitted(actual, expected):
         if expected_span > tolerance
     ]
     tightly_fitted = not non_degenerate_axes or any(
-        actual_span <= (
-            expected_span * (1.0 + MAX_VIEWPORT_FIT_PADDING_FRACTION)
-            + tolerance
-        )
+        actual_span <= expected_span * (1.0 + MAX_VIEWPORT_FIT_PADDING_FRACTION) + tolerance
         for actual_span, expected_span in non_degenerate_axes
     )
     return centered and covers and tightly_fitted
-
-
-def _extent_tolerance(actual, expected):
-    # Zoom-to-layer/selection fits with a display margin (ArcMap adds ~3-5%);
-    # compare against the extent SPAN, not the coordinate magnitude, or every
-    # fitted view fails on float-exact equality at projected coordinates.
-    span_x = abs(expected["XMax"] - expected["XMin"])
-    span_y = abs(expected["YMax"] - expected["YMin"])
-    return max(span_x, span_y, 1.0) * 0.05
 
 
 def _close(left, right, tolerance):

@@ -87,10 +87,10 @@ def execute(workflow_row, context, confirm_callback=None):
     # directory. Local derivation would permit stale runtimes to escape it.
     run_id = workflow_row.get("run_id") or u""
     staging_root = workflow_row.get("staging_root") or u""
+    context = dict(context)
     if run_id:
         if not staging_root:
             raise WorkflowExecutionError(u"Gateway lease acknowledgement lacks staging_root.")
-        context = dict(context)
         context["staging_root"] = staging_root
         context["run_id"] = run_id
 
@@ -111,7 +111,7 @@ def execute(workflow_row, context, confirm_callback=None):
                     runtime_arguments = _prepare_runtime_arguments(operation, context, arguments, step_outputs)
                     _confirm_edit_if_needed(operation, context, runtime_arguments, step_outputs, confirm_callback)
                     input_snapshot = _input_snapshot(operation, context, runtime_arguments, step_outputs)
-                    result = _call_executor(operation["executor"], context, runtime_arguments, step_outputs)
+                    result = _execute_step(operation, context, runtime_arguments, step_outputs, input_snapshot)
                     _commit_map_state_if_needed(operation)
                     result = _finalize_runtime_result(operation, context, runtime_arguments, result)
                     for output_index, output_path in enumerate(_result_output_paths(operation, result)):
@@ -122,7 +122,11 @@ def execute(workflow_row, context, confirm_callback=None):
                             output_policy_type(operation.get("output_policy") or {}),
                         )
                         if _result_adds_to_map(operation, result):
+                            common = _operations_common()
+                            bindings = common.capture_layer_bindings(context)
                             session.publish_output(registered_step_id)
+                            common.rebase_layer_positions(context, bindings)
+                            del bindings
                     publication_state = _publication_state(operation, result)
                     try:
                         observation = artifact_observation.observe_and_verify(
@@ -148,6 +152,18 @@ def execute(workflow_row, context, confirm_callback=None):
 
     result = {"ok": True, "summary": workflow["summary"], "steps": results}
     return execution_session.ExecutionOutcome(result)
+
+
+def _execute_step(operation, context, arguments, step_outputs, input_snapshot):
+    kind = (input_snapshot.get("map_state_before") or {}).get("kind")
+    if kind not in ("layer_added_from_path", "layer_removed_from_map",
+                    "layer_position_matches_request", "all_layers_removed"):
+        return _call_executor(operation["executor"], context, arguments, step_outputs)
+    common = _operations_common()
+    bindings = {} if kind == "all_layers_removed" else common.capture_layer_bindings(context)
+    result = _call_executor(operation["executor"], context, arguments, step_outputs)
+    common.rebase_layer_positions(context, bindings)
+    return result
 
 
 def _commit_map_state_if_needed(operation):

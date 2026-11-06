@@ -383,18 +383,22 @@ namespace ArcMapHarness.ArcMapBridgeExternal
                     string sourceUnitPath = ExtractString(request.Body, "source_publish_unit_path");
                     string deploymentHash = ExtractString(request.Body, "deployment_hash");
                     bool unitProbe = !string.IsNullOrWhiteSpace(sourceUnitPath);
-                    if (!IsCanonicalGuid(runId) || (!unitProbe && (string.IsNullOrWhiteSpace(outputId) ||
+                    bool mapProbe = ExtractString(request.Body, "probe_type") == "map_state";
+                    if (!IsCanonicalGuid(runId) || (mapProbe && string.IsNullOrWhiteSpace(outputId)) || (!unitProbe && !mapProbe && (string.IsNullOrWhiteSpace(outputId) ||
                         string.IsNullOrWhiteSpace(kind) || string.IsNullOrWhiteSpace(outputFormat) ||
                         string.IsNullOrWhiteSpace(stagedPath))) ||
                         string.IsNullOrWhiteSpace(deploymentHash))
                     {
                         return ErrorJson("run_id, deployment_hash and either source_publish_unit_path or output_id/kind/staged_path are required.");
                     }
-                    string probeJson = unitProbe
-                        ? "{\"source_publish_unit_path\":\"" + JsonEscape(sourceUnitPath) + "\",\"deployment_hash\":\"" + JsonEscape(deploymentHash) + "\"}"
-                        : "{\"output_id\":\"" + JsonEscape(outputId) + "\",\"kind\":\"" + JsonEscape(kind) +
-                          "\",\"output_format\":\"" + JsonEscape(outputFormat) +
-                          "\",\"staged_path\":\"" + JsonEscape(stagedPath) + "\",\"deployment_hash\":\"" + JsonEscape(deploymentHash) + "\"}";
+                    JObject body = JObject.Parse(request.Body);
+                    JObject probe = new JObject();
+                    foreach (string field in new[] { "source_publish_unit_path", "deployment_hash", "probe_type",
+                        "output_id", "kind", "output_format", "staged_path", "postcondition", "arguments", "acceptance_contract" })
+                    {
+                        if (body[field] != null) probe[field] = body[field].DeepClone();
+                    }
+                    string probeJson = probe.ToString(Newtonsoft.Json.Formatting.None);
                     ExecuteArcMapCommand(hwnd, "acceptance_probe", false, leaseId, epoch, planHash, runId, probeJson, null);
                     return "{\"ok\":true,\"run_id\":\"" + JsonEscape(runId) + "\"}";
                 }

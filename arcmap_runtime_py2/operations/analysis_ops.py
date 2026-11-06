@@ -75,7 +75,8 @@ def dissolve(context, arguments, step_outputs):
 def project(context, arguments, step_outputs):
     layer = common.find_layer(context, arguments["input_layer"], step_outputs)
     output = _output(context, arguments)
-    spatial_reference = arcpy.SpatialReference(arguments["spatial_reference"])
+    from arcmap_runtime_py2.spatial_reference import resolve
+    spatial_reference = resolve(arguments["spatial_reference"])
     arcpy.Project_management(common.dataset(layer), output, spatial_reference)
     return {"output": output}
 

@@ -117,6 +117,22 @@ class OpJournal:
         with self._lock:
             self._db.close()
 
+    def output_acceptance(self, path: str) -> Optional[Dict[str, Any]]:
+        """Look up the latest producer of this exact dataset, across restarts."""
+        normalized = str(path).replace('\\', '/').casefold()
+        with self._lock:
+            row = self._db.execute("""
+                SELECT ops.op_id, ops.receipt_status,
+                       json_extract(ops.result, '$.verification.passed')
+                FROM ops, json_each(CASE WHEN json_valid(ops.result)
+                                        THEN ops.result ELSE '{}' END, '$.result.steps') AS step
+                WHERE lower(replace(json_extract(step.value, '$.result.output'), '\\', '/')) = ?
+                ORDER BY ops.started_at DESC LIMIT 1
+            """, (normalized,)).fetchone()
+        if row is None:
+            return None
+        return {'op_id': row[0], 'accepted': row[1] == 'executed' and row[2] == 1}
+
 
 _COLUMNS = ("op_id", "run_id", "tool", "operation", "arguments", "precheck",
             "context_digest", "lease_id", "epoch", "plan_hash", "receipt_status",

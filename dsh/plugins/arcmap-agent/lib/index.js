@@ -2,23 +2,22 @@ import { readFileSync } from 'node:fs';
 import { assertLocalModel, stopReason } from './guard.js';
 
 export const name = 'arcmap-agent';
-export const inject = ['systemPrompt'];
+export const inject = ['systemPrompt', 'tools'];
 
 export function apply(ctx) {
   ctx.systemPrompt.section({
     name: 'arcmap:instructions', order: 0, complete: true,
     text: readFileSync(new URL('./persona.txt', import.meta.url), 'utf8'),
   });
-  ctx.systemPrompt.suppressRuntimeContext();
-  ctx.on('system-prompt/assemble', async (assembly, context, next) => {
-    const result = await next();
-    const unexpected = result.tools.filter(tool =>
+  ctx.on('system-prompt/assemble', (_assembly, { scope, toolSet }, next) => {
+    const tools = ctx.tools.schemas(scope, toolSet);
+    const unexpected = tools.filter(tool =>
       !tool.name.startsWith('mcp__arcmap__') && tool.name !== 'ask_user_question');
     if (unexpected.length) throw new Error(`GIS 工具隔离失败：${unexpected.map(t => t.name).join('、')}`);
-    if (context.agent && !result.tools.some(tool => tool.name === 'mcp__arcmap__get_map_context')) {
+    if (toolSet && !tools.some(tool => tool.name === 'mcp__arcmap__get_map_context')) {
       throw new Error('GIS 工具尚未就绪，请检查边界服务连接后重试。');
     }
-    return result;
+    return next();
   });
   ctx.on('agent/pre-step', async ({ agent, turn }, next) => {
     const reason = stopReason(agent.session.snapshotEvents(), turn);

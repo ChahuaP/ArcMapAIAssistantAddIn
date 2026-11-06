@@ -114,6 +114,11 @@ def _layer_violations(arguments: Dict[str, Any], properties: Dict[str, Any],
     known = {layer.get("layer_ref") for layer in layers}
     known |= {layer.get("name") for layer in layers}
     violations = []
+    if operation_id == 'data.define_projection':
+        ref = arguments.get('layer')
+        matches = [layer for layer in layers if ref in (layer.get('layer_ref'), layer.get('name'))]
+        if len(matches) == 1 and matches[0].get('spatial_reference') not in (None, '', 'Unknown'):
+            violations.append('该图层已有坐标参考，不能用重新定义坐标系代替坐标转换。请使用 analysis.project 生成新数据，保留源数据。')
     for name, property_schema in properties.items():
         if (property_schema or {}).get("x-geopilot-kind") != "layer":
             continue

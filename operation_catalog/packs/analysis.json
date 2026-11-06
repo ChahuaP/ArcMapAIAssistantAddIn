@@ -5,7 +5,7 @@
       "id": "analysis.buffer",
       "version": "1.0",
       "category": "analysis",
-      "summary": "对输入图层做缓冲区分析。",
+      "summary": "生成完整缓冲区。输入为面时，结果包含原面内部及其向外扩展范围；本工具不会扣除原面。若任务要求仅保留外侧邻域、不包含原区域，须继续调用 analysis.erase，以缓冲结果为输入、原面为擦除图层。",
       "keywords": [
         "buffer",
         "缓冲",
@@ -1199,7 +1199,7 @@
       "id": "analysis.erase",
       "version": "1.0",
       "category": "analysis",
-      "summary": "用擦除图层从输入图层中去除重叠部分。",
+      "summary": "计算输入图层减去擦除图层的空间差集。提取面区域的纯外侧邻域时，input_layer 使用完整缓冲结果，erase_layer 使用同一坐标系下的原面，输出不包含原面内部。",
       "keywords": [
         "erase",
         "擦除",

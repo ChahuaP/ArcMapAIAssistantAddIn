@@ -263,6 +263,10 @@ def _check(name, expected, observation, arguments, verifier_proof):
             check["verdict"] = "passed" if target and parameter in target.get("fields", []) and parameter not in observation.get("fields", []) else "failed"
         elif effect in ("inherit_input", "inherit_tabular_fields", "inherit_target_merge_join"):
             inherited = target.get("fields", []) if target else []
+            types = (target or {}).get("field_types") or {}
+            # Object identifiers and geometry storage fields are regenerated
+            # when a dataset moves between Shapefile and FileGDB.
+            inherited = [field for field in inherited if unicode(types.get(field) or "").lower() not in ("oid", "geometry")]
             if effect == "inherit_tabular_fields" and target:
                 types = target.get("field_types") or {}
                 inherited = [field for field in inherited if unicode(types.get(field) or "").lower() not in ("geometry", "raster", "blob")]
@@ -276,6 +280,8 @@ def _check(name, expected, observation, arguments, verifier_proof):
         elif effect == "merge_inputs":
             for source in targets:
                 for field in source.get("fields", []):
+                    if unicode((source.get("field_types") or {}).get(field) or "").lower() in ("oid", "geometry"):
+                        continue
                     if field not in required:
                         required.append(field)
             check["actual"] = {"required": required, "after": observation.get("fields")}
@@ -301,6 +307,19 @@ def _check(name, expected, observation, arguments, verifier_proof):
             selected_count = source.get("selection_count") if source else None
             check["actual"] = {"output": observation.get("feature_count"), "selected_input": selected_count}
             check["verdict"] = "passed" if selected_count is not None and observation.get("feature_count") == selected_count else "failed"
+        elif expected in ("reduced", "one_per_aggregate_group"):
+            source = _input(before, "input_layer")
+            fields = arguments.get("dissolve_fields") or []
+            if source and source.get("path"):
+                if fields:
+                    with arcpy.da.SearchCursor(source['path'], fields) as rows:
+                        expected_count = len(set(tuple(row) for row in rows))
+                else:
+                    expected_count = 1 if source.get('feature_count', 0) else 0
+                check['actual'] = {'expected_groups': expected_count, 'output': observation.get('feature_count')}
+                check['verdict'] = 'passed' if observation.get('feature_count') == expected_count else 'failed'
+            else:
+                check['verdict'] = 'failed'
         elif expected not in ("one", "in_place", "one_snapshot"):
             _symbolic_or_fail(check, verifier_proof, expected)
     elif name == "selection_state" and expected in ("applied", "cleared"):

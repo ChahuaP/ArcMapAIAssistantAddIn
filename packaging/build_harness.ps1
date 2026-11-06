@@ -79,7 +79,7 @@ Remove-Item -Recurse -Force $pycache -ErrorAction SilentlyContinue
 # Deployment identity: version + build time + content digest.
 $version = (Get-Content (Join-Path $repo 'VERSION') -Raw).Trim()
 $files = Get-ChildItem -Recurse -File $stage |
-    Where-Object { $_.FullName -notmatch '\\harness\\(runtime|dsh-profile)\\' } | Sort-Object FullName
+    Where-Object { $_.FullName -notmatch '\\harness\\runtime\\' } | Sort-Object FullName
 $hashes = foreach ($file in $files) {
     (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
 }
