@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import sys
 from threading import Lock
+from typing import Literal
 
 from fastmcp import FastMCP
 
@@ -72,8 +73,10 @@ def main():
         return execute("vector_inventory")
 
     @server.tool
-    def control_check() -> dict:
-        """核查绑定的项目范围和管控范围，统计重叠面积、覆盖比例和空间关系，生成报告。"""
+    def control_check(layers: list[Literal["项目范围", "管控范围"]] | None = None) -> dict:
+        """核查绑定的项目范围与管控范围。layers 可省略，填写时同时选择两个材料角色。"""
+        if layers is not None and (len(layers) != 2 or set(layers) != set(OPERATIONS["control_check"].materials)):
+            return {"status": "invalid_materials", "required": OPERATIONS["control_check"].materials}
         return execute("control_check")
 
     server.run(transport="stdio", show_banner=False)

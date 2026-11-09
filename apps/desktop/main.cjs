@@ -1,0 +1,112 @@
+const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, net, protocol, safeStorage, shell, Tray } = require('electron');
+const fs = require('node:fs');
+const path = require('node:path');
+const { pathToFileURL } = require('node:url');
+const { parseArgs } = require('node:util');
+const { DesktopController } = require('./controller.cjs');
+
+const origin = 'guizhi://app';
+protocol.registerSchemesAsPrivileged([{ scheme: 'guizhi', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
+
+async function startDesktop(options) {
+    const { externalPath } = await import('../../src/guizhi/infrastructure/dsh/sdk.mjs');
+    app.setName('规智');
+    if (options.userData) app.setPath('userData', externalPath(options.userData));
+    if (!app.requestSingleInstanceLock()) {
+        app.quit();
+        return null;
+    }
+    await app.whenReady();
+    const { runtime, dsh, rendererRuntime } = options;
+    for (const item of [runtime, rendererRuntime]) {
+        if (!item || !path.isAbsolute(item)) throw new Error('请选择有效的运行目录');
+    }
+    const vendor = path.join(rendererRuntime, 'node_modules');
+    const localFiles = ['index.html', 'app.js', 'map.js', 'style.css', 'mark.svg'];
+    const files = new Map(localFiles.map(name => ['/' + name, path.join(__dirname, name)]));
+    files.set('/react.js', path.join(vendor, 'react', 'umd', 'react.production.min.js'));
+    files.set('/react-dom.js', path.join(vendor, 'react-dom', 'umd', 'react-dom.production.min.js'));
+    for (const file of files.values()) {
+        if (!fs.existsSync(file)) throw new Error('桌面运行依赖不完整');
+    }
+    protocol.handle('guizhi', request => {
+        const url = new URL(request.url);
+        const file = url.hostname === 'app' && files.get(url.pathname);
+        return file ? net.fetch(pathToFileURL(file).href) : new Response('', { status: 404 });
+    });
+    let window;
+    const controller = new DesktopController({ userData: app.getPath('userData'), runtime, dsh,
+        safeStorage, externalPath, onChange: state => {
+            if (window && !window.isDestroyed()) window.webContents.send('guizhi:state', state);
+        } });
+    window = new BrowserWindow({ width: 1270, height: 820, minWidth: 790, minHeight: 590,
+        show: false, title: '规智', autoHideMenuBar: true, backgroundColor: '#f3f7f7',
+        icon: path.join(__dirname, 'mark.png'),
+        webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true } });
+    const reveal = () => { window.show(); window.focus(); };
+    const tray = new Tray(nativeImage.createFromPath(path.join(__dirname, 'mark.png')).resize({ width: 24, height: 24 }));
+    tray.setToolTip('规智');
+    tray.setContextMenu(Menu.buildFromTemplate([
+        { label: '打开规智', click: reveal },
+        { label: '设置', click: () => { reveal(); window.webContents.send('guizhi:settings'); } },
+        { type: 'separator' }, { label: '退出', click: () => app.quit() },
+    ]));
+    tray.on('double-click', reveal);
+    app.on('second-instance', reveal);
+    let quitting = false;
+    let closing = false;
+    window.on('close', event => {
+        if (!quitting) { event.preventDefault(); window.hide(); }
+    });
+    app.on('before-quit', event => {
+        if (quitting) return;
+        event.preventDefault();
+        if (closing) return;
+        closing = true;
+        void controller.close().finally(() => { quitting = true; tray.destroy(); app.quit(); });
+    });
+    window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    window.webContents.on('will-navigate', (event, url) => {
+        if (url !== origin + '/index.html') event.preventDefault();
+    });
+
+    function bind(method, handler) {
+        ipcMain.handle('guizhi:' + method, (event, ...args) => {
+            if (event.sender !== window.webContents || event.senderFrame?.url !== origin + '/index.html') {
+                throw new Error('请求来源无效');
+            }
+            return handler(...args);
+        });
+    }
+    bind('state', () => controller.state());
+    bind('configure', input => controller.configure(input));
+    bind('workspace', async () => {
+        const pick = await dialog.showOpenDialog(window, { properties: ['openDirectory', 'createDirectory'] });
+        return pick.canceled ? null : pick.filePaths[0];
+    });
+    bind('material', async () => {
+        const pick = await dialog.showOpenDialog(window, { properties: ['openFile'],
+            filters: [{ name: 'GeoPackage', extensions: ['gpkg'] }] });
+        return pick.canceled ? null : controller.describe(pick.filePaths[0]);
+    });
+    bind('submit', task => controller.submit(task));
+    bind('cancel', () => controller.cancel());
+    bind('report', async id => {
+        const error = await shell.openPath(await controller.report(id));
+        if (error) throw new Error('无法打开报告');
+    });
+    await window.loadURL(origin + '/index.html');
+    reveal();
+    return { window, tray, controller };
+}
+
+if (require.main === module) {
+    const { values } = parseArgs({ args: process.argv.slice(2), options: {
+        runtime: { type: 'string' }, dsh: { type: 'string' }, 'renderer-runtime': { type: 'string' },
+        'user-data': { type: 'string' },
+    } });
+    startDesktop({ ...values, rendererRuntime: values['renderer-runtime'], userData: values['user-data'] })
+        .catch(error => { dialog.showErrorBox('规智', error.message); app.exit(1); });
+}
+
+module.exports = { startDesktop };

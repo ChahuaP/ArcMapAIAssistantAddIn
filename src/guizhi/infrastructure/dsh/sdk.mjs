@@ -23,7 +23,7 @@ function within(root, path) {
     return rel === '' || (!isAbsolute(rel) && rel.split(/[\\/]/)[0] !== '..');
 }
 
-function externalPath(path) {
+export function externalPath(path) {
     if (!isAbsolute(path)) throw new Error('Workspace must be an absolute path');
     const full = resolve(path);
     let parent = full;
@@ -120,7 +120,8 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
         const aborted = new Promise(resolveAbort => {
             stopListener = addAbortListener(stop, () => resolveAbort(null));
         });
-        const response = await Promise.race([harness.run(options.prompt, {
+        const materials = `项目范围${options.input && options.layer ? '已绑定' : '未绑定'}，管控范围${options.control && options.controlLayer ? '已绑定' : '未绑定'}。`;
+        const response = await Promise.race([harness.run(materials + '\n用户请求：' + options.prompt, {
             sessionId: id,
             onNotification(note) {
                 if (note.method === 'session.status') {

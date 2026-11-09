@@ -29,8 +29,16 @@ def main() -> int:
     check.add_argument("--object-id")
     for command in ("inspect", "cancel", "_worker"):
         commands.add_parser(command).add_argument("run_id")
+    commands.add_parser("layers").add_argument("file", type=Path)
     args = parser.parse_args()
     try:
+        if args.command == "layers":
+            import pyogrio
+
+            if not args.file.is_file() or args.file.suffix.lower() != ".gpkg":
+                raise ValueError("请选择 GeoPackage 文件")
+            print(json.dumps([name for name, geometry in pyogrio.list_layers(args.file) if geometry]))
+            return 0
         if args.command in {"run", "check"}:
             checking = args.command == "check"
             result = run_vector(args.workspace, args.input, args.layer, args.object_id,
