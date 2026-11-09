@@ -5,7 +5,7 @@ const { randomUUID } = require('node:crypto');
 const onlineHost = 'https://api.minimaxi.com';
 const voiceDefault = 'female-shaonv';
 const defaults = { asr: 'minimax', tts: 'minimax', voice: voiceDefault, autoSpeak: true,
-    microphone: '', speaker: '', dictionary: [] };
+    microphone: '', speaker: '', localRoot: '', dictionary: [], pronunciation: [] };
 const audioLimit = 16_000 * 2 * 30 + 44;
 
 function readPcmWav(data) {
@@ -130,11 +130,17 @@ class MiniMaxSpeech {
 }
 
 class SpeechController {
-    constructor({ userData, storage, backends = {} }) {
+    constructor({ userData, storage, local }) {
         this.storage = storage;
         this.file = path.join(userData, 'speech.json');
+        this.usageFile = path.join(userData, 'speech-usage.json');
         this.settings = { ...defaults, ...(fs.existsSync(this.file) ? JSON.parse(fs.readFileSync(this.file, 'utf8')) : {}) };
-        this.backends = { minimax: () => new MiniMaxSpeech(this.key()), ...backends };
+        this.local = local;
+        this.backends = { minimax: () => new MiniMaxSpeech(this.key()) };
+        if (local) this.backends.local = () => local.provider(this.settings);
+        this.usage = fs.existsSync(this.usageFile) ? JSON.parse(fs.readFileSync(this.usageFile, 'utf8')) : [];
+        this.clips = new Map();
+        this.clipBytes = 0;
         this.active = null;
     }
 
@@ -160,14 +166,19 @@ class SpeechController {
         }
         const voice = input.voice?.trim() || voiceDefault;
         if (voice.length > 100 || /[\r\n]/.test(voice)) throw new Error('音色标识无效');
+        const localRoot = input.localRoot?.trim() || '';
+        for (const kind of ['asr', 'tts']) {
+            if (input[kind] === 'local') this.local.verify(localRoot, kind);
+        }
         const device = id => typeof id === 'string' && id.length <= 200 ? id : '';
         const settings = { asr: input.asr, tts: input.tts, voice, autoSpeak: Boolean(input.autoSpeak),
             microphone: device(input.microphone), speaker: device(input.speaker),
-            dictionary: dictionary(input.dictionary ?? []), encryptedKey };
-        const pending = this.file + '.' + randomUUID();
-        fs.writeFileSync(pending, JSON.stringify(settings), { flag: 'wx' });
-        fs.renameSync(pending, this.file);
+            dictionary: dictionary(input.dictionary ?? []), pronunciation: dictionary(input.pronunciation ?? []),
+            localRoot, encryptedKey };
+        writeRecord(this.file, settings);
         this.cancel();
+        this.clips.clear();
+        this.clipBytes = 0;
         this.settings = settings;
         return this.state();
     }
@@ -177,16 +188,21 @@ class SpeechController {
         this.active = null;
     }
 
-    async perform(kind, execute) {
+    async perform(kind, units, execute) {
         this.cancel();
         const mode = this.settings[kind];
         if (mode === 'off') throw new Error('此语音功能已关闭');
         const provider = this.backends[mode]();
         const controller = new AbortController();
         this.active = controller;
+        const started = performance.now();
         try {
-            const result = await execute(provider, controller.signal);
+            const { result, cached = false } = await execute(provider, controller.signal);
             controller.signal.throwIfAborted();
+            const records = [...this.usage.slice(-199), { kind, provider: mode, units, cached,
+                elapsedMs: Math.round(performance.now() - started), at: new Date().toISOString() }];
+            writeRecord(this.usageFile, records);
+            this.usage = records;
             return result;
         } catch (error) {
             if (controller.signal.aborted) return null;
@@ -199,22 +215,43 @@ class SpeechController {
     recognize(data, onPartial = () => {}) {
         const wav = readPcmWav(data);
         const terms = this.settings.dictionary;
-        return this.perform('asr', async (provider, signal) => {
+        return this.perform('asr', { seconds: (wav.length - 44) / 32000 }, async (provider, signal) => {
             const update = text => { if (!signal.aborted) onPartial(correctTerms(text, terms)); };
             const text = correctTerms(await provider.recognize(wav, signal, update), terms).trim();
             if (!text || text.length > 4000) throw new Error('没有识别到可发送的文字');
-            return text;
+            return { result: text };
         });
     }
 
     synthesize(text) {
         if (typeof text !== 'string' || !text.trim() || text.length > 360) throw new Error('播报片段长度无效');
-        return this.perform('tts', async (provider, signal) => {
-            const bytes = await provider.synthesize(text.trim(), this.settings.voice, signal);
+        const spoken = correctTerms(text.trim(), this.settings.pronunciation);
+        if (spoken.length > 360) throw new Error('应用发音词表后播报片段过长');
+        return this.perform('tts', { characters: [...spoken].length }, async (provider, signal) => {
+            if (this.settings.tts === 'local') this.local.verify(this.settings.localRoot, 'tts');
+            const cached = this.clips.has(spoken);
+            const bytes = this.clips.get(spoken) ?? await provider.synthesize(spoken, this.settings.voice, signal);
             if (bytes.length < 44 || bytes.toString('ascii', 0, 4) !== 'RIFF') throw new Error('合成音频格式无效');
-            return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+            signal.throwIfAborted();
+            if (!cached) {
+                while (this.clips.size >= 64 || this.clipBytes + bytes.length > 16 * 1024 * 1024) {
+                    const oldest = this.clips.keys().next().value;
+                    this.clipBytes -= this.clips.get(oldest).length;
+                    this.clips.delete(oldest);
+                }
+                this.clips.set(spoken, bytes);
+                this.clipBytes += bytes.length;
+            }
+            return { result: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), cached };
         });
     }
+}
+
+function writeRecord(file, value) {
+    const pending = file + '.' + randomUUID();
+    fs.writeFileSync(pending, JSON.stringify(value), { flag: 'wx' });
+    try { fs.renameSync(pending, file); }
+    finally { fs.rmSync(pending, { force: true }); }
 }
 
 module.exports = { MiniMaxSpeech, SpeechController, readPcmWav, correctTerms };

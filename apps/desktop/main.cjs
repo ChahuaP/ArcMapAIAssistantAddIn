@@ -5,6 +5,8 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { DesktopController } = require('./controller.cjs');
 const { SpeechController } = require('./speech.cjs');
+const { LocalSpeechRuntime } = require('./local-speech.cjs');
+const { modelCapabilities } = require('../../src/guizhi/infrastructure/dsh/ollama.cjs');
 
 const origin = 'guizhi://app';
 protocol.registerSchemesAsPrivileged([{ scheme: 'guizhi', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
@@ -63,7 +65,8 @@ async function startDesktop(options) {
     });
     let window;
     let portrait;
-    const speech = new SpeechController({ userData: app.getPath('userData'), storage: safeStorage });
+    const speech = new SpeechController({ userData: app.getPath('userData'), storage: safeStorage,
+        local: new LocalSpeechRuntime(path.join(runtime, 'python', 'python.exe'), externalPath) });
     const withSpeech = state => ({ ...state, speech: speech.state() });
     function broadcast(state) {
         for (const item of [window, portrait]) {
@@ -153,6 +156,18 @@ async function startDesktop(options) {
     }));
     bind('speechSynthesize', text => speech.synthesize(text));
     bind('speechCancel', () => speech.cancel());
+    bind('modelCheck', async (kind, url, model) => {
+        if (!['chat', 'vision'].includes(kind)) throw new Error('模型类型无效');
+        const result = await modelCapabilities(url, model);
+        if (!result.capabilities.includes(kind === 'chat' ? 'tools' : 'vision')) {
+            throw new Error(kind === 'chat' ? '所选模型不支持工具调用' : '所选模型不支持图像');
+        }
+        return result;
+    });
+    bind('speechFolder', async () => {
+        const pick = await dialog.showOpenDialog(window, { properties: ['openDirectory'] });
+        return pick.canceled ? null : externalPath(pick.filePaths[0]);
+    });
     bind('portraitHit', active => portrait.setIgnoreMouseEvents(!active, active ? {} : { forward: true }));
     bind('portraitInput', () => {
         portrait.show();

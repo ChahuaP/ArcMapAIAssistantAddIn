@@ -7,6 +7,7 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { promisify } from 'node:util';
+import ollama from './ollama.cjs';
 
 const source = realpathSync(fileURLToPath(new URL('../../../../', import.meta.url)));
 const readJson = path => JSON.parse(readFileSync(path, 'utf8'));
@@ -52,17 +53,13 @@ export function externalPath(path) {
 
 function runtimeEnv(options, mcpArgs) {
     const env = {};
-    const allowed = /^(path|systemroot|windir|temp|tmp|home|userprofile|appdata|localappdata|comspec|https_proxy|http_proxy|no_proxy)$/i;
+    const allowed = /^(path|systemroot|windir|temp|tmp|home|userprofile|appdata|localappdata|comspec|https_proxy|http_proxy|no_proxy|node_use_env_proxy)$/i;
     for (const [name, value] of Object.entries(process.env)) {
         if (allowed.test(name)) env[name] = value;
     }
     let providers;
     if (options.provider === 'ollama') {
-        const url = new URL(options.modelUrl ?? 'http://127.0.0.1:11434/v1');
-        if (url.protocol !== 'http:' || !['127.0.0.1', '[::1]'].includes(url.hostname)
-                || url.username || url.password || url.pathname !== '/v1' || url.search || url.hash) {
-            throw new Error('Ollama URL must be a loopback HTTP /v1 endpoint');
-        }
+        const url = ollama.ollamaUrl(options.modelUrl);
         env.GUIZHI_LOOPBACK_KEY = 'local';
         providers = { ollama: {
             api: 'openai-completions', baseURL: url.href, apiKeyEnv: 'GUIZHI_LOOPBACK_KEY',

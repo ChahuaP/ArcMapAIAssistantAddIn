@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { promisify } = require('node:util');
 const { action } = require('./task-commands.js');
+const { ollamaUrl } = require('../../src/guizhi/infrastructure/dsh/ollama.cjs');
 
 const exec = promisify(execFile);
 const cli = path.join(__dirname, '../../src/guizhi/__main__.py');
@@ -92,8 +93,11 @@ class DesktopController {
             encryptedKey = this.storage.encryptString(input.key.trim()).toString('base64');
         }
         fs.mkdirSync(workspace, { recursive: true });
-        this.settings = { workspace, provider: input.provider, model: input.model.trim(),
-            modelUrl: input.provider === 'ollama' ? input.modelUrl?.trim() || undefined : undefined, encryptedKey };
+        const visionModel = input.visionModel?.trim() || '';
+        const visionUrl = visionModel ? ollamaUrl(input.visionUrl).href : undefined;
+        const modelUrl = input.provider === 'ollama' ? ollamaUrl(input.modelUrl).href : undefined;
+        this.settings = { workspace, provider: input.provider, model: input.model.trim(), modelUrl,
+            visionModel, visionUrl, encryptedKey };
         save(this.file, this.settings);
         this.tasks = [];
         this.restore();
