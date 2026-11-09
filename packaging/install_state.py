@@ -47,17 +47,21 @@ def contained(root, *parts):
 
 
 def files(root):
-    for base, dirs, names in os.walk(root, followlinks=False):
+    # Dependency files can exceed MAX_PATH even under the default install directory.
+    # Use Windows extended-length paths without relying on a machine-wide policy.
+    path = str(root)
+    native_root = Path("\\\\?\\UNC\\" + path[2:] if root.drive.startswith("\\\\") else "\\\\?\\" + path)
+    for base, dirs, names in os.walk(native_root, followlinks=False):
         here = Path(base)
         for name in dirs + names:
             path = here / name
             if path.lstat().st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT:
-                raise ValueError(f"安装资源包含重定向路径 {path.relative_to(root)}")
+                raise ValueError(f"安装资源包含重定向路径 {path.relative_to(native_root)}")
         for name in names:
             path = here / name
             if not path.is_file():
                 raise ValueError("安装资源包含非普通文件")
-            yield path.relative_to(root).as_posix(), path
+            yield path.relative_to(native_root).as_posix(), path
 
 
 def write_pointer(root, value):
