@@ -86,7 +86,7 @@ class DesktopController {
     }
 
     configure(input) {
-        if (this.active || this.mapBusy || this.skillBusy) throw new Error('请先结束当前任务');
+        if (this.active || this.mapBusy || this.skillBusy || this.hostBusy) throw new Error('请先结束当前任务');
         const workspace = this.externalPath(input.workspace);
         if (!['minimax-cn', 'ollama'].includes(input.provider) || !input.model?.trim()) {
             throw new Error('请选择模型服务和模型');
@@ -102,7 +102,7 @@ class DesktopController {
         const modelUrl = input.provider === 'ollama' ? ollamaUrl(input.modelUrl).href : undefined;
         this.settings = { workspace, provider: input.provider, model: input.model.trim(), modelUrl,
             visionModel, visionUrl, showOperation: input.showOperation !== false,
-            screenHighlight: input.screenHighlight !== false, encryptedKey };
+            screenHighlight: input.screenHighlight !== false, arcmapBridge: this.settings.arcmapBridge, encryptedKey };
         save(this.file, this.settings);
         this.tasks = [];
         this.restore();
@@ -113,7 +113,8 @@ class DesktopController {
         try {
             const result = await exec(this.runtime.python, ['-I', '-B', cli, '--workspace',
                 this.settings.workspace, command, ...args], {
-                windowsHide: true, ...(command !== 'skill-publish' && { timeout: 30000 }), maxBuffer: 8 << 20 });
+                windowsHide: true, ...(command !== 'skill-publish' && { timeout: command === 'arcmap' ? 95000 : 30000 }),
+                maxBuffer: 8 << 20 });
             return JSON.parse(result.stdout);
         } catch (error) {
             let message;
@@ -132,6 +133,30 @@ class DesktopController {
         const layers = await this.python('layers', file);
         if (!layers.length) throw new Error('此文件没有可用的矢量图层');
         return { file, name: path.basename(file), kind, layers, layer: layers.length === 1 ? layers[0] : '' };
+    }
+
+    selectArcmapBridge(file) {
+        if (this.hostBusy || path.basename(file).toLowerCase() !== 'arcmapbridge.exe') throw new Error('请选择 ArcMapBridge.exe');
+        this.settings.arcmapBridge = this.externalPath(file);
+        save(this.file, this.settings);
+        this.onChange(this.state());
+        return this.settings.arcmapBridge;
+    }
+
+    async arcmap(request) {
+        const { workspace, arcmapBridge } = this.settings;
+        if (!workspace || !arcmapBridge) throw new Error('请先选择 ArcMap Bridge');
+        if (this.active || this.hostBusy || this.mapBusy) throw new Error('请先结束当前操作');
+        const file = path.join(workspace, 'arcmap-' + randomUUID() + '.json');
+        this.hostBusy = true;
+        try {
+            save(file, request);
+            const result = await this.python('arcmap', arcmapBridge, file);
+            return request.action === 'import' ? { ...result, material: await this.describe(result.file) } : result;
+        } finally {
+            fs.rmSync(file, { force: true });
+            this.hostBusy = false;
+        }
     }
 
     submit({ prompt, project, control, skill, materials = {}, previousTask }) {

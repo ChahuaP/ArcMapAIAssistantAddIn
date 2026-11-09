@@ -46,9 +46,17 @@ def main() -> int:
     commands.add_parser("skill-preview").add_argument("request", type=Path)
     commands.add_parser("skill-publish").add_argument("request", type=Path)
     commands.add_parser("workflow").add_argument("request", type=Path)
+    host = commands.add_parser("arcmap", help="Exchange a saved MXD with a local ArcMap 10.2 bridge")
+    host.add_argument("bridge", type=Path)
+    host.add_argument("request", type=Path)
     commands.add_parser("_dispatch-replay").add_argument("request", type=Path)
     args = parser.parse_args()
     try:
+        if args.command == "arcmap":
+            from guizhi.infrastructure.arcmap import exchange
+
+            print(json.dumps(exchange(args.workspace, args.bridge, json.loads(args.request.read_text(encoding="utf-8-sig")))))
+            return 0
         if args.command == "_dispatch-replay":
             from guizhi.application.dispatch import replay
 

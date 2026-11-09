@@ -1,37 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ESRI.Configuration xmlns="http://schemas.esri.com/Desktop/AddIns" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-  <Name>ArcMap AI Assistant</Name>
+  <Name>规智 ArcMap 交接</Name>
   <AddInID>{7f42eea1-1f17-4cf4-9d4f-c0c8d28c0a23}</AddInID>
-  <Description>ArcMap AI Assistant toolbar.</Description>
+  <Description>导出保存的 MXD、图层和选择集供规智办理。</Description>
   <Version>__HARNESS_VERSION__</Version>
   <Image />
-  <Author>Codex</Author>
+  <Author>规智</Author>
   <Company />
-  <Date>06/01/2026</Date>
-  <Targets>
-    <Target name="Desktop" version="10.1" />
-  </Targets>
+  <Date>11/09/2026</Date>
+  <Targets><Target name="Desktop" version="10.2" /></Targets>
   <AddIn language="PYTHON" library="ArcMapAIAssistant_addin.py" namespace="ArcMapAIAssistant_addin">
     <ArcMap>
       <Commands>
-        <Button caption="ArcMap Harness"
-                category="ArcMap AI Assistant"
-                class="OpenAssistantButton"
-                id="ArcMapAIAssistant_addin.openAssistantButton"
-                message="Start ArcMap Harness"
-                tip="启动 ArcMap Harness 控制台">
-          <Help heading="ArcMap AI Assistant" />
+        <Button caption="交给规智" category="规智" class="ExportHandoffButton" id="ArcMapAIAssistant_addin.exportHandoff"
+                message="保存规智交接文件" tip="导出当前保存的工程图层与选择集">
+          <Help heading="规智 ArcMap 交接" />
         </Button>
       </Commands>
       <Extensions />
       <Toolbars>
-        <Toolbar caption="ArcMap AI Assistant"
-                 category="ArcMap AI Assistant"
-                 id="ArcMapAIAssistant_addin.toolbar"
-                 showInitially="true">
-          <Items>
-            <Button refID="ArcMapAIAssistant_addin.openAssistantButton" />
-          </Items>
+        <Toolbar caption="规智" category="规智" id="ArcMapAIAssistant_addin.toolbar" showInitially="true">
+          <Items><Button refID="ArcMapAIAssistant_addin.exportHandoff" /></Items>
         </Toolbar>
       </Toolbars>
       <Menus />

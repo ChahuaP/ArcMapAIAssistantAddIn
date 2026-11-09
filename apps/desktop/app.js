@@ -175,6 +175,7 @@
         const [coordinates, setCoordinates] = useState([]);
         const [catalog, setCatalog] = useState([]);
         const [business, showBusiness] = useState('');
+        const [arcmap, showArcmap] = useState(false);
         const [initialMarkdown, setInitialMarkdown] = useState('');
         const { Business, RoleMaterials, reference } = window.GuizhiBusiness;
         const fail = error => setError(String(error.message || error).replace(/^Error invoking remote method '[^']+': Error: /, ''));
@@ -240,6 +241,7 @@
                 h('div', { className: 'brand' }, h('img', { src: '/mark.svg', alt: '', width: 39 }), h('span', null, '规智')),
                 h('button', { className: 'new-task', onClick: startNew }, '＋ 新任务'),
                 h('button', { disabled: !state?.settings.workspace, onClick: () => showBusiness('browse') }, '业务能力'),
+                h('button', { disabled: !state?.settings.workspace || busy, onClick: () => showArcmap(true) }, 'ArcMap 交接'),
                 h('div', { className: 'history-label' }, '办理记录'),
                 h('nav', { 'aria-label': '办理记录' }, ...(state?.tasks || []).map(item =>
                     h('button', { key: item.id, className: item.id === selected ? 'history selected' : 'history',
@@ -292,6 +294,11 @@
                         enabled: Boolean(state?.settings.workspace), onState: setState, fail }))),
             business && h(Business, { catalog, refresh, choose, Material, manage: business === 'manage',
                 initialMarkdown, close: () => { setInitialMarkdown(''); showBusiness(''); } }),
+            arcmap && h(window.GuizhiArcmap, { configured: state.settings.arcmapBridge, task,
+                close: () => showArcmap(false), attach: project => {
+                    setDraft({ ...emptyDraft(), project });
+                    select(null);
+                } }),
             state && (settings || !state.settings.workspace) && h(Settings, { current: state.settings,
                 speech: state.speech,
                 entries: coordinates, setEntries: setCoordinates,

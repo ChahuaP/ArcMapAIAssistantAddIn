@@ -27,7 +27,7 @@ async function startDesktop(options) {
     const vendor = path.join(rendererRuntime, 'node_modules');
     const localFiles = ['index.html', 'app.js', 'map.js', 'coordinates.js', 'skills.js', 'style.css', 'mark.svg',
         'portrait.html', 'portrait.css', 'portrait.js', 'task-commands.js', 'speech-settings.js',
-        'speech-audio.js', 'voice-input.js', 'visual.html', 'visual.css', 'visual.js'];
+        'speech-audio.js', 'voice-input.js', 'visual.html', 'visual.css', 'visual.js', 'arcmap.js'];
     const files = new Map(localFiles.map(name => ['/' + name, path.join(__dirname, name)]));
     files.set('/react.js', path.join(vendor, 'react', 'umd', 'react.production.min.js'));
     files.set('/react-dom.js', path.join(vendor, 'react-dom', 'umd', 'react-dom.production.min.js'));
@@ -163,6 +163,27 @@ async function startDesktop(options) {
     bind('workspace', async () => {
         const pick = await dialog.showOpenDialog(window, { properties: ['openDirectory', 'createDirectory'] });
         return pick.canceled ? null : pick.filePaths[0];
+    });
+    bind('arcmapBridge', async () => {
+        const pick = await dialog.showOpenDialog(window, { properties: ['openFile'],
+            filters: [{ name: 'ArcMap Bridge', extensions: ['exe'] }] });
+        return pick.canceled ? null : controller.selectArcmapBridge(pick.filePaths[0]);
+    });
+    bind('arcmapFile', async () => {
+        const pick = await dialog.showOpenDialog(window, { properties: ['openFile'],
+            filters: [{ name: 'ArcMap 工程或交接文件', extensions: ['mxd', 'json'] }] });
+        if (pick.canceled) return null;
+        const file = pick.filePaths[0];
+        if (path.extname(file).toLowerCase() === '.mxd') return { action: 'describe', map: file };
+        if (fs.statSync(file).size > 2 << 20) throw new Error('ArcMap 交接文件过大');
+        const payload = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
+        if (payload.action !== 'import' || !payload.map_revision) throw new Error('ArcMap 交接文件无效');
+        return payload;
+    });
+    bind('arcmapExchange', async request => {
+        const result = await controller.arcmap(request);
+        if (request.action === 'publish') shell.showItemInFolder(result.output);
+        return result;
     });
     bind('material', async (kind = 'vector') => {
         const formats = { vector: { name: 'GeoPackage', extensions: ['gpkg'] },
