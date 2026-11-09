@@ -8,7 +8,7 @@ import sys
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from guizhi.application.tasks import inspect, product_version, run_vector, worker
+from guizhi.application.tasks import inspect, product_version, run_operation, run_vector, worker
 from guizhi.infrastructure.workspace import Workspace
 
 
@@ -38,8 +38,20 @@ def main() -> int:
         "file", type=Path, help=".shp with its matching .prj in the same folder",
     )
     commands.add_parser("crs-show").add_argument("reference")
+    commands.add_parser("execute", help="Run a registered operation from a JSON request").add_argument("request", type=Path)
+    commands.add_parser("capabilities", help="List registered independent operations")
     args = parser.parse_args()
     try:
+        if args.command == "capabilities":
+            from dataclasses import asdict
+            from guizhi.domain.capabilities import CAPABILITIES
+
+            print(json.dumps({name: asdict(spec) for name, spec in CAPABILITIES.items()}))
+            return 0
+        if args.command == "execute":
+            result = run_operation(args.workspace, json.loads(args.request.read_text(encoding="utf-8-sig")))
+            print(json.dumps(result))
+            return {"succeeded": 0, "cancelled": 130}.get(result["status"], 1)
         if args.command == "layers":
             import pyogrio
 

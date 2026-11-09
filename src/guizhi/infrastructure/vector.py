@@ -15,7 +15,7 @@ import shapely
 from guizhi.domain.contracts import ClaimRevision, DatasetRevision, EvidenceRef, ObjectRevision
 
 
-def snapshot_gpkg(source: Path, target: Path, layer: str, ensure_supervised):
+def snapshot_gpkg(source: Path, target: Path, layer: str, ensure_supervised, *, allow_undefined=False):
     # SQLite backup captures a coherent database, including committed WAL data.
     incoming = sqlite3.connect(f"{source.as_uri()}?mode=ro", uri=True, timeout=0.25)
     try:
@@ -30,14 +30,20 @@ def snapshot_gpkg(source: Path, target: Path, layer: str, ensure_supervised):
         if db.execute("PRAGMA application_id").fetchone()[0] != 0x47504B47:
             raise ValueError("Input is not a GeoPackage")
         row = db.execute(
-            "SELECT srs_id, m FROM gpkg_geometry_columns WHERE table_name = ?", (layer,),
+            """SELECT g.srs_id, g.m, s.organization, s.definition
+               FROM gpkg_geometry_columns g JOIN gpkg_spatial_ref_sys s ON s.srs_id = g.srs_id
+               WHERE g.table_name = ?""", (layer,),
         ).fetchone()
         if row is None:
             raise ValueError(f"Vector layer not found: {layer}")
-        if row[0] in {-1, 0}:
+        undefined = row[0] in {-1, 0} or (
+            row[2] == "GDAL" and row[3].startswith('LOCAL_CS["Undefined SRS",')
+        )
+        if undefined and not allow_undefined:
             raise ValueError(f"Layer has no defined CRS: {layer}")
         if row[1]:
             raise ValueError("Measured geometries (M) are outside this export contract")
+        return not undefined
 
 
 def digest(path: Path) -> str:
@@ -45,21 +51,24 @@ def digest(path: Path) -> str:
         return file_digest(stream, "sha256").hexdigest()
 
 
-def import_layer(source_path, layer, directory, filename, job_id, ensure_supervised):
+def import_layer(source_path, layer, directory, filename, job_id, ensure_supervised, *, allow_undefined=False):
     source = Path(source_path)
     snapshot = directory / "artifacts" / filename
-    snapshot_gpkg(source, snapshot, layer, ensure_supervised)
+    defined = snapshot_gpkg(source, snapshot, layer, ensure_supervised, allow_undefined=allow_undefined)
     info = pyogrio.read_info(snapshot, layer=layer)
     with warnings.catch_warnings():
         warnings.simplefilter("error", RuntimeWarning)
         frame = pyogrio.read_dataframe(snapshot, layer=layer, fid_as_index=True)
-    if not isinstance(frame, geopandas.GeoDataFrame) or frame.crs is None:
+    if not isinstance(frame, geopandas.GeoDataFrame) or (defined and frame.crs is None):
         raise ValueError(f"Layer must contain spatial features with a defined CRS: {layer}")
+    if not defined and frame.crs is not None:
+        frame = frame.set_crs(None, allow_override=True)
 
     revision_id = uuid4().hex
     input_ref = EvidenceRef(uuid4().hex, revision_id, job_id, "import",
                             snapshot.relative_to(directory).as_posix(), digest(snapshot))
-    dataset = DatasetRevision(revision_id, str(source), layer, input_ref.id, frame.crs.to_wkt())
+    dataset = DatasetRevision(revision_id, str(source), layer, input_ref.id,
+                              frame.crs.to_wkt() if frame.crs else None)
     return frame, info, dataset, input_ref
 
 

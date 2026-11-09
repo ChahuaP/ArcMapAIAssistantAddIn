@@ -6,8 +6,8 @@ from dataclasses import dataclass
 class TaskSpec:
     id: str
     revision: int
-    source: str
-    layer: str
+    source: str | None
+    layer: str | None
     object_id: str
     operation: str = "vector_inventory"
     operation_version: str = "1.0.0"
@@ -16,6 +16,7 @@ class TaskSpec:
     control_layer: str | None = None
     project_plan: dict | None = None
     control_plan: dict | None = None
+    request: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -39,7 +40,7 @@ class DatasetRevision:
     source: str
     layer: str
     snapshot_evidence_id: str
-    crs_wkt: str
+    crs_wkt: str | None
 
 
 @dataclass(frozen=True)
@@ -52,7 +53,7 @@ class ObjectRevision:
 @dataclass(frozen=True)
 class EvidenceRef:
     id: str
-    dataset_revision_id: str
+    dataset_revision_id: str | None
     job_id: str
     step: str
     path: str

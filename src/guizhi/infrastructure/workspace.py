@@ -77,6 +77,10 @@ class Workspace:
                         kind TEXT NOT NULL, id TEXT NOT NULL, revision INTEGER NOT NULL,
                         body TEXT NOT NULL, PRIMARY KEY (kind, id, revision)
                     );
+                    CREATE TABLE IF NOT EXISTS operation_requests (
+                        key TEXT PRIMARY KEY, fingerprint TEXT NOT NULL,
+                        run_id TEXT NOT NULL REFERENCES runs(id)
+                    );
                 """)
 
     @contextmanager
@@ -99,14 +103,26 @@ class Workspace:
             raise ValueError("Run directory must not redirect")
         return path
 
-    def start(self, task: TaskSpec, run: Run, job: Job):
+    def start(self, task: TaskSpec, run: Run, job: Job, *, key=None, fingerprint=None):
         records = [json.dumps(asdict(record)) for record in (task, run, job)]
         stamp = now()
         with self.connect() as db:
+            if key is not None:
+                db.execute("BEGIN IMMEDIATE")
+                previous = db.execute(
+                    "SELECT fingerprint, run_id FROM operation_requests WHERE key = ?", (key,),
+                ).fetchone()
+                if previous:
+                    if previous["fingerprint"] != fingerprint:
+                        raise ValueError("Idempotency key is already bound to different parameters")
+                    return previous["run_id"]
             db.execute(
                 "INSERT INTO runs VALUES (?, ?, ?, ?, 'running', ?, ?, NULL, NULL)",
                 (run.id, *records, stamp, stamp),
             )
+            if key is not None:
+                db.execute("INSERT INTO operation_requests VALUES (?, ?, ?)", (key, fingerprint, run.id))
+        return run.id
 
     def read(self, run_id: str) -> dict:
         directory = self.directory(run_id)

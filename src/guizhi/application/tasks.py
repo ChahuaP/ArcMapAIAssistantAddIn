@@ -1,5 +1,6 @@
 """Submit, supervise and inspect vector tasks without a GIS host."""
 from collections.abc import Callable
+from hashlib import sha256
 import json
 import os
 from pathlib import Path
@@ -42,6 +43,11 @@ def worker(workspace: Workspace, run_id: str) -> dict:
 
     progress("worker_started", pid=os.getpid())
     arguments = (record["task"], record["job"], directory, progress, ensure_supervised)
+    if record["task"].get("request") is not None:
+        from guizhi.infrastructure.operations.runner import execute
+
+        return execute(record["task"]["request"], record["job"], directory, workspace,
+                       progress, ensure_supervised)
     if record["task"]["operation"] == "control_check":
         return check_control(*arguments, workspace.root)
     return inventory(*arguments)
@@ -113,24 +119,59 @@ def run_vector(root: Path, source: Path, layer: str, object_id: str | None,
     task = TaskSpec(uuid4().hex, 1, str(source), layer, object_id or uuid4().hex,
                     operation, definition.version, definition.rule, control_source, control_layer,
                     project_plan, control_plan)
+    return submit(workspace, task, cancel_requested)
+
+
+def run_operation(root, payload, cancel_requested=None):
+    from guizhi.domain.capabilities import CAPABILITIES, OperationRequest
+
+    request = OperationRequest.model_validate(payload)
+    spec = CAPABILITIES.get(request.operation)
+    if spec is None:
+        raise ValueError(f"Unknown operation: {request.operation}")
+    if not spec.minimum <= len(request.inputs) <= spec.maximum:
+        raise ValueError(f"{request.operation} requires {spec.minimum}–{spec.maximum} inputs")
+    if spec.edit and (not request.idempotency_key or (request.inputs and request.inputs[0].revision is None)):
+        raise ValueError("An edit requires an idempotency key and the target snapshot revision")
+    for item in request.inputs:
+        path = Path(item.file).resolve(strict=True)
+        if not path.is_file() or path.suffix.lower() != ".gpkg":
+            raise ValueError("Material must be a GeoPackage file")
+        item.file = str(path)
+    payload = request.model_dump(mode="json")
+    fingerprint = sha256(json.dumps(payload, sort_keys=True, allow_nan=False).encode()).hexdigest()
+    task = TaskSpec(uuid4().hex, 1, None, None, uuid4().hex, request.operation, spec.version,
+                    request=payload)
+    return submit(Workspace(root, create=True), task, cancel_requested,
+                  key=request.idempotency_key, fingerprint=fingerprint)
+
+
+def submit(workspace, task, cancel_requested, *, key=None, fingerprint=None):
     run = Run(uuid4().hex, task.id, task.revision, product_version())
     job = Job(uuid4().hex, run.id, task.operation)
     directory = workspace.directory(run.id)
     directory.mkdir()
     lock = directory / "supervisor.lock"
     lock.write_bytes(b"\0")
-    with supervisor_lock(lock) as acquired:
-        if not acquired:
-            raise RuntimeError("Unable to acquire new run lock")
-        workspace.start(task, run, job)
-        try:
-            supervise(workspace, run.id, cancel_requested)
-        except KeyboardInterrupt:
-            workspace.request_cancel(run.id)
-            workspace.finish(run.id, "cancelled")
-        except Exception as exc:
-            workspace.finish(run.id, "failed", error=f"{type(exc).__name__}: {exc}")
-    return workspace.read(run.id)
+    published = None
+    try:
+        with supervisor_lock(lock) as acquired:
+            if not acquired:
+                raise RuntimeError("Unable to acquire new run lock")
+            published = workspace.start(task, run, job, key=key, fingerprint=fingerprint)
+            if published == run.id:
+                try:
+                    supervise(workspace, run.id, cancel_requested)
+                except KeyboardInterrupt:
+                    workspace.request_cancel(run.id)
+                    workspace.finish(run.id, "cancelled")
+                except Exception as exc:
+                    workspace.finish(run.id, "failed", error=f"{type(exc).__name__}: {exc}")
+    finally:
+        if published != run.id:
+            lock.unlink()
+            directory.rmdir()
+    return inspect(workspace, published)
 
 
 def inspect(workspace: Workspace, run_id: str, *, cancel: bool = False) -> dict:
