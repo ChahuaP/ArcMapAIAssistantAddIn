@@ -88,6 +88,10 @@ async function startDesktop(options) {
             filters: [{ name: 'GeoPackage', extensions: ['gpkg'] }] });
         return pick.canceled ? null : controller.describe(pick.filePaths[0]);
     });
+    bind('mapAction', (...args) => controller.mapAction(...args));
+    bind('layoutReport', async () => {
+        if (await shell.openPath(await controller.layoutReport())) throw new Error('无法打开版面');
+    });
     bind('submit', task => controller.submit(task));
     bind('cancel', () => controller.cancel());
     bind('coordinates', () => controller.coordinateCatalog());

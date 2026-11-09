@@ -179,7 +179,8 @@
                                     } }),
                                 busy ? h('button', { type: 'button', onClick: () => api.cancel().then(setState).catch(fail) }, '停止')
                                     : h('button', { type: 'submit', className: 'primary', disabled: !draft.prompt.trim() }, '发送 ↑')))),
-                    h(window.GuizhiMap, { key: task?.id || 'empty', map: task?.map }))),
+                    h(window.GuizhiMap, { key: task?.id || 'empty', map: task?.map, view: state?.mapView,
+                        enabled: Boolean(state?.settings.workspace), onState: setState, fail }))),
             state && (settings || !state.settings.workspace) && h(Settings, { current: state.settings,
                 entries: coordinates, setEntries: setCoordinates,
                 close: () => showSettings(false), save: async value => {

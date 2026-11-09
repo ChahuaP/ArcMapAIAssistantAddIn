@@ -42,6 +42,8 @@ class DesktopController {
         this.onChange = onChange;
         this.tasks = [];
         this.active = null;
+        this.mapView = null;
+        this.mapBusy = false;
         this.restore();
     }
 
@@ -53,6 +55,7 @@ class DesktopController {
         if (!this.settings.workspace) return;
         this.settings.workspace = this.externalPath(this.settings.workspace);
         this.tasks = load(this.historyPath(), []);
+        this.mapView = load(path.join(this.settings.workspace, 'desktop-view.json'), null);
         let changed = false;
         for (const task of this.tasks) {
             if (['running', 'cancelling'].includes(task.status)) {
@@ -70,11 +73,11 @@ class DesktopController {
     state() {
         const { encryptedKey, ...settings } = this.settings;
         return { settings: { ...settings, keyConfigured: Boolean(encryptedKey || process.env.MINIMAX_API_KEY) },
-            tasks: this.tasks };
+            tasks: this.tasks, mapView: this.mapView };
     }
 
     configure(input) {
-        if (this.active) throw new Error('请先结束当前任务');
+        if (this.active || this.mapBusy) throw new Error('请先结束当前任务');
         const workspace = this.externalPath(input.workspace);
         if (!['minimax-cn', 'ollama'].includes(input.provider) || !input.model?.trim()) {
             throw new Error('请选择模型服务和模型');
@@ -157,6 +160,34 @@ class DesktopController {
 
     async coordinateCatalog() {
         return this.settings.workspace ? this.python('crs-list') : [];
+    }
+
+    async mapAction(action, parameters = {}, material = null) {
+        const actions = ['add_layer', 'set_visibility', 'remove_layer', 'clear_layers', 'reorder_layers',
+            'zoom_to_dataset', 'zoom_to_selection', 'set_layout_text', 'set_view_mode'];
+        if (!actions.includes(action) || !this.settings.workspace) throw new Error('无法执行地图操作');
+        if (this.mapBusy) throw new Error('地图正在更新');
+        const request = path.join(this.settings.workspace, 'map-' + randomUUID() + '.json');
+        this.mapBusy = true;
+        try {
+            save(request, { operation: 'presentation.' + action,
+                inputs: material ? [{ file: material.file, layer: material.layer }] : [],
+                parameters: { ...parameters, ...(this.mapView ? { view_run: this.mapView.id } : {}) } });
+            const run = await this.python('execute', request);
+            const artifact = checkedArtifact(run, 'map');
+            this.mapView = { id: run.id, data: artifact ? JSON.parse(artifact.bytes) : null,
+                ...run.result.presentation };
+            save(path.join(this.settings.workspace, 'desktop-view.json'), this.mapView);
+            return this.state();
+        } finally {
+            fs.rmSync(request, { force: true });
+            this.mapBusy = false;
+        }
+    }
+
+    async layoutReport() {
+        if (this.mapView?.mode !== 'layout') throw new Error('请先切换至版面');
+        return checkedArtifact(await this.python('inspect', this.mapView.id), 'report').file;
     }
 
     async importCoordinate(kind, file) {
