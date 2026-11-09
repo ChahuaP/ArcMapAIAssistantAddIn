@@ -34,7 +34,9 @@ def main() -> int:
     commands.add_parser("layers").add_argument("file", type=Path)
     commands.add_parser("crs-list")
     commands.add_parser("crs-import").add_argument("file", type=Path)
-    commands.add_parser("crs-define").add_argument("file", type=Path)
+    commands.add_parser("crs-define", help="Import the coordinate definition of a Shapefile").add_argument(
+        "file", type=Path, help=".shp with its matching .prj in the same folder",
+    )
     commands.add_parser("crs-show").add_argument("reference")
     args = parser.parse_args()
     try:

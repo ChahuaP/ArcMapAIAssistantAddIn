@@ -14,7 +14,7 @@
         return h('details', { className: 'coordinate-list', open: entries.length > 0 },
             h('summary', null, '坐标系与转换'),
             h('div', { className: 'coordinate-actions' },
-                h('button', { type: 'button', disabled: busy, onClick: () => read('definition') }, '导入坐标系'),
+                h('button', { type: 'button', disabled: busy, onClick: () => read('definition') }, '从 SHP 导入坐标系'),
                 h('button', { type: 'button', disabled: busy, onClick: () => read('plan') }, '导入转换方案')),
             error && h('p', { role: 'alert', className: 'error' }, error),
             ...entries.map(entry => {

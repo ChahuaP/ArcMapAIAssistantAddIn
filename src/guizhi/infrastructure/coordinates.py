@@ -7,6 +7,7 @@ from uuid import uuid4
 import numpy as np
 from pyproj import CRS, Transformer, network
 from pyproj.enums import TransformDirection
+from pyproj.exceptions import CRSError
 import shapely
 
 from guizhi.domain.crs import TransformPlan
@@ -117,10 +118,36 @@ def import_grids(plan, root, folder):
 
 
 def import_definition(workspace, path):
-    raw = path.read_bytes().decode("utf-8-sig")
-    definition = describe_definition(raw)
-    identifier = sha256(path.stem.casefold().encode()).hexdigest()[:20]
-    return store(workspace, "definition", identifier, definition["name"], {"definition": definition})
+    if path.suffix.lower() != ".shp" or not path.is_file():
+        raise ValueError("请选择有效的 .shp 文件")
+    projection_name = path.with_suffix(".prj").name
+    projections = [file for file in path.parent.iterdir()
+                   if file.name.casefold() == projection_name.casefold() and file.is_file()]
+    if not projections:
+        raise ValueError(f"未找到同名坐标文件 {projection_name}，请将它与 .shp 放在同一文件夹")
+    if len(projections) != 1:
+        raise ValueError(f"找到多个同名坐标文件 {projection_name}，请保留正确的一个")
+    projection = projections[0]
+    data = projection.read_bytes()
+    try:
+        raw = data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        try:
+            raw = data.decode("gb18030")
+        except UnicodeDecodeError as exc:
+            raise ValueError(f"{projection.name} 的文本编码无法识别") from exc
+    try:
+        definition = describe_definition(raw)
+    except CRSError as exc:
+        raise ValueError(f"{projection.name} 缺少有效的坐标系定义") from exc
+    source = path.resolve()
+    identifier = sha256(str(source).casefold().encode()).hexdigest()[:20]
+    return store(workspace, "definition", identifier, definition["name"], {
+        "definition": definition,
+        "source_file": str(source),
+        "projection_file": str(projection.resolve()),
+        "projection_sha256": sha256(data).hexdigest(),
+    })
 
 
 def import_plan(workspace, path):

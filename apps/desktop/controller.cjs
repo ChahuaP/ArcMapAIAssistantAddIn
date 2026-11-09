@@ -101,7 +101,7 @@ class DesktopController {
         } catch (error) {
             let message;
             try { message = JSON.parse(error.stderr).error; } catch { /* Process failed before producing a record. */ }
-            throw new Error(message?.split('\n')[0] || '无法读取材料或成果');
+            throw new Error(message?.split('\n')[0].replace(/^ValueError: /, '') || '无法读取材料或成果');
         }
     }
 

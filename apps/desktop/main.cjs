@@ -95,7 +95,7 @@ async function startDesktop(options) {
         if (!['plan', 'definition'].includes(kind)) throw new Error('请选择坐标资料类型');
         const pick = await dialog.showOpenDialog(window, { properties: ['openFile'], filters: [
             kind === 'plan' ? { name: '坐标转换方案', extensions: ['json'] }
-                : { name: '坐标系定义', extensions: ['prj', 'wkt'] },
+                : { name: 'Shapefile', extensions: ['shp'] },
         ] });
         if (!pick.canceled) await controller.importCoordinate(kind, pick.filePaths[0]);
         return controller.coordinateCatalog();
