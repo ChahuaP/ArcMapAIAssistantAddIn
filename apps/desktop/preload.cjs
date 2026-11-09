@@ -3,7 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 const api = {};
 for (const name of ['state', 'configure', 'workspace', 'material', 'submit', 'cancel', 'report',
     'skills', 'capabilities', 'capability', 'skillShow', 'skillPreview', 'skillPublish', 'skillOpen', 'skillTemplate', 'delivery',
-    'coordinates', 'importCoordinate', 'mapAction', 'layoutReport']) {
+    'coordinates', 'importCoordinate', 'mapAction', 'layoutReport', 'approvalSource']) {
     api[name] = (...args) => ipcRenderer.invoke('guizhi:' + name, ...args);
 }
 for (const name of ['state', 'settings']) {

@@ -11,9 +11,12 @@ from fastmcp import FastMCP
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from guizhi.application import skills
+from guizhi.application.tasks import run_operation
+from guizhi.domain.semantics import Fact
 from guizhi.domain.skills import Step
 # Load the native GIS dependencies before the stdio server starts its tool threads.
 from guizhi.infrastructure.operations.runner import capability
+from guizhi.infrastructure.operations.semantics import artifact_json, find_fragments, validate_material_facts
 from guizhi.infrastructure.workspace import Workspace
 
 
@@ -99,6 +102,36 @@ def main():
         return skills.summaries(workspace)
 
     @server.tool
+    def read_approval_materials(terms: list[str] | None = None) -> dict:
+        """读取绑定的审批文档，返回可引用的 document_run 和原文片段 ID。terms 用于查找文号、条款和原文关键词。"""
+        documents = [item for group in materials.values() for item in group if not item.get("layer")]
+        if not documents:
+            return {"status": "missing_materials", "message": "请添加审批材料"}
+        record = run_operation(workspace.root, {"operation": "semantics.read_documents", "inputs": documents,
+                               "idempotency_key": dispatch.name + ".documents"}, cancelled.exists)
+        if record["status"] != "succeeded":
+            return {"status": record["status"], "message": "无法读取绑定的审批材料"}
+        (dispatch / "discovery").touch()
+        index = artifact_json(workspace, record["id"], "document_index")
+        return {"status": "indexed", "document_run": record["id"],
+                "fragments": find_fragments(index, (terms or [])[:12])}
+
+    @server.tool
+    def describe_bound_layers() -> dict:
+        """查看绑定图层的字段、几何类型和坐标系。"""
+        import pyogrio
+
+        result = {}
+        for role, group in materials.items():
+            for item in group:
+                if item.get("layer"):
+                    info = pyogrio.read_info(item["file"], layer=item["layer"])
+                    result.setdefault(role, []).append({"fields": info["fields"].tolist(),
+                        "geometry": info["geometry_type"], "crs": info["crs"]})
+        (dispatch / "discovery").touch()
+        return result
+
+    @server.tool
     def propose_skill(title: str) -> dict:
         """用户要求以后都这样办理时，从当前已完成任务生成可编辑的技能候选。"""
         (dispatch / "discovery").touch()
@@ -125,16 +158,7 @@ def main():
         return {name: [spec.title, spec.minimum, spec.maximum] for name, spec in skills.OPERATIONS.items()
                 if not domain or name.startswith(domain + ".")}
 
-    @server.tool
-    def execute_workflow(mode: Literal["fixed", "free", "combined"], skill: str | None = None,
-                         steps: list[Step] | None = None) -> dict:
-        """整项任务一次提交。fixed=已发布技能；free=步骤；combined=已发布技能和附加步骤。
-        步骤 inputs 必须是字符串数组，如 ["material.project"]、["step.check"]，parameters 为对象。
-        """
-        if args.skill and skill and skill not in {args.skill, args.skill.partition("@")[0]}:
-            return input_issue("invalid_materials", "请使用已选技能 " + args.skill)
-        selected = args.skill or skill
-        extra = [step.model_dump(mode="json") for step in steps or []]
+    def run_plan(mode, selected, extra):
         try:
             plan = skills.specification(workspace, materials, skill=selected, steps=extra, coordinate_plans=plans)
             if mode != plan["mode"]:
@@ -145,6 +169,38 @@ def main():
             return input_issue(status, message)
         return execute("workflow.execute", {"skill": selected, "steps": extra}, lambda: skills.submit(
             workspace, plan, cancel_requested=cancelled.exists, key=dispatch.name))
+
+    @server.tool
+    def review_approval(document_run: str, project_code: str, region: str, parcel_field: str,
+                        project_field: str, facts: list[Fact]) -> dict:
+        """审批材料核查。先读取审批原文和图层字段，再提交原样引文及片段编号。自动计算管控叠加并关联地块结论。"""
+        if args.skill:
+            return input_issue("invalid_materials", "请使用已选技能 " + args.skill)
+        if any(len(materials.get(role, [])) != 1 for role in ("project", "control")):
+            return input_issue("missing_materials", "请选择项目范围和管控范围")
+        try:
+            index = artifact_json(workspace, document_run, "document_index")
+            validate_material_facts(index, project_code, facts)
+        except (ValueError, OSError, KeyError) as exc:
+            return input_issue("invalid_materials", f"{exc}。qualifier 应逐字摘自 quote。")
+        parameters = {"document_run": document_run, "project_code": project_code, "region": region,
+                      "parcel_field": parcel_field, "project_field": project_field,
+                      "facts": [item.model_dump(mode="json") for item in facts], "spatial_run": "$run.check"}
+        return run_plan("free", None, [
+            {"id": "check", "operation": "control_check", "inputs": ["material.project", "material.control"]},
+            {"id": "approval", "operation": "semantics.approval_case", "inputs": ["material.project"],
+             "parameters": parameters},
+        ])
+
+    @server.tool
+    def execute_workflow(mode: Literal["fixed", "free", "combined"], skill: str | None = None,
+                         steps: list[Step] | None = None) -> dict:
+        """整项任务一次提交。fixed=已发布技能；free=步骤；combined=已发布技能和附加步骤。
+        步骤 inputs 必须是字符串数组，如 ["material.project"]、["step.check"]，parameters 为对象。
+        """
+        if args.skill and skill and skill not in {args.skill, args.skill.partition("@")[0]}:
+            return input_issue("invalid_materials", "请使用已选技能 " + args.skill)
+        return run_plan(mode, args.skill or skill, [step.model_dump(mode="json") for step in steps or []])
 
     server.run(transport="stdio", show_banner=False)
 

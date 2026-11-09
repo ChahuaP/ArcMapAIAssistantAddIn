@@ -62,10 +62,20 @@ def execute(ctx, specification: dict):
         return False
 
     roles = {role["id"]: role for role in skill["materials"]} if skill else {}
+    document_number = 0
     for role, group in groups.items():
         sealed[role], seals[role] = [], []
         for item in group:
             ctx.check()
+            requirement = roles.get(role)
+            if requirement and (requirement["kind"] == "document") != (item["layer"] is None):
+                raise ValueError(f"Material {role} has the wrong format")
+            if item["layer"] is None:
+                document_number += 1
+                file, ref = ctx.seal_document(item["file"], item["revision"], document_number)
+                sealed[role].append({"file": str(file), "layer": None, "revision": ref["sha256"]})
+                seals[role].append({"run_id": ctx.job["run_id"], "artifact": ref["step"]})
+                continue
             record = run_operation(ctx.workspace.root, {"operation": "data.describe", "inputs": [item]}, cancelled)
             ctx.check()
             data = committed(record)
@@ -130,7 +140,7 @@ def execute(ctx, specification: dict):
     outputs = {}
     for record in records.values():
         for ref in record["result"]["evidence"]:
-            if ref["step"] in {"export", "report", "map", "table", "view", "selection"}:
+            if ref["step"] in {"export", "report", "map", "table", "view", "selection", "case"}:
                 outputs[ref["step"]] = (record["id"], ref["sha256"])
     for kind, (run_id, checksum) in outputs.items():
         src = read_artifact(ctx.workspace, run_id, kind)

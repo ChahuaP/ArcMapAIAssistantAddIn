@@ -4,7 +4,7 @@
     const api = window.guizhi;
     const reference = item => item.id + '@' + item.revision;
     const domains = { data: '数据', vector: '空间分析', geometry: '几何', table: '属性表',
-        crs: '坐标', presentation: '地图与版面', evidence: '留痕', system: '运行状态', business: '业务' };
+        crs: '坐标', presentation: '地图与版面', evidence: '留痕', system: '运行状态', semantics: '审批材料', business: '业务' };
 
     function RoleMaterials({ roles, materials, change, Material, plans, fail }) {
         return roles.map(role => {
@@ -13,7 +13,7 @@
             return h('div', { key: role.id, className: 'role-material' },
                 h('span', null, role.label, role.maximum > 1 && ' · ' + items.length + '/' + role.maximum),
                 ...slots.map((item, index) => h(Material, { key: index, label: item ? role.label : '添加' + role.label,
-                    item, plans, fail, change: next => {
+                    item, plans, fail, kind: role.kind, change: next => {
                         const group = items.slice();
                         if (next) group[index] = next;
                         else group.splice(index, 1);
@@ -52,7 +52,7 @@
         }
         const publishable = preview && preview.materials.every(role => {
             const items = samples[role.id] || [];
-            return items.length >= role.minimum && items.every(item => item.layer);
+            return items.length >= role.minimum && items.every(item => item.layer || item.kind === 'document');
         });
         return h('dialog', { className: 'business-dialog', ref: dialog, onCancel: event => {
             event.preventDefault();

@@ -150,7 +150,7 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
                 const item = { kind: 'session_event', type: fact.type, seq: fact.seq, time: fact.time };
                 if (fact.type === 'tool/call') {
                     item.tool = fact.data.name;
-                    if (item.tool === 'mcp__guizhi__execute_workflow') attempted = true;
+                    if (['mcp__guizhi__execute_workflow', 'mcp__guizhi__review_approval'].includes(item.tool)) attempted = true;
                 }
                 if (fact.type === 'assistant/message' && fact.data.usage) {
                     item.usage = fact.data.usage;

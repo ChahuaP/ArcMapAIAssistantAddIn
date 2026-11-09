@@ -53,7 +53,7 @@ $site = Join-Path $pythonDir 'Lib\site-packages'
 if ($LASTEXITCODE -ne 0) { throw 'Locked Python runtime installation failed' }
 @('python311.zip', '.', 'Lib\site-packages', 'import site') | Set-Content -LiteralPath (Join-Path $pythonDir 'python311._pth') -Encoding ASCII
 $pythonExe = Join-Path $pythonDir 'python.exe'
-& $pythonExe -I -B -c 'import sys; assert sys.flags.no_user_site; import fastmcp,pydantic,jsonschema,geopandas,shapely,pyproj,pyogrio,rasterio,win32api; print("Bundled Python and GIS imports passed")'
+& $pythonExe -I -B -c 'import sys; assert sys.flags.no_user_site; import fastmcp,pydantic,jsonschema,geopandas,shapely,pyproj,pyogrio,rasterio,win32api,pypdfium2,docx,openpyxl,rapidocr_onnxruntime; print("Bundled Python, GIS and document imports passed")'
 if ($LASTEXITCODE -ne 0) { throw 'Bundled Python import check failed' }
 
 $nodeDir = Join-Path $runtime 'node'

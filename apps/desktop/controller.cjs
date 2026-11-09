@@ -110,6 +110,10 @@ class DesktopController {
     }
 
     async describe(file) {
+        if (['.pdf', '.docx', '.xlsx'].includes(path.extname(file).toLowerCase())) {
+            if (!fs.statSync(file).isFile()) throw new Error('请选择材料文件');
+            return { file, name: path.basename(file), kind: 'document', layer: null, layers: [] };
+        }
         const layers = await this.python('layers', file);
         if (!layers.length) throw new Error('此文件没有可用的矢量图层');
         return { file, name: path.basename(file), layers, layer: layers.length === 1 ? layers[0] : '' };
@@ -227,6 +231,8 @@ class DesktopController {
                 const map = checkedArtifact(record, 'map');
                 if (map) task.map = JSON.parse(map.bytes);
                 task.hasReport = Boolean(checkedArtifact(record, 'report'));
+                const findings = checkedArtifact(record, 'case');
+                if (findings) task.approval = JSON.parse(findings.bytes);
                 task.deliveries = record.result.evidence.filter(item => ['export', 'table', 'workflow'].includes(item.step))
                     .map(item => item.step);
             }
@@ -261,6 +267,21 @@ class DesktopController {
         return checkedArtifact(await this.python('inspect', task.runId), kind).file;
     }
 
+    async approvalSource(id, claimId, evidenceIndex) {
+        const task = this.tasks.find(item => item.id === id && item.status === 'succeeded');
+        const record = task && await this.python('inspect', task.runId);
+        const artifact = record && checkedArtifact(record, 'case');
+        if (!artifact) throw new Error('本任务没有审批依据');
+        const claim = JSON.parse(artifact.bytes).claims.find(item => item.id === claimId);
+        const ref = claim?.evidence[evidenceIndex];
+        if (!ref || !/^document-\d+$/.test(ref.artifact)) throw new Error('此依据请在地图或成果中查看');
+        const source = checkedArtifact(await this.python('inspect', ref.run), ref.artifact);
+        if (!source || createHash('sha256').update(source.bytes).digest('hex') !== ref.sha256) {
+            throw new Error('依据文件内容已变更');
+        }
+        return source.file;
+    }
+
     async close() {
         const child = this.active?.child;
         if (!child) return;
@@ -275,7 +296,9 @@ class DesktopController {
 
 function materialBindings(groups) {
     return Object.fromEntries(Object.entries(groups).filter(([, items]) => items.length).map(([role, items]) => [role, items.map(item => {
-        if (!item?.file || !path.isAbsolute(item.file) || !item.layers?.includes(item.layer)) {
+        if (!item?.file || !path.isAbsolute(item.file) ||
+                (item.kind === 'document' ? !['.pdf', '.docx', '.xlsx'].includes(path.extname(item.file).toLowerCase())
+                    : !item.layers?.includes(item.layer))) {
             throw new Error('请选择材料图层');
         }
         return { file: item.file, layer: item.layer };

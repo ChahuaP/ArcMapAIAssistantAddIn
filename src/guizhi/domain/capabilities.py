@@ -76,6 +76,8 @@ CAPABILITIES = {
     "system.health": Capability("查询独立运行状态", 0, 0),
     "evidence.verify": Capability("验证已交付证据", 0, 0),
     "evidence.history": Capability("查询作业历史", 0, 0),
+    "semantics.read_documents": Capability("读取审批材料", 1, 32),
+    "semantics.approval_case": Capability("关联审批材料、地块与结论"),
     "workflow.execute": Capability("执行已编排任务", 0, 0),
 }
 
@@ -83,7 +85,7 @@ CAPABILITIES = {
 class Material(BaseModel):
     model_config = ConfigDict(extra="forbid")
     file: str
-    layer: Annotated[str, StringConstraints(min_length=1, max_length=255)]
+    layer: Annotated[str, StringConstraints(min_length=1, max_length=255)] | None = None
     revision: Hash | None = None
 
 

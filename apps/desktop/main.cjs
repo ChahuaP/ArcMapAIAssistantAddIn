@@ -83,9 +83,12 @@ async function startDesktop(options) {
         const pick = await dialog.showOpenDialog(window, { properties: ['openDirectory', 'createDirectory'] });
         return pick.canceled ? null : pick.filePaths[0];
     });
-    bind('material', async () => {
+    bind('material', async (kind = 'vector') => {
+        const vectors = { name: 'GeoPackage', extensions: ['gpkg'] };
+        const documents = { name: '审批材料', extensions: ['pdf', 'docx', 'xlsx'] };
+        if (!['vector', 'document', 'any'].includes(kind)) throw new Error('材料格式无效');
         const pick = await dialog.showOpenDialog(window, { properties: ['openFile'],
-            filters: [{ name: 'GeoPackage', extensions: ['gpkg'] }] });
+            filters: kind === 'vector' ? [vectors] : kind === 'document' ? [documents] : [vectors, documents] });
         return pick.canceled ? null : controller.describe(pick.filePaths[0]);
     });
     bind('mapAction', (...args) => controller.mapAction(...args));
@@ -115,6 +118,9 @@ async function startDesktop(options) {
     });
     bind('delivery', async (id, kind) => {
         shell.showItemInFolder(await controller.delivery(id, kind));
+    });
+    bind('approvalSource', async (...args) => {
+        if (await shell.openPath(await controller.approvalSource(...args))) throw new Error('无法打开依据');
     });
     bind('importCoordinate', async kind => {
         if (!['plan', 'definition'].includes(kind)) throw new Error('请选择坐标资料类型');

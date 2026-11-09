@@ -103,6 +103,13 @@ dialog .primary{justify-self:end}
 .skill-editor label,.skill-editor textarea{width:100%}
 .skill-editor textarea{max-height:280px;font-family:monospace;font-size:13px}
 .skill-materials,.materials{max-height:118px;overflow:auto}
+.approval-results{display:grid;gap:6px;margin-block:12px}
+.finding{padding:6px 0;border-top:1px solid #dbe8e3}
+.finding>button{display:flex;gap:12px;justify-content:space-between;text-align:left;width:100%}
+.finding>small{color:#4d6c67}
+.finding-source{padding:7px}
+.finding-source blockquote{margin:4px 0 8px;padding:5px 10px;border-left:3px solid #a4cdc1}
+.geo-map .focused-parcel{stroke:#205cbb;fill:#bad8f4;stroke-width:3}
 .capability-group{padding:5px 10px}
 .capability-group code{margin-left:9px;color:#4d6c67}
 @media(max-width:970px){.shell{grid-template-columns:168px minmax(0,1fr)}.workbench{gap:10px;padding:11px}.messages{padding:14px}.sidebar{padding-inline:10px}}

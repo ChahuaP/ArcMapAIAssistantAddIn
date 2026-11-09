@@ -5,6 +5,7 @@ from importlib import import_module
 from inspect import Parameter, signature
 import json
 from pathlib import Path
+import shutil
 from typing import get_type_hints
 from uuid import uuid4
 import warnings
@@ -66,10 +67,14 @@ class Execution:
         self.progress = progress
         self.check = check
         self.frames, self.datasets, self.evidence = [], [], []
+        self.documents = []
         self.info = []
         self.selection_hashes = []
         self.result = {}
         for i, material in enumerate(request.inputs):
+            if material.layer is None:
+                self.documents.append(self.seal_document(material.file, material.revision, i + 1))
+                continue
             frame, info, revision, evidence = import_layer(
                 material.file, material.layer, directory, f"input-{i + 1}.gpkg", job["id"], check,
                 allow_undefined=request.operation in {"data.describe", "data.list_fields", "crs.assign"},
@@ -82,7 +87,22 @@ class Execution:
             self.datasets.append(asdict(revision))
             self.evidence.append(asdict(evidence))
             self.selection_hashes.append(stable)
-        progress("inputs_sealed", count=len(self.frames))
+        progress("inputs_sealed", count=len(request.inputs))
+
+    def seal_document(self, source, expected, number):
+        self.check()
+        source = Path(source)
+        if source.suffix.lower() not in {".pdf", ".docx", ".xlsx"} or source.stat().st_size > 50 << 20:
+            raise ValueError("Expected a PDF, DOCX or XLSX document up to 50 MB")
+        before = digest(source)
+        if expected is not None and before != expected:
+            raise ValueError("Document differs from its expected revision")
+        copy = self.path(f"document-{number}{source.suffix.lower()}")
+        shutil.copyfile(source, copy)
+        ref = self.record(f"document-{number}", copy)
+        if ref["sha256"] != before or digest(source) != before:
+            raise ValueError("Document changed while importing")
+        return copy, ref
 
     def path(self, filename):
         if Path(filename).name != filename:

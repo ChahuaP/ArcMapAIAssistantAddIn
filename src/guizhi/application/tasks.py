@@ -144,8 +144,11 @@ def run_operation(root, payload, cancel_requested=None):
         raise ValueError("An edit requires an idempotency key and the target snapshot revision")
     for item in request.inputs:
         path = Path(item.file).resolve(strict=True)
-        if not path.is_file() or path.suffix.lower() != ".gpkg":
-            raise ValueError("Material must be a GeoPackage file")
+        suffix = path.suffix.lower()
+        if not path.is_file() or (suffix != ".gpkg" if item.layer else suffix not in {".pdf", ".docx", ".xlsx"}):
+            raise ValueError("Material must be a GeoPackage layer, PDF, DOCX or XLSX")
+        if (request.operation == "semantics.read_documents") != (item.layer is None):
+            raise ValueError("Document parsing requires documents and spatial operations require layers")
         item.file = str(path)
     payload = request.model_dump(mode="json")
     fingerprint = sha256(json.dumps(payload, sort_keys=True, allow_nan=False).encode()).hexdigest()

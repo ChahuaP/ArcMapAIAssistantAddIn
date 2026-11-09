@@ -15,12 +15,13 @@
             ring.map(([x, y], index) => (index ? 'L' : 'M') + x + ' ' + -y).join(' ') + ' Z')).join(' ');
     }
 
-    function draw(item, radius, choose, key) {
+    function draw(item, radius, choose, key, selected) {
         const geometry = item.geometry;
         if (geometry.type === 'GeometryCollection') {
-            return geometry.geometries.map((part, i) => draw({ ...item, geometry: part }, radius, choose, key + '-' + i));
+            return geometry.geometries.map((part, i) => draw({ ...item, geometry: part }, radius, choose, key + '-' + i, selected));
         }
-        const style = { key, className: item.role, onClick: item.layer ? () => choose(item) : undefined };
+        const style = { key, className: item.role + (item.id && item.id === selected ? ' focused-parcel' : ''),
+            onClick: item.layer || item.id ? () => choose(item) : undefined };
         if (geometry.type === 'Point' || geometry.type === 'MultiPoint') {
             const points = geometry.type === 'Point' ? [geometry.coordinates] : geometry.coordinates;
             return points.map(([x, y], i) => h('circle', { ...style, key: key + '-' + i, cx: x, cy: -y,
@@ -32,7 +33,7 @@
             fillOpacity: item.layer ? 0.4 : undefined });
     }
 
-    function MapPanel({ map, choose }) {
+    function MapPanel({ map, choose, selected }) {
         const [zoom, change] = useState(1);
         const [coverage, showCoverage] = useState(true);
         if (!map) return h('section', { className: 'map-panel map-empty', 'aria-label': '地图' },
@@ -52,7 +53,7 @@
                 h('span', null, map.crs)),
             h('svg', { className: 'geo-map', viewBox: box, role: 'img', 'aria-label': '项目范围与重叠区域' },
                 ...map.features.filter(item => item.role !== 'coverage' || coverage).map((item, index) =>
-                    draw(item, Math.max(width, height) * 0.008, choose, index))),
+                    draw(item, Math.max(width, height) * 0.008, choose, index, selected))),
             h('div', { className: 'map-controls' },
                 map.features.some(item => item.role === 'coverage') && h('label', null, h('input', { type: 'checkbox', checked: coverage,
                     onChange: event => showCoverage(event.target.checked) }), '重叠区域'),
@@ -61,7 +62,7 @@
                 h('button', { onClick: () => change(1) }, '复位')));
     }
 
-    window.GuizhiMap = function MapWorkspace({ map, view, onState, fail, enabled }) {
+    window.GuizhiMap = function MapWorkspace({ map, view, onState, fail, enabled, parcel, onParcel }) {
         const [editing, edit] = useState(false);
         const [busy, setBusy] = useState(false);
         const [picked, pick] = useState(null);
@@ -101,7 +102,8 @@
                     onChange: event => setTitle(event.target.value) }),
                 button('保存标题', () => action('set_layout_text', { element: 'title', text: title })),
                 button('打开版面', () => window.guizhi.layoutReport().catch(fail))),
-            h(MapPanel, { key: editing ? view?.id || 'new' : 'result', map: editing ? view?.data : map, choose: pick }),
+            h(MapPanel, { key: editing ? view?.id || 'new' : 'result', map: editing ? view?.data : map,
+                choose: editing ? pick : item => onParcel(item.id || null), selected: editing ? null : parcel }),
             editing && layers.length > 0 && h('ul', { className: 'map-layers' },
                 ...layers.map((item, index) => h('li', { key: item.id },
                     h('label', null, h('input', { type: 'checkbox', checked: item.visible, disabled: busy,

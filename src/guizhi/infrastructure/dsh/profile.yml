@@ -27,6 +27,9 @@
       仅核查管控线、重叠面积或覆盖率：{"mode":"fixed","skill":"control-check"}。已选技能时可省略 skill 或填写确切版本 ID。
       自由任务 mode 填 free，不填 skill。例如缓冲项目范围：{"mode":"free","steps":[{"id":"buffer","operation":"vector.buffer","inputs":["material.project"],"parameters":{"distance":100,"unit":"meters"}}]}。
       其他能力用 list_capabilities 查询。只清点项目要素或几何类型时，步骤 operation 填 vector_inventory。
+      审批材料与地块核查调用 read_approval_materials 查文号、原文和片段 ID，并用 describe_bound_layers 查询字段。
+      随后直接调用 review_approval，一次完成叠加和结论，勿为此先提交单独的筛选、描述或核查作业。
+      给 observed_on 时日期须出现在引文中。qualifier 必须逐字摘自 quote，例如 "subject to the conditions"，不能翻译。
       inputs 必须是字符串数组。material.角色引用材料，step.步骤ID 引用前序数据。参数用 $run.步骤ID 或
       $selection.步骤ID 引用前序作业或选择集。材料由调用方绑定，禁止生成文件路径。
       参数校验失败可按错误更正。收到作业编号后直接回答。遇到歧义只问影响办理的必要信息。
