@@ -5,6 +5,7 @@ const path = require('node:path');
 const { promisify } = require('node:util');
 const { action } = require('./task-commands.js');
 const { ollamaUrl } = require('../../src/guizhi/infrastructure/dsh/ollama.cjs');
+const { visualRecipe } = require('./visual-recipes.cjs');
 
 const exec = promisify(execFile);
 const cli = path.join(__dirname, '../../src/guizhi/__main__.py');
@@ -65,6 +66,7 @@ class DesktopController {
         for (const task of this.tasks) {
             if (['running', 'cancelling'].includes(task.status)) {
                 task.status = 'interrupted';
+                delete task.visual;
                 changed = true;
             }
         }
@@ -97,7 +99,8 @@ class DesktopController {
         const visionUrl = visionModel ? ollamaUrl(input.visionUrl).href : undefined;
         const modelUrl = input.provider === 'ollama' ? ollamaUrl(input.modelUrl).href : undefined;
         this.settings = { workspace, provider: input.provider, model: input.model.trim(), modelUrl,
-            visionModel, visionUrl, encryptedKey };
+            visionModel, visionUrl, showOperation: input.showOperation !== false,
+            screenHighlight: input.screenHighlight !== false, encryptedKey };
         save(this.file, this.settings);
         this.tasks = [];
         this.restore();
@@ -151,8 +154,13 @@ class DesktopController {
         this.active = { child, task };
         child.on('message', message => {
             if (message.type === 'event') {
-                if (message.event.type === 'tool/call') task.step = '正在办理';
-                this.onChange(this.state());
+                if (task.status !== 'running') return;
+                const visual = visualRecipe(message.event);
+                if (visual) {
+                    task.visual = visual;
+                    task.step = visual.label;
+                    this.onChange(this.state());
+                }
             } else if (message.type === 'result') {
                 void this.complete(task, message.result);
             }
@@ -257,6 +265,7 @@ class DesktopController {
         } catch {
             task.status = 'failed';
         } finally {
+            delete task.visual;
             this.active = null;
             this.persist();
             this.onChange(this.state());

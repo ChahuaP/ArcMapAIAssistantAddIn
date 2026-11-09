@@ -8,6 +8,8 @@ from pyproj import CRS
 
 from guizhi.application.skills import validate_steps
 from guizhi.application.tasks import run_operation, run_vector
+from guizhi.domain.capabilities import CAPABILITIES
+from guizhi.domain.operations import OPERATIONS
 from guizhi.domain.skills import Step
 from guizhi.infrastructure.cache import record_dependencies, reuse_job
 from guizhi.infrastructure.operations.evidence import read_artifact
@@ -68,6 +70,7 @@ def execute(ctx, specification: dict):
         sealed[role], seals[role] = [], []
         for item in group:
             ctx.check()
+            ctx.progress("material_reading", role=role, layer=item["layer"])
             requirement = roles.get(role)
             if requirement and (requirement["kind"] == "document") != (item["layer"] is None):
                 raise ValueError(f"Material {role} has the wrong format")
@@ -111,7 +114,10 @@ def execute(ctx, specification: dict):
             else:
                 inputs.append(material_from(ctx, records[name]))
         parameters = resolve_value(step.parameters, records)
-        ctx.progress("workflow_step_started", step_id=step.id, operation=step.operation)
+        layers = {item["layer"] for item in inputs if item["layer"]}
+        operation = OPERATIONS.get(step.operation) or CAPABILITIES[step.operation]
+        ctx.progress("workflow_step_started", step_id=step.id, operation=step.operation,
+                     title=operation.title, layer=next(iter(layers)) if len(layers) == 1 else None)
         if step.operation in {"control_check", "vector_inventory"}:
             expected = 2 if step.operation == "control_check" else 1
             if len(inputs) != expected:
@@ -144,6 +150,7 @@ def execute(ctx, specification: dict):
                 raise ValueError(f"Skill result check failed: {rule['step']}.{name}")
         for requirement in skill["evidence"]:
             read_artifact(ctx.workspace, records[requirement["step"]]["id"], requirement["kind"])
+    ctx.progress("workflow_publishing")
     ctx.json("workflow.json", manifest, "workflow")
     last = committed(records[steps[-1].id])
     outputs = {}

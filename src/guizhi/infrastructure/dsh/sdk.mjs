@@ -8,6 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { promisify } from 'node:util';
 import ollama from './ollama.cjs';
+import { watchRun } from './progress.mjs';
 
 const source = realpathSync(fileURLToPath(new URL('../../../../', import.meta.url)));
 const readJson = path => JSON.parse(readFileSync(path, 'utf8'));
@@ -139,6 +140,7 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
         onEvent(item);
     }
     let stopListener;
+    let stopProgress;
     let harness;
     let result;
     let attempted = false;
@@ -162,6 +164,7 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
         } else if (stop.aborted) {
             result = { status: deadline.aborted ? 'timed_out' : 'cancelled' };
         } else {
+            stopProgress = watchRun(workspace, id, event);
             mcpArgs.push('--materials', JSON.stringify(prepared.materials));
             if (prepared.key) mcpArgs.push('--plan-key', prepared.key);
             const env = { ...runtimeEnv(options, mcpArgs),
@@ -228,6 +231,7 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
         } catch (error) {
             result = { ...result, status: 'failed', shutdown_error: error.message };
         }
+        stopProgress?.();
     }
     const accounting = { input_tokens: 0, output_tokens: 0, cache_read_tokens: 0,
         cache_write_tokens: 0, total_tokens: 0, reported_steps: usage.size };

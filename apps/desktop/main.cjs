@@ -7,6 +7,7 @@ const { DesktopController } = require('./controller.cjs');
 const { SpeechController } = require('./speech.cjs');
 const { LocalSpeechRuntime } = require('./local-speech.cjs');
 const { modelCapabilities } = require('../../src/guizhi/infrastructure/dsh/ollama.cjs');
+const { VisualSession } = require('./visual.cjs');
 
 const origin = 'guizhi://app';
 protocol.registerSchemesAsPrivileged([{ scheme: 'guizhi', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
@@ -27,7 +28,7 @@ async function startDesktop(options) {
     const vendor = path.join(rendererRuntime, 'node_modules');
     const localFiles = ['index.html', 'app.js', 'map.js', 'coordinates.js', 'skills.js', 'style.css', 'mark.svg',
         'portrait.html', 'portrait.css', 'portrait.js', 'avatar.js', 'task-commands.js', 'speech-settings.js',
-        'speech-audio.js', 'voice-input.js'];
+        'speech-audio.js', 'voice-input.js', 'visual.html', 'visual.css', 'visual.js'];
     const files = new Map(localFiles.map(name => ['/' + name, path.join(__dirname, name)]));
     files.set('/react.js', path.join(vendor, 'react', 'umd', 'react.production.min.js'));
     files.set('/react-dom.js', path.join(vendor, 'react-dom', 'umd', 'react-dom.production.min.js'));
@@ -65,10 +66,12 @@ async function startDesktop(options) {
     });
     let window;
     let portrait;
+    let visual;
     const speech = new SpeechController({ userData: app.getPath('userData'), storage: safeStorage,
         local: new LocalSpeechRuntime(path.join(runtime, 'python', 'python.exe'), externalPath) });
     const withSpeech = state => ({ ...state, speech: speech.state() });
     function broadcast(state) {
+        visual?.update(state);
         for (const item of [window, portrait]) {
             if (item && !item.isDestroyed()) item.webContents.send('guizhi:state', withSpeech(state));
         }
@@ -86,6 +89,9 @@ async function startDesktop(options) {
         webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true,
             autoplayPolicy: 'no-user-gesture-required' } });
     const portraitUrl = origin + '/portrait.html';
+    visual = new VisualSession({ python: controller.runtime.python,
+        masks: () => portrait.isVisible() ? [portrait.getBounds()] : [],
+        cancel: () => broadcast(controller.cancel()) });
     const partition = portrait.webContents.session;
     partition.setPermissionRequestHandler((source, permission, callback, details) => callback(
         source === portrait.webContents && source.getURL() === portraitUrl &&
@@ -106,6 +112,7 @@ async function startDesktop(options) {
             portrait.hide();
         } },
         { label: '设置', click: () => { reveal(); window.webContents.send('guizhi:settings'); } },
+        { label: '接管', click: () => visual.takeover() },
         { type: 'separator' }, { label: '退出', click: () => app.quit() },
     ]));
     tray.on('double-click', reveal);
@@ -120,6 +127,7 @@ async function startDesktop(options) {
         event.preventDefault();
         if (closing) return;
         closing = true;
+        visual.close();
         speech.cancel();
         void controller.close().finally(() => { quitting = true; tray.destroy(); app.quit(); });
     });
@@ -196,7 +204,11 @@ async function startDesktop(options) {
         broadcast(state);
         return withSpeech(state);
     });
-    bind('cancel', () => withSpeech(controller.cancel()));
+    bind('cancel', () => {
+        const state = controller.cancel();
+        broadcast(state);
+        return withSpeech(state);
+    });
     bind('coordinates', () => controller.coordinateCatalog());
     bind('skills', () => controller.python('skills'));
     bind('capabilities', () => controller.python('capabilities'));
@@ -238,7 +250,7 @@ async function startDesktop(options) {
     await Promise.all([window.loadURL(origin + '/index.html'), portrait.loadURL(portraitUrl)]);
     if (!controller.settings.workspace) reveal();
     portrait.showInactive();
-    return { window, portrait, tray, controller, speech };
+    return { window, portrait, tray, controller, speech, visual };
 }
 
 module.exports = { startDesktop };
