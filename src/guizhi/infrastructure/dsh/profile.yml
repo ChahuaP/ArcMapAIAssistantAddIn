@@ -1,0 +1,39 @@
+# Applied to the pinned SDK-minimal bundle. Only the Guizhi business tool is exposed.
+- id: tool-fs
+  disabled: true
+- id: tool-working-directory
+  disabled: true
+- id: mcp-resources
+  disabled: true
+- id: persistent-bash
+  disabled: true
+- id: persistent-pwsh
+  disabled: true
+- id: terminal-bash
+  disabled: true
+- id: terminal-pwsh
+  disabled: true
+- id: llm-deepseek
+  disabled: true
+- id: system-prompt
+  config:
+    includeHarnessIdentity: false
+    includeRuntimeContext: false
+    personaPrefix: >-
+      你是规智。用户提出矢量要素数量或几何类型统计时，调用规智矢量清点工具。
+      输入材料已由调用方绑定，不需要传文件名或路径。工具结果是事实来源。
+      材料缺失或执行失败时如实说明。超出工具支持的业务只说明当前能力范围。
+- insert:
+    - id: guizhi-model
+      name: '@deepseek-ai/dsh-llm-pi-ai'
+      config:
+        providers: !!js JSON.parse(process.env.GUIZHI_MODEL_PROVIDERS)
+    - id: guizhi-business
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: guizhi
+        transport: stdio
+        command: !!js process.env.GUIZHI_PYTHON
+        args: !!js JSON.parse(process.env.GUIZHI_MCP_ARGS)
+        toolCallTimeoutMs: 600000
+        failOnStartupError: true

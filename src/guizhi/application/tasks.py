@@ -1,4 +1,5 @@
 """Submit, supervise and inspect vector tasks without a GIS host."""
+from collections.abc import Callable
 import json
 import os
 from pathlib import Path
@@ -41,17 +42,20 @@ def worker(workspace: Workspace, run_id: str) -> dict:
     return inventory(record["task"], record["job"], directory, progress, ensure_supervised)
 
 
-def supervise(workspace: Workspace, run_id: str):
+def supervise(workspace: Workspace, run_id: str, cancel_requested: Callable[[], bool] | None):
     command = [
         sys.executable, "-I", "-B", str(Path(__file__).resolve().parents[1] / "__main__.py"),
         "--workspace", str(workspace.root), "_worker", run_id,
     ]
     with subprocess.Popen(
         command, cwd=workspace.directory(run_id),
+        stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="utf-8",
     ) as process:
         try:
             while True:
+                if cancel_requested is not None and cancel_requested():
+                    workspace.request_cancel(run_id)
                 if workspace.status(run_id) == "cancelling":
                     process.kill()
                     process.communicate()
@@ -62,6 +66,8 @@ def supervise(workspace: Workspace, run_id: str):
                     break
                 except subprocess.TimeoutExpired:
                     continue
+            if cancel_requested is not None and cancel_requested():
+                workspace.request_cancel(run_id)
             if process.returncode:
                 workspace.finish(run_id, "failed", error=error.strip() or f"Worker exited {process.returncode}")
             else:
@@ -73,7 +79,8 @@ def supervise(workspace: Workspace, run_id: str):
             raise
 
 
-def run_vector(root: Path, source: Path, layer: str, object_id: str | None) -> dict:
+def run_vector(root: Path, source: Path, layer: str, object_id: str | None,
+               cancel_requested: Callable[[], bool] | None = None) -> dict:
     source = source.resolve(strict=True)
     if not source.is_file() or source.suffix.lower() != ".gpkg":
         raise ValueError("Input must be a GeoPackage file")
@@ -92,7 +99,7 @@ def run_vector(root: Path, source: Path, layer: str, object_id: str | None) -> d
             raise RuntimeError("Unable to acquire new run lock")
         workspace.start(task, run, job)
         try:
-            supervise(workspace, run.id)
+            supervise(workspace, run.id, cancel_requested)
         except KeyboardInterrupt:
             workspace.request_cancel(run.id)
             workspace.finish(run.id, "cancelled")
