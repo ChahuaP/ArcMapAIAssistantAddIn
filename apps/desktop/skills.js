@@ -87,7 +87,7 @@
                 if (text !== null) edit(text);
             }) }, '导入 Markdown')),
         h('div', { className: 'skill-cards' }, ...catalog.map(item => h('div', { className: 'skill-card', key: reference(item) },
-            h('strong', null, item.title), h('small', null, 'v' + item.revision),
+            h('strong', null, item.title), h('small', null, 'v' + item.release_version),
             h('span', null, item.materials.map(role => role.label).join('、')),
             h('button', { disabled: busy, className: editing ? '' : 'primary',
                 onClick: () => editing ? perform(async () => edit((await api.skillShow(reference(item))).markdown)) : choose(item) },
@@ -106,7 +106,7 @@
                     const result = await api.skillPublish(markdown, samples,
                         parameterValues(fields, parameters));
                     await refresh();
-                    setNotice(result.title + ' v' + result.revision + ' 已发布');
+                    setNotice(result.title + ' v' + result.release_version + ' 已发布');
                 }) }, busy ? '正在处理' : '验证并发布'))),
         h('details', null, h('summary', null, '查看全部操作'), ...Object.entries(domains).map(([id, title]) =>
             h('details', { key: id, className: 'capability-group' }, h('summary', null, title),

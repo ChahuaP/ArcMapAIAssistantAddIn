@@ -8,6 +8,7 @@ import yaml
 
 from guizhi.domain.capabilities import CAPABILITIES, Capability, Material
 from guizhi.domain.skills import Skill, Step
+from guizhi.domain.version import increment
 from guizhi.infrastructure.workspace import SOURCE_ROOT, Workspace
 
 SKILLS = SOURCE_ROOT / "resources" / "skills"
@@ -73,7 +74,7 @@ def parse_skill(text):
 def entry(text, revision, verification=None):
     skill = parse_skill(text)
     return {**skill.model_dump(mode="json"), "revision": revision, "markdown": text,
-            "sha256": sha256(text.encode()).hexdigest(), "verification": verification}
+            "sha256": sha256(text.encode()).hexdigest(), "verification": verification, "release_version": "1.0.0"}
 
 
 def catalog(workspace, *, include_history=False):
@@ -87,7 +88,11 @@ def catalog(workspace, *, include_history=False):
 
 def summaries(workspace):
     return [{**{key: item[key] for key in ("id", "title", "aliases", "materials", "revision")},
-             "parameters": item.get("parameters", {})} for item in catalog(workspace)]
+             "parameters": item.get("parameters", {}), "release_version": release_version(item)} for item in catalog(workspace)]
+
+
+def release_version(item):
+    return item.get("release_version", f"1.{item['revision'] - 1}.0")
 
 
 def get_skill(workspace, reference):
@@ -127,10 +132,16 @@ def specification(workspace, materials, *, skill=None, steps=None, candidate=Non
             raise ValueError(f"Missing or excess materials: {role['label']} ({role['minimum']}–{role['maximum']})")
     if selected and not extra and set(clean) - {role["id"] for role in required}:
         raise ValueError("Materials do not belong to this skill")
+    parameter_profile = None
+    if selected and selected.get("parameter_profiles"):
+        from guizhi.application.improvement import apply_profile
+
+        values, parameter_profile = apply_profile(selected, clean, values)
     validate_steps(fixed + extra, set(clean) | {role["id"] for role in required})
     return {"mode": "combined" if selected and extra else "fixed" if selected else "free",
             "materials": clean, "skill": selected, "steps": [step.model_dump(mode="json") for step in fixed + extra],
-            "coordinate_plans": coordinate_plans or {}, "skill_parameters": values, "model_provenance": None}
+            "coordinate_plans": coordinate_plans or {}, "skill_parameters": values, "parameter_profile": parameter_profile,
+            "model_provenance": None}
 
 
 def execute(root, materials, *, skill=None, steps=None, candidate=None, coordinate_plans=None,
@@ -159,6 +170,10 @@ def publish(root, text, materials, skill_parameters=None):
         db.execute("BEGIN IMMEDIATE")
         first = int(any(parse_skill((SKILLS / name).read_text(encoding="utf-8")).id == draft["id"] for name in BUILT_INS))
         current = db.execute("SELECT coalesce(max(revision), ?) FROM skills WHERE id=?", (first, draft["id"])).fetchone()[0]
+        latest = db.execute("SELECT body FROM skills WHERE id=? AND revision=?", (draft["id"], current)).fetchone()
+        if current:
+            version = release_version(json.loads(latest[0])) if latest else draft["release_version"]
+            draft["release_version"] = increment(version, "feature")
         saved = {**draft, "revision": current + 1,
                  "verification": {"run_id": result["id"], "workflow_sha256": manifest["sha256"]}}
         db.execute("INSERT INTO skills VALUES (?, ?, ?)", (saved["id"], saved["revision"], json.dumps(saved)))

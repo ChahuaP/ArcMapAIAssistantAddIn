@@ -126,7 +126,8 @@ def execute(ctx, specification: dict):
             ctx.progress("diagnostic_snapshot", ref=ref, layer=item["layer"], revision=data["revision"],
                          role=role, source_run=record["id"])
     manifest = {"mode": mode, "skill": skill, "material_runs": seals, "steps": [],
-                "model_provenance": specification["model_provenance"]}
+                "model_provenance": specification["model_provenance"],
+                "parameter_profile": specification.get("parameter_profile")}
     for step in steps:
         ctx.check()
         inputs = []

@@ -5,6 +5,7 @@ from math import fsum
 
 import geopandas as gpd
 import shapely
+from guizhi.domain.diagnostics import Fault
 
 from guizhi.infrastructure.operations.evidence import read_artifact
 from guizhi.infrastructure.operations.report import publish_report
@@ -24,7 +25,8 @@ def classified(frame, field, codes):
     series = frame[field].astype(str)
     missing = sorted(set(series) - codes.keys())
     if missing:
-        raise ValueError(f"Unmapped land classes: {', '.join(missing[:20])}")
+        raise Fault("parameter", "unmapped_land_classes", f"Unmapped land classes: {', '.join(missing[:20])}",
+                    unmapped_count=len(missing))
     return gpd.GeoDataFrame({"land_class": series.map(codes)}, geometry=frame.geometry, crs=frame.crs)
 
 
@@ -45,7 +47,8 @@ def summarize(ctx, years: list[int], field: str, classifications: dict[int, dict
 
 def compare(ctx, from_year: int, to_year: int, field: str, classifications: dict[int, dict[str, str]]):
     if not 1 <= from_year < to_year <= 9999 or set(classifications) != {from_year, to_year}:
-        raise ValueError("Specify both years and their mappings in chronological order")
+        raise Fault("parameter", "annual_chronology", "Specify both years and their mappings in chronological order",
+                    from_year=from_year, to_year=to_year)
     left, right = (classified(frame, field, classifications[year]) for frame, year in
                    zip(ctx.frames, (from_year, to_year), strict=True))
     if left.crs != right.crs:

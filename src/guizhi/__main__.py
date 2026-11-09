@@ -53,6 +53,10 @@ def main() -> int:
         if name == "replay-run":
             diagnostic.add_argument("--seconds", type=int, default=20)
     commands.add_parser("diagnose-dispatch").add_argument("dispatch_id")
+    commands.add_parser("improvement-plan").add_argument("request", type=Path)
+    candidate = commands.add_parser("improvement-apply")
+    candidate.add_argument("id")
+    candidate.add_argument("proposal", type=Path)
     commands.add_parser("platform-contract", help="Read the local platform connector contract")
     commands.add_parser("platform-handoff", help="Describe verified local artifacts for handoff").add_argument(
         "request", type=Path)
@@ -62,6 +66,16 @@ def main() -> int:
     commands.add_parser("_dispatch-replay").add_argument("request", type=Path)
     args = parser.parse_args()
     try:
+        if args.command in {"improvement-plan", "improvement-apply"}:
+            from guizhi.application import improvement
+
+            workspace = Workspace(args.workspace)
+            if args.command == "improvement-plan":
+                result = improvement.prepare(workspace, json.loads(args.request.read_text(encoding="utf-8-sig")))
+            else:
+                result = improvement.apply(workspace, args.id, json.loads(args.proposal.read_text(encoding="utf-8-sig")))
+            print(json.dumps(result))
+            return 0
         if args.command in {"diagnose-run", "replay-run", "diagnose-dispatch"}:
             from guizhi.application.diagnostics import diagnose_dispatch, diagnose_run, replay
 

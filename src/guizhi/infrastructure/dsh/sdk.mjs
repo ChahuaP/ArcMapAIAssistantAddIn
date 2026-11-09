@@ -55,7 +55,7 @@ export function externalPath(path) {
     return physical;
 }
 
-function runtimeEnv(options, mcpArgs) {
+export function runtimeEnv(options, mcpArgs = []) {
     const env = {};
     const allowed = /^(path|systemroot|windir|temp|tmp|home|userprofile|appdata|localappdata|comspec|https_proxy|http_proxy|no_proxy|node_use_env_proxy)$/i;
     for (const [name, value] of Object.entries(process.env)) {
@@ -66,6 +66,21 @@ function runtimeEnv(options, mcpArgs) {
     const providers = { 'minimax-cn': { apiKeyEnv: 'MINIMAX_API_KEY' } };
     return { ...env, GUIZHI_MODEL_PROVIDERS: JSON.stringify(providers),
         GUIZHI_PYTHON: options.python, GUIZHI_MCP_ARGS: JSON.stringify(mcpArgs) };
+}
+
+export async function loadHarness(python, runtime) {
+    if (!python || !runtime || !isAbsolute(python) || !isAbsolute(runtime)) {
+        throw new Error('Python and DSH runtime paths must be absolute');
+    }
+    const root = realpathSync(runtime);
+    const versions = readJson(join(source, 'packaging', 'dsh-runtime', 'package.json')).dependencies;
+    for (const name of ['@deepseek-ai/dsh', '@deepseek-ai/dsh-sdk-client']) {
+        const installed = readJson(join(root, 'node_modules', name, 'package.json'));
+        if (installed.version !== versions[name]) throw new Error('DSH runtime does not match the locked versions');
+    }
+    const requireRuntime = createRequire(join(root, 'package.json'));
+    const { DeepSeekHarness } = await import(pathToFileURL(requireRuntime.resolve('@deepseek-ai/dsh-sdk-client')).href);
+    return { DeepSeekHarness, versions };
 }
 
 export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
@@ -93,17 +108,7 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
             !Number.isSafeInteger(calls) || calls < 1 || calls > 40) {
         throw new Error('Invalid model budget');
     }
-    if (!options.python || !options.runtime || !isAbsolute(options.python) || !isAbsolute(options.runtime)) {
-        throw new Error('Python and DSH runtime paths must be absolute');
-    }
-    const runtime = realpathSync(options.runtime);
-    const versions = readJson(join(source, 'packaging', 'dsh-runtime', 'package.json')).dependencies;
-    for (const name of ['@deepseek-ai/dsh', '@deepseek-ai/dsh-sdk-client']) {
-        const installed = readJson(join(runtime, 'node_modules', name, 'package.json'));
-        if (installed.version !== versions[name]) throw new Error('DSH runtime does not match the locked versions');
-    }
-    const requireRuntime = createRequire(join(runtime, 'package.json'));
-    const { DeepSeekHarness } = await import(pathToFileURL(requireRuntime.resolve('@deepseek-ai/dsh-sdk-client')).href);
+    const { DeepSeekHarness, versions } = await loadHarness(options.python, options.runtime);
     const workspace = externalPath(options.workspace ?? '');
     const parent = join(workspace, 'dispatch');
     if (existsSync(parent) && relative(parent, realpathSync(parent)) !== '') {
