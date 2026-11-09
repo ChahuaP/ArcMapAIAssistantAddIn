@@ -1,22 +1,47 @@
 *{box-sizing:border-box}
-html,body{margin:0;background:transparent;overflow:hidden;color:#17394c;font:14px "Microsoft YaHei UI","Segoe UI",sans-serif}
+html,body{margin:0;background:transparent;overflow:hidden;color:#ebf5f1;font:13px "Microsoft YaHei UI","Segoe UI",sans-serif}
 [hidden]{display:none!important}
-main{position:relative;height:100vh;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;padding:8px 12px 12px;isolation:isolate}
-.grip{position:absolute;z-index:4;top:26px;left:calc(50% - 40px);width:80px;height:18px;-webkit-app-region:drag;border-top:3px solid #7aaba899;opacity:0;border-radius:12px}
-main:hover .grip,main:focus-within .grip{opacity:.45}
-#figure-toggle{background:none;border:none;padding:0;width:230px;height:276px;position:absolute;bottom:40px;left:calc(50% - 115px);box-shadow:none}
-#figure,#figure canvas{display:block;width:100%;height:100%}
-.avatar-unavailable{background:url('/mark.svg') center/92px no-repeat!important}
-button{color:#17394c;font:inherit;padding:7px 9px;border:1px solid #cedfdc;border-radius:9px;background:#f5f8f7;cursor:pointer}
-button:hover,button:focus-visible{border-color:#177d78;color:#105f5b}
-button:disabled{opacity:.5;cursor:default}
-.actions{z-index:3;display:flex;gap:4px;padding:4px;background:#f5f8f7ed;border:1px solid #d2e2e0;border-radius:12px;box-shadow:0 3px 14px #17394c26;opacity:.74}
-main:hover .actions,main:focus-within .actions,main:not([data-voice="idle"]) .actions{opacity:1}
-#mic{background:#177d78;color:white;border-color:#177d78;touch-action:none;user-select:none}
-#mic[aria-pressed="true"]{background:#23618b;border-color:#23618b}
-#status:not(:empty){position:absolute;bottom:56px;max-width:94%;z-index:3;padding:5px 9px;border-radius:12px;background:#f5f8f7;color:#17625e;pointer-events:none}
-#status.voice-error{color:#9c4935}
-#bubble{position:absolute;z-index:4;top:7px;left:12px;right:12px;max-height:104px;overflow:auto;padding:11px 13px;background:#f5f8f7f7;border:1px solid #d4e4e2;border-radius:14px;line-height:1.55;box-shadow:0 5px 17px #17394c20}
-#interaction{position:absolute;z-index:4;bottom:58px;left:12px;right:12px;display:flex;gap:6px;align-items:end;background:#f5f8f7;padding:8px;border:1px solid #d2e2e0;border-radius:13px;box-shadow:0 5px 17px #17394c26}
-#draft{width:100%;min-width:0;resize:none;border:1px solid #cedfdc;border-radius:8px;padding:7px;background:white;font:inherit;color:inherit}
-#interaction button{white-space:nowrap;background:#177d78;color:white}
+main{position:relative;height:100vh;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;padding:8px 14px 12px;isolation:isolate}
+button{font:inherit;cursor:pointer}
+button:disabled{opacity:.38;cursor:default}
+button:focus-visible{outline:2px solid #8fcbb7;outline-offset:2px}
+.grip{position:absolute;z-index:4;bottom:177px;left:calc(50% - 33px);width:66px;height:15px;-webkit-app-region:drag;border-top:2px solid #7aaba8aa;opacity:0;border-radius:12px}
+main:hover .grip,main:focus-within .grip{opacity:.55}
+#figure-toggle{background:none;border:none;padding:0;width:132px;height:132px;position:absolute;bottom:45px;left:calc(50% - 66px);border-radius:24px}
+#figure{display:block;width:100%;height:100%;filter:drop-shadow(0 7px 7px #152c2d35);transform-origin:50% 68%;animation:balance 6.4s ease-in-out infinite}
+.contours{fill:none;stroke:#397f70;stroke-opacity:.42;stroke-width:1.6;stroke-linecap:round}
+.eyes,#speaking-mouth{fill:#173c3c}
+.eyes{transform-box:fill-box;transform-origin:center;animation:blink 6.6s infinite}
+.smile{fill:none;stroke:#173c3c;stroke-width:2.7;stroke-linecap:round}
+#speaking-mouth{display:none}
+main[data-voice=speaking] .smile{display:none}
+main[data-voice=speaking] #speaking-mouth{display:block}
+main[data-voice=listening] #figure{animation:none;transform:rotate(-4deg)}
+main[data-voice=listening] .contours{stroke-opacity:.82}
+.actions{position:relative;z-index:3;display:flex;align-items:center;gap:1px;padding:3px;background:#192326f2;
+    border:1px solid #a8c8c524;border-radius:20px;box-shadow:0 4px 14px #111c2045}
+.actions>button{width:36px;height:33px;display:grid;place-items:center;padding:0;border:0;border-radius:14px;
+    color:#deece7;background:none}
+.actions>button:hover,.actions>button:focus-visible,.actions>button[aria-pressed=true]{background:#a6c6b926;color:#f2fff9}
+.actions>button+button::before{content:"";position:absolute;width:1px;height:16px;margin-left:-38px;background:#c6dfd322}
+.actions svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+#more[aria-expanded=true] svg{transform:rotate(180deg)}
+#more-panel{position:absolute;bottom:44px;left:50%;transform:translateX(-50%);width:140px;display:grid;gap:2px;
+    padding:5px;background:#192326f8;border:1px solid #a8c8c53b;border-radius:12px;box-shadow:0 6px 18px #111c204d}
+#more-panel button{padding:7px 9px;border:0;border-radius:7px;text-align:left;color:#ebf5f1;background:transparent}
+#more-panel button:hover,#more-panel button:focus-visible{background:#a6c6b926}
+#bubble{position:absolute;z-index:4;top:7px;left:14px;right:14px;max-height:100px;overflow:auto;padding:10px 14px;
+    background:#1b2629f2;border:1px solid #b6ccc44a;border-radius:18px;line-height:1.45;box-shadow:0 5px 15px #111c2045;overflow-wrap:anywhere}
+#message{font-weight:600}
+#status{font-size:12px;color:#c0d5cd}
+#message:not([hidden])+#status:not([hidden]){margin-top:4px}
+#status.voice-error{color:#ffc8a8}
+#interaction{position:absolute;z-index:4;bottom:57px;left:14px;right:14px;display:flex;gap:6px;align-items:end;
+    padding:7px;background:#1b2629f7;border:1px solid #b6ccc44a;border-radius:13px;box-shadow:0 5px 18px #111c204d}
+#draft{width:100%;min-width:0;resize:none;border:1px solid #c5dfd335;border-radius:8px;padding:7px;
+    background:#263438;font:inherit;color:#f2fff9}
+#draft::placeholder{color:#b4c7c0}
+#interaction button{white-space:nowrap;padding:7px 10px;border:0;border-radius:8px;background:#a4d4c0;color:#183531}
+@keyframes balance{0%,100%{transform:rotate(-1.4deg)}50%{transform:rotate(1.4deg)}}
+@keyframes blink{0%,43%,47%,100%{transform:scaleY(1)}45%{transform:scaleY(.12)}}
+@media(prefers-reduced-motion:reduce){#figure,.eyes{animation:none}main[data-voice=listening] #figure{transform:none}}

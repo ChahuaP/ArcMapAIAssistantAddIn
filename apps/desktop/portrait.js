@@ -1,14 +1,18 @@
 import { VoiceAudio } from './speech-audio.js';
-import { mountAvatar } from './avatar.js';
 
 const api = window.guizhi;
 const pane = document.querySelector('#interaction');
 const draft = document.querySelector('#draft');
-const message = document.querySelector('#bubble');
+const bubble = document.querySelector('#bubble');
+const message = document.querySelector('#message');
 const mic = document.querySelector('#mic');
 const play = document.querySelector('#play');
+const stop = document.querySelector('#stop');
+const more = document.querySelector('#more');
+const morePanel = document.querySelector('#more-panel');
 const detail = document.querySelector('#status');
 const shell = document.querySelector('main');
+const mouth = document.querySelector('#speaking-mouth');
 let state;
 let mode = 'idle';
 let held = false;
@@ -17,17 +21,32 @@ let seen;
 let task;
 let conversation;
 let passThrough;
+let speechFrame = 0;
+let mouthLevel = 0;
 
 function tell(text, error = false) {
     detail.textContent = text;
+    detail.hidden = !text;
     detail.classList.toggle('voice-error', error);
+    bubble.hidden = message.hidden && detail.hidden;
+}
+
+function animateMouth() {
+    mouthLevel += (voice.level() - mouthLevel) * 0.55;
+    mouth.setAttribute('ry', (2.5 + mouthLevel * 6).toFixed(2));
+    speechFrame = requestAnimationFrame(animateMouth);
 }
 
 const voice = new VoiceAudio(api, next => {
     mode = next;
     shell.dataset.voice = next;
     mic.setAttribute('aria-pressed', String(next === 'listening'));
-    mic.textContent = next === 'listening' ? '松开识别' : '按住说话';
+    mic.title = next === 'listening' ? '松开识别' : '按住说话';
+    mic.setAttribute('aria-label', mic.title);
+    stop.hidden = next === 'idle';
+    cancelAnimationFrame(speechFrame);
+    mouthLevel = 0;
+    if (next === 'speaking') speechFrame = requestAnimationFrame(animateMouth);
     tell({ opening: '正在打开麦克风', listening: '正在听', recognizing: '正在转成文字',
         synthesizing: '正在准备播报', speaking: '正在播报' }[next] || '');
 });
@@ -36,8 +55,18 @@ function fail(error) {
     tell(String(error.message || error).replace(/^Error invoking remote method '[^']+': Error: /, ''), true);
 }
 function toggle(force) {
+    showMore(false);
     pane.hidden = typeof force === 'boolean' ? !force : !pane.hidden;
     if (!pane.hidden) draft.focus({ preventScroll: true });
+}
+
+function showMore(open) {
+    morePanel.hidden = !open;
+    more.setAttribute('aria-expanded', String(open));
+    if (open) {
+        pane.hidden = true;
+        morePanel.querySelector('button').focus({ preventScroll: true });
+    }
 }
 
 function update(next) {
@@ -52,6 +81,7 @@ function update(next) {
     message.textContent = task?.response || (task?.status === 'running' ? task.step || '正在理解任务' :
         task?.status === 'cancelling' ? '正在结束任务' : '');
     message.hidden = !message.textContent;
+    bubble.hidden = message.hidden && detail.hidden;
     play.hidden = !task?.response;
     mic.disabled = next.speech.asr === 'off';
     if (seen === undefined) seen = task?.response ? task.id : '';
@@ -136,9 +166,20 @@ mic.addEventListener('keyup', event => {
 });
 document.querySelector('#type').addEventListener('click', () => toggle());
 document.querySelector('#figure-toggle').addEventListener('click', () => toggle());
-document.querySelector('#open').addEventListener('click', () => void api.workbench().catch(fail));
-document.querySelector('#stop').addEventListener('click', () => { held = false; void voice.stop().catch(fail); });
-play.addEventListener('click', () => { if (task?.response) void voice.speak(task.response, state.speech.speaker).catch(fail); });
+more.addEventListener('click', () => showMore(morePanel.hidden));
+document.querySelector('#open').addEventListener('click', () => {
+    showMore(false);
+    void api.workbench().catch(fail);
+});
+stop.addEventListener('click', () => {
+    showMore(false);
+    held = false;
+    void voice.stop().catch(fail);
+});
+play.addEventListener('click', () => {
+    showMore(false);
+    if (task?.response) void voice.speak(task.response, state.speech.speaker).catch(fail);
+});
 pane.addEventListener('submit', event => { event.preventDefault(); void send(draft.value).catch(fail); });
 draft.addEventListener('keydown', event => {
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
@@ -148,10 +189,18 @@ draft.addEventListener('keydown', event => {
 });
 document.addEventListener('keydown', event => {
     if (event.key === 'Escape') {
+        if (!morePanel.hidden) {
+            showMore(false);
+            more.focus();
+            return;
+        }
         held = false;
         void voice.stop().catch(fail);
         toggle(false);
     }
+});
+document.addEventListener('pointerdown', event => {
+    if (!morePanel.hidden && !event.target.closest('#more, #more-panel')) showMore(false);
 });
 window.addEventListener('pagehide', () => { held = false; voice.releaseCapture(); });
 document.addEventListener('pointermove', event => {
@@ -166,10 +215,3 @@ api.onState(update);
 api.onPortraitInput(() => toggle(true));
 api.onPortraitHide(() => { held = false; void voice.stop().catch(fail); });
 api.state().then(update).catch(fail);
-mountAvatar(document.querySelector('#figure'), () => voice.level(), () => ({
-    voice: mode, task: task?.status, reduced: matchMedia('(prefers-reduced-motion: reduce)').matches,
-})).catch(error => {
-    document.querySelector('#figure').hidden = true;
-    document.querySelector('#figure-toggle').classList.add('avatar-unavailable');
-    fail(error);
-});

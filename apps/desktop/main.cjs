@@ -1,5 +1,4 @@
 const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, net, protocol, safeStorage, screen, shell, Tray } = require('electron');
-const { createHash } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
@@ -27,42 +26,20 @@ async function startDesktop(options) {
     }
     const vendor = path.join(rendererRuntime, 'node_modules');
     const localFiles = ['index.html', 'app.js', 'map.js', 'coordinates.js', 'skills.js', 'style.css', 'mark.svg',
-        'portrait.html', 'portrait.css', 'portrait.js', 'avatar.js', 'task-commands.js', 'speech-settings.js',
+        'portrait.html', 'portrait.css', 'portrait.js', 'task-commands.js', 'speech-settings.js',
         'speech-audio.js', 'voice-input.js', 'visual.html', 'visual.css', 'visual.js'];
     const files = new Map(localFiles.map(name => ['/' + name, path.join(__dirname, name)]));
     files.set('/react.js', path.join(vendor, 'react', 'umd', 'react.production.min.js'));
     files.set('/react-dom.js', path.join(vendor, 'react-dom', 'umd', 'react-dom.production.min.js'));
-    const avatar = path.join(rendererRuntime, 'assets', 'avatar.vrm');
-    const identity = require('../../packaging/desktop-runtime/avatar.lock.json');
-    if (!fs.existsSync(avatar) || createHash('sha256').update(fs.readFileSync(avatar)).digest('hex') !== identity.sha256) {
-        throw new Error('数字形象资源缺失或完整性检查失败');
-    }
-    files.set('/avatar.vrm', avatar);
     for (const file of files.values()) {
         if (!fs.existsSync(file)) throw new Error('桌面运行依赖不完整');
     }
-    const importMap = fs.readFileSync(files.get('/portrait.html'), 'utf8').match(/<script type="importmap">(.*?)<\/script>/)[1];
-    const importHash = createHash('sha256').update(importMap).digest('base64');
-    const vendorRoots = { '/vendor/three/': path.join(vendor, 'three'),
-        '/vendor/vrm/': path.join(vendor, '@pixiv', 'three-vrm') };
     protocol.handle('guizhi', async request => {
         const url = new URL(request.url);
         if (url.hostname !== 'app') return new Response('', { status: 404 });
-        let file = files.get(url.pathname);
-        if (!file) {
-            for (const [prefix, root] of Object.entries(vendorRoots)) {
-                if (!url.pathname.startsWith(prefix) || !url.pathname.endsWith('.js')) continue;
-                const candidate = path.resolve(root, decodeURIComponent(url.pathname.slice(prefix.length)));
-                if (candidate.startsWith(root + path.sep) && fs.existsSync(candidate)) file = candidate;
-            }
-        }
+        const file = files.get(url.pathname);
         if (!file) return new Response('', { status: 404 });
-        const response = await net.fetch(pathToFileURL(file).href);
-        if (url.pathname !== '/portrait.html') return response;
-        const headers = new Headers(response.headers);
-        headers.set('Content-Security-Policy', "default-src 'none'; script-src 'self' 'sha256-" + importHash +
-            "'; style-src 'self'; connect-src 'self' blob:; img-src 'self' blob: data:; worker-src 'self'; base-uri 'none'; form-action 'none'");
-        return new Response(response.body, { status: response.status, headers });
+        return net.fetch(pathToFileURL(file).href);
     });
     let window;
     let portrait;
@@ -83,8 +60,8 @@ async function startDesktop(options) {
         icon: path.join(__dirname, 'mark.png'),
         webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true } });
     const area = screen.getPrimaryDisplay().workArea;
-    portrait = new BrowserWindow({ width: 334, height: 388, x: area.x + area.width - 350,
-        y: area.y + area.height - 405, frame: false, transparent: true, backgroundColor: '#00000000',
+    portrait = new BrowserWindow({ width: 312, height: 275, x: area.x + area.width - 328,
+        y: area.y + area.height - 292, frame: false, transparent: true, backgroundColor: '#00000000',
         resizable: false, skipTaskbar: true, alwaysOnTop: true, show: false, hasShadow: false, title: '规智数字形象',
         webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true,
             autoplayPolicy: 'no-user-gesture-required' } });
