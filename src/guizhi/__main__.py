@@ -46,12 +46,22 @@ def main() -> int:
     commands.add_parser("skill-preview").add_argument("request", type=Path)
     commands.add_parser("skill-publish").add_argument("request", type=Path)
     commands.add_parser("workflow").add_argument("request", type=Path)
+    commands.add_parser("platform-contract", help="Read the local platform connector contract")
+    commands.add_parser("platform-handoff", help="Describe verified local artifacts for handoff").add_argument(
+        "request", type=Path)
     host = commands.add_parser("arcmap", help="Exchange a saved MXD with a local ArcMap 10.2 bridge")
     host.add_argument("bridge", type=Path)
     host.add_argument("request", type=Path)
     commands.add_parser("_dispatch-replay").add_argument("request", type=Path)
     args = parser.parse_args()
     try:
+        if args.command in {"platform-contract", "platform-handoff"}:
+            from guizhi.application.platform import contract, prepare
+
+            result = (contract() if args.command == "platform-contract"
+                      else prepare(args.workspace, json.loads(args.request.read_text(encoding="utf-8-sig"))))
+            print(json.dumps(result))
+            return 0
         if args.command == "arcmap":
             from guizhi.infrastructure.arcmap import exchange
 
