@@ -1,0 +1,22 @@
+*{box-sizing:border-box}
+html,body{margin:0;background:transparent;overflow:hidden;color:#17394c;font:14px "Microsoft YaHei UI","Segoe UI",sans-serif}
+[hidden]{display:none!important}
+main{position:relative;height:100vh;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;padding:8px 12px 12px;isolation:isolate}
+.grip{position:absolute;z-index:4;top:26px;left:calc(50% - 40px);width:80px;height:18px;-webkit-app-region:drag;border-top:3px solid #7aaba899;opacity:0;border-radius:12px}
+main:hover .grip,main:focus-within .grip{opacity:.45}
+#figure-toggle{background:none;border:none;padding:0;width:230px;height:276px;position:absolute;bottom:40px;left:calc(50% - 115px);box-shadow:none}
+#figure,#figure canvas{display:block;width:100%;height:100%}
+.avatar-unavailable{background:url('/mark.svg') center/92px no-repeat!important}
+button{color:#17394c;font:inherit;padding:7px 9px;border:1px solid #cedfdc;border-radius:9px;background:#f5f8f7;cursor:pointer}
+button:hover,button:focus-visible{border-color:#177d78;color:#105f5b}
+button:disabled{opacity:.5;cursor:default}
+.actions{z-index:3;display:flex;gap:4px;padding:4px;background:#f5f8f7ed;border:1px solid #d2e2e0;border-radius:12px;box-shadow:0 3px 14px #17394c26;opacity:.74}
+main:hover .actions,main:focus-within .actions,main:not([data-voice="idle"]) .actions{opacity:1}
+#mic{background:#177d78;color:white;border-color:#177d78;touch-action:none;user-select:none}
+#mic[aria-pressed="true"]{background:#23618b;border-color:#23618b}
+#status:not(:empty){position:absolute;bottom:56px;max-width:94%;z-index:3;padding:5px 9px;border-radius:12px;background:#f5f8f7;color:#17625e;pointer-events:none}
+#status.voice-error{color:#9c4935}
+#bubble{position:absolute;z-index:4;top:7px;left:12px;right:12px;max-height:104px;overflow:auto;padding:11px 13px;background:#f5f8f7f7;border:1px solid #d4e4e2;border-radius:14px;line-height:1.55;box-shadow:0 5px 17px #17394c20}
+#interaction{position:absolute;z-index:4;bottom:58px;left:12px;right:12px;display:flex;gap:6px;align-items:end;background:#f5f8f7;padding:8px;border:1px solid #d2e2e0;border-radius:13px;box-shadow:0 5px 17px #17394c26}
+#draft{width:100%;min-width:0;resize:none;border:1px solid #cedfdc;border-radius:8px;padding:7px;background:white;font:inherit;color:inherit}
+#interaction button{white-space:nowrap;background:#177d78;color:white}

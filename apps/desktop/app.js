@@ -10,7 +10,7 @@
     const emptyDraft = () => ({ prompt: '', project: null, control: null, skill: null, materials: {} });
     const number = value => value.toLocaleString('zh-CN', { maximumFractionDigits: 2 });
 
-    function Settings({ current, close, save, entries, setEntries, manage }) {
+    function Settings({ current, speech, close, save, entries, setEntries, manage }) {
         const dialog = useRef(null);
         const [value, change] = useState({ ...current, key: '' });
         const [settingsError, setSettingsError] = useState('');
@@ -47,6 +47,7 @@
                     placeholder: current.keyConfigured ? '已配置，可输入新密钥' : '输入 MiniMax API 密钥',
                     autoComplete: 'off', onChange: event => update('key', event.target.value) })),
             current.workspace && h(window.GuizhiCoordinates, { entries, setEntries }),
+            speech && h(window.GuizhiSpeechSettings, { current: speech }),
             current.workspace && h('button', { type: 'button', onClick: manage }, '管理业务技能'),
             settingsError && h('p', { role: 'alert', className: 'error' }, settingsError),
             h('button', { className: 'primary', disabled: !value.workspace, type: 'submit' }, '保存设置')));
@@ -173,8 +174,7 @@
         });
         async function submit(event) {
             event.preventDefault();
-            const command = draft.prompt.trim().replace(/[。！!？?\s]+$/g, '');
-            if (['结束本轮', '结束这一轮任务', '结束当前任务', '开始新任务', '开始新的任务'].includes(command)) {
+            if (window.GuizhiTaskCommand(draft.prompt) === 'reset') {
                 startNew();
                 return;
             }
@@ -204,7 +204,7 @@
             setError('');
             setDraft(emptyDraft());
             select(null);
-            if (busy) void api.cancel().then(setState).catch(fail);
+            void api.submit({ prompt: '开始新任务' }).then(setState).catch(fail);
         }
         return h('div', { className: 'shell' },
             h('aside', { className: 'sidebar' },
@@ -247,6 +247,7 @@
                                 h(RoleMaterials, { roles: [{ id: 'inputs', label: '其他材料', kind: 'any', maximum: 30 }],
                                     materials: draft.materials, change: value => update('materials', value), Material, plans: [], fail })),
                             h('div', { className: 'compose-row' },
+                                h('button', { type: 'button', title: '打开语音输入', onClick: () => api.portraitInput().catch(fail) }, '语音'),
                                 h('textarea', { 'aria-label': '办理事项', placeholder: '输入办理事项…', rows: 2,
                                     value: draft.prompt, maxLength: 4000, onChange: event => update('prompt', event.target.value),
                                     onKeyDown: event => {
@@ -263,6 +264,7 @@
             business && h(Business, { catalog, refresh, choose, Material, manage: business === 'manage',
                 initialMarkdown, close: () => { setInitialMarkdown(''); showBusiness(''); } }),
             state && (settings || !state.settings.workspace) && h(Settings, { current: state.settings,
+                speech: state.speech,
                 entries: coordinates, setEntries: setCoordinates,
                 manage: () => { showSettings(false); showBusiness('manage'); },
                 close: () => showSettings(false), save: async value => {

@@ -3,6 +3,7 @@ const { createHash, randomUUID } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { promisify } = require('node:util');
+const { action } = require('./task-commands.js');
 
 const exec = promisify(execFile);
 const cli = path.join(__dirname, '../../src/guizhi/__main__.py');
@@ -44,6 +45,8 @@ class DesktopController {
         this.active = null;
         this.mapView = null;
         this.mapBusy = false;
+        this.conversation = 0;
+        this.focusTask = null;
         this.restore();
     }
 
@@ -55,6 +58,7 @@ class DesktopController {
         if (!this.settings.workspace) return;
         this.settings.workspace = this.externalPath(this.settings.workspace);
         this.tasks = load(this.historyPath(), []);
+        this.focusTask = this.tasks[0]?.id ?? null;
         this.mapView = load(path.join(this.settings.workspace, 'desktop-view.json'), null);
         let changed = false;
         for (const task of this.tasks) {
@@ -73,7 +77,7 @@ class DesktopController {
     state() {
         const { encryptedKey, ...settings } = this.settings;
         return { settings: { ...settings, keyConfigured: Boolean(encryptedKey || process.env.MINIMAX_API_KEY) },
-            tasks: this.tasks, mapView: this.mapView };
+            tasks: this.tasks, mapView: this.mapView, focusTask: this.focusTask, conversation: this.conversation };
     }
 
     configure(input) {
@@ -133,6 +137,7 @@ class DesktopController {
         }
         const task = { id: randomUUID(), title: [...prompt.trim()].slice(0, 32).join(''), prompt: prompt.trim(),
             project, control, skill, materials, previousTask, status: 'running', createdAt: new Date().toISOString() };
+        this.focusTask = task.id;
         this.tasks.unshift(task);
         this.persist();
         const child = fork(path.join(__dirname, 'agent.mjs'), {
@@ -160,6 +165,15 @@ class DesktopController {
             control: control?.file, controlLayer: control?.layer, skill, materials: bindings, previousRun,
             projectPlan: project?.plan || materials.project?.[0]?.plan,
             controlPlan: control?.plan || materials.control?.[0]?.plan } });
+        return this.state();
+    }
+
+    command(input) {
+        if (action(input.prompt) !== 'reset') return this.submit(input);
+        this.cancel();
+        this.conversation += 1;
+        this.focusTask = null;
+        this.onChange(this.state());
         return this.state();
     }
 

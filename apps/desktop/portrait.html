@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>规智</title>
+<link rel="stylesheet" href="/portrait.css">
+<script defer src="/task-commands.js"></script>
+<script type="importmap">{"imports":{"three":"/vendor/three/build/three.module.js","three/addons/":"/vendor/three/examples/jsm/","@pixiv/three-vrm":"/vendor/vrm/lib/three-vrm.module.js"}}</script>
+<script type="module" src="/portrait.js"></script>
+</head>
+<body><main>
+<div class="grip" data-hit title="拖动规智"></div>
+<button id="figure-toggle" type="button" aria-label="打开文字输入" data-hit><span id="figure"></span></button>
+<div id="bubble" hidden role="status" data-hit></div>
+<div id="status" aria-live="polite"></div>
+<div class="actions" data-hit>
+<button type="button" id="mic" aria-pressed="false">按住说话</button>
+<button type="button" id="type">文字</button>
+<button type="button" id="open">工作台</button>
+<button type="button" id="play" hidden>播报</button>
+<button type="button" id="stop">静音</button>
+</div>
+<form id="interaction" hidden data-hit>
+<textarea id="draft" aria-label="办理事项" placeholder="告诉规智要办什么" rows="2" maxlength="4000"></textarea>
+<button type="submit">发送</button>
+</form>
+</main></body>
+</html>

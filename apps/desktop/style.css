@@ -104,6 +104,10 @@ dialog .primary{justify-self:end}
 .skill-editor textarea{max-height:280px;font-family:monospace;font-size:13px}
 .skill-materials,.materials{max-height:118px;overflow:auto}
 .approval-results{display:grid;gap:6px;margin-block:12px}
+.voice-settings{padding:9px 0;border-top:1px solid #dbe8e3}
+.voice-settings summary{cursor:pointer;padding:5px 0}
+.voice-fields{display:grid;gap:9px;padding-top:8px}
+dialog label.voice-toggle{display:flex;align-items:center;gap:7px}
 .finding{padding:6px 0;border-top:1px solid #dbe8e3}
 .finding>button{display:flex;gap:12px;justify-content:space-between;text-align:left;width:100%}
 .finding>small{color:#4d6c67}
