@@ -193,7 +193,7 @@ async function startDesktop(options) {
     bind('capability', operation => controller.python('capability-show', operation));
     bind('skillShow', reference => controller.python('skill-show', reference));
     bind('skillPreview', markdown => controller.skillRequest('skill-preview', markdown));
-    bind('skillPublish', (markdown, materials) => controller.skillRequest('skill-publish', markdown, materials));
+    bind('skillPublish', (markdown, materials, parameters) => controller.skillRequest('skill-publish', markdown, materials, parameters));
     const skillFile = { name: '业务技能', extensions: ['md'] };
     bind('skillOpen', async () => {
         const pick = await dialog.showOpenDialog(window, { properties: ['openFile'], filters: [skillFile] });

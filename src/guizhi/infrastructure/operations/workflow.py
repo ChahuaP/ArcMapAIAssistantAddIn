@@ -22,7 +22,12 @@ def committed(record):
     return record["result"]
 
 
-def resolve_value(value, records):
+def resolve_value(value, records, skill_parameters):
+    if isinstance(value, str) and value.startswith("$param."):
+        name = value[7:]
+        if name not in skill_parameters:
+            raise ValueError(f"Missing declared skill parameter: {name}")
+        return skill_parameters[name]
     if isinstance(value, str) and value.startswith(("$run.", "$selection.")):
         mode, name = value.split(".", 1)
         record = records.get(name)
@@ -35,9 +40,9 @@ def resolve_value(value, records):
             raise ValueError(f"Step {name} has no selection")
         return result
     if isinstance(value, list):
-        return [resolve_value(item, records) for item in value]
+        return [resolve_value(item, records, skill_parameters) for item in value]
     if isinstance(value, dict):
-        return {key: resolve_value(item, records) for key, item in value.items()}
+        return {key: resolve_value(item, records, skill_parameters) for key, item in value.items()}
     return value
 
 
@@ -123,7 +128,7 @@ def execute(ctx, specification: dict):
                 inputs.extend(sealed.get(name, []))
             else:
                 inputs.append(material_from(ctx, records[name]))
-        parameters = resolve_value(step.parameters, records)
+        parameters = resolve_value(step.parameters, records, specification.get("skill_parameters", {}))
         layers = {item["layer"] for item in inputs if item["layer"]}
         operation = OPERATIONS.get(step.operation) or CAPABILITIES[step.operation]
         ctx.progress("workflow_step_started", step_id=step.id, operation=step.operation,
@@ -166,7 +171,7 @@ def execute(ctx, specification: dict):
     outputs = {}
     for record in records.values():
         for ref in record["result"]["evidence"]:
-            if ref["step"] in {"export", "report", "map", "table", "view", "selection", "case"}:
+            if ref["step"] in {"export", "report", "map", "table", "view", "selection", "case", "package"}:
                 outputs[ref["step"]] = (record["id"], ref["sha256"])
     for kind, (run_id, checksum) in outputs.items():
         src = read_artifact(ctx.workspace, run_id, kind)

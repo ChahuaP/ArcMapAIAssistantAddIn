@@ -5,7 +5,8 @@
     const reference = item => item.id + '@' + item.revision;
     const domains = { data: '数据', vector: '空间分析', geometry: '几何', table: '属性表',
         crs: '坐标', presentation: '地图与版面', evidence: '留痕', system: '运行状态', semantics: '审批材料',
-        knowledge: '业务知识', governance: '依据与解释', business: '业务' };
+        knowledge: '业务知识', governance: '依据与解释', raster: '栅格', cad: 'CAD',
+        annual: '年度地类', delivery: '共享交付', business: '业务' };
 
     function RoleMaterials({ roles, materials, change, Material, plans, fail }) {
         return roles.map(role => {
@@ -31,6 +32,7 @@
         const [markdown, setMarkdown] = useState(initialMarkdown || '');
         const [preview, setPreview] = useState(null);
         const [samples, setSamples] = useState({});
+        const [parameters, setParameters] = useState({});
         const [busy, setBusy] = useState(false);
         const [notice, setNotice] = useState('');
         const [error, setError] = useState('');
@@ -43,6 +45,7 @@
             setMarkdown(text);
             setPreview(null);
             setSamples({});
+            setParameters({});
             setNotice('');
             setEditing(true);
         }
@@ -51,10 +54,15 @@
             setError('');
             try { await action(); } catch (issue) { showError(issue); } finally { setBusy(false); }
         }
-        const publishable = preview && preview.materials.every(role => {
+        const fields = Object.entries(preview?.parameters || {});
+        const publishable = preview && fields.every(([name]) => parameters[name]?.trim()) && preview.materials.every(role => {
             const items = samples[role.id] || [];
             return items.length >= role.minimum && items.every(item => item.layer || ['raster', 'cad', 'document'].includes(item.kind));
         });
+        function sampleValue(text) {
+            try { return JSON.parse(text); }
+            catch { return text.trim(); }
+        }
         return h('dialog', { className: 'business-dialog', ref: dialog, onCancel: event => {
             event.preventDefault();
             if (!busy) close();
@@ -83,8 +91,12 @@
             preview && h('section', { className: 'skill-samples' },
                 h('h3', null, '验证样本'),
                 h(RoleMaterials, { roles: preview.materials, materials: samples, change: setSamples, Material, plans: [], fail: showError }),
+                ...fields.map(([name, label]) => h('label', { key: name }, label,
+                    h('input', { value: parameters[name] || '', disabled: busy,
+                        onChange: event => setParameters(old => ({ ...old, [name]: event.target.value })) }))),
                 h('button', { className: 'primary', disabled: busy || !publishable, onClick: () => perform(async () => {
-                    const result = await api.skillPublish(markdown, samples);
+                    const result = await api.skillPublish(markdown, samples,
+                        Object.fromEntries(fields.map(([name]) => [name, sampleValue(parameters[name])])));
                     await refresh();
                     setNotice(result.title + ' v' + result.revision + ' 已发布');
                 }) }, busy ? '正在处理' : '验证并发布'))),

@@ -11,7 +11,8 @@ from guizhi.domain.skills import Skill, Step
 from guizhi.infrastructure.workspace import SOURCE_ROOT, Workspace
 
 SKILLS = SOURCE_ROOT / "resources" / "skills"
-BUILT_INS = ("control-check.md",)
+BUILT_INS = ("control-check.md", "farmland-balance.md", "shared-delivery.md",
+             "cad-coordinates.md", "annual-land.md", "permit-history.md")
 OPERATIONS = {**{name: spec for name, spec in CAPABILITIES.items() if name != "workflow.execute"},
               "control_check": Capability("管控线核查", 2, 2), "vector_inventory": Capability("矢量清点")}
 
@@ -85,7 +86,8 @@ def catalog(workspace, *, include_history=False):
 
 
 def summaries(workspace):
-    return [{key: item[key] for key in ("id", "title", "aliases", "materials", "revision")} for item in catalog(workspace)]
+    return [{**{key: item[key] for key in ("id", "title", "aliases", "materials", "revision")},
+             "parameters": item.get("parameters", {})} for item in catalog(workspace)]
 
 
 def get_skill(workspace, reference):
@@ -97,7 +99,8 @@ def get_skill(workspace, reference):
     raise ValueError("Skill version not found")
 
 
-def specification(workspace, materials, *, skill=None, steps=None, candidate=None, coordinate_plans=None):
+def specification(workspace, materials, *, skill=None, steps=None, candidate=None, coordinate_plans=None,
+                  skill_parameters=None):
     selected = candidate or (get_skill(workspace, skill) if skill else None)
     clean = {}
     for name, group in materials.items():
@@ -113,6 +116,11 @@ def specification(workspace, materials, *, skill=None, steps=None, candidate=Non
     extra = [Step.model_validate(step) for step in steps or []]
     fixed = [Step.model_validate(step) for step in selected["steps"]] if selected else []
     required = selected["materials"] if selected else []
+    values = skill_parameters or {}
+    declared = selected.get("parameters", {}) if selected else {}
+    if not isinstance(values, dict) or values.keys() != declared.keys():
+        raise ValueError("Supply exactly the declared skill parameters: " + ", ".join(declared))
+    json.dumps(values, allow_nan=False)
     for role in required:
         size = len(clean.get(role["id"], []))
         if not role["minimum"] <= size <= role["maximum"]:
@@ -122,14 +130,14 @@ def specification(workspace, materials, *, skill=None, steps=None, candidate=Non
     validate_steps(fixed + extra, set(clean) | {role["id"] for role in required})
     return {"mode": "combined" if selected and extra else "fixed" if selected else "free",
             "materials": clean, "skill": selected, "steps": [step.model_dump(mode="json") for step in fixed + extra],
-            "coordinate_plans": coordinate_plans or {}, "model_provenance": None}
+            "coordinate_plans": coordinate_plans or {}, "skill_parameters": values, "model_provenance": None}
 
 
 def execute(root, materials, *, skill=None, steps=None, candidate=None, coordinate_plans=None,
-            cancel_requested=None, key=None):
+            skill_parameters=None, cancel_requested=None, key=None):
     workspace = Workspace(root, create=True)
     plan = specification(workspace, materials, skill=skill, steps=steps, candidate=candidate,
-                         coordinate_plans=coordinate_plans)
+                         coordinate_plans=coordinate_plans, skill_parameters=skill_parameters)
     return submit(workspace, plan, cancel_requested=cancel_requested, key=key)
 
 
@@ -140,10 +148,10 @@ def submit(workspace, plan, *, cancel_requested=None, key=None):
                                           "idempotency_key": key}, cancel_requested)
 
 
-def publish(root, text, materials):
+def publish(root, text, materials, skill_parameters=None):
     workspace = Workspace(root, create=True)
     draft = entry(text, 0)
-    result = execute(workspace.root, materials, candidate=draft)
+    result = execute(workspace.root, materials, candidate=draft, skill_parameters=skill_parameters)
     if result["status"] != "succeeded":
         raise ValueError(f"Skill sample failed: {result['error'] or result['status']}")
     manifest = next(item for item in result["result"]["evidence"] if item["step"] == "workflow")
@@ -176,7 +184,8 @@ def propose(workspace, run_id, title):
                 for item in manifest["steps"] for ref in workspace.read(item["run_id"])["result"]["evidence"]
                 if ref["step"] in {"export", "map", "report", "table", "view", "selection"}]
     payload = {"id": "task-" + run_id[:12], "title": title, "materials": list(roles.values()),
-               "steps": plan["steps"], "rules": source.get("rules", []), "evidence": evidence[:16]}
+               "steps": plan["steps"], "parameters": source.get("parameters", {}),
+               "rules": source.get("rules", []), "evidence": evidence[:16]}
     markdown = "---\n" + yaml.safe_dump(payload, allow_unicode=True, sort_keys=False) + "---\n"
     parse_skill(markdown)
     return {"source_run": run_id, "markdown": markdown}

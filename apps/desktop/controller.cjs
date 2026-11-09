@@ -197,14 +197,14 @@ class DesktopController {
         return this.settings.workspace ? this.python('crs-list') : [];
     }
 
-    async skillRequest(command, markdown, materials) {
+    async skillRequest(command, markdown, materials, parameters) {
         if (!this.settings.workspace || this.skillBusy) throw new Error('请先结束当前操作');
         if (typeof markdown !== 'string' || Buffer.byteLength(markdown) > 65536) throw new Error('技能文件最多 64 KB');
         const file = path.join(this.settings.workspace, 'skill-' + randomUUID());
         this.skillBusy = true;
         try {
             if (command === 'skill-preview') fs.writeFileSync(file, markdown, { flag: 'wx' });
-            else save(file, { text: markdown, materials: materialBindings(materials) });
+            else save(file, { text: markdown, materials: materialBindings(materials), skill_parameters: parameters });
             return await this.python(command, file);
         } finally {
             fs.rmSync(file, { force: true });
@@ -263,7 +263,7 @@ class DesktopController {
                 task.hasReport = Boolean(checkedArtifact(record, 'report'));
                 const findings = checkedArtifact(record, 'case');
                 if (findings) task.approval = JSON.parse(findings.bytes);
-                task.deliveries = record.result.evidence.filter(item => ['export', 'table', 'workflow'].includes(item.step))
+                task.deliveries = record.result.evidence.filter(item => ['export', 'table', 'workflow', 'package'].includes(item.step))
                     .map(item => item.step);
             }
         } catch {

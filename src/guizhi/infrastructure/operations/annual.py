@@ -1,9 +1,13 @@
 """Measure land-class areas and transitions on a common, non-overlapping survey grid."""
 from collections import defaultdict
+import json
 from math import fsum
 
 import geopandas as gpd
 import shapely
+
+from guizhi.infrastructure.operations.evidence import read_artifact
+from guizhi.infrastructure.operations.report import publish_report
 
 
 def classified(frame, field, codes):
@@ -35,7 +39,8 @@ def summarize(ctx, years: list[int], field: str, classifications: dict[int, dict
         for name, group in frame.groupby("land_class", sort=True):
             rows.append({"year": year, "land_class": name, "area_m2": fsum(group.area)})
     ctx.json("land-classes.json", {"unit": "m²", "rows": rows}, "table")
-    return {"statistics": {"row_count": len(rows), "year_count": len(years)}}
+    return {"source_revisions": ctx.selection_hashes,
+            "statistics": {"row_count": len(rows), "year_count": len(years)}}
 
 
 def compare(ctx, from_year: int, to_year: int, field: str, classifications: dict[int, dict[str, str]]):
@@ -62,6 +67,29 @@ def compare(ctx, from_year: int, to_year: int, field: str, classifications: dict
                                   "common_coverage_m2": common, "only_from_m2": max(0, fsum(left.area) - common),
                                   "only_to_m2": max(0, fsum(right.area) - common), "rows": rows}, "table")
     ctx.publish(transitions)
-    return {"statistics": {"row_count": len(rows), "common_coverage_m2": common,
+    return {"source_revisions": ctx.selection_hashes,
+            "statistics": {"row_count": len(rows), "common_coverage_m2": common,
                             "changed_area_m2": fsum(row["area_m2"] for row in rows
                                                     if row["from_class"] != row["to_class"])}}
+
+
+def report(ctx, summary_run: str, changes_run: str):
+    records = [ctx.workspace.read(run) for run in (summary_run, changes_run)]
+    if [item["task"]["operation"] for item in records] != ["annual.summarize", "annual.compare"]:
+        raise ValueError("Supply verified annual summaries and transitions")
+    left, right = (record["task"]["request"]["parameters"] for record in records)
+    if (left["years"] != [right["from_year"], right["to_year"]] or
+            any(left[key] != right[key] for key in ("field", "classifications")) or
+            records[0]["result"]["source_revisions"] != records[1]["result"]["source_revisions"]):
+        raise ValueError("Annual summary and transitions must share input revisions and classification rules")
+    summary = json.loads(read_artifact(ctx.workspace, summary_run, "table").read_text(encoding="utf-8"))
+    changes = json.loads(read_artifact(ctx.workspace, changes_run, "table").read_text(encoding="utf-8"))
+    years = {item["year"] for item in summary["rows"]}
+    if years != {changes["from_year"], changes["to_year"]}:
+        raise ValueError("Annual summary and change periods differ")
+    rows = [(str(item["year"]) + " " + item["land_class"], "年度面积", item["area_m2"]) for item in summary["rows"]]
+    rows += [(item["from_class"] + " → " + item["to_class"], "共同覆盖内变化", item["area_m2"])
+             for item in changes["rows"]]
+    publish_report(ctx, "年度地类面积与变化", ("类别", "统计口径", "面积（m²）"), rows, measure=3,
+                   note=f"共同覆盖 {changes['common_coverage_m2']:.2f} m²。单年覆盖以原有资料为准。")
+    return {"statistics": {"row_count": len(rows), "year_count": len(years)}}

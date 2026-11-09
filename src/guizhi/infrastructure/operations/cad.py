@@ -8,6 +8,7 @@ import shapely
 
 from guizhi.infrastructure.coordinates import apply_plan
 from guizhi.infrastructure.crs_catalog import get_plan
+from guizhi.infrastructure.operations.report import publish_report
 
 VERSIONS = {"AC1009", "AC1015", "AC1018", "AC1021", "AC1024", "AC1027", "AC1032"}
 
@@ -57,3 +58,6 @@ def convert(ctx, source_crs: str, layer: str | None = None, plan: str | None = N
     ctx.json("drawing.json", {"version": version, "selected_layer": layer,
                               "source_crs": source_crs, "output_crs": frame.crs.to_wkt(), "force_2d": force_2d}, "drawing")
     ctx.publish(frame)
+    counts = frame.groupby("Layer").size()
+    publish_report(ctx, "CAD 坐标整理", ("图层", "实体数"), [(str(name), int(count)) for name, count in counts.items()],
+                   measure=2, note=f"DXF {version}。坐标依据 {plan or source_crs}。")

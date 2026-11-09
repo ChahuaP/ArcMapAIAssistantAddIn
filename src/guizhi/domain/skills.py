@@ -46,6 +46,7 @@ class Skill(Strict):
     title: Title
     aliases: list[Title] = Field(default_factory=list, max_length=16)
     materials: list[Role] = Field(max_length=12)
+    parameters: dict[Slug, Title] = Field(default_factory=dict, max_length=20)
     steps: list[Step] = Field(min_length=1, max_length=12)
     rules: list[Rule] = Field(default_factory=list, max_length=16)
     evidence: list[Evidence] = Field(default_factory=list, max_length=16)

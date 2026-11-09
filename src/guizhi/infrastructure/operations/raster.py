@@ -129,7 +129,8 @@ def clip(ctx, all_touched: bool = False):
         shapes = list(frame.geometry)
         extent = geometry_window(src, shapes)
         write_windows(ctx, out, src, extent, shapes, all_touched)
-    return deliver(ctx, out, {"type": "clip", "pixel_inclusion": "all_touched" if all_touched else "center"})
+    result = deliver(ctx, out, {"type": "clip", "pixel_inclusion": "all_touched" if all_touched else "center"})
+    return {**result, "scope_revision": ctx.selection_hashes[0]}
 
 
 def reproject_raster(ctx, target_crs, resampling, resolution):

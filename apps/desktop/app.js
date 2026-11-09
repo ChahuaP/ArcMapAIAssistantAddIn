@@ -154,7 +154,7 @@
                     task.hasReport && h('button', { className: 'report', onClick: () => api.report(task.id).catch(fail) }, '查看报告 ↗'),
                     ...(task.deliveries || []).map(kind => h('button', { key: kind, className: 'report',
                         onClick: () => api.delivery(task.id, kind).catch(fail) },
-                        { export: '成果数据 ↗', table: '属性表 ↗', workflow: '办理留痕 ↗' }[kind]))));
+                        { export: '成果数据 ↗', table: '属性表 ↗', workflow: '办理留痕 ↗', package: '共享数据包 ↗' }[kind]))));
         }
         const detail = { missing_materials: '请按业务要求补齐材料。',
             invalid_materials: '请确认材料、图层和办理参数。', no_result: '请补充办理要求或从业务能力中选择。',

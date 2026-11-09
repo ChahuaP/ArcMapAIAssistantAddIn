@@ -19,7 +19,8 @@ READ_OPERATIONS = {
     "presentation.export_table",
     "raster.statistics", "cad.inspect", "annual.summarize", "annual.compare",
 }
-RUN_ARGUMENTS = {"document_run", "catalog_run", "case_run", "rules_run", "spatial_run", "prior_case"}
+RUN_ARGUMENTS = {"document_run", "catalog_run", "case_run", "rules_run", "spatial_run", "prior_case",
+                 "history_run", "summary_run", "changes_run", "vector_run", "raster_run", "attachment_run"}
 VALIDATOR_REVISION = "1.0.0"
 
 

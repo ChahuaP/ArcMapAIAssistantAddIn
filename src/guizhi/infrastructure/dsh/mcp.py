@@ -188,10 +188,11 @@ def main():
         return {name: [spec.title, spec.minimum, spec.maximum] for name, spec in skills.OPERATIONS.items()
                 if not domain or name.startswith(domain + ".")}
 
-    def run_plan(mode, selected, extra, bound=None, coordinate_plans=None):
+    def run_plan(mode, selected, extra, bound=None, coordinate_plans=None, skill_parameters=None):
         try:
             plan = skills.specification(workspace, materials if bound is None else bound, skill=selected,
-                                        steps=extra, coordinate_plans=plans if coordinate_plans is None else coordinate_plans)
+                                        steps=extra, coordinate_plans=plans if coordinate_plans is None else coordinate_plans,
+                                        skill_parameters=skill_parameters)
             if mode != plan["mode"]:
                 raise ValueError("Mode requires the corresponding skill and steps")
         except (ValueError, OSError) as exc:
@@ -278,13 +279,15 @@ def main():
 
     @server.tool
     def execute_workflow(mode: Literal["fixed", "free", "combined"], skill: str | None = None,
-                         steps: list[Step] | None = None) -> dict:
+                         steps: list[Step] | None = None, skill_parameters: dict | None = None) -> dict:
         """整项任务一次提交。fixed=已发布技能；free=步骤；combined=已发布技能和附加步骤。
         步骤 inputs 必须是字符串数组，如 ["material.project"]、["step.check"]，parameters 为对象。
+        固定技能的 skill_parameters 只填目录声明的参数。坐标、年份、分类和业务阈值必须有用户或既有材料依据。
         """
         if args.skill and skill and skill not in {args.skill, args.skill.partition("@")[0]}:
             return input_issue("invalid_materials", "请使用已选技能 " + args.skill)
-        return run_plan(mode, args.skill or skill, [step.model_dump(mode="json") for step in steps or []])
+        return run_plan(mode, args.skill or skill, [step.model_dump(mode="json") for step in steps or []],
+                        skill_parameters=skill_parameters)
 
     server.run(transport="stdio", show_banner=False)
 
