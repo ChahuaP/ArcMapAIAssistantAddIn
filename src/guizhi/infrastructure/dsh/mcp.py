@@ -103,7 +103,9 @@ def main():
     @server.tool
     def read_approval_materials(terms: list[str] | None = None) -> dict:
         """读取绑定的审批文档，返回可引用的 document_run 和原文片段 ID。terms 用于查找文号、条款和原文关键词。"""
-        documents = [item for group in materials.values() for item in group if not item.get("layer")]
+        from guizhi.domain.capabilities import material_kind
+
+        documents = [item for group in materials.values() for item in group if material_kind(item["file"]) == "document"]
         if not documents:
             return {"status": "missing_materials", "message": "请添加审批材料"}
         record, reused = reuse_job(workspace, "semantics.read_documents", documents, {}, lambda: run_operation(
@@ -118,16 +120,24 @@ def main():
 
     @server.tool
     def describe_bound_layers() -> dict:
-        """查看绑定图层的字段、几何类型和坐标系。"""
+        """查看已绑定材料类型、矢量字段或栅格的坐标系、波段与分辨率。"""
         import pyogrio
+        from guizhi.domain.capabilities import material_kind
+        from guizhi.infrastructure.operations.raster import metadata
 
         result = {}
         for role, group in materials.items():
             for item in group:
-                if item.get("layer"):
+                kind = material_kind(item["file"])
+                if kind == "vector":
                     info = pyogrio.read_info(item["file"], layer=item["layer"])
-                    result.setdefault(role, []).append({"fields": info["fields"].tolist(),
-                        "geometry": info["geometry_type"], "crs": info["crs"]})
+                    description = {"fields": info["fields"].tolist(), "geometry": info["geometry_type"], "crs": info["crs"]}
+                elif kind == "raster":
+                    info = metadata(item["file"])
+                    description = {key: info[key] for key in ("crs", "bands", "width", "height", "resolution")}
+                else:
+                    description = {}
+                result.setdefault(role, []).append({"kind": kind, **description})
         (dispatch / "discovery").touch()
         return result
 

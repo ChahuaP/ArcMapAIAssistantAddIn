@@ -53,7 +53,7 @@
         }
         const publishable = preview && preview.materials.every(role => {
             const items = samples[role.id] || [];
-            return items.length >= role.minimum && items.every(item => item.layer || item.kind === 'document');
+            return items.length >= role.minimum && items.every(item => item.layer || ['raster', 'cad', 'document'].includes(item.kind));
         });
         return h('dialog', { className: 'business-dialog', ref: dialog, onCancel: event => {
             event.preventDefault();

@@ -1,10 +1,25 @@
 """Active independent operations. Identifiers are canonical, including at the tool interface."""
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 Hash = Annotated[str, StringConstraints(pattern=r"^[a-f0-9]{64}$")]
+
+MATERIAL_FORMATS = {
+    ".gpkg": "vector", ".tif": "raster", ".tiff": "raster", ".dxf": "cad",
+    ".pdf": "document", ".docx": "document", ".xlsx": "document",
+}
+
+
+def material_kind(file):
+    suffix = Path(file).suffix.lower()
+    if suffix == ".dwg":
+        raise ValueError("DWG decoding is unavailable. Export an exchange DXF first.")
+    if suffix not in MATERIAL_FORMATS:
+        raise ValueError(f"Unsupported material format: {suffix}")
+    return MATERIAL_FORMATS[suffix]
 
 
 @dataclass(frozen=True)
@@ -14,6 +29,7 @@ class Capability:
     maximum: int = 1
     edit: bool = False
     version: str = "1.0.0"
+    kinds: tuple[str, ...] = ("vector",)
 
 
 CAPABILITIES = {
@@ -58,6 +74,15 @@ CAPABILITIES = {
     "geometry.append_stars": Capability("追加星形", edit=True),
     "geometry.explode": Capability("拆分多部件"),
     "geometry.repair": Capability("修复几何", edit=True),
+    "raster.statistics": Capability("栅格信息、波段统计与 NoData 检查", kinds=("raster",)),
+    "raster.clip": Capability("按范围裁切栅格", 2, 2, kinds=("raster", "vector")),
+    "raster.reproject": Capability("栅格重投影与重采样", kinds=("raster",)),
+    "raster.mosaic": Capability("拼接已对齐的栅格", 2, 32, kinds=("raster",)),
+    "cad.inspect": Capability("读取 DXF 版本、图层和几何类型", kinds=("cad",)),
+    "cad.convert": Capability("整理 DXF 图层和已知坐标系", kinds=("cad",)),
+    "annual.summarize": Capability("汇总年度地类面积", 1, 32),
+    "annual.compare": Capability("计算年度地类变化矩阵", 2, 2),
+    "delivery.check_attachments": Capability("核查共享交付附件", 0, 32, kinds=("document",)),
     "presentation.add_layer": Capability("添加图层"),
     "presentation.set_visibility": Capability("设置图层可见性", 0, 0),
     "presentation.remove_layer": Capability("移除图层", 0, 0),
@@ -76,7 +101,7 @@ CAPABILITIES = {
     "system.health": Capability("查询独立运行状态", 0, 0),
     "evidence.verify": Capability("验证已交付证据", 0, 0),
     "evidence.history": Capability("查询作业历史", 0, 0),
-    "semantics.read_documents": Capability("读取审批材料", 1, 32),
+    "semantics.read_documents": Capability("读取审批材料", 1, 32, kinds=("document",)),
     "semantics.approval_case": Capability("关联审批材料、地块与结论"),
     "knowledge.register_catalog": Capability("登记规则、术语和模型适用范围", 0, 0),
     "knowledge.extract_facts": Capability("提取并核对材料记载", 0, 0),
@@ -94,6 +119,13 @@ class Material(BaseModel):
     file: str
     layer: Annotated[str, StringConstraints(min_length=1, max_length=255)] | None = None
     revision: Hash | None = None
+
+    @property
+    def kind(self):
+        kind = material_kind(self.file)
+        if (self.layer is not None) != (kind == "vector"):
+            raise ValueError("GeoPackage materials require an explicit layer; other formats use a file")
+        return kind
 
 
 class OperationRequest(BaseModel):

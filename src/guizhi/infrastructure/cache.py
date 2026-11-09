@@ -17,6 +17,7 @@ READ_OPERATIONS = {
     "semantics.approval_case", "knowledge.extract_facts", "knowledge.map_terms", "knowledge.match_objects",
     "knowledge.find_rules", "knowledge.model_scope", "governance.explain_findings",
     "presentation.export_table",
+    "raster.statistics", "cad.inspect", "annual.summarize", "annual.compare",
 }
 RUN_ARGUMENTS = {"document_run", "catalog_run", "case_run", "rules_run", "spatial_run", "prior_case"}
 VALIDATOR_REVISION = "1.0.0"
@@ -34,6 +35,10 @@ def file_stamp(path):
 def input_signature(item):
     path = Path(item["file"])
     layer = item.get("layer")
+    if path.suffix.lower() in {".tif", ".tiff"}:
+        from guizhi.infrastructure.operations.raster import check_source
+
+        check_source(path)
     # SQLite writers can modify a sidecar while leaving the main file untouched.
     sidecars = [path.with_name(path.name + suffix) for suffix in ("-wal", "-journal")] if layer else []
     if any(sidecar.exists() for sidecar in sidecars):

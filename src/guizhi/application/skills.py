@@ -167,7 +167,10 @@ def propose(workspace, run_id, title):
     roles = {role["id"]: role for role in source.get("materials", [])}
     for name, materials in plan["materials"].items():
         if name not in roles:
-            roles[name] = {"id": name, "label": name, "geometry": "any", "coordinate": "any",
+            kinds = {Material.model_validate(item).kind for item in materials}
+            if len(kinds) > 1:
+                raise ValueError("Save a skill with one material type per role")
+            roles[name] = {"id": name, "label": name, "kind": next(iter(kinds), "vector"), "geometry": "any", "coordinate": "any",
                            "minimum": len(materials), "maximum": max(1, len(materials))}
     evidence = [{"step": item["id"], "kind": ref["step"]}
                 for item in manifest["steps"] for ref in workspace.read(item["run_id"])["result"]["evidence"]

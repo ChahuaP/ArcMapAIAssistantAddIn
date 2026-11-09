@@ -14,7 +14,7 @@ class Strict(BaseModel):
 class Role(Strict):
     id: Slug
     label: Title
-    kind: Literal["vector", "document"] = "vector"
+    kind: Literal["vector", "raster", "cad", "document"] = "vector"
     geometry: Literal["any", "point", "line", "polygon"] = "any"
     coordinate: Literal["any", "defined", "projected_meters"] = "defined"
     minimum: Annotated[int, Field(ge=0, le=32)] = 1

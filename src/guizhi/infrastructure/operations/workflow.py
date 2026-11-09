@@ -8,7 +8,7 @@ from pyproj import CRS
 
 from guizhi.application.skills import validate_steps
 from guizhi.application.tasks import run_operation, run_vector
-from guizhi.domain.capabilities import CAPABILITIES
+from guizhi.domain.capabilities import CAPABILITIES, Material
 from guizhi.domain.operations import OPERATIONS
 from guizhi.domain.skills import Step
 from guizhi.infrastructure.cache import record_dependencies, reuse_job
@@ -44,7 +44,7 @@ def resolve_value(value, records):
 def material_from(ctx, record):
     file = read_artifact(ctx.workspace, record["id"], "export")
     data = committed(record)
-    return {"file": str(file), "layer": data["export_layer"],
+    return {"file": str(file), "layer": data.get("export_layer"),
             "revision": data.get("data_revision") or data_revision(file)}
 
 
@@ -65,18 +65,28 @@ def execute(ctx, specification: dict):
         return False
 
     roles = {role["id"]: role for role in skill["materials"]} if skill else {}
-    document_number = 0
+    file_number = 0
     for role, group in groups.items():
         sealed[role], seals[role] = [], []
         for item in group:
             ctx.check()
             ctx.progress("material_reading", role=role, layer=item["layer"])
             requirement = roles.get(role)
-            if requirement and (requirement["kind"] == "document") != (item["layer"] is None):
+            kind = Material.model_validate(item).kind
+            if requirement and requirement["kind"] != kind:
                 raise ValueError(f"Material {role} has the wrong format")
-            if item["layer"] is None:
-                document_number += 1
-                file, ref = ctx.seal_document(item["file"], item["revision"], document_number)
+            if kind != "vector":
+                file_number += 1
+                if kind == "document":
+                    file, ref = ctx.seal_document(item["file"], item["revision"], file_number)
+                else:
+                    file, ref = ctx.seal_file(kind, item["file"], item["revision"], file_number)
+                    if kind == "raster" and requirement and requirement["coordinate"] == "projected_meters":
+                        from guizhi.infrastructure.operations.raster import metadata
+
+                        crs = CRS(metadata(file)["crs"])
+                        if not crs.is_projected or any(axis.unit_conversion_factor != 1 for axis in crs.axis_info[:2]):
+                            raise ValueError(f"Material {role} requires a projected coordinate system in metres")
                 sealed[role].append({"file": str(file), "layer": None, "revision": ref["sha256"]})
                 seals[role].append({"run_id": ctx.job["run_id"], "artifact": ref["step"]})
                 continue

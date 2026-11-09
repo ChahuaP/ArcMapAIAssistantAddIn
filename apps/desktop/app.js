@@ -199,7 +199,7 @@
         const skill = draft.skillDefinition;
         const materialsReady = !skill || skill.materials.every(role => {
             const items = draft.materials[role.id] || [];
-            return items.length >= role.minimum && items.every(item => item.layer || item.kind === 'document');
+            return items.length >= role.minimum && items.every(item => item.layer || ['raster', 'cad', 'document'].includes(item.kind));
         });
         async function submit(event) {
             event.preventDefault();

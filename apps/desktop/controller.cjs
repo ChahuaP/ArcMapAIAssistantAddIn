@@ -9,6 +9,8 @@ const { visualRecipe } = require('./visual-recipes.cjs');
 
 const exec = promisify(execFile);
 const cli = path.join(__dirname, '../../src/guizhi/__main__.py');
+const formats = { '.gpkg': 'vector', '.pdf': 'document', '.docx': 'document', '.xlsx': 'document',
+    '.tif': 'raster', '.tiff': 'raster', '.dxf': 'cad' };
 
 function load(file, initial) {
     return fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : initial;
@@ -121,13 +123,15 @@ class DesktopController {
     }
 
     async describe(file) {
-        if (['.pdf', '.docx', '.xlsx'].includes(path.extname(file).toLowerCase())) {
+        const kind = formats[path.extname(file).toLowerCase()];
+        if (!kind) throw new Error('请选择 GeoPackage、GeoTIFF、DXF 或审批文档');
+        if (kind !== 'vector') {
             if (!fs.statSync(file).isFile()) throw new Error('请选择材料文件');
-            return { file, name: path.basename(file), kind: 'document', layer: null, layers: [] };
+            return { file, name: path.basename(file), kind, layer: null, layers: [] };
         }
         const layers = await this.python('layers', file);
         if (!layers.length) throw new Error('此文件没有可用的矢量图层');
-        return { file, name: path.basename(file), layers, layer: layers.length === 1 ? layers[0] : '' };
+        return { file, name: path.basename(file), kind, layers, layer: layers.length === 1 ? layers[0] : '' };
     }
 
     submit({ prompt, project, control, skill, materials = {}, previousTask }) {
@@ -323,9 +327,9 @@ class DesktopController {
 
 function materialBindings(groups) {
     return Object.fromEntries(Object.entries(groups).filter(([, items]) => items.length).map(([role, items]) => [role, items.map(item => {
-        if (!item?.file || !path.isAbsolute(item.file) ||
-                (item.kind === 'document' ? !['.pdf', '.docx', '.xlsx'].includes(path.extname(item.file).toLowerCase())
-                    : !item.layers?.includes(item.layer))) {
+        const kind = item?.file && formats[path.extname(item.file).toLowerCase()];
+        if (!kind || !path.isAbsolute(item.file) ||
+                (kind === 'vector' ? !item.layers?.includes(item.layer) : item.layer !== null)) {
             throw new Error('请选择材料图层');
         }
         return { file: item.file, layer: item.layer };

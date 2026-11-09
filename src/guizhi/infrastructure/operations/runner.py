@@ -68,12 +68,17 @@ class Execution:
         self.check = check
         self.frames, self.datasets, self.evidence = [], [], []
         self.documents = []
+        self.rasters, self.drawings = [], []
         self.info = []
         self.selection_hashes = []
         self.result = {}
         for i, material in enumerate(request.inputs):
-            if material.layer is None:
+            if material.kind == "document":
                 self.documents.append(self.seal_document(material.file, material.revision, i + 1))
+                continue
+            if material.kind in {"raster", "cad"}:
+                file, _ = self.seal_file(material.kind, material.file, material.revision, i + 1)
+                (self.rasters if material.kind == "raster" else self.drawings).append(file)
                 continue
             frame, info, revision, evidence = import_layer(
                 material.file, material.layer, directory, f"input-{i + 1}.gpkg", job["id"], check,
@@ -90,18 +95,26 @@ class Execution:
         progress("inputs_sealed", count=len(request.inputs))
 
     def seal_document(self, source, expected, number):
+        if Path(source).stat().st_size > 50 << 20:
+            raise ValueError("Expected a PDF, DOCX or XLSX document up to 50 MB")
+        return self.seal_file("document", source, expected, number)
+
+    def seal_file(self, kind, source, expected, number):
         self.check()
         source = Path(source)
-        if source.suffix.lower() not in {".pdf", ".docx", ".xlsx"} or source.stat().st_size > 50 << 20:
-            raise ValueError("Expected a PDF, DOCX or XLSX document up to 50 MB")
+        if kind == "raster":
+            from guizhi.infrastructure.operations.raster import check_source
+
+            check_source(source)
         before = digest(source)
         if expected is not None and before != expected:
-            raise ValueError("Document differs from its expected revision")
-        copy = self.path(f"document-{number}{source.suffix.lower()}")
+            raise ValueError("Material differs from its expected revision")
+        step = f"{kind}-{number}"
+        copy = self.path(f"{step}{source.suffix.lower()}")
         shutil.copyfile(source, copy)
-        ref = self.record(f"document-{number}", copy)
+        ref = self.record(step, copy)
         if ref["sha256"] != before or digest(source) != before:
-            raise ValueError("Document changed while importing")
+            raise ValueError("Material changed while importing")
         return copy, ref
 
     def path(self, filename):

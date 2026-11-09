@@ -165,11 +165,12 @@ async function startDesktop(options) {
         return pick.canceled ? null : pick.filePaths[0];
     });
     bind('material', async (kind = 'vector') => {
-        const vectors = { name: 'GeoPackage', extensions: ['gpkg'] };
-        const documents = { name: '审批材料', extensions: ['pdf', 'docx', 'xlsx'] };
-        if (!['vector', 'document', 'any'].includes(kind)) throw new Error('材料格式无效');
+        const formats = { vector: { name: 'GeoPackage', extensions: ['gpkg'] },
+            raster: { name: 'GeoTIFF', extensions: ['tif', 'tiff'] }, cad: { name: 'DXF', extensions: ['dxf'] },
+            document: { name: '审批材料', extensions: ['pdf', 'docx', 'xlsx'] } };
+        if (kind !== 'any' && !Object.hasOwn(formats, kind)) throw new Error('材料格式无效');
         const pick = await dialog.showOpenDialog(window, { properties: ['openFile'],
-            filters: kind === 'vector' ? [vectors] : kind === 'document' ? [documents] : [vectors, documents] });
+            filters: kind === 'any' ? Object.values(formats) : [formats[kind]] });
         return pick.canceled ? null : controller.describe(pick.filePaths[0]);
     });
     bind('mapAction', async (...args) => withSpeech(await controller.mapAction(...args)));

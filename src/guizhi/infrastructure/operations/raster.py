@@ -1,0 +1,194 @@
+"""Process local self-contained GeoTIFFs without preserving invalid sample values."""
+from contextlib import ExitStack
+from datetime import date
+from math import fsum, isclose
+from pathlib import Path
+from typing import Literal
+from uuid import uuid4
+
+import numpy as np
+from pyproj import CRS
+from pyproj.transformer import TransformerGroup
+import rasterio as rio
+from rasterio.enums import Resampling
+from rasterio.features import geometry_mask, geometry_window
+from rasterio.merge import merge
+from rasterio.warp import calculate_default_transform, reproject as warp
+from rasterio.windows import Window, transform as window_transform
+
+
+def check_source(file):
+    with rio.open(file) as src:
+        if src.driver != "GTiff" or src.crs is None or not src.count or src.subdatasets:
+            raise ValueError("Expected a georeferenced GeoTIFF with directly readable bands")
+        if {Path(item).resolve() for item in src.files} != {Path(file).resolve()}:
+            raise ValueError("Supply a self-contained GeoTIFF without auxiliary files")
+        if any(np.dtype(dtype).kind not in "iuf" or
+               (np.dtype(dtype).kind in "iu" and np.dtype(dtype).itemsize > 4) for dtype in src.dtypes):
+            raise ValueError("Raster samples must be real numbers representable exactly as float64")
+        if any(not np.isfinite(value) for value in src.transform):
+            raise ValueError("Invalid raster transform")
+
+
+def metadata(file):
+    check_source(file)
+    with rio.open(file) as src:
+        return {"crs": src.crs.to_wkt(), "width": src.width, "height": src.height, "bands": src.count,
+                "resolution": list(src.res), "transform": list(src.transform)[:6], "bounds": list(src.bounds),
+                "dtypes": list(src.dtypes), "nodata": [
+                    val if val is None or np.isfinite(val) else "NaN" for val in src.nodatavals]}
+
+
+def samples(src, window):
+    data = src.read(window=window, masked=True, out_dtype="float64").filled(np.nan)
+    data[~np.isfinite(data)] = np.nan
+    return data
+
+
+def statistics(ctx, observed_on: date | None = None):
+    file = ctx.rasters[0]
+    info = metadata(file)
+    bands = []
+    with rio.open(file) as src:
+        for index in src.indexes:
+            count, minimum, maximum, sums = 0, None, None, []
+            for _, window in src.block_windows(index):
+                ctx.check()
+                block = src.read(index, window=window, masked=True).compressed().astype("float64")
+                block = block[np.isfinite(block)]
+                if not block.size:
+                    continue
+                count += int(block.size)
+                low, high = float(block.min()), float(block.max())
+                minimum = low if minimum is None else min(low, minimum)
+                maximum = high if maximum is None else max(high, maximum)
+                # Divide before summation to avoid overflow of otherwise representable means.
+                sums.append(float(np.sum(block / (src.width * src.height))))
+            bands.append({"band": index, "valid_count": count, "nodata_count": src.width * src.height - count,
+                          "min": minimum, "max": maximum,
+                          "mean": fsum(sums) / (count / (src.width * src.height)) if count else None})
+    info.update(observed_on=observed_on.isoformat() if observed_on else None, band_statistics=bands)
+    ctx.json("raster.json", info, "raster")
+    return {"raster": info, "statistics": {"band_count": info["bands"],
+            "valid_samples": sum(item["valid_count"] for item in bands),
+            "nodata_samples": sum(item["nodata_count"] for item in bands)}}
+
+
+def options(src, width, height, transform, crs):
+    return dict(driver="GTiff", width=width, height=height, count=src.count, transform=transform, crs=crs,
+                dtype="float64", nodata=np.nan, compress="deflate", predictor=3,
+                tiled=True, blockxsize=256, blockysize=256, BIGTIFF="IF_SAFER")
+
+
+def write_windows(ctx, path, src, extent, shapes=None, all_touched=False):
+    profile = options(src, int(extent.width), int(extent.height), window_transform(extent, src.transform), src.crs)
+    with rio.open(path, "w", **profile) as dst:
+        for _, window in dst.block_windows(1):
+            ctx.check()
+            source_window = Window(window.col_off + extent.col_off, window.row_off + extent.row_off,
+                                   window.width, window.height)
+            block = samples(src, source_window)
+            if shapes is not None:
+                valid = geometry_mask(shapes, out_shape=block.shape[1:], transform=dst.window_transform(window),
+                                      all_touched=all_touched, invert=True)
+                block[:, ~valid] = np.nan
+            dst.write(block, window=window)
+    with rio.open(path) as result:
+        if result.transform != profile["transform"] or result.crs != src.crs or result.shape != (
+                profile["height"], profile["width"]):
+            raise ValueError("Written raster has the wrong grid")
+
+
+def deliver(ctx, path, operation):
+    ctx.check()
+    info = metadata(path)
+    with rio.open(path) as src:
+        for _, window in src.block_windows(1):
+            ctx.check()
+            block = src.read(window=window)
+            if np.isinf(block).any() or not np.array_equal(np.isnan(block), src.read_masks(window=window) == 0):
+                raise ValueError("Raster export failed NoData verification")
+    info["operation"] = operation
+    ctx.json("raster.json", info, "raster")
+    ref = ctx.record("export", path)
+    return {"raster": info, "data_revision": ref["sha256"],
+            "statistics": {"band_count": info["bands"], "width": info["width"], "height": info["height"]}}
+
+
+def clip(ctx, all_touched: bool = False):
+    if len(ctx.rasters) != 1 or len(ctx.frames) != 1:
+        raise ValueError("Raster clipping requires one GeoTIFF and one polygon layer")
+    frame = ctx.frames[0]
+    if frame.empty or frame.crs is None or not frame.geom_type.isin(["Polygon", "MultiPolygon"]).all() or (
+            ~frame.is_valid | frame.is_empty).any():
+        raise ValueError("Clipping requires valid, nonempty polygons with a defined CRS")
+    out = ctx.path("result.tif")
+    with rio.open(ctx.rasters[0]) as src:
+        if frame.crs != CRS.from_user_input(src.crs):
+            raise ValueError("Align the clipping polygon to the raster CRS first")
+        shapes = list(frame.geometry)
+        extent = geometry_window(src, shapes)
+        write_windows(ctx, out, src, extent, shapes, all_touched)
+    return deliver(ctx, out, {"type": "clip", "pixel_inclusion": "all_touched" if all_touched else "center"})
+
+
+def reproject_raster(ctx, target_crs, resampling, resolution):
+    out = ctx.path("result.tif")
+    source = ctx.rasters[0]
+    target = CRS.from_user_input(target_crs)
+    with rio.open(source) as src:
+        source_crs = CRS.from_user_input(src.crs)
+        if source_crs.is_compound or target.is_compound or not (target.is_geographic or target.is_projected):
+            raise ValueError("Raster reprojection supports horizontal geographic and projected coordinate systems")
+        transformer = TransformerGroup(source_crs, target, always_xy=True, allow_ballpark=False)
+        if not transformer.best_available or not transformer.transformers:
+            raise ValueError("No verified coordinate transformation is available for this grid")
+        # Select a concrete non-ballpark coordinate operation and use it for grid construction and warping.
+        pipeline = transformer.transformers[0].definition
+        with rio.Env(PROJ_NETWORK="OFF"):
+            grid, width, height = calculate_default_transform(
+                src.crs, target, src.width, src.height, *src.bounds, resolution=resolution,
+                COORDINATE_OPERATION=pipeline)
+            normalized = ctx.directory / f"normalized-{uuid4().hex}.tif"
+            try:
+                write_windows(ctx, normalized, src, Window(0, 0, src.width, src.height))
+                with rio.open(normalized) as clean, rio.open(out, "w", **options(src, width, height, grid, target)) as dst:
+                    for index in src.indexes:
+                        ctx.check()
+                        warp(rio.band(clean, index), rio.band(dst, index), src_nodata=np.nan, dst_nodata=np.nan,
+                             resampling=Resampling[resampling], warp_mem_limit=64, COORDINATE_OPERATION=pipeline)
+            finally:
+                normalized.unlink(missing_ok=True)
+    return deliver(ctx, out, {"type": "reproject", "source_crs": source_crs.to_wkt(),
+                             "resampling": resampling, "coordinate_operation": pipeline})
+
+
+def reproject(ctx, target_crs: str, resampling: Literal["nearest", "bilinear", "cubic"] = "nearest",
+              resolution: tuple[float, float] | None = None):
+    if resolution is not None and any(not np.isfinite(value) or value <= 0 for value in resolution):
+        raise ValueError("Target resolution must contain two positive finite numbers")
+    return reproject_raster(ctx, target_crs, resampling, resolution)
+
+
+def mosaic(ctx, overlap: Literal["first", "last"] = "first"):
+    out = ctx.path("result.tif")
+    with ExitStack() as stack:
+        sources = [stack.enter_context(rio.open(path)) for path in ctx.rasters]
+        first = sources[0]
+        grid = first.transform
+        if grid.b or grid.d or grid.a <= 0 or grid.e >= 0:
+            raise ValueError("Mosaic requires a north-up, unrotated grid")
+        normalized = []
+        for index, src in enumerate(sources):
+            x, y = (~grid) * (src.transform.c, src.transform.f)
+            if (src.crs != first.crs or src.count != first.count or src.res != first.res or
+                src.transform.b or src.transform.d or src.transform.a <= 0 or src.transform.e >= 0 or
+                not isclose(x, round(x), abs_tol=1e-7, rel_tol=0) or not isclose(y, round(y), abs_tol=1e-7, rel_tol=0)):
+                raise ValueError("Mosaic sources must share the CRS, band count, resolution and pixel alignment")
+            path = ctx.directory / f"mosaic-{index}-{uuid4().hex}.tif"
+            stack.callback(path.unlink, missing_ok=True)
+            write_windows(ctx, path, src, Window(0, 0, src.width, src.height))
+            normalized.append(path)
+        merge(normalized, method=overlap, dtype="float64", nodata=np.nan, mem_limit=64, dst_path=out,
+              dst_kwds=dict(compress="deflate", predictor=3, tiled=True, blockxsize=256, blockysize=256, BIGTIFF="IF_SAFER"))
+    return deliver(ctx, out, {"type": "mosaic", "overlap": overlap, "source_count": len(ctx.rasters)})
