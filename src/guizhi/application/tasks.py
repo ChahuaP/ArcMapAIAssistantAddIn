@@ -11,6 +11,7 @@ from time import monotonic
 from uuid import uuid4
 
 from guizhi.domain.contracts import Job, Run, TaskSpec
+from guizhi.domain.diagnostics import Fault
 from guizhi.domain.operations import OPERATIONS
 from guizhi.infrastructure.workspace import SOURCE_ROOT, Workspace, supervisor_lock
 
@@ -24,6 +25,7 @@ def product_version() -> str:
 
 def worker(workspace: Workspace, run_id: str) -> dict:
     from guizhi.infrastructure.control import check_control
+    from guizhi.infrastructure.runtime_identity import runtime_identity
     from guizhi.infrastructure.vector import inventory
 
     record = workspace.read(run_id)
@@ -45,16 +47,29 @@ def worker(workspace: Workspace, run_id: str) -> dict:
         ensure_supervised()
         workspace.event(run_id, step, **details)
 
-    progress("worker_started", pid=os.getpid())
+    progress("worker_started", pid=os.getpid(), runtime=runtime_identity())
     arguments = (record["task"], record["job"], directory, progress, ensure_supervised)
-    if record["task"].get("request") is not None:
-        from guizhi.infrastructure.operations.runner import execute
+    try:
+        if record["task"].get("request") is not None:
+            from guizhi.infrastructure.operations.runner import execute
 
-        return execute(record["task"]["request"], record["job"], directory, workspace,
-                       progress, ensure_supervised)
-    if record["task"]["operation"] == "control_check":
-        return check_control(*arguments, workspace.root)
-    return inventory(*arguments)
+            return execute(record["task"]["request"], record["job"], directory, workspace,
+                           progress, ensure_supervised)
+        if record["task"]["operation"] == "control_check":
+            return check_control(*arguments, workspace.root)
+        return inventory(*arguments)
+    except Exception as exc:
+        if workspace.status(run_id) == "running":
+            if isinstance(exc, Fault):
+                failure = exc.fact()
+            elif isinstance(exc, PermissionError):
+                failure = {"category": "environment", "code": "permission_denied",
+                           "evidence": {"errno": exc.errno, "winerror": getattr(exc, "winerror", None)}}
+            else:
+                failure = {"category": "undetermined", "code": "unclassified_exception",
+                           "evidence": {"exception": type(exc).__name__}}
+            progress("diagnostic_failure", **failure)
+        raise
 
 
 def supervise(workspace: Workspace, run_id: str, cancel_requested: Callable[[], bool] | None):

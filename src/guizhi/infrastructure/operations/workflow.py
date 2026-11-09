@@ -9,6 +9,7 @@ from pyproj import CRS
 from guizhi.application.skills import validate_steps
 from guizhi.application.tasks import run_operation, run_vector
 from guizhi.domain.capabilities import CAPABILITIES, Material
+from guizhi.domain.diagnostics import Fault
 from guizhi.domain.operations import OPERATIONS
 from guizhi.domain.skills import Step
 from guizhi.infrastructure.cache import record_dependencies, reuse_job
@@ -47,8 +48,11 @@ def resolve_value(value, records, skill_parameters):
 
 
 def material_from(ctx, record):
-    file = read_artifact(ctx.workspace, record["id"], "export")
     data = committed(record)
+    if not any(ref["step"] == "export" for ref in data["evidence"]):
+        raise Fault("workflow", "upstream_has_no_export", "Workflow step consumes a result without a data export",
+                    upstream_operation=record["task"]["operation"], upstream_run=record["id"])
+    file = read_artifact(ctx.workspace, record["id"], "export")
     return {"file": str(file), "layer": data.get("export_layer"),
             "revision": data.get("data_revision") or data_revision(file)}
 
@@ -94,11 +98,12 @@ def execute(ctx, specification: dict):
                             raise ValueError(f"Material {role} requires a projected coordinate system in metres")
                 sealed[role].append({"file": str(file), "layer": None, "revision": ref["sha256"]})
                 seals[role].append({"run_id": ctx.job["run_id"], "artifact": ref["step"]})
+                ctx.snapshot(ref, None, ref["sha256"], role=role)
                 continue
             record, reused = reuse_job(ctx.workspace, "data.describe", [item], {},
                                        lambda: run_operation(ctx.workspace.root, {
                                            "operation": "data.describe", "inputs": [item]}, cancelled), check=ctx.check)
-            ctx.progress("material_resolved", role=role, child_run_id=record["id"], reused=reused)
+            ctx.progress("material_resolved", role=role, child_run_id=record["id"], status=record["status"], reused=reused)
             ctx.check()
             data = committed(record)
             requirement = roles.get(role, {})
@@ -117,6 +122,9 @@ def execute(ctx, specification: dict):
             file = read_artifact(ctx.workspace, record["id"], "import")
             sealed[role].append({"file": str(file), "layer": item["layer"], "revision": data["revision"]})
             seals[role].append(record["id"])
+            ref = next(ref for ref in data["evidence"] if ref["step"] == "import")
+            ctx.progress("diagnostic_snapshot", ref=ref, layer=item["layer"], revision=data["revision"],
+                         role=role, source_run=record["id"])
     manifest = {"mode": mode, "skill": skill, "material_runs": seals, "steps": [],
                 "model_provenance": specification["model_provenance"]}
     for step in steps:

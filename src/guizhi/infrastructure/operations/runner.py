@@ -13,10 +13,11 @@ import warnings
 from pandas.testing import assert_frame_equal
 import pyogrio
 import shapely
-from pydantic import ConfigDict, create_model
+from pydantic import ConfigDict, ValidationError, create_model
 
 from guizhi.domain.capabilities import CAPABILITIES, OperationRequest
 from guizhi.domain.contracts import EvidenceRef
+from guizhi.domain.diagnostics import Fault
 from guizhi.infrastructure.vector import digest, import_layer
 
 
@@ -75,11 +76,14 @@ class Execution:
         self.result = {}
         for i, material in enumerate(request.inputs):
             if material.kind == "document":
-                self.documents.append(self.seal_document(material.file, material.revision, i + 1))
+                file, ref = self.seal_document(material.file, material.revision, i + 1)
+                self.documents.append((file, ref))
+                self.snapshot(ref, None, ref["sha256"])
                 continue
             if material.kind in {"raster", "cad", "model"}:
-                file, _ = self.seal_file(material.kind, material.file, material.revision, i + 1)
+                file, ref = self.seal_file(material.kind, material.file, material.revision, i + 1)
                 {"raster": self.rasters, "cad": self.drawings, "model": self.models}[material.kind].append(file)
+                self.snapshot(ref, None, ref["sha256"])
                 continue
             frame, info, revision, evidence = import_layer(
                 material.file, material.layer, directory, f"input-{i + 1}.gpkg", job["id"], check,
@@ -87,13 +91,18 @@ class Execution:
             )
             stable = data_revision(directory / evidence.path)
             if material.revision is not None and material.revision != stable:
-                raise ValueError(f"Input {i + 1} differs from its expected snapshot revision")
+                raise Fault("association", "input_revision_mismatch", f"Input {i + 1} differs from its expected snapshot revision",
+                            input_number=i + 1, expected=material.revision, actual=stable)
             self.frames.append(frame)
             self.info.append(info)
             self.datasets.append(asdict(revision))
             self.evidence.append(asdict(evidence))
             self.selection_hashes.append(stable)
+            self.snapshot(asdict(evidence), material.layer, stable)
         progress("inputs_sealed", count=len(request.inputs))
+
+    def snapshot(self, ref, layer, revision, *, role=None):
+        self.progress("diagnostic_snapshot", ref=ref, layer=layer, revision=revision, role=role)
 
     def seal_document(self, source, expected, number):
         if Path(source).stat().st_size > 50 << 20:
@@ -111,7 +120,8 @@ class Execution:
             check_source(source)
         before = digest(source)
         if expected is not None and before != expected:
-            raise ValueError("Material differs from its expected revision")
+            raise Fault("association", "input_revision_mismatch", "Material differs from its expected revision",
+                        input_number=number, expected=expected, actual=before)
         step = f"{kind}-{number}"
         copy = self.path(f"{step}{source.suffix.lower()}")
         shutil.copyfile(source, copy)
@@ -156,7 +166,8 @@ class Execution:
                                     layer_options={"FID": available("fid"), "GEOMETRY_NAME": available("geom")})
             check = pyogrio.read_dataframe(out, layer="result")
         if check.crs != frame.crs or shapely.to_wkb(frame.geometry).tolist() != shapely.to_wkb(check.geometry).tolist():
-            raise ValueError("Export failed geometry or CRS verification")
+            raise Fault("tool", "export_geometry_mismatch", "Export failed geometry or CRS verification",
+                        same_crs=check.crs == frame.crs, expected_count=len(frame), actual_count=len(check))
         assert_frame_equal(frame.drop(columns=frame.geometry.name), check.drop(columns=check.geometry.name),
                            check_dtype=False, check_exact=True)
         self.record(artifact, out)
@@ -175,6 +186,11 @@ def execute(request, job, directory, workspace, progress, check):
     request = OperationRequest.model_validate(request)
     function = handler(request.operation)
     model = parameter_model(function)
-    params = model.model_validate(request.parameters)
     ctx = Execution(request, job, directory, workspace, progress, check)
+    try:
+        params = model.model_validate(request.parameters)
+    except ValidationError as exc:
+        fields = [{"field": list(item["loc"]), "rule": item["type"]}
+                  for item in exc.errors(include_input=False, include_url=False)]
+        raise Fault("parameter", "parameter_schema", str(exc), fields=fields) from exc
     return ctx.finish(function(ctx, **dict(params)))

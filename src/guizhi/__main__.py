@@ -46,6 +46,13 @@ def main() -> int:
     commands.add_parser("skill-preview").add_argument("request", type=Path)
     commands.add_parser("skill-publish").add_argument("request", type=Path)
     commands.add_parser("workflow").add_argument("request", type=Path)
+    for name in ("diagnose-run", "replay-run"):
+        diagnostic = commands.add_parser(name)
+        diagnostic.add_argument("run_id")
+        diagnostic.add_argument("--assertion", type=Path)
+        if name == "replay-run":
+            diagnostic.add_argument("--seconds", type=int, default=20)
+    commands.add_parser("diagnose-dispatch").add_argument("dispatch_id")
     commands.add_parser("platform-contract", help="Read the local platform connector contract")
     commands.add_parser("platform-handoff", help="Describe verified local artifacts for handoff").add_argument(
         "request", type=Path)
@@ -55,6 +62,19 @@ def main() -> int:
     commands.add_parser("_dispatch-replay").add_argument("request", type=Path)
     args = parser.parse_args()
     try:
+        if args.command in {"diagnose-run", "replay-run", "diagnose-dispatch"}:
+            from guizhi.application.diagnostics import diagnose_dispatch, diagnose_run, replay
+
+            workspace = Workspace(args.workspace)
+            if args.command == "diagnose-dispatch":
+                result = diagnose_dispatch(workspace, args.dispatch_id)
+            else:
+                assertion = json.loads(args.assertion.read_text(encoding="utf-8-sig")) if args.assertion else None
+                result = diagnose_run(workspace, args.run_id, assertion)
+                if args.command == "replay-run":
+                    result = replay(workspace, result, seconds=args.seconds)
+            print(json.dumps(result))
+            return 0
         if args.command in {"platform-contract", "platform-handoff"}:
             from guizhi.application.platform import contract, prepare
 

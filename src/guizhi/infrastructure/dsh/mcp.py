@@ -111,8 +111,10 @@ def main():
             pending.replace(receipt)
             return model_result(result)
 
-    def input_issue(status, message):
+    def input_issue(status, message, *, diagnostic=None):
         result = {"status": status, "error": message}
+        if diagnostic:
+            result["diagnostic"] = diagnostic
         with mutex:
             pending = issue.with_suffix(".pending")
             pending.write_text(json.dumps(result), encoding="utf-8")
@@ -312,7 +314,9 @@ def main():
         已绑定办理参数时省略 skill_parameters；否则只填写技能声明的参数。坐标、年份、分类和阈值必须有依据。
         """
         if args.skill and skill and skill not in {args.skill, args.skill.partition("@")[0]}:
-            return input_issue("invalid_materials", "请使用已选技能 " + args.skill)
+            return input_issue("invalid_materials", "请使用已选技能 " + args.skill,
+                               diagnostic={"category": "model", "code": "selected_skill_mismatch",
+                                           "evidence": {"selected_skill": args.skill, "proposed_skill": skill}})
         if bound_parameters is not None:
             if skill_parameters and skill_parameters != bound_parameters:
                 return input_issue("invalid_materials", "请使用工作台中已经填写的办理参数")

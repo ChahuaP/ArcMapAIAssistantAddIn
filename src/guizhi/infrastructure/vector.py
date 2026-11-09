@@ -79,6 +79,7 @@ def inventory(task: dict, job: dict, directory: Path, progress, ensure_supervise
         task["source"], task["layer"], directory, "input.gpkg", job["id"], ensure_supervised,
     )
     frame = frame.reset_index(drop=True)
+    progress("diagnostic_snapshot", ref=asdict(input_ref), layer=task["layer"], revision=input_ref.sha256, role=None)
     obj = ObjectRevision(uuid4().hex, task["object_id"], dataset.id)
     progress("imported", dataset_revision=asdict(dataset), evidence=asdict(input_ref))
 

@@ -9,6 +9,7 @@ import geopandas
 import pandas as pd
 import shapely
 from pydantic import BaseModel, ConfigDict
+from guizhi.domain.diagnostics import Fault
 
 Unit = Literal["meters", "kilometers", "map_units", "degrees"]
 Mode = Literal["new_selection", "add_to_selection", "remove_from_selection", "select_subset"]
@@ -30,15 +31,17 @@ def compatible(frames):
 
 def valid(frame, *, polygon=False):
     geometry = frame.geometry
-    if geometry.isna().any() or not geometry.is_valid.all():
-        raise ValueError("Invalid or null geometry; repair the input explicitly")
+    invalid = geometry.isna() | ~geometry.is_valid
+    if invalid.any():
+        raise Fault("data", "invalid_geometry", "Invalid or null geometry; repair the input explicitly",
+                    invalid_count=int(invalid.sum()))
     if polygon and not geometry.geom_type.isin(["Polygon", "MultiPolygon"]).all():
         raise ValueError("Operation requires polygon data")
 
 
 def distance_in_crs(crs, value, unit):
     if not isfinite(value) or value < 0:
-        raise ValueError("Distance must be finite and nonnegative")
+        raise Fault("parameter", "invalid_distance", "Distance must be finite and nonnegative", unit=unit)
     if crs is None or len(crs.axis_info) != 2:
         raise ValueError("Distance requires a defined 2D CRS")
     if unit == "degrees":
@@ -110,7 +113,9 @@ def condition_mask(frame, value, depth=0):
 
 def selection_fids(ctx, selection):
     if selection.layer != ctx.request.inputs[0].layer or selection.revision != ctx.selection_hashes[0]:
-        raise ValueError("Selection belongs to a different dataset revision")
+        raise Fault("association", "selection_revision_mismatch", "Selection belongs to a different dataset revision",
+                    expected_revision=ctx.selection_hashes[0], selected_revision=selection.revision,
+                    same_layer=selection.layer == ctx.request.inputs[0].layer)
     fids = set(selection.fids)
     if len(fids) != len(selection.fids) or not fids.issubset(ctx.frames[0].index):
         raise ValueError("Selection contains duplicate or unknown feature IDs")

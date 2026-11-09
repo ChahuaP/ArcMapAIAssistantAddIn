@@ -7,6 +7,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 from geopandas import clip
 from pypdfium2 import PdfDocument
+from guizhi.domain.diagnostics import Fault
 
 from guizhi.infrastructure.documents import checked_office
 from guizhi.infrastructure.operations.common import compatible, field, valid
@@ -38,7 +39,8 @@ def check_attachments(ctx, required: list[Literal["pdf", "docx", "xlsx"]]):
         supplied.append({"name": name, "format": suffix, "sha256": ref["sha256"]})
     missing = sorted(set(required) - {item["format"] for item in supplied})
     if missing:
-        raise ValueError(f"Missing required attachments: {', '.join(missing)}")
+        raise Fault("data", "missing_required_attachments", f"Missing required attachments: {', '.join(missing)}",
+                    required_formats=missing)
     ctx.json("attachments.json", {"attachments": supplied}, "attachments")
     return {"statistics": {"attachment_count": len(supplied)}}
 
