@@ -94,6 +94,7 @@
                         item.unit && ' ' + item.unit)),
                 h('small', null, labels[item.status] || item.status),
                 shown === item.id && h('div', { className: 'finding-source' },
+                    item.edition && h('p', null, item.as_of + ' · ' + item.edition),
                     item.quote && h('blockquote', null, item.quote),
                     ...item.evidence.map((ref, index) => ref.artifact.startsWith('document-')
                         ? h('button', { key: index, onClick: () => api.approvalSource(task.id, item.id, index).catch(fail) },

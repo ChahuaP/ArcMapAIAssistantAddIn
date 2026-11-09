@@ -4,7 +4,8 @@
     const api = window.guizhi;
     const reference = item => item.id + '@' + item.revision;
     const domains = { data: '数据', vector: '空间分析', geometry: '几何', table: '属性表',
-        crs: '坐标', presentation: '地图与版面', evidence: '留痕', system: '运行状态', semantics: '审批材料', business: '业务' };
+        crs: '坐标', presentation: '地图与版面', evidence: '留痕', system: '运行状态', semantics: '审批材料',
+        knowledge: '业务知识', governance: '依据与解释', business: '业务' };
 
     function RoleMaterials({ roles, materials, change, Material, plans, fail }) {
         return roles.map(role => {

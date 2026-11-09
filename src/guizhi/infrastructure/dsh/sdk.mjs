@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { addAbortListener } from 'node:events';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -8,6 +8,7 @@ import { parseArgs } from 'node:util';
 
 const source = realpathSync(fileURLToPath(new URL('../../../../', import.meta.url)));
 const readJson = path => JSON.parse(readFileSync(path, 'utf8'));
+const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 
 function verifiedResponse(receipt) {
     const stats = receipt.statistics;
@@ -98,8 +99,14 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
     }
     const id = randomUUID();
     const directory = join(parent, id);
+    const profile = fileURLToPath(new URL('./profile.yml', import.meta.url));
+    const schema = ['capabilities', 'skills', 'semantics', 'knowledge']
+        .map(name => readFileSync(join(source, 'src', 'guizhi', 'domain', name + '.py')));
+    const provenance = { provider: options.provider, model: options.model,
+        profile_sha256: hash(readFileSync(profile)), request_sha256: hash(options.prompt),
+        schema_sha256: hash(Buffer.concat(schema)), retrieval_version: '1.0.0' };
     const mcpArgs = ['-I', '-B', fileURLToPath(new URL('./mcp.py', import.meta.url)),
-        '--workspace', workspace, '--dispatch', directory];
+        '--workspace', workspace, '--dispatch', directory, '--model-provenance', JSON.stringify(provenance)];
     if (options.input) mcpArgs.push('--input', resolve(options.input));
     if (options.layer) mcpArgs.push('--layer', options.layer);
     if (options.control) mcpArgs.push('--control', resolve(options.control));
@@ -117,7 +124,7 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
     mkdirSync(directory);
     const harness = new DeepSeekHarness({
         profile: 'sdk-minimal',
-        patches: [fileURLToPath(new URL('./profile.yml', import.meta.url))],
+        patches: [profile],
         dshHome: join(directory, 'dsh-home'), cwd: directory, processCwd: directory,
         provider: options.provider, model: options.model, maxTokens: 1024,
         initializeTimeoutMs: 45000, env,

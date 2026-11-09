@@ -1,5 +1,6 @@
 """Expose discovery and verified work on the DSH stdio transport."""
 import argparse
+from datetime import date
 import json
 from pathlib import Path
 import sys
@@ -33,6 +34,7 @@ def main():
     parser.add_argument("--skill")
     parser.add_argument("--previous-run")
     parser.add_argument("--materials", type=json.loads, default={})
+    parser.add_argument("--model-provenance", type=json.loads)
     args = parser.parse_args()
     workspace = Workspace(args.workspace, create=True)
     dispatch = args.dispatch.resolve(strict=True)
@@ -132,6 +134,26 @@ def main():
         return result
 
     @server.tool
+    def list_rule_catalogs(region: str | None = None) -> list[dict]:
+        """查看工作区已登记的规则目录、版本和适用事项。"""
+        with workspace.connect() as db:
+            entries = db.execute("""
+                SELECT id FROM runs WHERE status='succeeded'
+                AND json_extract(job, '$.operation')='knowledge.register_catalog'
+                ORDER BY created_at DESC LIMIT 12
+            """).fetchall()
+        (dispatch / "discovery").touch()
+        results = []
+        for entry in entries:
+            index = artifact_json(workspace, entry["id"], "knowledge_catalog")
+            scopes = [{"region": rule["region"], "matter": rule["matter"], "edition": rule["edition"],
+                       "project_code": rule["project_code"]} for rule in index["rules"]
+                      if not region or rule["region"].casefold() == region.casefold()]
+            if scopes:
+                results.append({"catalog_run": entry["id"], "revision": index["revision"], "scopes": scopes})
+        return results
+
+    @server.tool
     def propose_skill(title: str) -> dict:
         """用户要求以后都这样办理时，从当前已完成任务生成可编辑的技能候选。"""
         (dispatch / "discovery").touch()
@@ -167,12 +189,14 @@ def main():
             message = str(exc)
             status = "missing_materials" if message.startswith("Missing or excess materials:") else "invalid_materials"
             return input_issue(status, message)
+        plan["model_provenance"] = args.model_provenance
         return execute("workflow.execute", {"skill": selected, "steps": extra}, lambda: skills.submit(
             workspace, plan, cancel_requested=cancelled.exists, key=dispatch.name))
 
     @server.tool
     def review_approval(document_run: str, project_code: str, region: str, parcel_field: str,
-                        project_field: str, facts: list[Fact]) -> dict:
+                        project_field: str, facts: list[Fact], catalog_run: str | None = None,
+                        as_of: date | None = None, matter: str | None = None) -> dict:
         """审批材料核查。先读取审批原文和图层字段，再提交原样引文及片段编号。自动计算管控叠加并关联地块结论。"""
         if args.skill:
             return input_issue("invalid_materials", "请使用已选技能 " + args.skill)
@@ -183,14 +207,26 @@ def main():
             validate_material_facts(index, project_code, facts)
         except (ValueError, OSError, KeyError) as exc:
             return input_issue("invalid_materials", f"{exc}。qualifier 应逐字摘自 quote。")
+        if catalog_run and (not as_of or not matter):
+            return input_issue("missing_materials", "请选择核查日期和适用事项")
         parameters = {"document_run": document_run, "project_code": project_code, "region": region,
                       "parcel_field": parcel_field, "project_field": project_field,
-                      "facts": [item.model_dump(mode="json") for item in facts], "spatial_run": "$run.check"}
-        return run_plan("free", None, [
+                      "facts": [item.model_dump(mode="json") for item in facts], "spatial_run": "$run.check",
+                      "as_of": as_of.isoformat() if as_of else None}
+        steps = [
             {"id": "check", "operation": "control_check", "inputs": ["material.project", "material.control"]},
             {"id": "approval", "operation": "semantics.approval_case", "inputs": ["material.project"],
              "parameters": parameters},
-        ])
+        ]
+        if catalog_run:
+            steps.extend([
+                {"id": "rules", "operation": "knowledge.find_rules", "parameters": {
+                    "catalog_run": catalog_run, "region": region, "matter": matter,
+                    "as_of": as_of.isoformat(), "project_code": project_code}},
+                {"id": "explanation", "operation": "governance.explain_findings", "parameters": {
+                    "case_run": "$run.approval", "rules_run": "$run.rules"}},
+            ])
+        return run_plan("free", None, steps)
 
     @server.tool
     def execute_workflow(mode: Literal["fixed", "free", "combined"], skill: str | None = None,

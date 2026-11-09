@@ -78,6 +78,13 @@ CAPABILITIES = {
     "evidence.history": Capability("查询作业历史", 0, 0),
     "semantics.read_documents": Capability("读取审批材料", 1, 32),
     "semantics.approval_case": Capability("关联审批材料、地块与结论"),
+    "knowledge.register_catalog": Capability("登记规则、术语和模型适用范围", 0, 0),
+    "knowledge.extract_facts": Capability("提取并核对材料记载", 0, 0),
+    "knowledge.map_terms": Capability("映射已登记业务术语", 0, 0),
+    "knowledge.match_objects": Capability("按编码和地域匹配业务对象", 0, 0),
+    "knowledge.find_rules": Capability("查询指定时点的适用规则", 0, 0),
+    "knowledge.model_scope": Capability("检查模型适用范围", 0, 0),
+    "governance.explain_findings": Capability("生成带依据的业务解释", 0, 0),
     "workflow.execute": Capability("执行已编排任务", 0, 0),
 }
 

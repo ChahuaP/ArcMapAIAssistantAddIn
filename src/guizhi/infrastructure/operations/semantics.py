@@ -149,12 +149,15 @@ def spatial_findings(ctx, frame, parcels, spatial_run):
 
 
 def case_report(ctx, case, title):
+    names = {"supported": "有依据", "conflict": "材料冲突", "insufficient": "证据不足",
+             "outside_period": "时点之外"}
     rows = "".join(f"<tr><td>{escape(item['field'])}</td><td>{escape(str(item['value'] if item['value'] is not None else '—'))}"
-                   f" {escape(item.get('unit', ''))}</td><td>{escape(item['status'])}</td>"
+                   f" {escape(item.get('unit', ''))}</td><td>{escape(names.get(item['status'], item['status']))}</td>"
                    f"<td>{escape(item.get('quote', ''))}</td></tr>" for item in case["claims"])
     report = ctx.path("case.html")
+    stamp = f"<p>核查时点 {escape(case['as_of'])}</p>" if case["as_of"] else ""
     report.write_text("<!doctype html><html lang='zh-CN'><meta charset='utf-8'><title>审批材料核查</title>"
-                      f"<h1>{escape(title)}</h1><p>{escape(case['project']['code'])}</p>"
+                      f"<h1>{escape(title)}</h1><p>{escape(case['project']['code'])}</p>{stamp}"
                       "<table><thead><tr><th>事项</th><th>结果</th><th>证据状态</th><th>原文</th></tr></thead>"
                       f"<tbody>{rows}</tbody></table></html>", encoding="utf-8")
     ctx.record("report", report)

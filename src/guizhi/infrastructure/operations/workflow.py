@@ -95,7 +95,8 @@ def execute(ctx, specification: dict):
             file = read_artifact(ctx.workspace, record["id"], "import")
             sealed[role].append({"file": str(file), "layer": item["layer"], "revision": data["revision"]})
             seals[role].append(record["id"])
-    manifest = {"mode": mode, "skill": skill, "material_runs": seals, "steps": []}
+    manifest = {"mode": mode, "skill": skill, "material_runs": seals, "steps": [],
+                "model_provenance": specification["model_provenance"]}
     for step in steps:
         ctx.check()
         inputs = []

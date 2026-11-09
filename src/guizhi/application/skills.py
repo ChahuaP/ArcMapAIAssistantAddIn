@@ -122,7 +122,7 @@ def specification(workspace, materials, *, skill=None, steps=None, candidate=Non
     validate_steps(fixed + extra, set(clean) | {role["id"] for role in required})
     return {"mode": "combined" if selected and extra else "fixed" if selected else "free",
             "materials": clean, "skill": selected, "steps": [step.model_dump(mode="json") for step in fixed + extra],
-            "coordinate_plans": coordinate_plans or {}}
+            "coordinate_plans": coordinate_plans or {}, "model_provenance": None}
 
 
 def execute(root, materials, *, skill=None, steps=None, candidate=None, coordinate_plans=None,
