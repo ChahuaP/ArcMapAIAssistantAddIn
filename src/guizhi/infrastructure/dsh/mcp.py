@@ -12,9 +12,12 @@ from fastmcp import FastMCP
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from guizhi.application import skills
+from guizhi.application.dispatch import format_operation, remember_plan
 from guizhi.application.tasks import run_operation
 from guizhi.domain.semantics import Fact
 from guizhi.domain.skills import Step
+from guizhi.infrastructure.cache import reuse_job, verified_run
+from guizhi.infrastructure.operations.evidence import read_artifact
 # Load the native GIS dependencies before the stdio server starts its tool threads.
 from guizhi.infrastructure.operations.runner import capability
 from guizhi.infrastructure.operations.semantics import artifact_json, find_fragments, validate_material_facts
@@ -35,6 +38,7 @@ def main():
     parser.add_argument("--previous-run")
     parser.add_argument("--materials", type=json.loads, default={})
     parser.add_argument("--model-provenance", type=json.loads)
+    parser.add_argument("--plan-key")
     args = parser.parse_args()
     workspace = Workspace(args.workspace, create=True)
     dispatch = args.dispatch.resolve(strict=True)
@@ -71,15 +75,8 @@ def main():
             result = {"operation": operation, "parameters": parameters}
             try:
                 record = run()
-                result.update(status=record["status"], run_id=record["id"])
-                if record["status"] == "succeeded":
-                    data = record["result"]
-                    result["statistics"] = data["statistics"]
-                    if "workflow" in data:
-                        result["mode"] = data["workflow"]["mode"]
-                        result["steps"] = data["workflow"]["steps"]
-                elif record["error"]:
-                    result["error"] = record["error"]
+                result = format_operation(record, parameters)
+                remember_plan(workspace, args.plan_key, record)
             except (ValueError, OSError) as exc:
                 message = str(exc)
                 status = "missing_materials" if message.startswith("Missing or excess materials:") else "invalid_materials"
@@ -109,13 +106,14 @@ def main():
         documents = [item for group in materials.values() for item in group if not item.get("layer")]
         if not documents:
             return {"status": "missing_materials", "message": "请添加审批材料"}
-        record = run_operation(workspace.root, {"operation": "semantics.read_documents", "inputs": documents,
-                               "idempotency_key": dispatch.name + ".documents"}, cancelled.exists)
+        record, reused = reuse_job(workspace, "semantics.read_documents", documents, {}, lambda: run_operation(
+            workspace.root, {"operation": "semantics.read_documents", "inputs": documents,
+                             "idempotency_key": dispatch.name + ".documents"}, cancelled.exists))
         if record["status"] != "succeeded":
             return {"status": record["status"], "message": "无法读取绑定的审批材料"}
         (dispatch / "discovery").touch()
         index = artifact_json(workspace, record["id"], "document_index")
-        return {"status": "indexed", "document_run": record["id"],
+        return {"status": "indexed", "document_run": record["id"], "reused": reused,
                 "fragments": find_fragments(index, (terms or [])[:12])}
 
     @server.tool
@@ -180,9 +178,10 @@ def main():
         return {name: [spec.title, spec.minimum, spec.maximum] for name, spec in skills.OPERATIONS.items()
                 if not domain or name.startswith(domain + ".")}
 
-    def run_plan(mode, selected, extra):
+    def run_plan(mode, selected, extra, bound=None, coordinate_plans=None):
         try:
-            plan = skills.specification(workspace, materials, skill=selected, steps=extra, coordinate_plans=plans)
+            plan = skills.specification(workspace, materials if bound is None else bound, skill=selected,
+                                        steps=extra, coordinate_plans=plans if coordinate_plans is None else coordinate_plans)
             if mode != plan["mode"]:
                 raise ValueError("Mode requires the corresponding skill and steps")
         except (ValueError, OSError) as exc:
@@ -227,6 +226,45 @@ def main():
                     "case_run": "$run.approval", "rules_run": "$run.rules"}},
             ])
         return run_plan("free", None, steps)
+
+    @server.tool
+    def update_approval(catalog_run: str | None = None) -> dict:
+        """用已选审批成果继续核查。只替换新绑定的项目或管控图层；目录改版时可指定新目录。"""
+        if not args.previous_run or not verified_run(workspace, args.previous_run):
+            return input_issue("invalid_materials", "请选择可追溯的已办审批任务")
+        previous = workspace.read(args.previous_run)
+        if previous["task"]["operation"] != "workflow.execute":
+            return input_issue("invalid_materials", "请选择已办审批任务")
+        plan = previous["task"]["request"]["parameters"]["specification"]
+        steps = plan["steps"]
+        approvals = [step for step in steps if step["operation"] == "semantics.approval_case"]
+        if plan["mode"] != "free" or len(approvals) != 1:
+            return input_issue("invalid_materials", "所选任务没有可复用的审批流程")
+        if any(not item.get("layer") for group in materials.values() for item in group):
+            return input_issue("invalid_materials", "新文档需重新读取原文并提交审批核查")
+        if set(materials) - {"project", "control"}:
+            return input_issue("invalid_materials", "请选择对应的项目或管控图层")
+        if catalog_run:
+            rules = [step for step in steps if step["operation"] == "knowledge.find_rules"]
+            if len(rules) != 1:
+                return input_issue("invalid_materials", "该任务没有可更新的规则口径")
+            rules[0]["parameters"]["catalog_run"] = catalog_run
+        approvals[0]["parameters"]["prior_case"] = args.previous_run
+        bound = dict(materials)
+        original = previous["result"]["workflow"]["material_runs"]
+        for role, group in plan["materials"].items():
+            if role in bound:
+                continue
+            bound[role] = []
+            for material, ref in zip(group, original[role], strict=True):
+                if isinstance(ref, str):
+                    path = read_artifact(workspace, ref, "import")
+                    revision = workspace.read(ref)["result"]["revision"]
+                else:
+                    path = read_artifact(workspace, ref["run_id"], ref["artifact"])
+                    revision = material["revision"]
+                bound[role].append({**material, "file": str(path), "revision": revision})
+        return run_plan("free", None, steps, bound, {**plan["coordinate_plans"], **plans})
 
     @server.tool
     def execute_workflow(mode: Literal["fixed", "free", "combined"], skill: str | None = None,

@@ -9,6 +9,7 @@ from pyproj import CRS
 from guizhi.application.skills import validate_steps
 from guizhi.application.tasks import run_operation, run_vector
 from guizhi.domain.skills import Step
+from guizhi.infrastructure.cache import record_dependencies, reuse_job
 from guizhi.infrastructure.operations.evidence import read_artifact
 from guizhi.infrastructure.operations.runner import data_revision
 
@@ -76,7 +77,10 @@ def execute(ctx, specification: dict):
                 sealed[role].append({"file": str(file), "layer": None, "revision": ref["sha256"]})
                 seals[role].append({"run_id": ctx.job["run_id"], "artifact": ref["step"]})
                 continue
-            record = run_operation(ctx.workspace.root, {"operation": "data.describe", "inputs": [item]}, cancelled)
+            record, reused = reuse_job(ctx.workspace, "data.describe", [item], {},
+                                       lambda: run_operation(ctx.workspace.root, {
+                                           "operation": "data.describe", "inputs": [item]}, cancelled), check=ctx.check)
+            ctx.progress("material_resolved", role=role, child_run_id=record["id"], reused=reused)
             ctx.check()
             data = committed(record)
             requirement = roles.get(role, {})
@@ -115,18 +119,22 @@ def execute(ctx, specification: dict):
             plans = {**(specification["coordinate_plans"] if expected == 2 else {}), **parameters}
             if set(plans) - {"project_plan", "control_plan"} or (expected == 1 and plans):
                 raise ValueError("Unexpected business operation parameters")
-            record = run_vector(ctx.workspace.root, Path(inputs[0]["file"]), inputs[0]["layer"], None, cancelled,
-                                operation=step.operation, control=(Path(inputs[1]["file"]), inputs[1]["layer"])
-                                if expected == 2 else None, **plans)
+            record, reused = reuse_job(ctx.workspace, step.operation, inputs, plans, lambda: run_vector(
+                ctx.workspace.root, Path(inputs[0]["file"]), inputs[0]["layer"], None, cancelled,
+                operation=step.operation, control=(Path(inputs[1]["file"]), inputs[1]["layer"])
+                if expected == 2 else None, **plans), check=ctx.check)
         else:
-            record = run_operation(ctx.workspace.root, {"operation": step.operation, "inputs": inputs,
-                                   "parameters": parameters, "idempotency_key": ctx.job["run_id"] + "." + step.id}, cancelled)
+            record, reused = reuse_job(ctx.workspace, step.operation, inputs, parameters, lambda: run_operation(
+                ctx.workspace.root, {"operation": step.operation, "inputs": inputs, "parameters": parameters,
+                                     "idempotency_key": ctx.job["run_id"] + "." + step.id}, cancelled), check=ctx.check)
         ctx.check()
-        ctx.progress("workflow_step_finished", step_id=step.id, child_run_id=record["id"], status=record["status"])
+        ctx.progress("workflow_step_finished", step_id=step.id, child_run_id=record["id"], status=record["status"], reused=reused)
         committed(record)
         records[step.id] = record
         manifest["steps"].append({"id": step.id, "operation": step.operation, "run_id": record["id"],
-                                  "statistics": record["result"].get("statistics", {})})
+                                  "statistics": record["result"].get("statistics", {}), "reused": reused,
+                                  "inputs": step.inputs, "upstream_runs": sorted(record_dependencies(record)),
+                                  "execution": record["result"].get("execution") if not reused else None})
     if skill:
         for rule in skill["rules"]:
             statistics = records[rule["step"]]["result"].get("statistics", {})
@@ -152,4 +160,5 @@ def execute(ctx, specification: dict):
     # The original step's claim and its evidence remain available through the run reference.
     return {**{name: last[name] for name in ("export_layer", "data_revision", "selection", "presentation")
                if name in last}, "workflow": manifest, "final_run": records[steps[-1].id]["id"],
-            "statistics": {**last.get("statistics", {}), "step_count": len(steps)}}
+            "statistics": {**last.get("statistics", {}), "step_count": len(steps),
+                           "reused_steps": sum(item["reused"] for item in manifest["steps"])}}

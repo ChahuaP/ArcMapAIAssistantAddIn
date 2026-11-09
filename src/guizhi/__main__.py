@@ -46,8 +46,14 @@ def main() -> int:
     commands.add_parser("skill-preview").add_argument("request", type=Path)
     commands.add_parser("skill-publish").add_argument("request", type=Path)
     commands.add_parser("workflow").add_argument("request", type=Path)
+    commands.add_parser("_dispatch-replay").add_argument("request", type=Path)
     args = parser.parse_args()
     try:
+        if args.command == "_dispatch-replay":
+            from guizhi.application.dispatch import replay
+
+            print(json.dumps(replay(args.workspace, args.request)))
+            return 0
         if args.command == "capabilities":
             from dataclasses import asdict
             from guizhi.application.skills import OPERATIONS

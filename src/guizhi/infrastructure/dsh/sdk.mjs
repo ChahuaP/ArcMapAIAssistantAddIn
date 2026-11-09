@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { addAbortListener } from 'node:events';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
@@ -5,16 +6,20 @@ import { createRequire } from 'node:module';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
+import { promisify } from 'node:util';
 
 const source = realpathSync(fileURLToPath(new URL('../../../../', import.meta.url)));
 const readJson = path => JSON.parse(readFileSync(path, 'utf8'));
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
+const exec = promisify(execFile);
 
 function verifiedResponse(receipt) {
     const stats = receipt.statistics;
     const area = value => value.toLocaleString('zh-CN', { maximumFractionDigits: 2 });
     const parts = [];
     if (receipt.mode) parts.push(`已完成 ${stats.step_count} 个步骤。`);
+    if (stats.reused_steps) parts.push(`其中复用 ${stats.reused_steps} 个步骤。`);
+    if (stats.changed_parcels) parts.push(`更新涉及 ${stats.changed_parcels} 宗地。`);
     for (const item of receipt.steps ?? [{ statistics: stats }]) {
         const fact = item.statistics;
         if (fact.coverage_ratio !== undefined) {
@@ -81,6 +86,12 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 900000) {
         throw new Error('Timeout must be between 1 and 900000 ms');
     }
+    const tokens = options.maxModelTokens ?? 180000;
+    const calls = options.maxModelCalls ?? 12;
+    if (!Number.isSafeInteger(tokens) || tokens < 1 || tokens > 1000000 ||
+            !Number.isSafeInteger(calls) || calls < 1 || calls > 40) {
+        throw new Error('Invalid model budget');
+    }
     if (!options.python || !options.runtime || !isAbsolute(options.python) || !isAbsolute(options.runtime)) {
         throw new Error('Python and DSH runtime paths must be absolute');
     }
@@ -107,84 +118,108 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
         schema_sha256: hash(Buffer.concat(schema)), retrieval_version: '1.0.0' };
     const mcpArgs = ['-I', '-B', fileURLToPath(new URL('./mcp.py', import.meta.url)),
         '--workspace', workspace, '--dispatch', directory, '--model-provenance', JSON.stringify(provenance)];
-    if (options.input) mcpArgs.push('--input', resolve(options.input));
-    if (options.layer) mcpArgs.push('--layer', options.layer);
-    if (options.control) mcpArgs.push('--control', resolve(options.control));
-    if (options.controlLayer) mcpArgs.push('--control-layer', options.controlLayer);
     if (options.projectPlan) mcpArgs.push('--project-plan', options.projectPlan);
     if (options.controlPlan) mcpArgs.push('--control-plan', options.controlPlan);
     if (options.skill) mcpArgs.push('--skill', options.skill);
     if (options.previousRun) mcpArgs.push('--previous-run', options.previousRun);
-    if (options.materials) mcpArgs.push('--materials', JSON.stringify(options.materials));
-    const env = runtimeEnv(options, mcpArgs);
     const deadline = AbortSignal.timeout(timeoutMs);
     const stop = signal ? AbortSignal.any([signal, deadline]) : deadline;
     stop.throwIfAborted();
     mkdirSync(parent, { recursive: true });
     mkdirSync(directory);
-    const harness = new DeepSeekHarness({
-        profile: 'sdk-minimal',
-        patches: [profile],
-        dshHome: join(directory, 'dsh-home'), cwd: directory, processCwd: directory,
-        provider: options.provider, model: options.model, maxTokens: 1024,
-        initializeTimeoutMs: 45000, env,
-    });
+    const materials = { ...options.materials };
+    if (options.input && options.layer) materials.project = [{ file: resolve(options.input), layer: options.layer }];
+    if (options.control && options.controlLayer) materials.control = [{ file: resolve(options.control), layer: options.controlLayer }];
+    const requestFile = join(directory, 'replay-input.json');
+    const operationPath = join(directory, 'operation.json');
+    const budgetPath = join(directory, 'budget.json');
+    writeFileSync(requestFile, JSON.stringify({ materials, provenance, model_url: options.modelUrl ?? null,
+        skill: options.skill ?? null, previous_run: options.previousRun ?? null, project_plan: options.projectPlan ?? null,
+        control_plan: options.controlPlan ?? null, dsh: versions['@deepseek-ai/dsh'] }));
     const usage = new Map();
     function event(item) {
         appendFileSync(join(directory, 'events.jsonl'), JSON.stringify(item) + '\n');
         onEvent(item);
     }
     let stopListener;
+    let harness;
     let result;
     let attempted = false;
     try {
         event({ kind: 'dispatch', id, provider: options.provider, model: options.model });
         const aborted = new Promise(resolveAbort => {
-            stopListener = addAbortListener(stop, () => resolveAbort(null));
+            stopListener = addAbortListener(stop, () => {
+                writeFileSync(join(directory, 'cancelled'), '');
+                resolveAbort(null);
+            });
         });
-        const roles = Object.fromEntries(Object.entries(options.materials ?? {}).map(([role, items]) => [role, items.length]));
-        if (options.input && options.layer) roles.project = 1;
-        if (options.control && options.controlLayer) roles.control = 1;
-        const context = `已绑定材料数量 ${JSON.stringify(roles)}。已选技能 ${options.skill || '无'}。有已选历史成果：${Boolean(options.previousRun)}。\n`;
-        const response = await Promise.race([harness.run(context + '用户请求：' + options.prompt, {
-            sessionId: id,
-            onNotification(note) {
-                if (note.method === 'session.status') {
-                    event({ kind: 'status', status: note.params.status });
-                }
-                if (note.method !== 'session.event') return;
-                const fact = note.params.event;
-                const item = { kind: 'session_event', type: fact.type, seq: fact.seq, time: fact.time };
-                if (fact.type === 'tool/call') {
-                    item.tool = fact.data.name;
-                    if (['mcp__guizhi__execute_workflow', 'mcp__guizhi__review_approval'].includes(item.tool)) attempted = true;
-                }
-                if (fact.type === 'assistant/message' && fact.data.usage) {
-                    item.usage = fact.data.usage;
-                    usage.set(fact.seq, fact.data.usage);
-                }
-                event(item);
-            },
-        }), aborted]);
-        if (response === null) {
-            writeFileSync(join(directory, 'cancelled'), '');
+        const { stdout } = await exec(options.python, ['-I', '-B', join(source, 'src/guizhi/__main__.py'),
+            '--workspace', workspace, '_dispatch-replay', requestFile], { windowsHide: true, maxBuffer: 4 << 20 });
+        const prepared = JSON.parse(stdout);
+        if (prepared.operation) {
+            event({ kind: 'plan_reused', run_id: prepared.operation.run_id });
+            writeFileSync(operationPath, JSON.stringify(prepared.operation));
+            result = { status: prepared.operation.status, finish_reason: 'recorded_plan', plan_reused: true,
+                operation: prepared.operation, response: prepared.operation.status === 'succeeded'
+                    ? verifiedResponse(prepared.operation) : prepared.operation.error };
+        } else if (stop.aborted) {
             result = { status: deadline.aborted ? 'timed_out' : 'cancelled' };
         } else {
-            const receiptPath = join(directory, 'operation.json');
-            const issuePath = join(directory, 'input-issue.json');
-            const receipt = existsSync(receiptPath) ? readJson(receiptPath) : null;
-            const issue = existsSync(issuePath) ? readJson(issuePath) : null;
-            const status = receipt?.status ?? (response.finishReason !== 'completed' ? 'failed' : issue?.status ??
-                (attempted ? 'no_result' : existsSync(join(directory, 'discovery')) ? 'answered'
-                    : Object.keys(roles).length ? 'no_result' : 'missing_materials'));
-            const terminal = response.events.findLast(fact => fact.type === 'turn/end');
-            const candidatePath = join(directory, 'candidate.json');
-            result = { status, finish_reason: response.finishReason,
-                response: status === 'succeeded' ? verifiedResponse(receipt)
-                    : receipt?.error ?? issue?.error ?? (attempted ? '本轮没有交付成果。' : response.finalResponse),
-                operation: receipt, ...(issue && !receipt ? { input_issue: issue } : {}),
-                ...(status === 'answered' && existsSync(candidatePath) ? { candidate: readJson(candidatePath) } : {}),
-                ...(terminal?.data.reason.error ? { error: terminal.data.reason.error } : {}) };
+            mcpArgs.push('--materials', JSON.stringify(prepared.materials));
+            if (prepared.key) mcpArgs.push('--plan-key', prepared.key);
+            const env = { ...runtimeEnv(options, mcpArgs),
+                GUIZHI_BUDGET_CONFIG: JSON.stringify({ tokens, calls, checkpoint: budgetPath, operation: operationPath }) };
+            harness = new DeepSeekHarness({
+                profile: 'sdk-minimal', patches: [profile], dshHome: join(directory, 'dsh-home'),
+                cwd: directory, processCwd: directory, provider: options.provider, model: options.model, maxTokens: 1024,
+                initializeTimeoutMs: 45000, env,
+            });
+            await harness.start();
+            if (!existsSync(budgetPath)) throw new Error('Model budget guard did not initialize');
+            const roles = Object.fromEntries(Object.entries(materials).map(([role, items]) => [role, items.length]));
+            const context = `已绑定材料数量 ${JSON.stringify(roles)}。已选技能 ${options.skill || '无'}。有已选历史成果：${Boolean(options.previousRun)}。\n`;
+            const response = await Promise.race([harness.run(context + '用户请求：' + options.prompt, {
+                sessionId: id,
+                onNotification(note) {
+                    if (note.method === 'session.status') {
+                        event({ kind: 'status', status: note.params.status });
+                    }
+                    if (note.method !== 'session.event') return;
+                    const fact = note.params.event;
+                    const item = { kind: 'session_event', type: fact.type, seq: fact.seq, time: fact.time };
+                    if (fact.type === 'tool/call') {
+                        item.tool = fact.data.name;
+                        if (['mcp__guizhi__execute_workflow', 'mcp__guizhi__review_approval',
+                            'mcp__guizhi__update_approval'].includes(item.tool)) attempted = true;
+                    }
+                    if (fact.type === 'assistant/message' && fact.data.usage) {
+                        item.usage = fact.data.usage;
+                        usage.set(fact.seq, fact.data.usage);
+                    }
+                    event(item);
+                },
+            }), aborted]);
+            if (response === null) {
+                writeFileSync(join(directory, 'cancelled'), '');
+                result = { status: deadline.aborted ? 'timed_out' : 'cancelled' };
+            } else {
+                const issuePath = join(directory, 'input-issue.json');
+                const receipt = existsSync(operationPath) ? readJson(operationPath) : null;
+                const issue = existsSync(issuePath) ? readJson(issuePath) : null;
+                const stopped = existsSync(budgetPath) && readJson(budgetPath).status === 'exhausted';
+                const status = receipt?.status ?? (stopped ? 'budget_exhausted' : response.finishReason !== 'completed' ? 'failed' : issue?.status ??
+                    (attempted ? 'no_result' : existsSync(join(directory, 'discovery')) ? 'answered'
+                        : Object.keys(roles).length ? 'no_result' : 'missing_materials'));
+                const terminal = response.events.findLast(fact => fact.type === 'turn/end');
+                const candidatePath = join(directory, 'candidate.json');
+                result = { status, finish_reason: response.finishReason,
+                    response: status === 'succeeded' ? verifiedResponse(receipt)
+                        : receipt?.error ?? issue?.error ?? (stopped ? '模型预算已用完，已保存办理进度。'
+                            : attempted ? '本轮没有交付成果。' : response.finalResponse),
+                    operation: receipt, ...(issue && !receipt ? { input_issue: issue } : {}),
+                    ...(status === 'answered' && existsSync(candidatePath) ? { candidate: readJson(candidatePath) } : {}),
+                    ...(terminal?.data.reason.error ? { error: terminal.data.reason.error } : {}) };
+            }
         }
     } catch (error) {
         writeFileSync(join(directory, 'cancelled'), '');
@@ -192,7 +227,7 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
     } finally {
         stopListener?.[Symbol.dispose]();
         try {
-            await harness.close();
+            await harness?.close();
         } catch (error) {
             result = { ...result, status: 'failed', shutdown_error: error.message };
         }
@@ -208,6 +243,7 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
             ? null : accounting.total_tokens + tokens.totalTokens;
     }
     const receipt = { ...result, id, directory, provider: options.provider, model: options.model,
+        budget: existsSync(budgetPath) ? readJson(budgetPath) : null,
         sdk_version: versions['@deepseek-ai/dsh-sdk-client'], usage: usage.size ? accounting : null };
     writeFileSync(join(directory, 'result.json'), JSON.stringify(receipt, null, 2) + '\n');
     return receipt;
@@ -221,6 +257,7 @@ async function main() {
         control: { type: 'string' }, 'control-layer': { type: 'string' },
         'project-plan': { type: 'string' }, 'control-plan': { type: 'string' },
         'timeout-ms': { type: 'string' }, skill: { type: 'string' }, materials: { type: 'string' }, 'previous-run': { type: 'string' },
+        'max-model-tokens': { type: 'string' }, 'max-model-calls': { type: 'string' },
     } });
     const controller = new AbortController();
     const cancel = () => controller.abort();
@@ -231,6 +268,8 @@ async function main() {
             materials: values.materials ? JSON.parse(values.materials) : undefined,
             previousRun: values['previous-run'],
             projectPlan: values['project-plan'], controlPlan: values['control-plan'],
+            maxModelTokens: values['max-model-tokens'] === undefined ? undefined : Number(values['max-model-tokens']),
+            maxModelCalls: values['max-model-calls'] === undefined ? undefined : Number(values['max-model-calls']),
             timeoutMs: values['timeout-ms'] === undefined ? undefined : Number(values['timeout-ms']) },
         { signal: controller.signal, onEvent: item => console.log(JSON.stringify(item)) });
         console.log(JSON.stringify({ kind: 'result', ...result }));

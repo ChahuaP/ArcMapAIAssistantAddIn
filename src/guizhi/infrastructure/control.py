@@ -1,5 +1,6 @@
 """Polygon control overlay with union-based area accounting."""
 from collections import Counter
+from hashlib import sha256
 from dataclasses import asdict
 from math import isclose
 from pathlib import Path
@@ -12,7 +13,9 @@ import shapely
 from shapely.geometry import mapping
 
 from guizhi.domain.contracts import ClaimRevision, EvidenceRef, ObjectRevision
+from guizhi.infrastructure.cache import fingerprint, implementation, read_entry, write_entry
 from guizhi.infrastructure.vector import digest, import_layer
+from guizhi.infrastructure.workspace import Workspace
 
 
 def classify(project, boundary):
@@ -31,6 +34,25 @@ def polygons(frame, label):
             or shapely.has_z(geom).any()):
         raise ValueError(f"{label} requires non-empty, valid 2D polygons")
     return geom
+
+
+def parcel_intersections(workspace, parcels, boundaries, crs, check):
+    shapes = list(boundaries)
+    index = shapely.STRtree(shapes)
+    control_keys = [sha256(shapely.to_wkb(shapely.normalize(shape))).hexdigest() for shape in shapes]
+    revision = implementation("control_check")
+    for parcel in parcels:
+        check()
+        neighbors = index.query(parcel, predicate="intersects")
+        key = fingerprint([revision, crs.to_wkt(), shapely.to_wkb(shapely.normalize(parcel), hex=True),
+                           sorted(control_keys[i] for i in neighbors)])
+        saved = read_entry(workspace, "overlay-parcel", key)
+        if saved:
+            yield saved["relation"], shapely.from_wkb(saved["geometry"]), True
+        else:
+            relation, hit = classify(parcel, shapely.union_all([shapes[i] for i in neighbors]))
+            write_entry(workspace, "overlay-parcel", key, {"relation": relation, "geometry": shapely.to_wkb(hit, hex=True)})
+            yield relation, hit, False
 
 
 def map_payload(project, coverage, crs):
@@ -96,9 +118,11 @@ def check_control(task: dict, job: dict, directory: Path, progress, ensure_super
     project_union = shapely.union_all(project_geom)
     control_union = shapely.union_all(control_geom)
     rows, intersections = [], []
-    for feature, shape in zip(project.index, project_geom, strict=True):
-        ensure_supervised()
-        relation, hit = classify(shape, control_union)
+    workspace = Workspace(workspace_root)
+    reused = 0
+    for feature, (relation, hit, from_cache) in zip(
+            project.index, parcel_intersections(workspace, project_geom, control_geom, crs, ensure_supervised), strict=True):
+        reused += from_cache
         rows.append({"source_fid": int(feature), "relation": relation, "overlap_m2": hit.area})
         intersections.append(hit)
     coverage = project_union.intersection(control_union)
@@ -136,4 +160,5 @@ def check_control(task: dict, job: dict, directory: Path, progress, ensure_super
             "evidence": [asdict(ref) for ref in evidence], "statistics": stats,
             "validation": checks, "export_layer": "control_check",
             "analysis_crs_wkt": crs.to_wkt(),
+            "execution": {"reused_parcels": reused, "computed_parcels": len(rows) - reused, "aggregate_recomputed": True},
             "runtime": {"gdal": pyogrio.__gdal_version_string__, "geos": shapely.geos_version_string}}

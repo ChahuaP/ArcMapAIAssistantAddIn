@@ -42,5 +42,6 @@ def explain_findings(ctx, case_run: str, rules_run: str, title: str = "审批核
     shutil.copyfile(source, output)
     ctx.record("map", output)
     case_report(ctx, case, title)
-    return {"statistics": {"claim_count": len(case["claims"]), "rule_count": len(result["findings"])},
+    return {"statistics": {"claim_count": len(case["claims"]), "rule_count": len(result["findings"]),
+                           "changed_parcels": len(case["parcel_changes"])},
             "case_status": case["status"]}

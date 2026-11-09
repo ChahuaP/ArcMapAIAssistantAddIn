@@ -85,6 +85,10 @@ class Workspace:
                         id TEXT NOT NULL, revision INTEGER NOT NULL, body TEXT NOT NULL,
                         PRIMARY KEY (id, revision)
                     );
+                    CREATE TABLE IF NOT EXISTS compute_cache (
+                        namespace TEXT NOT NULL, key TEXT NOT NULL, body TEXT NOT NULL,
+                        size INTEGER NOT NULL, touched REAL NOT NULL, PRIMARY KEY (namespace, key)
+                    );
                 """)
 
     @contextmanager

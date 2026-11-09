@@ -4,7 +4,8 @@
     const api = window.guizhi;
     const labels = { running: '正在办理', cancelling: '正在停止', succeeded: '已完成',
         failed: '未完成', cancelled: '已停止', timed_out: '已超时', interrupted: '已中断',
-        missing_materials: '待补材料', invalid_materials: '材料有误', no_result: '待补信息', answered: '已答复' };
+        missing_materials: '待补材料', invalid_materials: '材料有误', no_result: '待补信息', answered: '已答复',
+        budget_exhausted: '已保存进度' };
     const active = task => task && ['running', 'cancelling'].includes(task.status);
     const emptyDraft = () => ({ prompt: '', project: null, control: null, skill: null, materials: {} });
     const number = value => value.toLocaleString('zh-CN', { maximumFractionDigits: 2 });
@@ -84,6 +85,8 @@
             return '要素 ' + loc.fid;
         }
         return h('section', { className: 'approval-results', 'aria-label': '审批结论' },
+            caseFile.parcel_changes?.length > 0 && h('p', null, caseFile.parcel_changes.map(item =>
+                ({ added: '新增 ', removed: '移除 ', updated: '更新 ' })[item.status] + item.code).join('，')),
             parcel && h('button', { onClick: () => selectParcel(null) }, parcels.get(parcel) + ' ×'),
             ...activeClaims.map(item => h('div', { className: 'finding', key: item.id },
                 h('button', { type: 'button', onClick: () => {

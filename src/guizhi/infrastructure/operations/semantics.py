@@ -127,6 +127,23 @@ def parcel_transitions(ctx, prior_case, transitions, project_id, parcels):
     return links
 
 
+def parcel_changes(ctx, prior_case, project_id, parcels):
+    if not prior_case:
+        return []
+    previous = artifact_json(ctx.workspace, prior_case, "case")
+    if previous["project"]["id"] != project_id:
+        raise ValueError("The update requires the same project")
+    old = {parcel["id"]: parcel for parcel in previous["parcels"]}
+    new = {parcel["id"]: parcel for parcel in parcels}
+    changes = [{"code": item["code"], "status": "removed"} for identity, item in old.items() if identity not in new]
+    for identity, item in new.items():
+        if identity not in old:
+            changes.append({"code": item["code"], "status": "added"})
+        elif item["revision"] != old[identity]["revision"]:
+            changes.append({"code": item["code"], "status": "updated"})
+    return changes
+
+
 def spatial_findings(ctx, frame, parcels, spatial_run):
     if not spatial_run:
         return [], {}
@@ -183,9 +200,13 @@ def approval_case(ctx, document_run: str, project_code: str, region: str, parcel
     source = artifact_json(ctx.workspace, document_run, "document_index")
     project_id = key("project", normalized(region), code(project_code))
     revision = ctx.selection_hashes[0]
-    parcels = [{"id": key("parcel", normalized(region), code(value)), "code": value,
-                "revision": key("parcel", normalized(region), code(value), revision), "fid": int(fid)}
-               for fid, value in identifiers.items()]
+    parcels = []
+    attributes = frame.drop(columns=frame.geometry.name)
+    for (fid, value), shape, row in zip(identifiers.items(), shapes, attributes.itertuples(index=False, name=None), strict=True):
+        identity = key("parcel", normalized(region), code(value))
+        parcel_revision = key(identity, frame.crs.to_wkt(), shapely.to_wkb(shapely.normalize(shape), hex=True),
+                              list(zip(attributes.columns, map(str, row), strict=True)))
+        parcels.append({"id": identity, "code": value, "revision": parcel_revision, "fid": int(fid)})
     claims, links = material_claims(ctx, source, document_run, project_code, project_id, facts, required, as_of)
     links.extend({"type": "contains", "from": project_id, "to": parcel["id"]} for parcel in parcels)
     links.extend(parcel_transitions(ctx, prior_case, transitions, project_id, parcels))
@@ -196,6 +217,7 @@ def approval_case(ctx, document_run: str, project_code: str, region: str, parcel
     case = {"project": {"id": project_id, "code": project_code, "region": region,
                         "revision": key(project_id, revision, [doc["revision"] for doc in source["documents"]])},
             "parcels": parcels, "claims": claims, "links": links, "as_of": as_of.isoformat() if as_of else None,
+            "parcel_changes": parcel_changes(ctx, prior_case, project_id, parcels),
             "precise": precise, "status": ("conflict" if any(c["status"] == "conflict" for c in claims) else
                      "insufficient" if not claims or any(c["status"] == "insufficient" for c in claims) else "supported"),
             "sources": {"document_run": document_run, "spatial_run": spatial_run, "parcel_revision": revision}}
@@ -204,4 +226,5 @@ def approval_case(ctx, document_run: str, project_code: str, region: str, parcel
                          "features": [{"role": "project", "id": parcel["id"], "label": parcel["code"], "geometry": mapping(shape)}
                                       for parcel, shape in zip(parcels, shapes, strict=True)]}, "map")
     case_report(ctx, case, "审批材料与地块核查")
-    return {"statistics": {**stats, "parcel_count": len(parcels), "claim_count": len(claims)}, "case_status": case["status"]}
+    return {"statistics": {**stats, "parcel_count": len(parcels), "claim_count": len(claims),
+                           "changed_parcels": len(case["parcel_changes"])}, "case_status": case["status"]}
