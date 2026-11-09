@@ -8,14 +8,18 @@ import sys
 from guizhi.infrastructure.workspace import SOURCE_ROOT
 
 
+def source_fingerprint(root):
+    checksum = sha256()
+    files = [root / "VERSION", root / "requirements.lock",
+             *sorted((root / "src/guizhi").rglob("*.py"))]
+    for path in files:
+        checksum.update(path.relative_to(root).as_posix().encode())
+        checksum.update(sha256(path.read_bytes()).digest())
+    return checksum.hexdigest()
+
+
 @lru_cache(maxsize=1)
 def runtime_identity():
-    checksum = sha256()
-    files = [SOURCE_ROOT / "VERSION", SOURCE_ROOT / "requirements.lock",
-             *sorted((SOURCE_ROOT / "src/guizhi").rglob("*.py"))]
-    for path in files:
-        checksum.update(path.relative_to(SOURCE_ROOT).as_posix().encode())
-        checksum.update(sha256(path.read_bytes()).digest())
-    return {"source_sha256": checksum.hexdigest(), "python": sys.version,
+    return {"source_sha256": source_fingerprint(SOURCE_ROOT), "python": sys.version,
             "packages": {name: version(name) for name in
                          ("pydantic", "geopandas", "shapely", "pyogrio", "pyproj", "rasterio", "onnxruntime")}}

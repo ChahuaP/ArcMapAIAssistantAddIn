@@ -2,7 +2,8 @@ param(
     [Parameter(Mandatory)][string]$RuntimeRoot,
     [Parameter(Mandatory)][string]$DesktopRuntime,
     [string]$DshRuntime,
-    [string]$UserData
+    [string]$UserData,
+    [string]$ReleaseRoot
 )
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
@@ -14,5 +15,12 @@ if (-not (Test-Path -LiteralPath $electron -PathType Leaf)) { throw "Electron ru
 $flags = @('--runtime', $RuntimeRoot, '--renderer-runtime', $DesktopRuntime)
 if ($DshRuntime) { $flags += '--dsh', (Assert-ExternalBuildPath $DshRuntime $repo) }
 if ($UserData) { $flags += '--user-data', (Assert-ExternalBuildPath $UserData $repo) }
-& $electron (Join-Path $repo 'apps/desktop/entry.cjs') @flags | Out-Default
+$source = $repo
+if ($ReleaseRoot) {
+    $registry = Assert-ExternalBuildPath $ReleaseRoot $repo
+    $bundle = & (Join-Path $RuntimeRoot 'python/python.exe') -I -B (Join-Path $repo 'src/guizhi/__main__.py') --workspace $registry release-active $registry
+    if ($LASTEXITCODE -ne 0) { throw 'Could not verify the active Guizhi release' }
+    $source = ($bundle | ConvertFrom-Json).source
+}
+& $electron (Join-Path $source 'apps/desktop/entry.cjs') @flags | Out-Default
 if ($LASTEXITCODE -ne 0) { throw "Guizhi exited with $LASTEXITCODE" }

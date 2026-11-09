@@ -23,9 +23,12 @@ export async function improve(options) {
         throw new Error('Use an absolute improvement request path and a MiniMax model');
     }
     options = { ...options, workspace: externalPath(options.workspace) };
+    const mode = options.mode ?? 'skill';
+    if (!['skill', 'tool'].includes(mode)) throw new Error('Unknown maintenance mode');
+    const operation = mode === 'tool' ? 'tool' : 'improvement';
     const env = runtimeEnv(options);
     const { DeepSeekHarness, versions } = await loadHarness(options.python, options.runtime);
-    const plan = await local(options, 'improvement-plan', options.request);
+    const plan = await local(options, operation + '-plan', options.request);
     const budget = join(plan.directory, 'model-budget.json');
     const proposal = join(plan.directory, 'proposal.json');
     const harness = new DeepSeekHarness({
@@ -63,13 +66,13 @@ export async function improve(options) {
     } finally {
         await harness.close();
     }
-    return local(options, 'improvement-apply', plan.id, proposal);
+    return local(options, operation + '-apply', plan.id, proposal);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
     const { values } = parseArgs({ options: {
         workspace: { type: 'string' }, runtime: { type: 'string' }, python: { type: 'string' },
-        request: { type: 'string' }, model: { type: 'string', default: 'MiniMax-M3' },
+        request: { type: 'string' }, model: { type: 'string', default: 'MiniMax-M3' }, mode: { type: 'string', default: 'skill' },
     } });
     improve(values).then(result => {
         console.log(JSON.stringify(result));

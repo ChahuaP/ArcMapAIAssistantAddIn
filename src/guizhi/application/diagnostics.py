@@ -127,6 +127,16 @@ def diagnose_dispatch(workspace, dispatch_id):
         # A later valid operation takes precedence over an earlier rejected tool call.
         if receipt.get("status") in {"succeeded", "answered"}:
             raise ValueError("The dispatch completed")
+    if contained(folder, "operation.claim").exists():
+        with workspace.connect() as db:
+            bound = db.execute("SELECT run_id FROM operation_requests WHERE key=?", (dispatch_id,)).fetchone()
+        if bound:
+            run = inspect(workspace, bound["run_id"])
+            if run["status"] == "succeeded":
+                raise ValueError("The dispatch has a committed result")
+            if run["status"] in {"running", "cancelling", "cancelled"}:
+                raise ValueError(f"The dispatch operation is {run['status']}")
+            return diagnose_run(workspace, run["id"])
     raw = json.loads(issue.read_text(encoding="utf-8")) if issue.is_file() else {}
     finding = raw.get("diagnostic")
     if finding is None:
@@ -194,8 +204,9 @@ def replay(workspace, case, *, seconds=20):
     parameters = request["parameters"] if request else {"layer": task["layer"]}
     if task["operation"] == "workflow.execute":
         parameters["specification"]["materials"] = {role: [] for role in parameters["specification"]["materials"]}
-    key = fingerprint([case["fingerprint"], parameters, [(item["role"], item["revision"]) for item in snapshots],
-                       case["finding"]["evidence"].get("oracle"), case["finding"]["evidence"].get("expected"),
+    key = fingerprint([case["fingerprint"], parameters,
+                       [(item["role"], item["layer"], item["revision"]) for item in snapshots],
+                       {name: case["finding"]["evidence"].get(name) for name in ("statistic", "oracle", "expected")},
                        case["runtime"]])
     directory = contained(workspace.root, "diagnostics", "replays", key)
     receipt = contained(directory, "result.json")

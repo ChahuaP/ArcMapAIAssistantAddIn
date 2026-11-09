@@ -57,6 +57,15 @@ def main() -> int:
     candidate = commands.add_parser("improvement-apply")
     candidate.add_argument("id")
     candidate.add_argument("proposal", type=Path)
+    commands.add_parser("tool-plan").add_argument("request", type=Path)
+    tool = commands.add_parser("tool-apply")
+    tool.add_argument("id")
+    tool.add_argument("proposal", type=Path)
+    seed = commands.add_parser("release-seed")
+    seed.add_argument("root", type=Path)
+    seed.add_argument("archive", type=Path)
+    seed.add_argument("sha256")
+    commands.add_parser("release-active").add_argument("root", type=Path)
     commands.add_parser("platform-contract", help="Read the local platform connector contract")
     commands.add_parser("platform-handoff", help="Describe verified local artifacts for handoff").add_argument(
         "request", type=Path)
@@ -66,6 +75,20 @@ def main() -> int:
     commands.add_parser("_dispatch-replay").add_argument("request", type=Path)
     args = parser.parse_args()
     try:
+        if args.command in {"release-seed", "release-active", "tool-plan", "tool-apply"}:
+            from guizhi.application import tool_repair
+            from guizhi.infrastructure import releases
+
+            if args.command == "release-seed":
+                result = tool_repair.seed(args.root, args.archive, args.sha256)
+            elif args.command == "release-active":
+                result = releases.active(args.root)
+            elif args.command == "tool-plan":
+                result = tool_repair.prepare(Workspace(args.workspace), json.loads(args.request.read_text(encoding="utf-8-sig")))
+            else:
+                result = tool_repair.apply(Workspace(args.workspace), args.id, json.loads(args.proposal.read_text(encoding="utf-8-sig")))
+            print(json.dumps(result))
+            return 0
         if args.command in {"improvement-plan", "improvement-apply"}:
             from guizhi.application import improvement
 

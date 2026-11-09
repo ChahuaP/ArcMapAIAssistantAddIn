@@ -101,7 +101,7 @@ def condition_mask(frame, value, depth=0):
     elif op == "like" and keys == {"value"} and isinstance(value["value"], str):
         if not pd.api.types.is_string_dtype(series):
             raise ValueError("LIKE requires a text field")
-        mask = series.str.fullmatch(like_regex(value["value"]), na=False)
+        mask = series.str.fullmatch(like_regex(value["value"]), na=False, flags=re.DOTALL)
     elif op == "in" and keys == {"values"} and isinstance(value["values"], list) and value["values"]:
         mask = series.isin(value["values"]) & series.notna()
     elif op == "between" and keys == {"values"} and isinstance(value["values"], list) and len(value["values"]) == 2:
