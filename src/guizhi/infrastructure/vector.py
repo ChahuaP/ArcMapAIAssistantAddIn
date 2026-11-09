@@ -4,6 +4,7 @@ from dataclasses import asdict
 from hashlib import file_digest
 from pathlib import Path
 import sqlite3
+from time import monotonic
 from uuid import uuid4
 import warnings
 
@@ -13,15 +14,33 @@ import pyogrio
 import shapely
 
 from guizhi.domain.contracts import ClaimRevision, DatasetRevision, EvidenceRef, ObjectRevision
+from guizhi.domain.diagnostics import Fault
+
+SOURCE_LOCK_WAIT = 5
 
 
 def snapshot_gpkg(source: Path, target: Path, layer: str, ensure_supervised, *, allow_undefined=False):
     # SQLite backup captures a coherent database, including committed WAL data.
+    blocked_at = None
+
+    def progress(status, _remaining, _total):
+        nonlocal blocked_at
+        ensure_supervised()
+        if status & 0xff not in {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}:
+            blocked_at = None
+            return
+        now = monotonic()
+        if blocked_at is None:
+            blocked_at = now
+        elif now - blocked_at >= SOURCE_LOCK_WAIT:
+            raise Fault("environment", "source_locked", "GeoPackage 正被其他进程占用，请解除占用后重试。",
+                        wait_seconds=SOURCE_LOCK_WAIT)
+
     incoming = sqlite3.connect(f"{source.as_uri()}?mode=ro", uri=True, timeout=0.25)
     try:
         outgoing = sqlite3.connect(target)
         try:
-            incoming.backup(outgoing, pages=256, progress=lambda *_: ensure_supervised(), sleep=0.1)
+            incoming.backup(outgoing, pages=256, progress=progress, sleep=0.1)
         finally:
             outgoing.close()
     finally:
