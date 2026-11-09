@@ -14,24 +14,10 @@
         const dialog = useRef(null);
         const [value, change] = useState({ ...current, key: '' });
         const [settingsError, setSettingsError] = useState('');
-        const [modelStatus, setModelStatus] = useState('');
         const fail = error => setSettingsError(String(error.message || error)
             .replace(/^Error invoking remote method '[^']+': Error: /, ''));
-        const update = (name, next) => {
-            setModelStatus('');
-            change(old => ({ ...old, [name]: next }));
-        };
+        const update = (name, next) => change(old => ({ ...old, [name]: next }));
         useEffect(() => { dialog.current.showModal(); }, []);
-        const local = value.provider === 'ollama';
-        const check = async (kind, url, model) => {
-            setModelStatus('正在检测');
-            setSettingsError('');
-            try {
-                const { capabilities } = await api.modelCheck(kind, url, model);
-                const names = { completion: '对话', tools: '工具调用', vision: '图像', thinking: '推理' };
-                setModelStatus(capabilities.filter(item => names[item]).map(item => names[item]).join(' · '));
-            } catch (error) { setModelStatus(''); fail(error); }
-        };
         return h('dialog', { ref: dialog, onCancel: event => {
             event.preventDefault();
             if (current.workspace) close();
@@ -48,27 +34,11 @@
                 h('button', { type: 'button', onClick: () => api.workspace().then(folder => {
                     if (folder) update('workspace', folder);
                 }).catch(fail) }, '选择'))),
-            h('label', null, '模型服务', h('select', { value: value.provider, onChange: event => {
-                const provider = event.target.value;
-                setModelStatus('');
-                change(old => ({ ...old, provider, model: provider === 'ollama' ? 'qwen3.5:9b' : 'MiniMax-M3' }));
-            } }, h('option', { value: 'minimax-cn' }, 'MiniMax 在线'), h('option', { value: 'ollama' }, 'Ollama 本地或内网'))),
-            h('label', null, '模型', h('input', { value: value.model, required: true,
+            h('label', null, 'MiniMax 在线模型', h('input', { value: value.model, required: true,
                 onChange: event => update('model', event.target.value) })),
-            local ? h('label', null, '服务地址', h('input', { value: value.modelUrl || '',
-                placeholder: 'http://127.0.0.1:11434/v1', onChange: event => update('modelUrl', event.target.value) }))
-                : h('label', null, 'API 密钥', h('input', { type: 'password', value: value.key,
-                    placeholder: current.keyConfigured ? '已配置，可输入新密钥' : '输入 MiniMax API 密钥',
-                    autoComplete: 'off', onChange: event => update('key', event.target.value) })),
-            local && h('button', { type: 'button', onClick: () => check('chat', value.modelUrl, value.model) }, '检测对话模型'),
-            h('details', null, h('summary', null, '视觉模型'),
-                h('label', null, 'Ollama 模型', h('input', { value: value.visionModel || '',
-                    onChange: event => update('visionModel', event.target.value) })),
-                h('label', null, '服务地址', h('input', { value: value.visionUrl || '', placeholder: 'http://127.0.0.1:11434/v1',
-                    onChange: event => update('visionUrl', event.target.value) })),
-                h('button', { type: 'button', disabled: !value.visionModel?.trim(),
-                    onClick: () => check('vision', value.visionUrl, value.visionModel) }, '检测视觉模型')),
-            modelStatus && h('p', { role: 'status' }, modelStatus),
+            h('label', null, 'API 密钥', h('input', { type: 'password', value: value.key,
+                placeholder: current.keyConfigured ? '已配置，可输入新密钥' : '输入 MiniMax API 密钥',
+                autoComplete: 'off', onChange: event => update('key', event.target.value) })),
             h('label', { className: 'voice-toggle' },
                 h('input', { type: 'checkbox', checked: value.showOperation !== false,
                     onChange: event => update('showOperation', event.target.checked) }), '显示办理过程'),
@@ -250,7 +220,7 @@
                 h('button', { className: 'settings-link', onClick: () => showSettings(true) }, '设置')),
             h('main', { className: 'content' },
                 h('header', null, h('h1', null, task ? task.title : '规智工作台'),
-                    state && h('span', { className: 'model-chip' }, h('i'), state.settings.provider === 'ollama' ? '本地模型' : '在线模型')),
+                    state && h('span', { className: 'model-chip' }, h('i'), '在线模型')),
                 h('div', { className: 'workbench' },
                     h('section', { className: 'conversation', 'aria-label': '任务对话' },
                         h('div', { className: 'messages' }, task ? [

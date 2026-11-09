@@ -7,7 +7,6 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { promisify } from 'node:util';
-import ollama from './ollama.cjs';
 import { watchRun } from './progress.mjs';
 
 const source = realpathSync(fileURLToPath(new URL('../../../../', import.meta.url)));
@@ -58,28 +57,24 @@ function runtimeEnv(options, mcpArgs) {
     for (const [name, value] of Object.entries(process.env)) {
         if (allowed.test(name)) env[name] = value;
     }
-    let providers;
-    if (options.provider === 'ollama') {
-        const url = ollama.ollamaUrl(options.modelUrl);
-        env.GUIZHI_LOOPBACK_KEY = 'local';
-        providers = { ollama: {
-            api: 'openai-completions', baseURL: url.href, apiKeyEnv: 'GUIZHI_LOOPBACK_KEY',
-            defaultContextWindow: 8192, defaultMaxTokens: 1024, models: [{ id: options.model }],
-        } };
-    } else if (options.provider === 'minimax-cn') {
-        if (options.modelUrl) throw new Error('Custom URL is only supported for Ollama');
-        if (!process.env.MINIMAX_API_KEY?.trim()) throw new Error('MINIMAX_API_KEY is required');
-        env.MINIMAX_API_KEY = process.env.MINIMAX_API_KEY;
-        providers = { 'minimax-cn': { apiKeyEnv: 'MINIMAX_API_KEY' } };
-    } else {
-        throw new Error('Provider must be ollama or minimax-cn');
-    }
+    if (!process.env.MINIMAX_API_KEY?.trim()) throw new Error('请配置 MiniMax 在线模型密钥');
+    env.MINIMAX_API_KEY = process.env.MINIMAX_API_KEY;
+    const providers = { 'minimax-cn': { apiKeyEnv: 'MINIMAX_API_KEY' } };
     return { ...env, GUIZHI_MODEL_PROVIDERS: JSON.stringify(providers),
         GUIZHI_PYTHON: options.python, GUIZHI_MCP_ARGS: JSON.stringify(mcpArgs) };
 }
 
 export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
-    if (!options.prompt?.trim() || !options.model?.trim()) throw new Error('Prompt and model are required');
+    if (options.provider !== 'minimax-cn' || options.modelUrl ||
+            !/^MiniMax-[A-Za-z0-9.-]+$/.test(options.model ?? '')) {
+        throw new Error('请选择 MiniMax 在线模型');
+    }
+    if (!options.prompt?.trim()) throw new Error('Prompt is required');
+    const started = performance.now();
+    const safeError = value => {
+        const secret = process.env.MINIMAX_API_KEY?.trim();
+        return secret ? String(value).replaceAll(secret, '[密钥]') : String(value);
+    };
     const timeoutMs = options.timeoutMs ?? 180000;
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 900000) {
         throw new Error('Timeout must be between 1 and 900000 ms');
@@ -131,7 +126,7 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
     const requestFile = join(directory, 'replay-input.json');
     const operationPath = join(directory, 'operation.json');
     const budgetPath = join(directory, 'budget.json');
-    writeFileSync(requestFile, JSON.stringify({ materials, provenance, model_url: options.modelUrl ?? null,
+    writeFileSync(requestFile, JSON.stringify({ materials, provenance,
         skill: options.skill ?? null, previous_run: options.previousRun ?? null, project_plan: options.projectPlan ?? null,
         control_plan: options.controlPlan ?? null, dsh: versions['@deepseek-ai/dsh'] }));
     const usage = new Map();
@@ -218,18 +213,18 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
                             : attempted ? '本轮没有交付成果。' : response.finalResponse),
                     operation: receipt, ...(issue && !receipt ? { input_issue: issue } : {}),
                     ...(status === 'answered' && existsSync(candidatePath) ? { candidate: readJson(candidatePath) } : {}),
-                    ...(terminal?.data.reason.error ? { error: terminal.data.reason.error } : {}) };
+                    ...(terminal?.data.reason.error ? { error: safeError(terminal.data.reason.error) } : {}) };
             }
         }
     } catch (error) {
         writeFileSync(join(directory, 'cancelled'), '');
-        result = { status: 'failed', error: error.message };
+        result = { status: 'failed', error: safeError(error.message) };
     } finally {
         stopListener?.[Symbol.dispose]();
         try {
             await harness?.close();
         } catch (error) {
-            result = { ...result, status: 'failed', shutdown_error: error.message };
+            result = { ...result, status: 'failed', shutdown_error: safeError(error.message) };
         }
         stopProgress?.();
     }
@@ -244,6 +239,7 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
             ? null : accounting.total_tokens + tokens.totalTokens;
     }
     const receipt = { ...result, id, directory, provider: options.provider, model: options.model,
+        elapsed_ms: Math.round(performance.now() - started), execution: { gis: 'local', model: 'online' },
         budget: existsSync(budgetPath) ? readJson(budgetPath) : null,
         sdk_version: versions['@deepseek-ai/dsh-sdk-client'], usage: usage.size ? accounting : null };
     writeFileSync(join(directory, 'result.json'), JSON.stringify(receipt, null, 2) + '\n');
@@ -253,7 +249,7 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
 async function main() {
     const { values } = parseArgs({ options: {
         workspace: { type: 'string' }, runtime: { type: 'string' }, python: { type: 'string' },
-        provider: { type: 'string' }, model: { type: 'string' }, 'model-url': { type: 'string' },
+        provider: { type: 'string', default: 'minimax-cn' }, model: { type: 'string' },
         prompt: { type: 'string' }, input: { type: 'string' }, layer: { type: 'string' },
         control: { type: 'string' }, 'control-layer': { type: 'string' },
         'project-plan': { type: 'string' }, 'control-plan': { type: 'string' },
@@ -265,7 +261,7 @@ async function main() {
     process.once('SIGINT', cancel);
     process.once('SIGTERM', cancel);
     try {
-        const result = await dispatch({ ...values, modelUrl: values['model-url'], controlLayer: values['control-layer'],
+        const result = await dispatch({ ...values, controlLayer: values['control-layer'],
             materials: values.materials ? JSON.parse(values.materials) : undefined,
             previousRun: values['previous-run'],
             projectPlan: values['project-plan'], controlPlan: values['control-plan'],

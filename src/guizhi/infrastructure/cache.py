@@ -18,6 +18,9 @@ READ_OPERATIONS = {
     "knowledge.find_rules", "knowledge.model_scope", "governance.explain_findings",
     "presentation.export_table",
     "raster.statistics", "cad.inspect", "annual.summarize", "annual.compare",
+    "raster.clip", "raster.reproject", "raster.mosaic", "cad.convert", "annual.report",
+    "delivery.clip_vector", "delivery.check_attachments", "delivery.bundle",
+    "governance.farmland_balance", "governance.permit_history",
 }
 RUN_ARGUMENTS = {"document_run", "catalog_run", "case_run", "rules_run", "spatial_run", "prior_case",
                  "history_run", "summary_run", "changes_run", "vector_run", "raster_run", "attachment_run"}
@@ -70,7 +73,10 @@ def implementation(operation):
     paths = [SOURCE_ROOT / "VERSION", SOURCE_ROOT / "requirements.lock", root / "vector.py",
              root / "operations" / "runner.py", *modules.get(operation, ())]
     if "." in operation:
-        paths.append(root / "operations" / (operation.split(".", 1)[0] + ".py"))
+        domain = operation.split(".", 1)[0]
+        paths.append(root / "operations" / (domain + ".py"))
+        if domain in {"annual", "cad", "delivery", "governance"}:
+            paths.append(root / "operations" / "report.py")
     if operation == "control_check":
         paths.append(root / "cache.py")
     return fingerprint([VALIDATOR_REVISION, *map(digest, paths)])

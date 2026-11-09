@@ -1,4 +1,5 @@
 """Reuse a verified plan on identical bound inputs, with a new workflow receipt."""
+from datetime import datetime
 from pathlib import Path
 import json
 
@@ -10,7 +11,9 @@ from guizhi.infrastructure.workspace import Workspace
 
 def format_operation(record, parameters):
     result = {"operation": "workflow.execute", "parameters": parameters,
-              "status": record["status"], "run_id": record["id"]}
+              "status": record["status"], "run_id": record["id"],
+              "local_elapsed_ms": round((datetime.fromisoformat(record["updated_at"]) -
+                                         datetime.fromisoformat(record["created_at"])).total_seconds() * 1000)}
     if record["status"] == "succeeded":
         data = record["result"]
         result.update(statistics=data["statistics"], mode=data["workflow"]["mode"], steps=data["workflow"]["steps"])

@@ -4,7 +4,6 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { promisify } = require('node:util');
 const { action } = require('./task-commands.js');
-const { ollamaUrl } = require('../../src/guizhi/infrastructure/dsh/ollama.cjs');
 const { visualRecipe } = require('./visual-recipes.cjs');
 
 const exec = promisify(execFile);
@@ -39,7 +38,7 @@ class DesktopController {
     constructor({ userData, runtime, dsh, safeStorage, externalPath, onChange }) {
         this.file = path.join(userData, 'settings.json');
         fs.mkdirSync(userData, { recursive: true });
-        this.settings = load(this.file, { workspace: '', provider: 'minimax-cn', model: 'MiniMax-M3' });
+        this.settings = load(this.file, { workspace: '', model: 'MiniMax-M3' });
         this.runtime = { python: path.join(runtime, 'python', 'python.exe'),
             node: path.join(runtime, 'node', 'node.exe'), runtime: dsh || path.join(runtime, 'dsh') };
         this.storage = safeStorage;
@@ -88,8 +87,8 @@ class DesktopController {
     configure(input) {
         if (this.active || this.mapBusy || this.skillBusy || this.hostBusy) throw new Error('请先结束当前任务');
         const workspace = this.externalPath(input.workspace);
-        if (!['minimax-cn', 'ollama'].includes(input.provider) || !input.model?.trim()) {
-            throw new Error('请选择模型服务和模型');
+        if (!/^MiniMax-[A-Za-z0-9.-]+$/.test(input.model?.trim() ?? '')) {
+            throw new Error('请选择 MiniMax 在线模型');
         }
         let encryptedKey = this.settings.encryptedKey;
         if (input.key?.trim()) {
@@ -97,11 +96,7 @@ class DesktopController {
             encryptedKey = this.storage.encryptString(input.key.trim()).toString('base64');
         }
         fs.mkdirSync(workspace, { recursive: true });
-        const visionModel = input.visionModel?.trim() || '';
-        const visionUrl = visionModel ? ollamaUrl(input.visionUrl).href : undefined;
-        const modelUrl = input.provider === 'ollama' ? ollamaUrl(input.modelUrl).href : undefined;
-        this.settings = { workspace, provider: input.provider, model: input.model.trim(), modelUrl,
-            visionModel, visionUrl, showOperation: input.showOperation !== false,
+        this.settings = { workspace, model: input.model.trim(), showOperation: input.showOperation !== false,
             screenHighlight: input.screenHighlight !== false, arcmapBridge: this.settings.arcmapBridge, encryptedKey };
         save(this.file, this.settings);
         this.tasks = [];
@@ -168,7 +163,7 @@ class DesktopController {
         materialBindings({ project: project ? [project] : [], control: control ? [control] : [] });
         if (skill && !/^[a-z][a-z0-9_-]{0,39}@[1-9]\d*$/.test(skill)) throw new Error('请选择已发布的技能');
         const env = { ...process.env };
-        if (this.settings.provider === 'minimax-cn' && this.settings.encryptedKey) {
+        if (this.settings.encryptedKey) {
             env.MINIMAX_API_KEY = this.storage.decryptString(Buffer.from(this.settings.encryptedKey, 'base64'));
         }
         const task = { id: randomUUID(), title: [...prompt.trim()].slice(0, 32).join(''), prompt: prompt.trim(),
@@ -201,7 +196,7 @@ class DesktopController {
             }
         });
         child.send({ type: 'start', options: { ...this.runtime, workspace: this.settings.workspace,
-            provider: this.settings.provider, model: this.settings.model, modelUrl: this.settings.modelUrl,
+            provider: 'minimax-cn', model: this.settings.model,
             prompt: task.prompt, input: project?.file, layer: project?.layer,
             control: control?.file, controlLayer: control?.layer, skill, materials: bindings, previousRun,
             projectPlan: project?.plan || materials.project?.[0]?.plan,
@@ -277,7 +272,8 @@ class DesktopController {
         try {
             task.status = receipt.status;
             task.runId = receipt.operation?.run_id;
-            task.response = ['succeeded', 'answered'].includes(task.status) ? receipt.response : receipt.operation?.error || receipt.response;
+            task.response = ['succeeded', 'answered'].includes(task.status) ? receipt.response
+                : receipt.operation?.error || receipt.error || receipt.response;
             task.statistics = receipt.operation?.statistics;
             task.candidate = receipt.candidate?.markdown;
             if (task.status === 'succeeded') {

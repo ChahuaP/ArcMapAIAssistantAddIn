@@ -3,6 +3,7 @@ import argparse
 from datetime import date
 import json
 from pathlib import Path
+import re
 import sys
 from threading import Lock
 from typing import Literal
@@ -59,12 +60,33 @@ def main():
         materials["control"] = [{"file": str(args.control), "layer": args.control_layer}]
     plans = {key: value for key, value in {"project_plan": args.project_plan,
                                          "control_plan": args.control_plan}.items() if value}
+    local_paths = {str(workspace.root), *(item["file"] for group in materials.values() for item in group)}
+    path_forms = {value.replace("\\", "/") for value in local_paths} | {value.replace("/", "\\") for value in local_paths}
+    private_path = re.compile("|".join(re.escape(path) for path in sorted(path_forms, key=len, reverse=True)),
+                              re.IGNORECASE)
+
+    def redact(value):
+        if isinstance(value, str):
+            return private_path.sub("[本地材料]", value)
+        if isinstance(value, dict):
+            return {redact(key): redact(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [redact(item) for item in value]
+        return value
+
+    def model_result(result):
+        summary = {key: result[key] for key in ("operation", "status", "run_id", "mode", "statistics", "error")
+                   if key in result}
+        if "steps" in result:
+            summary["steps"] = [{key: item[key] for key in ("id", "operation", "statistics", "reused")}
+                                for item in result["steps"]]
+        return redact(summary)
 
     def execute(operation, parameters, run):
         with mutex:
             if receipt.exists():
                 saved = json.loads(receipt.read_text(encoding="utf-8"))
-                return saved if saved["operation"] == operation and saved["parameters"] == parameters else {
+                return model_result(saved) if saved["operation"] == operation and saved["parameters"] == parameters else {
                     "status": "operation_already_selected"}
             if cancelled.exists():
                 return {"status": "cancelled"}
@@ -84,7 +106,7 @@ def main():
             pending = receipt.with_suffix(".pending")
             pending.write_text(json.dumps(result), encoding="utf-8")
             pending.replace(receipt)
-            return result
+            return model_result(result)
 
     def input_issue(status, message):
         result = {"status": status, "error": message}
@@ -92,7 +114,7 @@ def main():
             pending = issue.with_suffix(".pending")
             pending.write_text(json.dumps(result), encoding="utf-8")
             pending.replace(issue)
-        return result
+        return model_result(result)
 
     @server.tool
     def list_skills() -> list[dict]:
@@ -129,14 +151,16 @@ def main():
         for role, group in materials.items():
             for item in group:
                 kind = material_kind(item["file"])
-                if kind == "vector":
-                    info = pyogrio.read_info(item["file"], layer=item["layer"])
-                    description = {"fields": info["fields"].tolist(), "geometry": info["geometry_type"], "crs": info["crs"]}
-                elif kind == "raster":
-                    info = metadata(item["file"])
-                    description = {key: info[key] for key in ("crs", "bands", "width", "height", "resolution")}
-                else:
-                    description = {}
+                description = {}
+                try:
+                    if kind == "vector":
+                        info = pyogrio.read_info(item["file"], layer=item["layer"])
+                        description = {"fields": info["fields"].tolist(), "geometry": info["geometry_type"], "crs": info["crs"]}
+                    elif kind == "raster":
+                        info = metadata(item["file"])
+                        description = {key: info[key] for key in ("crs", "bands", "width", "height", "resolution")}
+                except (ValueError, OSError) as exc:
+                    return input_issue("invalid_materials", str(exc))
                 result.setdefault(role, []).append({"kind": kind, **description})
         (dispatch / "discovery").touch()
         return result
