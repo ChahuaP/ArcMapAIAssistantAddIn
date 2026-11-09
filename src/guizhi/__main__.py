@@ -21,12 +21,21 @@ def main() -> int:
     run.add_argument("--input", required=True, type=Path)
     run.add_argument("--layer", required=True)
     run.add_argument("--object-id")
+    check = commands.add_parser("check", help="Check polygon coverage and export evidence")
+    check.add_argument("--input", required=True, type=Path)
+    check.add_argument("--layer", required=True)
+    check.add_argument("--control", required=True, type=Path)
+    check.add_argument("--control-layer", required=True)
+    check.add_argument("--object-id")
     for command in ("inspect", "cancel", "_worker"):
         commands.add_parser(command).add_argument("run_id")
     args = parser.parse_args()
     try:
-        if args.command == "run":
-            result = run_vector(args.workspace, args.input, args.layer, args.object_id)
+        if args.command in {"run", "check"}:
+            checking = args.command == "check"
+            result = run_vector(args.workspace, args.input, args.layer, args.object_id,
+                                operation="control_check" if checking else "vector_inventory",
+                                control=(args.control, args.control_layer) if checking else None)
             print(json.dumps(result))
             return {"succeeded": 0, "cancelled": 130}.get(result["status"], 1)
         workspace = Workspace(args.workspace)

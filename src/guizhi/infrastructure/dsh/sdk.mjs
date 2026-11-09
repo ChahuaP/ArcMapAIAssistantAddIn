@@ -9,6 +9,15 @@ import { parseArgs } from 'node:util';
 const source = realpathSync(fileURLToPath(new URL('../../../../', import.meta.url)));
 const readJson = path => JSON.parse(readFileSync(path, 'utf8'));
 
+function verifiedResponse(receipt) {
+    const stats = receipt.statistics;
+    if (receipt.operation === 'vector_inventory') {
+        return `共 ${stats.feature_count} 个要素。`;
+    }
+    const area = value => value.toLocaleString('zh-CN', { maximumFractionDigits: 2 });
+    return `项目范围 ${area(stats.project_area_m2)} m²，重叠 ${area(stats.covered_area_m2)} m²，覆盖率 ${(stats.coverage_ratio * 100).toFixed(2)}%。结果反映空间关系，审批依据请查阅适用规则。`;
+}
+
 function within(root, path) {
     const rel = relative(root, path);
     return rel === '' || (!isAbsolute(rel) && rel.split(/[\\/]/)[0] !== '..');
@@ -80,10 +89,12 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
     }
     const id = randomUUID();
     const directory = join(parent, id);
-    const mcpArgs = ['-I', '-B', fileURLToPath(new URL('./mcp_inventory.py', import.meta.url)),
+    const mcpArgs = ['-I', '-B', fileURLToPath(new URL('./mcp.py', import.meta.url)),
         '--workspace', workspace, '--dispatch', directory];
     if (options.input) mcpArgs.push('--input', resolve(options.input));
     if (options.layer) mcpArgs.push('--layer', options.layer);
+    if (options.control) mcpArgs.push('--control', resolve(options.control));
+    if (options.controlLayer) mcpArgs.push('--control-layer', options.controlLayer);
     const env = runtimeEnv(options, mcpArgs);
     const deadline = AbortSignal.timeout(timeoutMs);
     const stop = signal ? AbortSignal.any([signal, deadline]) : deadline;
@@ -130,13 +141,14 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
             writeFileSync(join(directory, 'cancelled'), '');
             result = { status: deadline.aborted ? 'timed_out' : 'cancelled' };
         } else {
-            const receiptPath = join(directory, 'inventory.json');
+            const receiptPath = join(directory, 'operation.json');
             const receipt = existsSync(receiptPath) ? readJson(receiptPath) : null;
             const status = response.finishReason !== 'completed' ? 'failed'
                 : receipt?.status ?? (options.input && options.layer ? 'no_result' : 'missing_materials');
             const terminal = response.events.findLast(fact => fact.type === 'turn/end');
             result = { status, finish_reason: response.finishReason,
-                response: response.finalResponse, operation: receipt,
+                response: status === 'succeeded' ? verifiedResponse(receipt) : response.finalResponse,
+                operation: receipt,
                 ...(terminal?.data.reason.error ? { error: terminal.data.reason.error } : {}) };
         }
     } catch (error) {
@@ -171,6 +183,7 @@ async function main() {
         workspace: { type: 'string' }, runtime: { type: 'string' }, python: { type: 'string' },
         provider: { type: 'string' }, model: { type: 'string' }, 'model-url': { type: 'string' },
         prompt: { type: 'string' }, input: { type: 'string' }, layer: { type: 'string' },
+        control: { type: 'string' }, 'control-layer': { type: 'string' },
         'timeout-ms': { type: 'string' },
     } });
     const controller = new AbortController();
@@ -178,7 +191,7 @@ async function main() {
     process.once('SIGINT', cancel);
     process.once('SIGTERM', cancel);
     try {
-        const result = await dispatch({ ...values, modelUrl: values['model-url'],
+        const result = await dispatch({ ...values, modelUrl: values['model-url'], controlLayer: values['control-layer'],
             timeoutMs: values['timeout-ms'] === undefined ? undefined : Number(values['timeout-ms']) },
         { signal: controller.signal, onEvent: item => console.log(JSON.stringify(item)) });
         console.log(JSON.stringify({ kind: 'result', ...result }));

@@ -45,24 +45,31 @@ def digest(path: Path) -> str:
         return file_digest(stream, "sha256").hexdigest()
 
 
-def inventory(task: dict, job: dict, directory: Path, progress, ensure_supervised) -> dict:
-    source = Path(task["source"])
-    snapshot = directory / "artifacts" / "input.gpkg"
-    export = directory / "artifacts" / "result.gpkg"
-    layer = task["layer"]
-    progress("import_started")
+def import_layer(source_path, layer, directory, filename, job_id, ensure_supervised):
+    source = Path(source_path)
+    snapshot = directory / "artifacts" / filename
     snapshot_gpkg(source, snapshot, layer, ensure_supervised)
     info = pyogrio.read_info(snapshot, layer=layer)
     with warnings.catch_warnings():
         warnings.simplefilter("error", RuntimeWarning)
-        frame = pyogrio.read_dataframe(snapshot, layer=layer)
+        frame = pyogrio.read_dataframe(snapshot, layer=layer, fid_as_index=True)
     if not isinstance(frame, geopandas.GeoDataFrame) or frame.crs is None:
         raise ValueError(f"Layer must contain spatial features with a defined CRS: {layer}")
 
     revision_id = uuid4().hex
-    input_ref = EvidenceRef(uuid4().hex, revision_id, job["id"], "import",
+    input_ref = EvidenceRef(uuid4().hex, revision_id, job_id, "import",
                             snapshot.relative_to(directory).as_posix(), digest(snapshot))
     dataset = DatasetRevision(revision_id, str(source), layer, input_ref.id, frame.crs.to_wkt())
+    return frame, info, dataset, input_ref
+
+
+def inventory(task: dict, job: dict, directory: Path, progress, ensure_supervised) -> dict:
+    export = directory / "artifacts" / "result.gpkg"
+    progress("import_started")
+    frame, info, dataset, input_ref = import_layer(
+        task["source"], task["layer"], directory, "input.gpkg", job["id"], ensure_supervised,
+    )
+    frame = frame.reset_index(drop=True)
     obj = ObjectRevision(uuid4().hex, task["object_id"], dataset.id)
     progress("imported", dataset_revision=asdict(dataset), evidence=asdict(input_ref))
 

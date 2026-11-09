@@ -10,6 +10,10 @@ class TaskSpec:
     layer: str
     object_id: str
     operation: str = "vector_inventory"
+    operation_version: str = "1.0.0"
+    rule_version: str | None = None
+    control_source: str | None = None
+    control_layer: str | None = None
 
 
 @dataclass(frozen=True)
@@ -59,6 +63,6 @@ class ClaimRevision:
     object_revision_id: str
     job_id: str
     kind: str
-    value: int
+    value: int | float
     unit: str
     evidence_ids: tuple[str, ...]

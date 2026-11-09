@@ -9,6 +9,7 @@ import sys
 from uuid import uuid4
 
 from guizhi.domain.contracts import Job, Run, TaskSpec
+from guizhi.domain.operations import OPERATIONS
 from guizhi.infrastructure.workspace import SOURCE_ROOT, Workspace, supervisor_lock
 
 
@@ -20,6 +21,7 @@ def product_version() -> str:
 
 
 def worker(workspace: Workspace, run_id: str) -> dict:
+    from guizhi.infrastructure.control import check_control
     from guizhi.infrastructure.vector import inventory
 
     record = workspace.read(run_id)
@@ -39,7 +41,10 @@ def worker(workspace: Workspace, run_id: str) -> dict:
         workspace.event(run_id, step, **details)
 
     progress("worker_started", pid=os.getpid())
-    return inventory(record["task"], record["job"], directory, progress, ensure_supervised)
+    handlers = {"vector_inventory": inventory, "control_check": check_control}
+    return handlers[record["task"]["operation"]](
+        record["task"], record["job"], directory, progress, ensure_supervised,
+    )
 
 
 def supervise(workspace: Workspace, run_id: str, cancel_requested: Callable[[], bool] | None):
@@ -80,13 +85,24 @@ def supervise(workspace: Workspace, run_id: str, cancel_requested: Callable[[], 
 
 
 def run_vector(root: Path, source: Path, layer: str, object_id: str | None,
-               cancel_requested: Callable[[], bool] | None = None) -> dict:
+               cancel_requested: Callable[[], bool] | None = None, *,
+               operation: str = "vector_inventory", control: tuple[Path, str] | None = None) -> dict:
+    definition = OPERATIONS[operation]
     source = source.resolve(strict=True)
     if not source.is_file() or source.suffix.lower() != ".gpkg":
         raise ValueError("Input must be a GeoPackage file")
     if not layer.strip() or (object_id is not None and not object_id.strip()):
         raise ValueError("Layer and any supplied object ID must be non-empty")
-    task = TaskSpec(uuid4().hex, 1, str(source), layer, object_id or uuid4().hex)
+    control_source = control_layer = None
+    if operation == "control_check":
+        if control is None or not control[1].strip():
+            raise ValueError("Control GeoPackage and layer are required")
+        target = control[0].resolve(strict=True)
+        if not target.is_file() or target.suffix.lower() != ".gpkg":
+            raise ValueError("Control input must be a GeoPackage file")
+        control_source, control_layer = str(target), control[1]
+    task = TaskSpec(uuid4().hex, 1, str(source), layer, object_id or uuid4().hex,
+                    operation, definition.version, definition.rule, control_source, control_layer)
     run = Run(uuid4().hex, task.id, task.revision, product_version())
     job = Job(uuid4().hex, run.id, task.operation)
     workspace = Workspace(root, create=True)

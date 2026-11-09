@@ -1,15 +1,15 @@
 # Build a pinned Windows x64 runtime outside the source checkout.
 param(
-    [Parameter(Mandatory)][string]$Stage,
+    [Parameter(Mandatory)][string]$RuntimeRoot,
     [Parameter(Mandatory)][string]$CacheRoot,
     [string]$BuildPython = 'python'
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'build_paths.ps1')
 $repo = Split-Path $PSScriptRoot -Parent
-$Stage = Assert-ExternalBuildPath $Stage $repo
+$runtime = Assert-ExternalBuildPath $RuntimeRoot $repo
 $CacheRoot = Assert-ExternalBuildPath $CacheRoot $repo
-if ($Stage -eq $CacheRoot -or $Stage.StartsWith($CacheRoot + '\', 'OrdinalIgnoreCase') -or $CacheRoot.StartsWith($Stage + '\', 'OrdinalIgnoreCase')) {
+if ($runtime -eq $CacheRoot -or $runtime.StartsWith($CacheRoot + '\', 'OrdinalIgnoreCase') -or $CacheRoot.StartsWith($runtime + '\', 'OrdinalIgnoreCase')) {
     throw 'Stage and runtime cache must be separate trees'
 }
 [IO.Directory]::CreateDirectory($CacheRoot) | Out-Null
@@ -44,7 +44,6 @@ $wheels = Join-Path $CacheRoot "wheels-$lockHash"
 & $BuildPython -B -m pip --isolated download --disable-pip-version-check --only-binary=:all: --require-hashes --dest $wheels -r $lock
 if ($LASTEXITCODE -ne 0) { throw 'Locked wheel download failed' }
 
-$runtime = Join-Path $Stage 'harness\runtime'
 $pythonDir = Join-Path $runtime 'python'
 if (Test-Path -LiteralPath $runtime) { throw "Runtime stage must be new: $runtime" }
 [IO.Directory]::CreateDirectory($pythonDir) | Out-Null
