@@ -44,7 +44,8 @@ async function startDesktop(options) {
     let portrait;
     let visual;
     const speech = new SpeechController({ userData: app.getPath('userData'), storage: safeStorage,
-        local: new LocalSpeechRuntime(path.join(runtime, 'python', 'python.exe'), externalPath) });
+        local: new LocalSpeechRuntime(path.join(runtime, 'python', 'python.exe'), externalPath),
+        bundledLocalRoot: options.bundledSpeech });
     const withSpeech = state => ({ ...state, speech: speech.state() });
     function broadcast(state) {
         visual?.update(state);
@@ -53,7 +54,8 @@ async function startDesktop(options) {
         }
     }
     const controller = new DesktopController({ userData: app.getPath('userData'), runtime, dsh,
-        safeStorage, externalPath, onChange: broadcast });
+        safeStorage, externalPath, onChange: broadcast, bundledArcmap: options.bundledArcmap,
+        installationRoot: options.installationRoot });
     window = new BrowserWindow({ width: 1270, height: 820, minWidth: 790, minHeight: 590,
         show: false, title: '规智', autoHideMenuBar: true, backgroundColor: '#f3f7f7',
         icon: path.join(__dirname, 'mark.png'),
@@ -239,8 +241,10 @@ async function startDesktop(options) {
         if (error) throw new Error('无法打开报告');
     });
     await Promise.all([window.loadURL(origin + '/index.html'), portrait.loadURL(portraitUrl)]);
-    if (!controller.settings.workspace) reveal();
-    portrait.showInactive();
+    if (!options.verifyStartup) {
+        if (!controller.settings.workspace) reveal();
+        portrait.showInactive();
+    }
     return { window, portrait, tray, controller, speech, visual };
 }
 

@@ -130,14 +130,16 @@ class MiniMaxSpeech {
 }
 
 class SpeechController {
-    constructor({ userData, storage, local }) {
+    constructor({ userData, storage, local, bundledLocalRoot }) {
         this.storage = storage;
         this.file = path.join(userData, 'speech.json');
         this.usageFile = path.join(userData, 'speech-usage.json');
         this.settings = { ...defaults, ...(fs.existsSync(this.file) ? JSON.parse(fs.readFileSync(this.file, 'utf8')) : {}) };
         this.local = local;
+        this.bundledLocalRoot = bundledLocalRoot;
         this.backends = { minimax: () => new MiniMaxSpeech(this.key()) };
-        if (local) this.backends.local = () => local.provider(this.settings);
+        if (local) this.backends.local = () => local.provider({ ...this.settings,
+            localRoot: this.settings.localRoot || this.bundledLocalRoot });
         this.usage = fs.existsSync(this.usageFile) ? JSON.parse(fs.readFileSync(this.usageFile, 'utf8')) : [];
         this.clips = new Map();
         this.clipBytes = 0;
@@ -152,7 +154,7 @@ class SpeechController {
     state() {
         const { encryptedKey, ...settings } = this.settings;
         return { ...settings, onlineReady: Boolean(encryptedKey || process.env.MINIMAX_SPEECH_KEY),
-            providers: Object.keys(this.backends) };
+            providers: Object.keys(this.backends), bundledLocal: Boolean(this.bundledLocalRoot) };
     }
 
     configure(input) {
@@ -168,7 +170,7 @@ class SpeechController {
         if (voice.length > 100 || /[\r\n]/.test(voice)) throw new Error('音色标识无效');
         const localRoot = input.localRoot?.trim() || '';
         for (const kind of ['asr', 'tts']) {
-            if (input[kind] === 'local') this.local.verify(localRoot, kind);
+            if (input[kind] === 'local') this.local.verify(localRoot || this.bundledLocalRoot, kind);
         }
         const device = id => typeof id === 'string' && id.length <= 200 ? id : '';
         const settings = { asr: input.asr, tts: input.tts, voice, autoSpeak: Boolean(input.autoSpeak),
@@ -228,7 +230,7 @@ class SpeechController {
         const spoken = correctTerms(text.trim(), this.settings.pronunciation);
         if (spoken.length > 360) throw new Error('应用发音词表后播报片段过长');
         return this.perform('tts', { characters: [...spoken].length }, async (provider, signal) => {
-            if (this.settings.tts === 'local') this.local.verify(this.settings.localRoot, 'tts');
+            if (this.settings.tts === 'local') this.local.verify(this.settings.localRoot || this.bundledLocalRoot, 'tts');
             const cached = this.clips.has(spoken);
             const bytes = this.clips.get(spoken) ?? await provider.synthesize(spoken, this.settings.voice, signal);
             if (bytes.length < 44 || bytes.toString('ascii', 0, 4) !== 'RIFF') throw new Error('合成音频格式无效');

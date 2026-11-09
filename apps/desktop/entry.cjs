@@ -1,17 +1,47 @@
 const { app, dialog } = require('electron');
+const fs = require('node:fs');
+const path = require('node:path');
 const { parseArgs } = require('node:util');
 const { startDesktop } = require('./main.cjs');
 
+let probe;
 async function main() {
     const { values } = parseArgs({ args: process.argv.slice(2), options: {
         runtime: { type: 'string' }, dsh: { type: 'string' },
         'renderer-runtime': { type: 'string' }, 'user-data': { type: 'string' },
+        'bundled-speech': { type: 'string' }, 'bundled-arcmap': { type: 'string' },
+        'installation-root': { type: 'string' },
+        'verify-startup': { type: 'string' },
     } });
-    await startDesktop({ runtime: values.runtime, dsh: values.dsh,
-        rendererRuntime: values['renderer-runtime'], userData: values['user-data'] });
+    probe = values['verify-startup'];
+    if (probe && (!path.isAbsolute(probe) || !path.isAbsolute(values['user-data'] || ''))) {
+        throw new Error('启动检查需要独立的本地设置目录');
+    }
+    const desktop = await startDesktop({ runtime: values.runtime, dsh: values.dsh,
+        rendererRuntime: values['renderer-runtime'], userData: values['user-data'],
+        installationRoot: values['installation-root'],
+        bundledSpeech: values['bundled-speech'], bundledArcmap: values['bundled-arcmap'], verifyStartup: Boolean(probe) });
+    if (probe && desktop) {
+        const [workbench, portrait] = await Promise.all([
+            desktop.window.webContents.executeJavaScript(`new Promise(resolve => {
+                let attempts = 20;
+                function check() {
+                    if (window.guizhi && window.GuizhiBusiness && document.getElementById('app')?.childElementCount) resolve(true);
+                    else if (attempts-- > 0) setTimeout(check, 100);
+                    else resolve(false);
+                }
+                check();
+            })`),
+            desktop.portrait.webContents.executeJavaScript("Boolean(window.guizhi && document.getElementById('interaction'))"),
+        ]);
+        if (!workbench || !portrait) throw new Error('规智界面启动检查失败');
+        fs.writeFileSync(probe, JSON.stringify({ workbench, portrait }), { flag: 'wx' });
+        app.exit(0);
+    }
 }
 
 main().catch(error => {
-    dialog.showErrorBox('规智', error.message);
+    if (probe) process.stderr.write(error.message + '\n');
+    else dialog.showErrorBox('规智', error.message);
     app.exit(1);
 });

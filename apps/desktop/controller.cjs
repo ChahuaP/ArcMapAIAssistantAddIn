@@ -35,13 +35,15 @@ function checkedArtifact(record, step) {
 }
 
 class DesktopController {
-    constructor({ userData, runtime, dsh, safeStorage, externalPath, onChange }) {
+    constructor({ userData, runtime, dsh, safeStorage, externalPath, onChange, bundledArcmap, installationRoot }) {
         this.file = path.join(userData, 'settings.json');
         fs.mkdirSync(userData, { recursive: true });
         this.settings = load(this.file, { workspace: '', model: 'MiniMax-M3' });
         this.runtime = { python: path.join(runtime, 'python', 'python.exe'),
             node: path.join(runtime, 'node', 'node.exe'), runtime: dsh || path.join(runtime, 'dsh') };
         this.storage = safeStorage;
+        this.bundledArcmap = bundledArcmap;
+        this.installationRoot = installationRoot;
         this.externalPath = externalPath;
         this.onChange = onChange;
         this.tasks = [];
@@ -59,7 +61,7 @@ class DesktopController {
 
     restore() {
         if (!this.settings.workspace) return;
-        this.settings.workspace = this.externalPath(this.settings.workspace);
+        this.settings.workspace = this.workspacePath(this.settings.workspace);
         this.tasks = load(this.historyPath(), []);
         this.focusTask = this.tasks[0]?.id ?? null;
         this.mapView = load(path.join(this.settings.workspace, 'desktop-view.json'), null);
@@ -78,15 +80,30 @@ class DesktopController {
         save(this.historyPath(), this.tasks);
     }
 
+    workspacePath(file) {
+        const folder = this.externalPath(file);
+        if (this.installationRoot) {
+            const inside = (root, child) => {
+                const relative = path.relative(root, child);
+                return !path.isAbsolute(relative) && relative.split(path.sep)[0] !== '..';
+            };
+            if (inside(this.installationRoot, folder) || inside(folder, this.installationRoot)) {
+                throw new Error('请选择安装目录之外的成果保存位置');
+            }
+        }
+        return folder;
+    }
+
     state() {
         const { encryptedKey, ...settings } = this.settings;
-        return { settings: { ...settings, keyConfigured: Boolean(encryptedKey || process.env.MINIMAX_API_KEY) },
+        return { settings: { ...settings, arcmapBridge: settings.arcmapBridge || this.bundledArcmap,
+            keyConfigured: Boolean(encryptedKey || process.env.MINIMAX_API_KEY) },
             tasks: this.tasks, mapView: this.mapView, focusTask: this.focusTask, conversation: this.conversation };
     }
 
     configure(input) {
         if (this.active || this.mapBusy || this.skillBusy || this.hostBusy) throw new Error('请先结束当前任务');
-        const workspace = this.externalPath(input.workspace);
+        const workspace = this.workspacePath(input.workspace);
         if (!/^MiniMax-[A-Za-z0-9.-]+$/.test(input.model?.trim() ?? '')) {
             throw new Error('请选择 MiniMax 在线模型');
         }
@@ -139,7 +156,8 @@ class DesktopController {
     }
 
     async arcmap(request) {
-        const { workspace, arcmapBridge } = this.settings;
+        const { workspace } = this.settings;
+        const arcmapBridge = this.settings.arcmapBridge || this.bundledArcmap;
         if (!workspace || !arcmapBridge) throw new Error('请先选择 ArcMap Bridge');
         if (this.active || this.hostBusy || this.mapBusy) throw new Error('请先结束当前操作');
         const file = path.join(workspace, 'arcmap-' + randomUUID() + '.json');

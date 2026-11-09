@@ -46,7 +46,8 @@
                 h('button', { type: 'button', onClick: reload }, '刷新设备'),
                 value.tts === 'minimax' && h('label', null, '播报音色', input('voice')),
                 (value.asr === 'local' || value.tts === 'local') && h('label', null, '本地语音目录',
-                    h('div', { className: 'field-row' }, input('localRoot', { readOnly: true }),
+                    h('div', { className: 'field-row' }, input('localRoot', {
+                        readOnly: true, placeholder: value.bundledLocal ? '随应用安装' : undefined }),
                         h('button', { type: 'button', onClick: () => api.speechFolder().then(folder => {
                             if (folder) update('localRoot', folder);
                         }).catch(fail) }, '选择'))),
