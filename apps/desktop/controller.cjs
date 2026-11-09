@@ -9,7 +9,7 @@ const { visualRecipe } = require('./visual-recipes.cjs');
 const exec = promisify(execFile);
 const cli = path.join(__dirname, '../../src/guizhi/__main__.py');
 const formats = { '.gpkg': 'vector', '.pdf': 'document', '.docx': 'document', '.xlsx': 'document',
-    '.tif': 'raster', '.tiff': 'raster', '.dxf': 'cad' };
+    '.tif': 'raster', '.tiff': 'raster', '.dxf': 'cad', '.onnx': 'model' };
 
 function load(file, initial) {
     return fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : initial;
@@ -120,7 +120,7 @@ class DesktopController {
 
     async describe(file) {
         const kind = formats[path.extname(file).toLowerCase()];
-        if (!kind) throw new Error('请选择 GeoPackage、GeoTIFF、DXF 或审批文档');
+        if (!kind) throw new Error('请选择受支持的业务材料');
         if (kind !== 'vector') {
             if (!fs.statSync(file).isFile()) throw new Error('请选择材料文件');
             return { file, name: path.basename(file), kind, layer: null, layers: [] };
@@ -154,7 +154,7 @@ class DesktopController {
         }
     }
 
-    submit({ prompt, project, control, skill, materials = {}, previousTask }) {
+    submit({ prompt, project, control, skill, materials = {}, previousTask, skillParameters, parameterText }) {
         if (!this.settings.workspace) throw new Error('请先选择成果保存位置');
         if (this.active) throw new Error('已有任务在运行');
         if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 4000) throw new Error('请输入办理事项');
@@ -162,12 +162,13 @@ class DesktopController {
         const previousRun = this.tasks.find(item => item.id === previousTask && item.status === 'succeeded')?.runId;
         materialBindings({ project: project ? [project] : [], control: control ? [control] : [] });
         if (skill && !/^[a-z][a-z0-9_-]{0,39}@[1-9]\d*$/.test(skill)) throw new Error('请选择已发布的技能');
+        if (skillParameters && Buffer.byteLength(JSON.stringify(skillParameters)) > 65536) throw new Error('办理参数最多 64 KB');
         const env = { ...process.env };
         if (this.settings.encryptedKey) {
             env.MINIMAX_API_KEY = this.storage.decryptString(Buffer.from(this.settings.encryptedKey, 'base64'));
         }
         const task = { id: randomUUID(), title: [...prompt.trim()].slice(0, 32).join(''), prompt: prompt.trim(),
-            project, control, skill, materials, previousTask, status: 'running', createdAt: new Date().toISOString() };
+            project, control, skill, materials, previousTask, parameterText, status: 'running', createdAt: new Date().toISOString() };
         this.focusTask = task.id;
         this.tasks.unshift(task);
         this.persist();
@@ -198,7 +199,7 @@ class DesktopController {
         child.send({ type: 'start', options: { ...this.runtime, workspace: this.settings.workspace,
             provider: 'minimax-cn', model: this.settings.model,
             prompt: task.prompt, input: project?.file, layer: project?.layer,
-            control: control?.file, controlLayer: control?.layer, skill, materials: bindings, previousRun,
+            control: control?.file, controlLayer: control?.layer, skill, skillParameters, materials: bindings, previousRun,
             projectPlan: project?.plan || materials.project?.[0]?.plan,
             controlPlan: control?.plan || materials.control?.[0]?.plan } });
         return this.state();
@@ -284,7 +285,7 @@ class DesktopController {
                 task.hasReport = Boolean(checkedArtifact(record, 'report'));
                 const findings = checkedArtifact(record, 'case');
                 if (findings) task.approval = JSON.parse(findings.bytes);
-                task.deliveries = record.result.evidence.filter(item => ['export', 'table', 'workflow', 'package'].includes(item.step))
+                task.deliveries = record.result.evidence.filter(item => ['export', 'table', 'workflow', 'package', 'boundaries'].includes(item.step))
                     .map(item => item.step);
             }
         } catch {

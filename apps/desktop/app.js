@@ -7,7 +7,7 @@
         missing_materials: '待补材料', invalid_materials: '材料有误', no_result: '待补信息', answered: '已答复',
         budget_exhausted: '已保存进度' };
     const active = task => task && ['running', 'cancelling'].includes(task.status);
-    const emptyDraft = () => ({ prompt: '', project: null, control: null, skill: null, materials: {} });
+    const emptyDraft = () => ({ prompt: '', project: null, control: null, skill: null, materials: {}, parameterText: {} });
     const number = value => value.toLocaleString('zh-CN', { maximumFractionDigits: 2 });
 
     function Settings({ current, speech, close, save, entries, setEntries, manage }) {
@@ -124,7 +124,8 @@
                     task.hasReport && h('button', { className: 'report', onClick: () => api.report(task.id).catch(fail) }, '查看报告 ↗'),
                     ...(task.deliveries || []).map(kind => h('button', { key: kind, className: 'report',
                         onClick: () => api.delivery(task.id, kind).catch(fail) },
-                        { export: '成果数据 ↗', table: '属性表 ↗', workflow: '办理留痕 ↗', package: '共享数据包 ↗' }[kind]))));
+                        { export: '成果数据 ↗', table: '属性表 ↗', workflow: '办理留痕 ↗',
+                            package: '共享数据包 ↗', boundaries: '边界图层 ↗' }[kind]))));
         }
         const detail = { missing_materials: '请按业务要求补齐材料。',
             invalid_materials: '请确认材料、图层和办理参数。', no_result: '请补充办理要求或从业务能力中选择。',
@@ -147,7 +148,8 @@
         const [business, showBusiness] = useState('');
         const [arcmap, showArcmap] = useState(false);
         const [initialMarkdown, setInitialMarkdown] = useState('');
-        const { Business, RoleMaterials, reference } = window.GuizhiBusiness;
+        const { Business, RoleMaterials, ParameterFields, materialReady, parametersReady, parameterValues,
+            reference } = window.GuizhiBusiness;
         const fail = error => setError(String(error.message || error).replace(/^Error invoking remote method '[^']+': Error: /, ''));
         const update = (key, value) => setDraft(old => ({ ...old, [key]: value }));
         const refresh = () => api.skills().then(setCatalog);
@@ -170,19 +172,22 @@
         const skill = draft.skillDefinition;
         const materialsReady = !skill || skill.materials.every(role => {
             const items = draft.materials[role.id] || [];
-            return items.length >= role.minimum && items.every(item => item.layer || ['raster', 'cad', 'document'].includes(item.kind));
+            return items.length >= role.minimum && items.every(materialReady);
         });
+        const fields = skill?.parameters || {};
+        const canSubmit = materialsReady && parametersReady(fields, draft.parameterText);
         async function submit(event) {
             event.preventDefault();
             if (window.GuizhiTaskCommand(draft.prompt) === 'reset') {
                 startNew();
                 return;
             }
-            if (busy || !draft.prompt.trim() || !materialsReady) return;
+            if (busy || !draft.prompt.trim() || !canSubmit) return;
             setError('');
             setSending(true);
             try {
-                const next = await api.submit({ ...draft, previousTask: draft.previousTask || task?.id });
+                const next = await api.submit({ ...draft, previousTask: draft.previousTask || task?.id,
+                    skillParameters: skill ? parameterValues(fields, draft.parameterText) : undefined });
                 setState(next);
                 select(next.tasks[0].id);
                 setDraft(emptyDraft());
@@ -241,7 +246,10 @@
                                 h('button', { type: 'button', className: 'attached', onClick: () => setDraft(emptyDraft()) },
                                     skill.title + ' ×'),
                                 h(RoleMaterials, { roles: skill.materials, materials: draft.materials,
-                                    change: value => update('materials', value), Material, plans, fail }))
+                                    change: value => update('materials', value), Material, plans, fail }),
+                                Object.keys(fields).length > 0 && h('div', { className: 'skill-samples' },
+                                    h(ParameterFields, { fields, values: draft.parameterText, disabled: busy,
+                                        change: value => update('parameterText', value) })))
                             : h('div', { className: 'materials' },
                                 h(Material, { label: '项目范围', item: draft.project, change: value => update('project', value), fail, plans }),
                                 h(Material, { label: '管控范围', item: draft.control, change: value => update('control', value), fail, plans }),
@@ -258,7 +266,7 @@
                                         }
                                     } }),
                                 busy ? h('button', { type: 'button', onClick: () => api.cancel().then(setState).catch(fail) }, '停止')
-                                    : h('button', { type: 'submit', className: 'primary', disabled: !draft.prompt.trim() || !materialsReady }, '发送 ↑')))),
+                                    : h('button', { type: 'submit', className: 'primary', disabled: !draft.prompt.trim() || !canSubmit }, '发送 ↑')))),
                     h(window.GuizhiMap, { key: task?.id || 'empty', map: task?.map, view: state?.mapView,
                         parcel, onParcel: selectParcel,
                         enabled: Boolean(state?.settings.workspace), onState: setState, fail }))),

@@ -12,7 +12,7 @@ from guizhi.infrastructure.workspace import SOURCE_ROOT, Workspace
 
 SKILLS = SOURCE_ROOT / "resources" / "skills"
 BUILT_INS = ("control-check.md", "farmland-balance.md", "shared-delivery.md",
-             "cad-coordinates.md", "annual-land.md", "permit-history.md")
+             "cad-coordinates.md", "annual-land.md", "permit-history.md", "imagery-change.md")
 OPERATIONS = {**{name: spec for name, spec in CAPABILITIES.items() if name != "workflow.execute"},
               "control_check": Capability("管控线核查", 2, 2), "vector_inventory": Capability("矢量清点")}
 
@@ -182,7 +182,7 @@ def propose(workspace, run_id, title):
                            "minimum": len(materials), "maximum": max(1, len(materials))}
     evidence = [{"step": item["id"], "kind": ref["step"]}
                 for item in manifest["steps"] for ref in workspace.read(item["run_id"])["result"]["evidence"]
-                if ref["step"] in {"export", "map", "report", "table", "view", "selection"}]
+                if ref["step"] in {"export", "map", "report", "table", "view", "selection", "boundaries"}]
     payload = {"id": "task-" + run_id[:12], "title": title, "materials": list(roles.values()),
                "steps": plan["steps"], "parameters": source.get("parameters", {}),
                "rules": source.get("rules", []), "evidence": evidence[:16]}

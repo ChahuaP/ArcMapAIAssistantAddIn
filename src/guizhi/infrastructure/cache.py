@@ -21,6 +21,7 @@ READ_OPERATIONS = {
     "raster.clip", "raster.reproject", "raster.mosaic", "cad.convert", "annual.report",
     "delivery.clip_vector", "delivery.check_attachments", "delivery.bundle",
     "governance.farmland_balance", "governance.permit_history",
+    "imagery.classify", "imagery.change",
 }
 RUN_ARGUMENTS = {"document_run", "catalog_run", "case_run", "rules_run", "spatial_run", "prior_case",
                  "history_run", "summary_run", "changes_run", "vector_run", "raster_run", "attachment_run"}
@@ -75,8 +76,10 @@ def implementation(operation):
     if "." in operation:
         domain = operation.split(".", 1)[0]
         paths.append(root / "operations" / (domain + ".py"))
-        if domain in {"annual", "cad", "delivery", "governance"}:
+        if domain in {"annual", "cad", "delivery", "governance", "imagery"}:
             paths.append(root / "operations" / "report.py")
+        if domain == "imagery":
+            paths.append(root.parent / "domain" / "imagery.py")
     if operation == "control_check":
         paths.append(root / "cache.py")
     return fingerprint([VALIDATOR_REVISION, *map(digest, paths)])

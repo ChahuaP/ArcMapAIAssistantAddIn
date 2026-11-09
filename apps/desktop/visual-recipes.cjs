@@ -22,6 +22,7 @@ function visualRecipe(event) {
     const specific = {
         'data.describe': 'read', 'data.list_fields': 'read', 'data.export_selection': 'publish',
         'vector.spatial_join': 'link', 'semantics.read_documents': 'read', 'control_check': 'check',
+        'imagery.classify': 'draw', 'imagery.change': 'calculate',
     }[operation] || kind;
     return recipe(specific, '规智正在' + title, layer);
 }

@@ -69,6 +69,7 @@ class Execution:
         self.frames, self.datasets, self.evidence = [], [], []
         self.documents = []
         self.rasters, self.drawings = [], []
+        self.models = []
         self.info = []
         self.selection_hashes = []
         self.result = {}
@@ -76,9 +77,9 @@ class Execution:
             if material.kind == "document":
                 self.documents.append(self.seal_document(material.file, material.revision, i + 1))
                 continue
-            if material.kind in {"raster", "cad"}:
+            if material.kind in {"raster", "cad", "model"}:
                 file, _ = self.seal_file(material.kind, material.file, material.revision, i + 1)
-                (self.rasters if material.kind == "raster" else self.drawings).append(file)
+                {"raster": self.rasters, "cad": self.drawings, "model": self.models}[material.kind].append(file)
                 continue
             frame, info, revision, evidence = import_layer(
                 material.file, material.layer, directory, f"input-{i + 1}.gpkg", job["id"], check,
@@ -102,6 +103,8 @@ class Execution:
     def seal_file(self, kind, source, expected, number):
         self.check()
         source = Path(source)
+        if kind == "model" and not 0 < source.stat().st_size <= 50 << 20:
+            raise ValueError("Expected a self-contained ONNX model up to 50 MB")
         if kind == "raster":
             from guizhi.infrastructure.operations.raster import check_source
 
@@ -133,9 +136,9 @@ class Execution:
         path.write_text(json.dumps(value, ensure_ascii=False, allow_nan=False, indent=2), encoding="utf-8")
         return self.record(step, path)
 
-    def publish(self, frame, *, geometry_type=None):
+    def publish(self, frame, *, geometry_type=None, artifact="export", filename="result.gpkg"):
         self.check()
-        out = self.path("result.gpkg")
+        out = self.path(filename)
         frame = frame.reset_index(drop=True)
         if frame.crs is None:
             raise ValueError("Result requires a defined CRS")
@@ -156,9 +159,10 @@ class Execution:
             raise ValueError("Export failed geometry or CRS verification")
         assert_frame_equal(frame.drop(columns=frame.geometry.name), check.drop(columns=check.geometry.name),
                            check_dtype=False, check_exact=True)
-        self.record("export", out)
-        self.result.update(export_layer="result", data_revision=data_revision(out),
-                           statistics={"feature_count": len(frame)})
+        self.record(artifact, out)
+        if artifact == "export":
+            self.result.update(export_layer="result", data_revision=data_revision(out),
+                               statistics={"feature_count": len(frame)})
 
     def finish(self, payload):
         result = {**self.result, **(payload or {}), "datasets": self.datasets,

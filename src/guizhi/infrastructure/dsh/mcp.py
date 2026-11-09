@@ -40,11 +40,14 @@ def main():
     parser.add_argument("--materials", type=json.loads, default={})
     parser.add_argument("--model-provenance", type=json.loads)
     parser.add_argument("--plan-key")
+    parser.add_argument("--use-bound-parameters", action="store_true")
     args = parser.parse_args()
     workspace = Workspace(args.workspace, create=True)
     dispatch = args.dispatch.resolve(strict=True)
     if dispatch.parent != workspace.root / "dispatch":
         raise ValueError("Dispatch must belong to the selected workspace")
+    bound_parameters = (json.loads((dispatch / "replay-input.json").read_text(encoding="utf-8"))["skill_parameters"]
+                        if args.use_bound_parameters else None)
 
     server = FastMCP("Guizhi")
     mutex = Lock()
@@ -306,10 +309,14 @@ def main():
                          steps: list[Step] | None = None, skill_parameters: dict | None = None) -> dict:
         """整项任务一次提交。fixed=已发布技能；free=步骤；combined=已发布技能和附加步骤。
         步骤 inputs 必须是字符串数组，如 ["material.project"]、["step.check"]，parameters 为对象。
-        固定技能的 skill_parameters 只填目录声明的参数。坐标、年份、分类和业务阈值必须有用户或既有材料依据。
+        已绑定办理参数时省略 skill_parameters；否则只填写技能声明的参数。坐标、年份、分类和阈值必须有依据。
         """
         if args.skill and skill and skill not in {args.skill, args.skill.partition("@")[0]}:
             return input_issue("invalid_materials", "请使用已选技能 " + args.skill)
+        if bound_parameters is not None:
+            if skill_parameters and skill_parameters != bound_parameters:
+                return input_issue("invalid_materials", "请使用工作台中已经填写的办理参数")
+            skill_parameters = bound_parameters
         return run_plan(mode, args.skill or skill, [step.model_dump(mode="json") for step in steps or []],
                         skill_parameters=skill_parameters)
 

@@ -9,7 +9,7 @@ Hash = Annotated[str, StringConstraints(pattern=r"^[a-f0-9]{64}$")]
 
 MATERIAL_FORMATS = {
     ".gpkg": "vector", ".tif": "raster", ".tiff": "raster", ".dxf": "cad",
-    ".pdf": "document", ".docx": "document", ".xlsx": "document",
+    ".pdf": "document", ".docx": "document", ".xlsx": "document", ".onnx": "model",
 }
 
 
@@ -78,6 +78,8 @@ CAPABILITIES = {
     "raster.clip": Capability("按范围裁切栅格", 2, 2, kinds=("raster", "vector")),
     "raster.reproject": Capability("栅格重投影与重采样", kinds=("raster",)),
     "raster.mosaic": Capability("拼接已对齐的栅格", 2, 32, kinds=("raster",)),
+    "imagery.classify": Capability("识别多波段影像地类及边界", 2, 2, kinds=("raster", "model")),
+    "imagery.change": Capability("对比两期影像地类与变化边界", 2, 2, kinds=("raster",)),
     "cad.inspect": Capability("读取 DXF 版本、图层和几何类型", kinds=("cad",)),
     "cad.convert": Capability("整理 DXF 图层和已知坐标系", kinds=("cad",)),
     "annual.summarize": Capability("汇总年度地类面积", 1, 32),

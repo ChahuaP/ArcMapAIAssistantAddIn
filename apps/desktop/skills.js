@@ -6,7 +6,21 @@
     const domains = { data: '数据', vector: '空间分析', geometry: '几何', table: '属性表',
         crs: '坐标', presentation: '地图与版面', evidence: '留痕', system: '运行状态', semantics: '审批材料',
         knowledge: '业务知识', governance: '依据与解释', raster: '栅格', cad: 'CAD',
-        annual: '年度地类', delivery: '共享交付', business: '业务' };
+        annual: '年度地类', imagery: '影像识别', delivery: '共享交付', business: '业务' };
+    const materialReady = item => Boolean(item.layer || (item.kind && item.kind !== 'vector'));
+    const parametersReady = (fields, values) => Object.keys(fields).every(name => values[name]?.trim());
+    function parameterValues(fields, values) {
+        return Object.fromEntries(Object.keys(fields).map(name => {
+            const text = values[name].trim();
+            try { return [name, JSON.parse(text)]; } catch { return [name, text]; }
+        }));
+    }
+
+    function ParameterFields({ fields, values, change, disabled }) {
+        return Object.entries(fields).map(([name, label]) => h('label', { key: name }, label,
+            h('input', { value: values[name] || '', disabled, onChange: event =>
+                change({ ...values, [name]: event.target.value }) })));
+    }
 
     function RoleMaterials({ roles, materials, change, Material, plans, fail }) {
         return roles.map(role => {
@@ -54,15 +68,11 @@
             setError('');
             try { await action(); } catch (issue) { showError(issue); } finally { setBusy(false); }
         }
-        const fields = Object.entries(preview?.parameters || {});
-        const publishable = preview && fields.every(([name]) => parameters[name]?.trim()) && preview.materials.every(role => {
+        const fields = preview?.parameters || {};
+        const publishable = preview && parametersReady(fields, parameters) && preview.materials.every(role => {
             const items = samples[role.id] || [];
-            return items.length >= role.minimum && items.every(item => item.layer || ['raster', 'cad', 'document'].includes(item.kind));
+            return items.length >= role.minimum && items.every(materialReady);
         });
-        function sampleValue(text) {
-            try { return JSON.parse(text); }
-            catch { return text.trim(); }
-        }
         return h('dialog', { className: 'business-dialog', ref: dialog, onCancel: event => {
             event.preventDefault();
             if (!busy) close();
@@ -91,12 +101,10 @@
             preview && h('section', { className: 'skill-samples' },
                 h('h3', null, '验证样本'),
                 h(RoleMaterials, { roles: preview.materials, materials: samples, change: setSamples, Material, plans: [], fail: showError }),
-                ...fields.map(([name, label]) => h('label', { key: name }, label,
-                    h('input', { value: parameters[name] || '', disabled: busy,
-                        onChange: event => setParameters(old => ({ ...old, [name]: event.target.value })) }))),
+                h(ParameterFields, { fields, values: parameters, change: setParameters, disabled: busy }),
                 h('button', { className: 'primary', disabled: busy || !publishable, onClick: () => perform(async () => {
                     const result = await api.skillPublish(markdown, samples,
-                        Object.fromEntries(fields.map(([name]) => [name, sampleValue(parameters[name])])));
+                        parameterValues(fields, parameters));
                     await refresh();
                     setNotice(result.title + ' v' + result.revision + ' 已发布');
                 }) }, busy ? '正在处理' : '验证并发布'))),
@@ -113,5 +121,5 @@
         error && h('p', { className: 'error', role: 'alert' }, error));
     }
 
-    window.GuizhiBusiness = { Business, RoleMaterials, reference };
+    window.GuizhiBusiness = { Business, RoleMaterials, ParameterFields, materialReady, parametersReady, parameterValues, reference };
 })();

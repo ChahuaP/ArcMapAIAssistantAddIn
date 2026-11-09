@@ -31,6 +31,10 @@ function verifiedResponse(receipt) {
     if (stats.geometry_types) parts.push(Object.entries(stats.geometry_types)
         .map(([name, count]) => `${name} ${count} 个`).join('，') + '。');
     if (stats.row_count !== undefined) parts.push(`共 ${stats.row_count} 行。`);
+    if (stats.changed_area_m2 !== undefined && stats.evaluation) {
+        if (stats.evaluation === 'simulation') parts.push('本轮使用模拟样本。');
+        parts.push(`变化面积 ${area(stats.changed_area_m2)} m²，另有 ${area(stats.unknown_pixels)} 个未知像元和 ${area(stats.nodata_pixels)} 个缺测像元。`);
+    }
     return parts.join('') || '已完成办理，成果和证据已保存。';
 }
 
@@ -70,6 +74,10 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
         throw new Error('请选择 MiniMax 在线模型');
     }
     if (!options.prompt?.trim()) throw new Error('Prompt is required');
+    if (options.skillParameters !== undefined && (!options.skill || !options.skillParameters ||
+            typeof options.skillParameters !== 'object' || Array.isArray(options.skillParameters))) {
+        throw new Error('请选择办理参数对应的技能');
+    }
     const started = performance.now();
     const safeError = value => {
         const secret = process.env.MINIMAX_API_KEY?.trim();
@@ -128,7 +136,9 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
     const budgetPath = join(directory, 'budget.json');
     writeFileSync(requestFile, JSON.stringify({ materials, provenance,
         skill: options.skill ?? null, previous_run: options.previousRun ?? null, project_plan: options.projectPlan ?? null,
-        control_plan: options.controlPlan ?? null, dsh: versions['@deepseek-ai/dsh'] }));
+        control_plan: options.controlPlan ?? null, skill_parameters: options.skillParameters ?? null,
+        dsh: versions['@deepseek-ai/dsh'] }));
+    if (options.skillParameters !== undefined) mcpArgs.push('--use-bound-parameters');
     const usage = new Map();
     function event(item) {
         appendFileSync(join(directory, 'events.jsonl'), JSON.stringify(item) + '\n');
@@ -172,7 +182,8 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
             await harness.start();
             if (!existsSync(budgetPath)) throw new Error('Model budget guard did not initialize');
             const roles = Object.fromEntries(Object.entries(materials).map(([role, items]) => [role, items.length]));
-            const context = `已绑定材料数量 ${JSON.stringify(roles)}。已选技能 ${options.skill || '无'}。有已选历史成果：${Boolean(options.previousRun)}。\n`;
+            const bound = options.skillParameters !== undefined ? '办理参数已在本机绑定，执行技能时省略 skill_parameters。' : '';
+            const context = `已绑定材料数量 ${JSON.stringify(roles)}。已选技能 ${options.skill || '无'}。${bound}有已选历史成果：${Boolean(options.previousRun)}。\n`;
             const response = await Promise.race([harness.run(context + '用户请求：' + options.prompt, {
                 sessionId: id,
                 onNotification(note) {

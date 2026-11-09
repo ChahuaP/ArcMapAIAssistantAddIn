@@ -179,7 +179,8 @@ async function startDesktop(options) {
     bind('material', async (kind = 'vector') => {
         const formats = { vector: { name: 'GeoPackage', extensions: ['gpkg'] },
             raster: { name: 'GeoTIFF', extensions: ['tif', 'tiff'] }, cad: { name: 'DXF', extensions: ['dxf'] },
-            document: { name: '审批材料', extensions: ['pdf', 'docx', 'xlsx'] } };
+            document: { name: '审批材料', extensions: ['pdf', 'docx', 'xlsx'] },
+            model: { name: 'ONNX', extensions: ['onnx'] } };
         if (kind !== 'any' && !Object.hasOwn(formats, kind)) throw new Error('材料格式无效');
         const pick = await dialog.showOpenDialog(window, { properties: ['openFile'],
             filters: kind === 'any' ? Object.values(formats) : [formats[kind]] });
