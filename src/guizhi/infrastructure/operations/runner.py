@@ -106,6 +106,7 @@ class Execution:
         with warnings.catch_warnings():
             warnings.simplefilter("error", RuntimeWarning)
             pyogrio.write_dataframe(frame, out, layer="result", driver="GPKG", geometry_type=geometry_type,
+                                    promote_to_multi=False,
                                     layer_options={"FID": available("fid"), "GEOMETRY_NAME": available("geom")})
             check = pyogrio.read_dataframe(out, layer="result")
         if check.crs != frame.crs or shapely.to_wkb(frame.geometry).tolist() != shapely.to_wkb(check.geometry).tolist():

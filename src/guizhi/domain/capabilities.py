@@ -44,6 +44,20 @@ CAPABILITIES = {
     "table.delete_rows": Capability("删除要素", edit=True),
     "crs.assign": Capability("定义已知坐标系", edit=True),
     "crs.transform": Capability("按已验证方案转换坐标"),
+    "geometry.create_dataset": Capability("新建空图层", 0, 1),
+    "geometry.create_points": Capability("创建点", 0, 1),
+    "geometry.append_points": Capability("追加点", edit=True),
+    "geometry.create_lines": Capability("创建线", 0, 1),
+    "geometry.append_lines": Capability("追加线", edit=True),
+    "geometry.create_polygons": Capability("创建面", 0, 1),
+    "geometry.append_polygons": Capability("追加面", edit=True),
+    "geometry.create_rectangle": Capability("创建矩形", 0, 1),
+    "geometry.create_regular_polygons": Capability("创建正多边形", 0, 1),
+    "geometry.append_regular_polygons": Capability("追加正多边形", edit=True),
+    "geometry.create_stars": Capability("创建星形", 0, 1),
+    "geometry.append_stars": Capability("追加星形", edit=True),
+    "geometry.explode": Capability("拆分多部件"),
+    "geometry.repair": Capability("修复几何", edit=True),
 }
 
 
