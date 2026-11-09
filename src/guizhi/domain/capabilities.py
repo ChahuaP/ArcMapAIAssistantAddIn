@@ -76,6 +76,7 @@ CAPABILITIES = {
     "system.health": Capability("查询独立运行状态", 0, 0),
     "evidence.verify": Capability("验证已交付证据", 0, 0),
     "evidence.history": Capability("查询作业历史", 0, 0),
+    "workflow.execute": Capability("执行已编排任务", 0, 0),
 }
 
 

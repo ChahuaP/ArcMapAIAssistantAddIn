@@ -77,7 +77,7 @@ class DesktopController {
     }
 
     configure(input) {
-        if (this.active || this.mapBusy) throw new Error('请先结束当前任务');
+        if (this.active || this.mapBusy || this.skillBusy) throw new Error('请先结束当前任务');
         const workspace = this.externalPath(input.workspace);
         if (!['minimax-cn', 'ollama'].includes(input.provider) || !input.model?.trim()) {
             throw new Error('请选择模型服务和模型');
@@ -99,7 +99,8 @@ class DesktopController {
     async python(command, ...args) {
         try {
             const result = await exec(this.runtime.python, ['-I', '-B', cli, '--workspace',
-                this.settings.workspace, command, ...args], { windowsHide: true, timeout: 30000, maxBuffer: 8 << 20 });
+                this.settings.workspace, command, ...args], {
+                windowsHide: true, ...(command !== 'skill-publish' && { timeout: 30000 }), maxBuffer: 8 << 20 });
             return JSON.parse(result.stdout);
         } catch (error) {
             let message;
@@ -114,21 +115,20 @@ class DesktopController {
         return { file, name: path.basename(file), layers, layer: layers.length === 1 ? layers[0] : '' };
     }
 
-    submit({ prompt, project, control }) {
+    submit({ prompt, project, control, skill, materials = {}, previousTask }) {
         if (!this.settings.workspace) throw new Error('请先选择成果保存位置');
         if (this.active) throw new Error('已有任务在运行');
         if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 4000) throw new Error('请输入办理事项');
-        for (const material of [project, control]) {
-            if (material && (!path.isAbsolute(material.file) || !material.layers.includes(material.layer))) {
-                throw new Error('请选择材料图层');
-            }
-        }
+        const bindings = materialBindings(materials);
+        const previousRun = this.tasks.find(item => item.id === previousTask && item.status === 'succeeded')?.runId;
+        materialBindings({ project: project ? [project] : [], control: control ? [control] : [] });
+        if (skill && !/^[a-z][a-z0-9_-]{0,39}@[1-9]\d*$/.test(skill)) throw new Error('请选择已发布的技能');
         const env = { ...process.env };
         if (this.settings.provider === 'minimax-cn' && this.settings.encryptedKey) {
             env.MINIMAX_API_KEY = this.storage.decryptString(Buffer.from(this.settings.encryptedKey, 'base64'));
         }
         const task = { id: randomUUID(), title: [...prompt.trim()].slice(0, 32).join(''), prompt: prompt.trim(),
-            project, control, status: 'running', createdAt: new Date().toISOString() };
+            project, control, skill, materials, previousTask, status: 'running', createdAt: new Date().toISOString() };
         this.tasks.unshift(task);
         this.persist();
         const child = fork(path.join(__dirname, 'agent.mjs'), {
@@ -138,7 +138,7 @@ class DesktopController {
         this.active = { child, task };
         child.on('message', message => {
             if (message.type === 'event') {
-                if (message.event.type === 'tool/call') task.step = '正在核查材料';
+                if (message.event.type === 'tool/call') task.step = '正在办理';
                 this.onChange(this.state());
             } else if (message.type === 'result') {
                 void this.complete(task, message.result);
@@ -153,13 +153,29 @@ class DesktopController {
         child.send({ type: 'start', options: { ...this.runtime, workspace: this.settings.workspace,
             provider: this.settings.provider, model: this.settings.model, modelUrl: this.settings.modelUrl,
             prompt: task.prompt, input: project?.file, layer: project?.layer,
-            control: control?.file, controlLayer: control?.layer,
-            projectPlan: project?.plan, controlPlan: control?.plan } });
+            control: control?.file, controlLayer: control?.layer, skill, materials: bindings, previousRun,
+            projectPlan: project?.plan || materials.project?.[0]?.plan,
+            controlPlan: control?.plan || materials.control?.[0]?.plan } });
         return this.state();
     }
 
     async coordinateCatalog() {
         return this.settings.workspace ? this.python('crs-list') : [];
+    }
+
+    async skillRequest(command, markdown, materials) {
+        if (!this.settings.workspace || this.skillBusy) throw new Error('请先结束当前操作');
+        if (typeof markdown !== 'string' || Buffer.byteLength(markdown) > 65536) throw new Error('技能文件最多 64 KB');
+        const file = path.join(this.settings.workspace, 'skill-' + randomUUID());
+        this.skillBusy = true;
+        try {
+            if (command === 'skill-preview') fs.writeFileSync(file, markdown, { flag: 'wx' });
+            else save(file, { text: markdown, materials: materialBindings(materials) });
+            return await this.python(command, file);
+        } finally {
+            fs.rmSync(file, { force: true });
+            this.skillBusy = false;
+        }
     }
 
     async mapAction(action, parameters = {}, material = null) {
@@ -202,14 +218,17 @@ class DesktopController {
         try {
             task.status = receipt.status;
             task.runId = receipt.operation?.run_id;
-            task.response = receipt.response;
+            task.response = ['succeeded', 'answered'].includes(task.status) ? receipt.response : receipt.operation?.error || receipt.response;
             task.statistics = receipt.operation?.statistics;
+            task.candidate = receipt.candidate?.markdown;
             if (task.status === 'succeeded') {
                 const record = await this.python('inspect', task.runId);
                 if (record.status !== 'succeeded') throw new Error('成果未发布');
                 const map = checkedArtifact(record, 'map');
                 if (map) task.map = JSON.parse(map.bytes);
                 task.hasReport = Boolean(checkedArtifact(record, 'report'));
+                task.deliveries = record.result.evidence.filter(item => ['export', 'table', 'workflow'].includes(item.step))
+                    .map(item => item.step);
             }
         } catch {
             task.status = 'failed';
@@ -236,6 +255,12 @@ class DesktopController {
         return checkedArtifact(record, 'report').file;
     }
 
+    async delivery(id, kind) {
+        const task = this.tasks.find(item => item.id === id);
+        if (!task?.deliveries?.includes(kind) || task.status !== 'succeeded') throw new Error('成果尚未发布');
+        return checkedArtifact(await this.python('inspect', task.runId), kind).file;
+    }
+
     async close() {
         const child = this.active?.child;
         if (!child) return;
@@ -246,6 +271,15 @@ class DesktopController {
             child.once('exit', () => { clearTimeout(timer); resolve(); });
         });
     }
+}
+
+function materialBindings(groups) {
+    return Object.fromEntries(Object.entries(groups).filter(([, items]) => items.length).map(([role, items]) => [role, items.map(item => {
+        if (!item?.file || !path.isAbsolute(item.file) || !item.layers?.includes(item.layer)) {
+            throw new Error('请选择材料图层');
+        }
+        return { file: item.file, layer: item.layer };
+    })]));
 }
 
 module.exports = { DesktopController };

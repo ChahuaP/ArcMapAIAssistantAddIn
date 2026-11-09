@@ -81,6 +81,10 @@ class Workspace:
                         key TEXT PRIMARY KEY, fingerprint TEXT NOT NULL,
                         run_id TEXT NOT NULL REFERENCES runs(id)
                     );
+                    CREATE TABLE IF NOT EXISTS skills (
+                        id TEXT NOT NULL, revision INTEGER NOT NULL, body TEXT NOT NULL,
+                        PRIMARY KEY (id, revision)
+                    );
                 """)
 
     @contextmanager

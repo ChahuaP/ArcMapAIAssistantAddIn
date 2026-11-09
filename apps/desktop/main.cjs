@@ -21,7 +21,7 @@ async function startDesktop(options) {
         if (!item || !path.isAbsolute(item)) throw new Error('请选择有效的运行目录');
     }
     const vendor = path.join(rendererRuntime, 'node_modules');
-    const localFiles = ['index.html', 'app.js', 'map.js', 'coordinates.js', 'style.css', 'mark.svg'];
+    const localFiles = ['index.html', 'app.js', 'map.js', 'coordinates.js', 'skills.js', 'style.css', 'mark.svg'];
     const files = new Map(localFiles.map(name => ['/' + name, path.join(__dirname, name)]));
     files.set('/react.js', path.join(vendor, 'react', 'umd', 'react.production.min.js'));
     files.set('/react-dom.js', path.join(vendor, 'react-dom', 'umd', 'react-dom.production.min.js'));
@@ -95,6 +95,27 @@ async function startDesktop(options) {
     bind('submit', task => controller.submit(task));
     bind('cancel', () => controller.cancel());
     bind('coordinates', () => controller.coordinateCatalog());
+    bind('skills', () => controller.python('skills'));
+    bind('capabilities', () => controller.python('capabilities'));
+    bind('capability', operation => controller.python('capability-show', operation));
+    bind('skillShow', reference => controller.python('skill-show', reference));
+    bind('skillPreview', markdown => controller.skillRequest('skill-preview', markdown));
+    bind('skillPublish', (markdown, materials) => controller.skillRequest('skill-publish', markdown, materials));
+    const skillFile = { name: '业务技能', extensions: ['md'] };
+    bind('skillOpen', async () => {
+        const pick = await dialog.showOpenDialog(window, { properties: ['openFile'], filters: [skillFile] });
+        if (pick.canceled) return null;
+        const file = pick.filePaths[0];
+        if (fs.statSync(file).size > 65536) throw new Error('技能文件最多 64 KB');
+        return fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '');
+    });
+    bind('skillTemplate', async () => {
+        const pick = await dialog.showSaveDialog(window, { defaultPath: '业务技能模板.md', filters: [skillFile] });
+        if (!pick.canceled) fs.copyFileSync(path.join(__dirname, '../../resources/skills/template.md'), externalPath(pick.filePath));
+    });
+    bind('delivery', async (id, kind) => {
+        shell.showItemInFolder(await controller.delivery(id, kind));
+    });
     bind('importCoordinate', async kind => {
         if (!['plan', 'definition'].includes(kind)) throw new Error('请选择坐标资料类型');
         const pick = await dialog.showOpenDialog(window, { properties: ['openFile'], filters: [

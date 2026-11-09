@@ -34,6 +34,16 @@ def parameter_model(function):
     return create_model(function.__name__, __config__=ConfigDict(extra="forbid"), **fields)
 
 
+def capability(operation):
+    from guizhi.application.skills import OPERATIONS
+
+    spec = OPERATIONS.get(operation)
+    if spec is None:
+        raise ValueError("Unknown operation")
+    schema = parameter_model(handler(operation)).model_json_schema() if operation in CAPABILITIES else {}
+    return {**asdict(spec), "parameters": schema}
+
+
 def data_revision(path):
     """Hash a sealed SQLite image independently of backup-maintained header counters."""
     with path.open("rb") as stream:

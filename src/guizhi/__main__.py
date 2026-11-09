@@ -40,18 +40,47 @@ def main() -> int:
     commands.add_parser("crs-show").add_argument("reference")
     commands.add_parser("execute", help="Run a registered operation from a JSON request").add_argument("request", type=Path)
     commands.add_parser("capabilities", help="List registered independent operations")
+    commands.add_parser("capability-show").add_argument("operation")
+    commands.add_parser("skills", help="List active skills")
+    commands.add_parser("skill-show").add_argument("reference")
+    commands.add_parser("skill-preview").add_argument("request", type=Path)
+    commands.add_parser("skill-publish").add_argument("request", type=Path)
+    commands.add_parser("workflow").add_argument("request", type=Path)
     args = parser.parse_args()
     try:
         if args.command == "capabilities":
             from dataclasses import asdict
-            from guizhi.domain.capabilities import CAPABILITIES
+            from guizhi.application.skills import OPERATIONS
 
-            print(json.dumps({name: asdict(spec) for name, spec in CAPABILITIES.items()}))
+            print(json.dumps({name: asdict(spec) for name, spec in OPERATIONS.items()}))
+            return 0
+        if args.command == "capability-show":
+            from guizhi.infrastructure.operations.runner import capability
+
+            print(json.dumps(capability(args.operation)))
             return 0
         if args.command == "execute":
             result = run_operation(args.workspace, json.loads(args.request.read_text(encoding="utf-8-sig")))
             print(json.dumps(result))
             return {"succeeded": 0, "cancelled": 130}.get(result["status"], 1)
+        if args.command in {"skills", "skill-show", "skill-preview", "skill-publish", "workflow"}:
+            from guizhi.application import skills
+
+            workspace = Workspace(args.workspace, create=True)
+            if args.command == "skills":
+                result = skills.summaries(workspace)
+            elif args.command == "skill-show":
+                result = skills.get_skill(workspace, args.reference)
+            elif args.command == "skill-preview":
+                result = skills.parse_skill(args.request.read_text(encoding="utf-8-sig")).model_dump(mode="json")
+            else:
+                payload = json.loads(args.request.read_text(encoding="utf-8-sig"))
+                handler = skills.publish if args.command == "skill-publish" else skills.execute
+                result = handler(workspace.root, **payload)
+            print(json.dumps(result))
+            if args.command == "workflow":
+                return {"succeeded": 0, "cancelled": 130}.get(result["status"], 1)
+            return 0
         if args.command == "layers":
             import pyogrio
 

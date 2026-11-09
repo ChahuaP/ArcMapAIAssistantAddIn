@@ -11,11 +11,20 @@ const readJson = path => JSON.parse(readFileSync(path, 'utf8'));
 
 function verifiedResponse(receipt) {
     const stats = receipt.statistics;
-    if (receipt.operation === 'vector_inventory') {
-        return `共 ${stats.feature_count} 个要素。`;
-    }
     const area = value => value.toLocaleString('zh-CN', { maximumFractionDigits: 2 });
-    return `项目范围 ${area(stats.project_area_m2)} m²，重叠 ${area(stats.covered_area_m2)} m²，覆盖率 ${(stats.coverage_ratio * 100).toFixed(2)}%。结果反映空间关系，审批依据请查阅适用规则。`;
+    const parts = [];
+    if (receipt.mode) parts.push(`已完成 ${stats.step_count} 个步骤。`);
+    for (const item of receipt.steps ?? [{ statistics: stats }]) {
+        const fact = item.statistics;
+        if (fact.coverage_ratio !== undefined) {
+            parts.push(`项目范围 ${area(fact.project_area_m2)} m²，重叠 ${area(fact.covered_area_m2)} m²，覆盖率 ${(fact.coverage_ratio * 100).toFixed(2)}%。结果反映空间关系，审批依据请查阅适用规则。`);
+        }
+    }
+    if (stats.feature_count !== undefined) parts.push(`共 ${stats.feature_count} 个要素。`);
+    if (stats.geometry_types) parts.push(Object.entries(stats.geometry_types)
+        .map(([name, count]) => `${name} ${count} 个`).join('，') + '。');
+    if (stats.row_count !== undefined) parts.push(`共 ${stats.row_count} 行。`);
+    return parts.join('') || '已完成办理，成果和证据已保存。';
 }
 
 function within(root, path) {
@@ -97,6 +106,9 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
     if (options.controlLayer) mcpArgs.push('--control-layer', options.controlLayer);
     if (options.projectPlan) mcpArgs.push('--project-plan', options.projectPlan);
     if (options.controlPlan) mcpArgs.push('--control-plan', options.controlPlan);
+    if (options.skill) mcpArgs.push('--skill', options.skill);
+    if (options.previousRun) mcpArgs.push('--previous-run', options.previousRun);
+    if (options.materials) mcpArgs.push('--materials', JSON.stringify(options.materials));
     const env = runtimeEnv(options, mcpArgs);
     const deadline = AbortSignal.timeout(timeoutMs);
     const stop = signal ? AbortSignal.any([signal, deadline]) : deadline;
@@ -117,13 +129,17 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
     }
     let stopListener;
     let result;
+    let attempted = false;
     try {
         event({ kind: 'dispatch', id, provider: options.provider, model: options.model });
         const aborted = new Promise(resolveAbort => {
             stopListener = addAbortListener(stop, () => resolveAbort(null));
         });
-        const materials = `项目范围${options.input && options.layer ? '已绑定' : '未绑定'}，管控范围${options.control && options.controlLayer ? '已绑定' : '未绑定'}。`;
-        const response = await Promise.race([harness.run(materials + '\n用户请求：' + options.prompt, {
+        const roles = Object.fromEntries(Object.entries(options.materials ?? {}).map(([role, items]) => [role, items.length]));
+        if (options.input && options.layer) roles.project = 1;
+        if (options.control && options.controlLayer) roles.control = 1;
+        const context = `已绑定材料数量 ${JSON.stringify(roles)}。已选技能 ${options.skill || '无'}。有已选历史成果：${Boolean(options.previousRun)}。\n`;
+        const response = await Promise.race([harness.run(context + '用户请求：' + options.prompt, {
             sessionId: id,
             onNotification(note) {
                 if (note.method === 'session.status') {
@@ -132,7 +148,10 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
                 if (note.method !== 'session.event') return;
                 const fact = note.params.event;
                 const item = { kind: 'session_event', type: fact.type, seq: fact.seq, time: fact.time };
-                if (fact.type === 'tool/call') item.tool = fact.data.name;
+                if (fact.type === 'tool/call') {
+                    item.tool = fact.data.name;
+                    if (item.tool === 'mcp__guizhi__execute_workflow') attempted = true;
+                }
                 if (fact.type === 'assistant/message' && fact.data.usage) {
                     item.usage = fact.data.usage;
                     usage.set(fact.seq, fact.data.usage);
@@ -145,13 +164,19 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
             result = { status: deadline.aborted ? 'timed_out' : 'cancelled' };
         } else {
             const receiptPath = join(directory, 'operation.json');
+            const issuePath = join(directory, 'input-issue.json');
             const receipt = existsSync(receiptPath) ? readJson(receiptPath) : null;
-            const status = response.finishReason !== 'completed' ? 'failed'
-                : receipt?.status ?? (options.input && options.layer ? 'no_result' : 'missing_materials');
+            const issue = existsSync(issuePath) ? readJson(issuePath) : null;
+            const status = receipt?.status ?? (response.finishReason !== 'completed' ? 'failed' : issue?.status ??
+                (attempted ? 'no_result' : existsSync(join(directory, 'discovery')) ? 'answered'
+                    : Object.keys(roles).length ? 'no_result' : 'missing_materials'));
             const terminal = response.events.findLast(fact => fact.type === 'turn/end');
+            const candidatePath = join(directory, 'candidate.json');
             result = { status, finish_reason: response.finishReason,
-                response: status === 'succeeded' ? verifiedResponse(receipt) : response.finalResponse,
-                operation: receipt,
+                response: status === 'succeeded' ? verifiedResponse(receipt)
+                    : receipt?.error ?? issue?.error ?? (attempted ? '本轮没有交付成果。' : response.finalResponse),
+                operation: receipt, ...(issue && !receipt ? { input_issue: issue } : {}),
+                ...(status === 'answered' && existsSync(candidatePath) ? { candidate: readJson(candidatePath) } : {}),
                 ...(terminal?.data.reason.error ? { error: terminal.data.reason.error } : {}) };
         }
     } catch (error) {
@@ -188,7 +213,7 @@ async function main() {
         prompt: { type: 'string' }, input: { type: 'string' }, layer: { type: 'string' },
         control: { type: 'string' }, 'control-layer': { type: 'string' },
         'project-plan': { type: 'string' }, 'control-plan': { type: 'string' },
-        'timeout-ms': { type: 'string' },
+        'timeout-ms': { type: 'string' }, skill: { type: 'string' }, materials: { type: 'string' }, 'previous-run': { type: 'string' },
     } });
     const controller = new AbortController();
     const cancel = () => controller.abort();
@@ -196,11 +221,13 @@ async function main() {
     process.once('SIGTERM', cancel);
     try {
         const result = await dispatch({ ...values, modelUrl: values['model-url'], controlLayer: values['control-layer'],
+            materials: values.materials ? JSON.parse(values.materials) : undefined,
+            previousRun: values['previous-run'],
             projectPlan: values['project-plan'], controlPlan: values['control-plan'],
             timeoutMs: values['timeout-ms'] === undefined ? undefined : Number(values['timeout-ms']) },
         { signal: controller.signal, onEvent: item => console.log(JSON.stringify(item)) });
         console.log(JSON.stringify({ kind: 'result', ...result }));
-        process.exitCode = result.status === 'succeeded' ? 0 : result.status === 'cancelled' ? 130 : 1;
+        process.exitCode = ['succeeded', 'answered'].includes(result.status) ? 0 : result.status === 'cancelled' ? 130 : 1;
     } finally {
         process.off('SIGINT', cancel);
         process.off('SIGTERM', cancel);

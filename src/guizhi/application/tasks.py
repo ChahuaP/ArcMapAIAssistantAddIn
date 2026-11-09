@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+from time import monotonic
 from uuid import uuid4
 
 from guizhi.domain.contracts import Job, Run, TaskSpec
@@ -29,6 +30,7 @@ def worker(workspace: Workspace, run_id: str) -> dict:
     if record["status"] != "running":
         raise ValueError("Worker requires an active run")
     directory = workspace.directory(run_id)
+    workflow = record["task"]["operation"] == "workflow.execute"
     # Exactly one worker can claim the artifact directory for a run.
     (directory / "artifacts").mkdir()
 
@@ -36,6 +38,8 @@ def worker(workspace: Workspace, run_id: str) -> dict:
         with supervisor_lock(directory / "supervisor.lock") as acquired:
             if acquired:
                 raise RuntimeError("Worker lost its supervisor")
+        if workflow and workspace.status(run_id) == "cancelling":
+            raise InterruptedError("Workflow cancelled")
 
     def progress(step, **details):
         ensure_supervised()
@@ -54,6 +58,8 @@ def worker(workspace: Workspace, run_id: str) -> dict:
 
 
 def supervise(workspace: Workspace, run_id: str, cancel_requested: Callable[[], bool] | None):
+    workflow = workspace.read(run_id)["task"]["operation"] == "workflow.execute"
+    cancel_deadline = None
     command = [
         sys.executable, "-I", "-B", str(Path(__file__).resolve().parents[1] / "__main__.py"),
         "--workspace", str(workspace.root), "_worker", run_id,
@@ -68,10 +74,13 @@ def supervise(workspace: Workspace, run_id: str, cancel_requested: Callable[[], 
                 if cancel_requested is not None and cancel_requested():
                     workspace.request_cancel(run_id)
                 if workspace.status(run_id) == "cancelling":
-                    process.kill()
-                    process.communicate()
-                    workspace.finish(run_id, "cancelled")
-                    return
+                    if not workflow or (cancel_deadline is not None and monotonic() >= cancel_deadline):
+                        process.kill()
+                        process.communicate()
+                        workspace.finish(run_id, "cancelled")
+                        return
+                    if cancel_deadline is None:
+                        cancel_deadline = monotonic() + 5
                 try:
                     output, error = process.communicate(timeout=0.2)
                     break

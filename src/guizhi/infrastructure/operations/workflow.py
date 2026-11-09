@@ -1,0 +1,144 @@
+"""Execute fixed, free and combined plans using the same registered job runner."""
+import json
+from operator import eq, ge, le
+import shutil
+from pathlib import Path
+
+from pyproj import CRS
+
+from guizhi.application.skills import validate_steps
+from guizhi.application.tasks import run_operation, run_vector
+from guizhi.domain.skills import Step
+from guizhi.infrastructure.operations.evidence import read_artifact
+from guizhi.infrastructure.operations.runner import data_revision
+
+
+def committed(record):
+    if record["status"] != "succeeded":
+        raise ValueError(record["error"] or record["status"])
+    return record["result"]
+
+
+def resolve_value(value, records):
+    if isinstance(value, str) and value.startswith(("$run.", "$selection.")):
+        mode, name = value.split(".", 1)
+        record = records.get(name)
+        if record is None:
+            raise ValueError(f"Unavailable prior step: {name}")
+        if mode == "$run":
+            return record["id"]
+        result = record["result"].get("selection")
+        if result is None:
+            raise ValueError(f"Step {name} has no selection")
+        return result
+    if isinstance(value, list):
+        return [resolve_value(item, records) for item in value]
+    if isinstance(value, dict):
+        return {key: resolve_value(item, records) for key, item in value.items()}
+    return value
+
+
+def material_from(ctx, record):
+    file = read_artifact(ctx.workspace, record["id"], "export")
+    data = committed(record)
+    return {"file": str(file), "layer": data["export_layer"],
+            "revision": data.get("data_revision") or data_revision(file)}
+
+
+def execute(ctx, specification: dict):
+    mode = specification["mode"]
+    skill = specification["skill"]
+    groups = specification["materials"]
+    steps = [Step.model_validate(raw) for raw in specification["steps"]]
+    validate_steps(steps, groups.keys() | {item["id"] for item in skill["materials"]} if skill else groups.keys())
+    if mode not in {"fixed", "free", "combined"}:
+        raise ValueError("Unknown workflow mode")
+    sealed, seals, records = {}, {}, {}
+    def cancelled():
+        try:
+            ctx.check()
+        except InterruptedError:
+            return True
+        return False
+
+    roles = {role["id"]: role for role in skill["materials"]} if skill else {}
+    for role, group in groups.items():
+        sealed[role], seals[role] = [], []
+        for item in group:
+            ctx.check()
+            record = run_operation(ctx.workspace.root, {"operation": "data.describe", "inputs": [item]}, cancelled)
+            ctx.check()
+            data = committed(record)
+            requirement = roles.get(role, {})
+            expected = requirement.get("geometry", "any")
+            if expected != "any":
+                name = (data["geometry_type"] or "").casefold().replace("multi", "", 1).split(" ")[0]
+                if {"linestring": "line"}.get(name, name) != expected:
+                    raise ValueError(f"Material {role} must contain {expected} geometry")
+            policy = requirement.get("coordinate", "any")
+            if policy != "any" and data["crs"] is None:
+                raise ValueError(f"Material {role} requires a defined coordinate system")
+            if policy == "projected_meters":
+                crs = CRS(data["crs"])
+                if not crs.is_projected or any(axis.unit_conversion_factor != 1 for axis in crs.axis_info[:2]):
+                    raise ValueError(f"Material {role} requires a projected coordinate system in metres")
+            file = read_artifact(ctx.workspace, record["id"], "import")
+            sealed[role].append({"file": str(file), "layer": item["layer"], "revision": data["revision"]})
+            seals[role].append(record["id"])
+    manifest = {"mode": mode, "skill": skill, "material_runs": seals, "steps": []}
+    for step in steps:
+        ctx.check()
+        inputs = []
+        for reference in step.inputs:
+            kind, name = reference.split(".", 1)
+            if kind == "material":
+                inputs.extend(sealed.get(name, []))
+            else:
+                inputs.append(material_from(ctx, records[name]))
+        parameters = resolve_value(step.parameters, records)
+        ctx.progress("workflow_step_started", step_id=step.id, operation=step.operation)
+        if step.operation in {"control_check", "vector_inventory"}:
+            expected = 2 if step.operation == "control_check" else 1
+            if len(inputs) != expected:
+                raise ValueError(f"{step.operation} requires {expected} input(s)")
+            plans = {**(specification["coordinate_plans"] if expected == 2 else {}), **parameters}
+            if set(plans) - {"project_plan", "control_plan"} or (expected == 1 and plans):
+                raise ValueError("Unexpected business operation parameters")
+            record = run_vector(ctx.workspace.root, Path(inputs[0]["file"]), inputs[0]["layer"], None, cancelled,
+                                operation=step.operation, control=(Path(inputs[1]["file"]), inputs[1]["layer"])
+                                if expected == 2 else None, **plans)
+        else:
+            record = run_operation(ctx.workspace.root, {"operation": step.operation, "inputs": inputs,
+                                   "parameters": parameters, "idempotency_key": ctx.job["run_id"] + "." + step.id}, cancelled)
+        ctx.check()
+        ctx.progress("workflow_step_finished", step_id=step.id, child_run_id=record["id"], status=record["status"])
+        committed(record)
+        records[step.id] = record
+        manifest["steps"].append({"id": step.id, "operation": step.operation, "run_id": record["id"],
+                                  "statistics": record["result"].get("statistics", {})})
+    if skill:
+        for rule in skill["rules"]:
+            statistics = records[rule["step"]]["result"].get("statistics", {})
+            name = rule["statistic"]
+            compare = {"eq": eq, "ge": ge, "le": le}[rule["compare"]]
+            if name not in statistics or not compare(statistics[name], rule["value"]):
+                raise ValueError(f"Skill result check failed: {rule['step']}.{name}")
+        for requirement in skill["evidence"]:
+            read_artifact(ctx.workspace, records[requirement["step"]]["id"], requirement["kind"])
+    ctx.json("workflow.json", manifest, "workflow")
+    last = committed(records[steps[-1].id])
+    outputs = {}
+    for record in records.values():
+        for ref in record["result"]["evidence"]:
+            if ref["step"] in {"export", "report", "map", "table", "view", "selection"}:
+                outputs[ref["step"]] = (record["id"], ref["sha256"])
+    for kind, (run_id, checksum) in outputs.items():
+        src = read_artifact(ctx.workspace, run_id, kind)
+        output = ctx.path(kind + src.suffix)
+        shutil.copyfile(src, output)
+        if ctx.record(kind, output)["sha256"] != checksum:
+            raise ValueError("Published workflow artifact failed checksum verification")
+    # The original step's claim and its evidence remain available through the run reference.
+    return {**{name: last[name] for name in ("export_layer", "data_revision", "selection", "presentation")
+               if name in last}, "workflow": manifest, "final_run": records[steps[-1].id]["id"],
+            "statistics": {**last.get("statistics", {}), "step_count": len(steps)}}

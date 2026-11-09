@@ -90,4 +90,19 @@ dialog .primary{justify-self:end}
 .coordinate-list pre{overflow:auto;max-height:135px;background:#eef6f2;padding:8px;white-space:pre-wrap}
 .coordinate-list p{padding:6px 0;font-size:12px}
 .coordinate-actions{display:flex;gap:8px;padding:6px 0}
+.business-dialog{max-width:min(680px,92vw);display:grid;gap:14px}
+.business-dialog:not([open]){display:none}
+.business-actions,.delivery-actions{display:flex;flex-wrap:wrap;gap:7px}
+.skill-cards{display:grid;gap:8px}
+.skill-card{display:grid;grid-template-columns:auto 1fr auto;gap:5px 10px;align-items:center;border:1px solid #d5e6de;border-radius:10px;padding:10px}
+.skill-card span{grid-column:1/3;grid-row:2;color:#4d6c67}
+.skill-card button{grid-column:3;grid-row:1/3}
+.skill-card small,.role-material>span{color:#4d6c67;font-size:12px}
+.role-material,.skill-editor,.skill-samples{display:flex;gap:7px;flex-wrap:wrap;align-items:center}
+.skill-editor,.skill-samples{display:grid;justify-items:start;width:100%}
+.skill-editor label,.skill-editor textarea{width:100%}
+.skill-editor textarea{max-height:280px;font-family:monospace;font-size:13px}
+.skill-materials,.materials{max-height:118px;overflow:auto}
+.capability-group{padding:5px 10px}
+.capability-group code{margin-left:9px;color:#4d6c67}
 @media(max-width:970px){.shell{grid-template-columns:168px minmax(0,1fr)}.workbench{gap:10px;padding:11px}.messages{padding:14px}.sidebar{padding-inline:10px}}
