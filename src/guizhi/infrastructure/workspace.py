@@ -73,6 +73,10 @@ class Workspace:
                         seq INTEGER PRIMARY KEY, run_id TEXT NOT NULL REFERENCES runs(id),
                         time TEXT NOT NULL, step TEXT NOT NULL, details TEXT NOT NULL
                     );
+                    CREATE TABLE IF NOT EXISTS crs_catalog (
+                        kind TEXT NOT NULL, id TEXT NOT NULL, revision INTEGER NOT NULL,
+                        body TEXT NOT NULL, PRIMARY KEY (kind, id, revision)
+                    );
                 """)
 
     @contextmanager

@@ -59,7 +59,7 @@ def write_report(path, stats):
     )
 
 
-def check_control(task: dict, job: dict, directory: Path, progress, ensure_supervised) -> dict:
+def check_control(task: dict, job: dict, directory: Path, progress, ensure_supervised, workspace_root: Path) -> dict:
     progress("import_started")
     project, _, project_rev, project_ref = import_layer(
         task["source"], task["layer"], directory, "input.gpkg", job["id"], ensure_supervised,
@@ -68,6 +68,24 @@ def check_control(task: dict, job: dict, directory: Path, progress, ensure_super
         task["control_source"], task["control_layer"], directory, "control.gpkg", job["id"], ensure_supervised,
     )
     progress("imported", datasets=[asdict(project_rev), asdict(control_rev)])
+    evidence = [project_ref, control_ref]
+
+    def transform_role(frame, role, revision):
+        plan = task.get(role + "_plan")
+        if plan is None:
+            return frame
+        from guizhi.infrastructure.coordinates import apply_plan
+
+        converted = apply_plan(frame, plan, workspace_root)
+        file = directory / "artifacts" / (role + "-crs.json")
+        file.write_text(json.dumps(plan, ensure_ascii=False, indent=2), encoding="utf-8")
+        evidence.append(EvidenceRef(uuid4().hex, revision.id, job["id"], "transform",
+                                    file.relative_to(directory).as_posix(), digest(file)))
+        progress("transformed", role=role, plan_id=plan["id"], revision=plan["revision"])
+        return converted
+
+    project = transform_role(project, "project", project_rev)
+    control = transform_role(control, "control", control_rev)
     crs = project.crs
     if crs != control.crs:
         raise ValueError("Project and control CRS differ; select a verified transformation")
@@ -105,7 +123,6 @@ def check_control(task: dict, job: dict, directory: Path, progress, ensure_super
     write_report(report, stats)
     map_file = artifacts / "map.json"
     map_file.write_text(json.dumps(map_payload(project_union, coverage, crs)), encoding="utf-8")
-    evidence = [project_ref, control_ref]
     for step, path in (("export", result), ("report", report), ("map", map_file)):
         evidence.append(EvidenceRef(uuid4().hex, project_rev.id, job["id"], step,
                                     path.relative_to(directory).as_posix(), digest(path)))
@@ -118,4 +135,5 @@ def check_control(task: dict, job: dict, directory: Path, progress, ensure_super
             "object_revision": asdict(obj), "claim_revision": asdict(claim),
             "evidence": [asdict(ref) for ref in evidence], "statistics": stats,
             "validation": checks, "export_layer": "control_check",
+            "analysis_crs_wkt": crs.to_wkt(),
             "runtime": {"gdal": pyogrio.__gdal_version_string__, "geos": shapely.geos_version_string}}

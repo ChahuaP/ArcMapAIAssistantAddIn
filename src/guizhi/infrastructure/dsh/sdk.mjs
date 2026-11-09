@@ -95,6 +95,8 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
     if (options.layer) mcpArgs.push('--layer', options.layer);
     if (options.control) mcpArgs.push('--control', resolve(options.control));
     if (options.controlLayer) mcpArgs.push('--control-layer', options.controlLayer);
+    if (options.projectPlan) mcpArgs.push('--project-plan', options.projectPlan);
+    if (options.controlPlan) mcpArgs.push('--control-plan', options.controlPlan);
     const env = runtimeEnv(options, mcpArgs);
     const deadline = AbortSignal.timeout(timeoutMs);
     const stop = signal ? AbortSignal.any([signal, deadline]) : deadline;
@@ -185,6 +187,7 @@ async function main() {
         provider: { type: 'string' }, model: { type: 'string' }, 'model-url': { type: 'string' },
         prompt: { type: 'string' }, input: { type: 'string' }, layer: { type: 'string' },
         control: { type: 'string' }, 'control-layer': { type: 'string' },
+        'project-plan': { type: 'string' }, 'control-plan': { type: 'string' },
         'timeout-ms': { type: 'string' },
     } });
     const controller = new AbortController();
@@ -193,6 +196,7 @@ async function main() {
     process.once('SIGTERM', cancel);
     try {
         const result = await dispatch({ ...values, modelUrl: values['model-url'], controlLayer: values['control-layer'],
+            projectPlan: values['project-plan'], controlPlan: values['control-plan'],
             timeoutMs: values['timeout-ms'] === undefined ? undefined : Number(values['timeout-ms']) },
         { signal: controller.signal, onEvent: item => console.log(JSON.stringify(item)) });
         console.log(JSON.stringify({ kind: 'result', ...result }));

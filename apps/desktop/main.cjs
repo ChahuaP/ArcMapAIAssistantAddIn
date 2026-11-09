@@ -2,7 +2,6 @@ const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, net, protocol, s
 const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
-const { parseArgs } = require('node:util');
 const { DesktopController } = require('./controller.cjs');
 
 const origin = 'guizhi://app';
@@ -22,7 +21,7 @@ async function startDesktop(options) {
         if (!item || !path.isAbsolute(item)) throw new Error('请选择有效的运行目录');
     }
     const vendor = path.join(rendererRuntime, 'node_modules');
-    const localFiles = ['index.html', 'app.js', 'map.js', 'style.css', 'mark.svg'];
+    const localFiles = ['index.html', 'app.js', 'map.js', 'coordinates.js', 'style.css', 'mark.svg'];
     const files = new Map(localFiles.map(name => ['/' + name, path.join(__dirname, name)]));
     files.set('/react.js', path.join(vendor, 'react', 'umd', 'react.production.min.js'));
     files.set('/react-dom.js', path.join(vendor, 'react-dom', 'umd', 'react-dom.production.min.js'));
@@ -91,6 +90,16 @@ async function startDesktop(options) {
     });
     bind('submit', task => controller.submit(task));
     bind('cancel', () => controller.cancel());
+    bind('coordinates', () => controller.coordinateCatalog());
+    bind('importCoordinate', async kind => {
+        if (!['plan', 'definition'].includes(kind)) throw new Error('请选择坐标资料类型');
+        const pick = await dialog.showOpenDialog(window, { properties: ['openFile'], filters: [
+            kind === 'plan' ? { name: '坐标转换方案', extensions: ['json'] }
+                : { name: '坐标系定义', extensions: ['prj', 'wkt'] },
+        ] });
+        if (!pick.canceled) await controller.importCoordinate(kind, pick.filePaths[0]);
+        return controller.coordinateCatalog();
+    });
     bind('report', async id => {
         const error = await shell.openPath(await controller.report(id));
         if (error) throw new Error('无法打开报告');
@@ -98,15 +107,6 @@ async function startDesktop(options) {
     await window.loadURL(origin + '/index.html');
     reveal();
     return { window, tray, controller };
-}
-
-if (require.main === module) {
-    const { values } = parseArgs({ args: process.argv.slice(2), options: {
-        runtime: { type: 'string' }, dsh: { type: 'string' }, 'renderer-runtime': { type: 'string' },
-        'user-data': { type: 'string' },
-    } });
-    startDesktop({ ...values, rendererRuntime: values['renderer-runtime'], userData: values['user-data'] })
-        .catch(error => { dialog.showErrorBox('规智', error.message); app.exit(1); });
 }
 
 module.exports = { startDesktop };

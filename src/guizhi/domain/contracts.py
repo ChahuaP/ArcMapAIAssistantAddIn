@@ -14,6 +14,8 @@ class TaskSpec:
     rule_version: str | None = None
     control_source: str | None = None
     control_layer: str | None = None
+    project_plan: dict | None = None
+    control_plan: dict | None = None
 
 
 @dataclass(frozen=True)

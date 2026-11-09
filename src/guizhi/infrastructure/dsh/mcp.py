@@ -23,6 +23,8 @@ def main():
     parser.add_argument("--layer")
     parser.add_argument("--control", type=Path)
     parser.add_argument("--control-layer")
+    parser.add_argument("--project-plan")
+    parser.add_argument("--control-plan")
     args = parser.parse_args()
     workspace = external_root(args.workspace)
     dispatch = args.dispatch.resolve(strict=True)
@@ -54,7 +56,8 @@ def main():
             else:
                 try:
                     record = run_vector(workspace, args.input, args.layer, None, cancelled.exists,
-                                        operation=operation, control=control)
+                                        operation=operation, control=control,
+                                        project_plan=args.project_plan, control_plan=args.control_plan)
                     result.update(status=record["status"], run_id=record["id"])
                     if record["status"] == "succeeded":
                         result["statistics"] = record["result"]["statistics"]

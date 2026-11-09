@@ -94,9 +94,15 @@ class DesktopController {
     }
 
     async python(command, ...args) {
-        const result = await exec(this.runtime.python, ['-I', '-B', cli, '--workspace',
-            this.settings.workspace, command, ...args], { windowsHide: true, timeout: 30000, maxBuffer: 8 << 20 });
-        return JSON.parse(result.stdout);
+        try {
+            const result = await exec(this.runtime.python, ['-I', '-B', cli, '--workspace',
+                this.settings.workspace, command, ...args], { windowsHide: true, timeout: 30000, maxBuffer: 8 << 20 });
+            return JSON.parse(result.stdout);
+        } catch (error) {
+            let message;
+            try { message = JSON.parse(error.stderr).error; } catch { /* Process failed before producing a record. */ }
+            throw new Error(message?.split('\n')[0] || '无法读取材料或成果');
+        }
     }
 
     async describe(file) {
@@ -144,8 +150,19 @@ class DesktopController {
         child.send({ type: 'start', options: { ...this.runtime, workspace: this.settings.workspace,
             provider: this.settings.provider, model: this.settings.model, modelUrl: this.settings.modelUrl,
             prompt: task.prompt, input: project?.file, layer: project?.layer,
-            control: control?.file, controlLayer: control?.layer } });
+            control: control?.file, controlLayer: control?.layer,
+            projectPlan: project?.plan, controlPlan: control?.plan } });
         return this.state();
+    }
+
+    async coordinateCatalog() {
+        return this.settings.workspace ? this.python('crs-list') : [];
+    }
+
+    async importCoordinate(kind, file) {
+        if (this.active) throw new Error('请先结束当前任务');
+        if (!['plan', 'definition'].includes(kind)) throw new Error('请选择坐标资料类型');
+        return this.python(kind === 'plan' ? 'crs-import' : 'crs-define', file);
     }
 
     async complete(task, receipt) {

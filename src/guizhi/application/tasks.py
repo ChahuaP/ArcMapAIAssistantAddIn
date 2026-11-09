@@ -41,10 +41,10 @@ def worker(workspace: Workspace, run_id: str) -> dict:
         workspace.event(run_id, step, **details)
 
     progress("worker_started", pid=os.getpid())
-    handlers = {"vector_inventory": inventory, "control_check": check_control}
-    return handlers[record["task"]["operation"]](
-        record["task"], record["job"], directory, progress, ensure_supervised,
-    )
+    arguments = (record["task"], record["job"], directory, progress, ensure_supervised)
+    if record["task"]["operation"] == "control_check":
+        return check_control(*arguments, workspace.root)
+    return inventory(*arguments)
 
 
 def supervise(workspace: Workspace, run_id: str, cancel_requested: Callable[[], bool] | None):
@@ -86,7 +86,8 @@ def supervise(workspace: Workspace, run_id: str, cancel_requested: Callable[[], 
 
 def run_vector(root: Path, source: Path, layer: str, object_id: str | None,
                cancel_requested: Callable[[], bool] | None = None, *,
-               operation: str = "vector_inventory", control: tuple[Path, str] | None = None) -> dict:
+               operation: str = "vector_inventory", control: tuple[Path, str] | None = None,
+               project_plan: str | None = None, control_plan: str | None = None) -> dict:
     definition = OPERATIONS[operation]
     source = source.resolve(strict=True)
     if not source.is_file() or source.suffix.lower() != ".gpkg":
@@ -101,11 +102,19 @@ def run_vector(root: Path, source: Path, layer: str, object_id: str | None,
         if not target.is_file() or target.suffix.lower() != ".gpkg":
             raise ValueError("Control input must be a GeoPackage file")
         control_source, control_layer = str(target), control[1]
+    workspace = Workspace(root, create=True)
+    if project_plan or control_plan:
+        from guizhi.infrastructure.crs_catalog import get_plan
+
+        if operation != "control_check":
+            raise ValueError("Transformation plans apply to control checks")
+        project_plan = get_plan(workspace, project_plan) if project_plan else None
+        control_plan = get_plan(workspace, control_plan) if control_plan else None
     task = TaskSpec(uuid4().hex, 1, str(source), layer, object_id or uuid4().hex,
-                    operation, definition.version, definition.rule, control_source, control_layer)
+                    operation, definition.version, definition.rule, control_source, control_layer,
+                    project_plan, control_plan)
     run = Run(uuid4().hex, task.id, task.revision, product_version())
     job = Job(uuid4().hex, run.id, task.operation)
-    workspace = Workspace(root, create=True)
     directory = workspace.directory(run.id)
     directory.mkdir()
     lock = directory / "supervisor.lock"

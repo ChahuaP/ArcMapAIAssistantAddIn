@@ -9,9 +9,12 @@
     const emptyDraft = () => ({ prompt: '', project: null, control: null });
     const number = value => value.toLocaleString('zh-CN', { maximumFractionDigits: 2 });
 
-    function Settings({ current, close, save, fail }) {
+    function Settings({ current, close, save, entries, setEntries }) {
         const dialog = useRef(null);
         const [value, change] = useState({ ...current, key: '' });
+        const [settingsError, setSettingsError] = useState('');
+        const fail = error => setSettingsError(String(error.message || error)
+            .replace(/^Error invoking remote method '[^']+': Error: /, ''));
         const update = (name, next) => change(old => ({ ...old, [name]: next }));
         useEffect(() => { dialog.current.showModal(); }, []);
         const local = value.provider === 'ollama';
@@ -19,7 +22,11 @@
             event.preventDefault();
             if (current.workspace) close();
         } },
-        h('form', { onSubmit: event => { event.preventDefault(); void save(value); } },
+        h('form', { onSubmit: event => {
+            event.preventDefault();
+            setSettingsError('');
+            void save(value).catch(fail);
+        } },
             h('div', { className: 'dialog-head' }, h('h2', null, '设置'),
                 current.workspace && h('button', { type: 'button', className: 'quiet', onClick: close }, '关闭')),
             h('label', null, '成果保存位置', h('div', { className: 'field-row' },
@@ -38,10 +45,12 @@
                 : h('label', null, 'API 密钥', h('input', { type: 'password', value: value.key,
                     placeholder: current.keyConfigured ? '已配置，可输入新密钥' : '输入 MiniMax API 密钥',
                     autoComplete: 'off', onChange: event => update('key', event.target.value) })),
+            current.workspace && h(window.GuizhiCoordinates, { entries, setEntries }),
+            settingsError && h('p', { role: 'alert', className: 'error' }, settingsError),
             h('button', { className: 'primary', disabled: !value.workspace, type: 'submit' }, '保存设置')));
     }
 
-    function Material({ label, item, change, fail }) {
+    function Material({ label, item, change, fail, plans }) {
         return h('div', { className: 'material' },
             h('button', { type: 'button', className: item ? 'attached' : 'attach', title: item?.name || label,
                 onClick: () => api.material().then(value => { if (value) change(value); }).catch(fail) },
@@ -49,6 +58,13 @@
             item && item.layers.length > 1 && h('select', { 'aria-label': label + '图层', value: item.layer,
                 onChange: event => change({ ...item, layer: event.target.value }) },
                 h('option', { value: '' }, '选择图层'), ...item.layers.map(layer => h('option', { key: layer }, layer))),
+            item && plans.length > 0 && h('select', { className: 'plan-select', 'aria-label': label + '坐标方案',
+                value: item.plan || '', onChange: event => change({ ...item, plan: event.target.value }) },
+                h('option', { value: '' }, '沿用坐标'),
+                ...plans.map(plan => {
+                    const id = plan.id + '@' + plan.revision;
+                    return h('option', { key: id, value: id }, plan.title + ' · v' + plan.revision);
+                })),
             item && h('button', { type: 'button', className: 'remove', 'aria-label': '移除' + label, onClick: () => change(null) }, '×'));
     }
 
@@ -81,6 +97,7 @@
         const [settings, showSettings] = useState(false);
         const [error, setError] = useState('');
         const [sending, setSending] = useState(false);
+        const [coordinates, setCoordinates] = useState([]);
         const fail = error => setError(String(error.message || error).replace(/^Error invoking remote method '[^']+': Error: /, ''));
         const update = (key, value) => setDraft(old => ({ ...old, [key]: value }));
         useEffect(() => {
@@ -89,10 +106,19 @@
             const offSettings = api.onSettings(() => showSettings(true));
             return () => { off(); offSettings(); };
         }, []);
+        useEffect(() => {
+            if (state?.settings.workspace) api.coordinates().then(setCoordinates).catch(fail);
+        }, [state?.settings.workspace]);
+        const plans = coordinates.filter(entry => entry.kind === 'plan');
         const task = state?.tasks.find(item => item.id === selected);
         const busy = state?.tasks.some(active) || sending;
         async function submit(event) {
             event.preventDefault();
+            const command = draft.prompt.trim().replace(/[。！!？?\s]+$/g, '');
+            if (['结束本轮', '结束这一轮任务', '结束当前任务', '开始新任务', '开始新的任务'].includes(command)) {
+                startNew();
+                return;
+            }
             if (busy || !draft.prompt.trim()) return;
             setError('');
             setSending(true);
@@ -140,8 +166,8 @@
                         h('form', { className: 'composer', onSubmit: submit },
                             error && h('p', { role: 'alert', className: 'error' }, error),
                             h('div', { className: 'materials' },
-                                h(Material, { label: '项目范围', item: draft.project, change: value => update('project', value), fail }),
-                                h(Material, { label: '管控范围', item: draft.control, change: value => update('control', value), fail })),
+                                h(Material, { label: '项目范围', item: draft.project, change: value => update('project', value), fail, plans }),
+                                h(Material, { label: '管控范围', item: draft.control, change: value => update('control', value), fail, plans })),
                             h('div', { className: 'compose-row' },
                                 h('textarea', { 'aria-label': '办理事项', placeholder: '输入办理事项…', rows: 2,
                                     value: draft.prompt, maxLength: 4000, onChange: event => update('prompt', event.target.value),
@@ -154,10 +180,13 @@
                                 busy ? h('button', { type: 'button', onClick: () => api.cancel().then(setState).catch(fail) }, '停止')
                                     : h('button', { type: 'submit', className: 'primary', disabled: !draft.prompt.trim() }, '发送 ↑')))),
                     h(window.GuizhiMap, { key: task?.id || 'empty', map: task?.map }))),
-            state && (settings || !state.settings.workspace) && h(Settings, { current: state.settings, fail,
+            state && (settings || !state.settings.workspace) && h(Settings, { current: state.settings,
+                entries: coordinates, setEntries: setCoordinates,
                 close: () => showSettings(false), save: async value => {
-                    try { const next = await api.configure(value); setState(next); select(next.tasks[0]?.id || null); showSettings(false); }
-                    catch (error) { fail(error); }
+                    const next = await api.configure(value);
+                    setState(next);
+                    select(next.tasks[0]?.id || null);
+                    showSettings(false);
                 } }));
     }
     ReactDOM.createRoot(document.getElementById('app')).render(h(App));

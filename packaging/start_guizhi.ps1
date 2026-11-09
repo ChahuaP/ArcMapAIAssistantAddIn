@@ -14,5 +14,5 @@ if (-not (Test-Path -LiteralPath $electron -PathType Leaf)) { throw "Electron ru
 $flags = @('--runtime', $RuntimeRoot, '--renderer-runtime', $DesktopRuntime)
 if ($DshRuntime) { $flags += '--dsh', (Assert-ExternalBuildPath $DshRuntime $repo) }
 if ($UserData) { $flags += '--user-data', (Assert-ExternalBuildPath $UserData $repo) }
-& $electron (Join-Path $repo 'apps/desktop/main.cjs') @flags
+& $electron (Join-Path $repo 'apps/desktop/entry.cjs') @flags | Out-Default
 if ($LASTEXITCODE -ne 0) { throw "Guizhi exited with $LASTEXITCODE" }

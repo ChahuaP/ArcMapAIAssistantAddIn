@@ -27,9 +27,15 @@ def main() -> int:
     check.add_argument("--control", required=True, type=Path)
     check.add_argument("--control-layer", required=True)
     check.add_argument("--object-id")
+    check.add_argument("--project-plan")
+    check.add_argument("--control-plan")
     for command in ("inspect", "cancel", "_worker"):
         commands.add_parser(command).add_argument("run_id")
     commands.add_parser("layers").add_argument("file", type=Path)
+    commands.add_parser("crs-list")
+    commands.add_parser("crs-import").add_argument("file", type=Path)
+    commands.add_parser("crs-define").add_argument("file", type=Path)
+    commands.add_parser("crs-show").add_argument("reference")
     args = parser.parse_args()
     try:
         if args.command == "layers":
@@ -39,11 +45,28 @@ def main() -> int:
                 raise ValueError("请选择 GeoPackage 文件")
             print(json.dumps([name for name, geometry in pyogrio.list_layers(args.file) if geometry]))
             return 0
+        if args.command.startswith("crs-"):
+            from guizhi.infrastructure.crs_catalog import catalog, get_plan
+
+            workspace = Workspace(args.workspace, create=True)
+            if args.command == "crs-list":
+                result = catalog(workspace)
+            elif args.command == "crs-show":
+                result = get_plan(workspace, args.reference)
+            else:
+                from guizhi.infrastructure.coordinates import import_definition, import_plan
+
+                importer = import_plan if args.command == "crs-import" else import_definition
+                result = importer(workspace, args.file)
+            print(json.dumps(result))
+            return 0
         if args.command in {"run", "check"}:
             checking = args.command == "check"
             result = run_vector(args.workspace, args.input, args.layer, args.object_id,
                                 operation="control_check" if checking else "vector_inventory",
-                                control=(args.control, args.control_layer) if checking else None)
+                                control=(args.control, args.control_layer) if checking else None,
+                                project_plan=args.project_plan if checking else None,
+                                control_plan=args.control_plan if checking else None)
             print(json.dumps(result))
             return {"succeeded": 0, "cancelled": 130}.get(result["status"], 1)
         workspace = Workspace(args.workspace)
