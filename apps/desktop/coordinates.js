@@ -73,12 +73,13 @@
                     plans.length > 0 && field('方案版本', h('select', { value: input.replace,
                         onChange: event => patch({ replace: event.target.value }) }, h('option', { value: '' }, '新建方案'),
                         ...plans.map(item => h('option', { key: ref(item), value: ref(item) }, '更新 ' + item.title))))),
-                ...[['source', '源控制点', sourceFile], ['target', '目标控制点', targetFile]].map(([side, label, item]) =>
-                    h(CoordinateFile, { key: side, label, item, busy, change: value => chooseFile(side, value),
-                        pick: () => perform(async () => {
-                            const value = await api.coordinateFile('points');
-                            if (value) chooseFile(side, value);
-                        }) })),
+                h('div', { className: 'setting-fields' },
+                    ...[['source', '源控制点', sourceFile], ['target', '目标控制点', targetFile]].map(([side, label, item]) =>
+                        h(CoordinateFile, { key: side, label, item, busy, change: value => chooseFile(side, value),
+                            pick: () => perform(async () => {
+                                const value = await api.coordinateFile('points');
+                                if (value) chooseFile(side, value);
+                            }) }))),
                 button('layers', '匹配对应点', { disabled: !allFiles || busy, onClick: inspect }),
                 choices && h(React.Fragment, null,
                     h('div', { className: 'setting-fields' },

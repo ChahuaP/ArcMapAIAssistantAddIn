@@ -332,7 +332,7 @@
                 h('span', { className: 'tile-icon' }, icon(['layers', 'globe', 'folder'][catalog.indexOf(item)])),
                 h('b', null, item.title))));
         const quick = h('main', { className: 'launcher' },
-            h('header', { className: 'launcher-head' }, brand(), h('div', { className: 'title-group' },
+            h('header', { className: 'launcher-head' }, brand(true), h('div', { className: 'title-group' },
                 appearance.shortcutRegistered && h('kbd', null, appearance.shortcut.replaceAll('+', ' + ')),
                 button('app', '打开工作台', { type: 'text', onClick: () => api.workbench().catch(fail) }),
                 iconButton('close', '收起快捷面板', { onClick: () => api.hideLauncher().catch(fail) }))),
@@ -376,14 +376,16 @@
                     (resultTask?.hasReport || resultTask?.deliveries?.length > 0) && h('section', { className: 'artifact-list' },
                         h('h2', null, '成果文件'),
                         resultTask.hasReport && h('div', { className: 'delivery-row' },
-                            button('file', '办理报告', { onClick: () => api.report(resultTask.id).catch(fail) }),
+                            button('file', '办理报告', { type: 'text', onClick: () => api.report(resultTask.id).catch(fail) }),
                             button('file', '导出 PDF', { onClick: () => api.exportDelivery(resultTask.id, 'report', 'pdf').catch(fail) })),
                         ...(resultTask.deliveries || []).map(kind => {
                             const extension = resultTask.deliveryFormats?.[kind];
                             const name = extension === '.tif' ? 'GeoTIFF' : extension === '.xlsx' ? 'Excel' : null;
+                            const title = deliverables[kind] || '业务成果';
                             return h('div', { key: kind, className: 'delivery-row' },
-                                button('file', deliverables[kind] || '业务成果', { onClick: () => api.delivery(resultTask.id, kind).catch(fail) }),
+                                button('file', title, { type: 'text', onClick: () => api.delivery(resultTask.id, kind).catch(fail) }),
                                 extension && button('folder', name ? '导出 ' + name : '另存为', {
+                                    'aria-label': name ? '导出 ' + name + ' · ' + title : '另存为 · ' + title,
                                     onClick: () => api.exportDelivery(resultTask.id, kind, 'original').catch(fail) }),
                                 extension === '.gpkg' && button('file', '导出 SHP', {
                                     onClick: () => api.exportDelivery(resultTask.id, kind, 'shp').catch(fail) }));

@@ -26,7 +26,7 @@ main[data-task=read] .contours, main[data-task=draw] .contours, main[data-task=t
 .actions > button { width: 34px; height: 32px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 9px; background: transparent; }
 .actions > button:hover, .actions > button[aria-pressed=true] { background: var(--soft); color: var(--accent); }
 .actions svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
-#bubble { position: absolute; z-index: 4; top: 7px; left: 14px; right: 14px; max-height: 87px; overflow: auto; padding: 8px 12px; border-radius: 13px; line-height: 1.45; overflow-wrap: anywhere; }
+#bubble { position: absolute; z-index: 4; top: 7px; left: 14px; right: 14px; max-height: 87px; overflow: auto; padding: 8px 12px; border-radius: 12px; line-height: 1.6; overflow-wrap: anywhere; }
 #message { font-weight: 600; }
 #message p { margin: 0 0 4px; }
 #message a { color: var(--accent); }

@@ -85,7 +85,7 @@
         };
         const host = state.arcgis.host;
         return [card('产品信息', h('div', { className: 'about-product' },
-            h('h2', null, productName),
+            h('p', { className: 'about-name' }, productName),
             h('p', { lang: 'en', className: 'muted' }, 'Smart Governance System for the Liuhe Branch of the Nanjing Municipal Bureau of Planning and Natural Resources'),
             h('p', null, '规智 · ' + state.version), h('p', null, '版权所有 © 于佳民 · 个人自研'))),
         card('诊断报告', button('server', '检查运行状态', { loading: busy, onClick: () => void refresh(true) }),

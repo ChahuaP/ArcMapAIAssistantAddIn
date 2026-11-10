@@ -4,7 +4,7 @@
     const api = window.guizhi;
     const { Titlebar } = window.GuizhiShell;
     const { ModelForm, Workspace, initial, errorText } = window.GuizhiModel;
-    const steps = ['成果位置', '模式与模型', '语音', '开始使用'];
+    const steps = ['成果位置', '模型设置', '语音设置', '确认配置'];
 
     window.GuizhiOnboarding = function Onboarding({ state, save }) {
         const [step, setStep] = useState(0);
@@ -58,13 +58,13 @@
             h('main', { className: 'onboarding-frame' },
                 h('header', { className: 'onboarding-header' }, h('div', { className: 'onboarding-content' },
                     h('h1', null, '首次使用设置'),
-                    h(antd.Steps, { current: step, size: 'small', items: steps.map(title => ({ title })) }))),
+                    h(antd.Steps, { current: step, size: 'small', responsive: false, items: steps.map(title => ({ title })) }))),
                 h('div', { className: 'onboarding-scroll' },
                     h('div', { className: 'onboarding-content', key: step }, content[step]())),
                 h('footer', { className: 'onboarding-footer' }, h('div', { className: 'onboarding-content setting-row' },
                     h('div', { className: 'business-actions' },
                         step > 0 && h(antd.Button, { disabled: blocked, onClick: () => { setError(''); setStep(step - 1); } }, '上一步'),
-                        step === 2 && h(antd.Button, { type: 'text', disabled: blocked, onClick: () => advance(true) }, '暂时跳过语音')),
+                        step === 2 && h(antd.Button, { type: 'text', disabled: blocked, onClick: () => advance(true) }, '跳过语音')),
                     h('div', { className: 'business-actions' },
                         error && h('span', { className: 'error', role: 'alert' }, error),
                         h(antd.Button, { type: 'primary', disabled: blocked || (step === 0 && !value.workspace.trim()) ||

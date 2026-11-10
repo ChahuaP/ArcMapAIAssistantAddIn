@@ -97,10 +97,10 @@
                 saved?.keyConfigured;
             const updateProfile = (key, next) => update(name, { ...profile, [key]: next,
                 ...(['baseUrl', 'region', 'workspace'].includes(key) ? { key: '' } : {}) });
-            return h('section', { className: 'settings-card speech-channel' },
-                h('h2', null, title),
+            return h('section', { className: 'settings-card speech-channel', 'aria-labelledby': kind + '-heading' },
+                h('h2', { id: kind + '-heading' }, title),
                 h('div', { className: 'setting-fields' },
-                    select(title + '服务', provider, choices, next => change({ ...value, [kind]: next,
+                    select('语音服务', provider, choices, next => change({ ...value, [kind]: next,
                         [name]: next === current[kind] ? current[name] : {},
                         ...(asr ? {} : { voice: next === current.tts ? current.voice : '' }) })),
                     select(asr ? '麦克风' : '播放设备', value[device], byKind(asr ? 'audioinput' : 'audiooutput', value[device]),
@@ -124,9 +124,9 @@
                         { placeholder: { custom: 'alloy', azure: 'zh-CN-XiaoxiaoNeural',
                             aliyun: 'longanyang', minimax: 'female-shaonv', surf: 'huayan',
                             volc: profile.model === 'seed-icl-2.0' ? '控制台中的音色 ID' : '使用默认音色' }[provider] })),
-                asr ? button('mic', testing === 'recording' ? '结束并识别' : '试录音',
+                asr ? button('mic', testing === 'recording' ? '结束录音' : '录音测试',
                     { disabled: provider === 'off' || Boolean(testing && testing !== 'recording'), onClick: record })
-                    : button('mic', '试听声音', { disabled: provider === 'off' || Boolean(testing),
+                    : button('speaker', '声音试听', { disabled: provider === 'off' || Boolean(testing),
                         loading: testing === 'tts', onClick: listen }));
         }
         return h('div', { className: 'speech-form' }, section('asr'), section('tts'),
@@ -162,15 +162,16 @@
             } catch (issue) { setError(errorText(issue)); }
             finally { setSaving(false); }
         }
-        return h(React.Fragment, null, h(SpeechForm, { current, value, change: setValue, busy: setTesting }),
+        return h('div', { className: 'voice-settings-page' }, h(SpeechForm, { current, value, change: setValue, busy: setTesting }),
             h('details', { className: 'voice-settings' }, h('summary', null, '专业词汇'),
                 h('div', { className: 'voice-fields' },
                     h('label', null, '术语纠错', h('textarea', { rows: 2, placeholder: '原词=正确词', value: words,
                         onChange: event => setWords(event.target.value) })),
                     h('label', null, '发音词表', h('textarea', { rows: 2, placeholder: '原词=发音读法', value: pronunciation,
                         onChange: event => setPronunciation(event.target.value) })))),
-            h(antd.Button, { type: 'primary', disabled: testing, loading: saving, onClick: save }, '保存语音设置'),
-            message && h('p', { role: 'status' }, message),
-            error && h('p', { role: 'alert', className: 'error' }, error));
+            h('div', { className: 'setting-row' },
+                h('div', null, message && h('p', { role: 'status' }, message),
+                    error && h('p', { role: 'alert', className: 'error' }, error)),
+                h(antd.Button, { type: 'primary', disabled: testing, loading: saving, onClick: save }, '保存设置')));
     };
 })();
