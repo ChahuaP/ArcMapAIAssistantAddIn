@@ -69,6 +69,19 @@ svg { flex: none; vertical-align: middle; }
 .bubble.user { max-width: 88%; align-self: flex-end; background: var(--soft); border-bottom-right-radius: 3px; }
 .bubble.assistant { background: var(--sub); border: 1px solid var(--line); }
 .assistant p { margin: 8px 0; }
+.answer-markdown { min-width: 0; overflow-x: auto; margin-block: 8px; }
+.answer-markdown :first-child { margin-top: 0; }
+.answer-markdown :last-child { margin-bottom: 0; }
+.answer-markdown h1, .answer-markdown h2, .answer-markdown h3, .answer-markdown h4 {
+    margin: 14px 0 5px; color: var(--ink); white-space: normal; font-size: 1.08em;
+}
+.answer-markdown ul, .answer-markdown ol { margin-block: 7px; padding-inline-start: 24px; }
+.answer-markdown a { color: var(--accent); }
+.answer-markdown pre { padding: 9px; overflow: auto; background: var(--panel); border: 1px solid var(--line); }
+.answer-markdown :not(pre) > code { padding: 1px 4px; border-radius: 4px; background: var(--soft); }
+.answer-markdown blockquote { margin: 8px 0; padding-inline: 10px; border-inline-start: 3px solid var(--border); color: var(--muted); }
+.answer-markdown table { border-collapse: collapse; max-width: 100%; }
+.answer-markdown td, .answer-markdown th { border: 1px solid var(--line); padding: 5px 8px; text-align: start; }
 .result-head { display: flex; align-items: center; gap: 9px; }
 .metrics { display: flex; gap: 20px; margin: 12px 0 14px; }
 .metrics dt { color: var(--muted); font-size: 12px; }

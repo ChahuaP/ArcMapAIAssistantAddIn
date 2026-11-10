@@ -35,12 +35,13 @@ async function startDesktop(options) {
         'materials-ui.js', 'skill-editor.js',
         'style.css', 'theme.css', 'mark.svg', 'luhe-banner.png', 'model-form.js', 'onboarding.js',
         'portrait.html', 'portrait.css', 'portrait.js', 'task-commands.js', 'speech-settings.js',
-        'speech-audio.js', 'voice-input.js', 'visual.html', 'visual.css', 'visual.js', 'arcgis-extension.js'];
+        'speech-audio.js', 'voice-input.js', 'visual.html', 'visual.css', 'visual.js', 'arcgis-extension.js', 'markdown.js'];
     const files = new Map(localFiles.map(name => ['/' + name, path.join(__dirname, name)]));
     files.set('/react.js', path.join(vendor, 'react', 'umd', 'react.production.min.js'));
     files.set('/react-dom.js', path.join(vendor, 'react-dom', 'umd', 'react-dom.production.min.js'));
     files.set('/dayjs.js', path.join(vendor, 'dayjs', 'dayjs.min.js'));
     files.set('/antd.js', path.join(vendor, 'antd', 'dist', 'antd.min.js'));
+    files.set('/markdown-it.js', path.join(vendor, 'markdown-it', 'dist', 'browser', 'markdown-it.umd.min.js'));
     for (const file of files.values()) {
         if (!fs.existsSync(file)) throw new Error('桌面运行依赖不完整');
     }
@@ -79,7 +80,8 @@ async function startDesktop(options) {
         safeStorage, externalPath, onChange: broadcast, bundledArcmap: options.bundledArcmap,
         installationRoot: options.installationRoot });
     const hostRoot = process.env.GUIZHI_ARCGIS_HOSTS || path.join(process.env.LOCALAPPDATA, 'Guizhi', 'ArcGIS', 'hosts');
-    sync = new ArcGisSync(controller, hostRoot, () => broadcast(controller.state()));
+    sync = new ArcGisSync(controller, hostRoot, app.getPath('documents'), () => broadcast(controller.state()));
+    controller.onStarted = task => sync.started(task);
     controller.onCompleted = task => sync.completed(task);
     visual = new VisualSession({ python: controller.runtime.python,
         masks: () => portrait.isVisible() ? [portrait.getBounds()] : [],
@@ -142,6 +144,12 @@ async function startDesktop(options) {
         });
     }
     bind('state', () => withSpeech(controller.state()));
+    bind('openLink', value => {
+        if (typeof value !== 'string' || value.length > 2048) throw new Error('链接无效');
+        const url = new URL(value);
+        if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw new Error('链接无效');
+        return shell.openExternal(url.href);
+    });
     bind('appearance', desktop.configureAppearance);
     bind('shortcutCapture', (surface, enabled) => {
         if (surface !== window || typeof enabled !== 'boolean') throw new Error('快捷键录入请求无效');
@@ -210,7 +218,7 @@ async function startDesktop(options) {
         const appearance = desktop.appearance();
         return { model: { mode: config?.mode, name: config?.model, state: config ? 'configured' : 'missing', ...modelCheck },
             voice: { asr: speech.diagnostic('asr'), tts: speech.diagnostic('tts') },
-            bridge: Boolean(settings.arcmapBridge && fs.existsSync(settings.arcmapBridge)),
+            bridge: Boolean(sync.bridge && fs.existsSync(sync.bridge)),
             shortcut: { registered: appearance.shortcutRegistered, value: appearance.shortcut } };
     }, true);
     bind('speechConfigure', input => {
@@ -245,27 +253,12 @@ async function startDesktop(options) {
         const pick = await dialog.showOpenDialog(window, { properties: ['openDirectory', 'createDirectory'] });
         return pick.canceled ? null : pick.filePaths[0];
     });
-    bind('arcmapBridge', async () => {
-        const pick = await dialog.showOpenDialog(window, { properties: ['openFile'],
-            filters: [{ name: 'ArcGIS 连接组件', extensions: ['exe'] }] });
-        return pick.canceled ? null : controller.selectArcmapBridge(pick.filePaths[0]);
-    });
-    bind('arcgisOpen', async () => {
-        const pick = await dialog.showOpenDialog(window, { properties: ['openFile'],
-            filters: [{ name: 'ArcGIS 工程', extensions: ['mxd'] }] });
-        if (pick.canceled) return null;
-        const file = externalPath(pick.filePaths[0]);
-        await sync.open(file);
-        return file;
-    });
     bind('arcgisInstall', async () => {
         const file = options.bundledArcmap && path.join(path.dirname(options.bundledArcmap), 'Guizhi.esriaddin');
         if (!file || !fs.existsSync(file)) throw new Error('请从规智交付目录安装 Guizhi.esriaddin');
         if (await shell.openPath(file)) throw new Error('无法打开 ArcGIS 扩展安装程序');
     });
-    bind('arcgisConfigure', input => sync.configure(input));
-    bind('arcgisDiscover', session => sync.discover(session));
-    bind('arcgisPublish', id => sync.enqueue(controller.tasks.find(task => task.id === id)));
+    bind('arcgisConfigure', carrier => sync.configure(carrier));
     bind('arcgisRetry', id => sync.retry(id));
     bind('arcgisCapture', (index, selected) => sync.capture(index, selected));
     bind('material', async (kind = 'any', folder = false) => {

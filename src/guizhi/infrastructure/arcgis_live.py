@@ -12,7 +12,7 @@ import pyogrio
 
 from guizhi.infrastructure.arcmap import bridge, export_frame, file_stamps, json_file, local_data
 from guizhi.infrastructure.operations.evidence import read_artifact
-from guizhi.infrastructure.operations.raster import check_source
+from guizhi.infrastructure.operations.raster import check_source, normalize
 from guizhi.infrastructure.operations.runner import data_revision
 from guizhi.infrastructure.vector import digest, source_files, source_revision
 from guizhi.infrastructure.workspace import Workspace
@@ -27,6 +27,35 @@ def launcher():
     except OSError as error:
         raise ValueError("未找到 ArcGIS Desktop 10.2 安装") from error
     return {"executable": str(executable)}
+
+
+def exchange_root(workspace):
+    parent = workspace.root / "host-exchanges"
+    if parent.resolve() != parent:
+        raise ValueError("ArcGIS 交换目录不能指向其他位置")
+    parent.mkdir(exist_ok=True)
+    return parent
+
+
+def view(root, executable):
+    location = exchange_root(Workspace(root, create=True))
+    target = location / "规智数据视图.mxd"
+    if target.resolve() != target:
+        raise ValueError("ArcGIS 数据视图不能指向其他位置")
+    if not target.exists():
+        folder = location / uuid4().hex
+        folder.mkdir()
+        try:
+            pending = folder / target.name
+            bridge(executable, folder, "view", {"action": "view", "output": str(pending)})
+            try:
+                pending.rename(target)
+            except FileExistsError:
+                if target.resolve() != target or not target.is_file():
+                    raise
+        finally:
+            shutil.rmtree(folder)
+    return {**launcher(), "view": str(target)}
 
 
 def notify(pid, window):
@@ -76,44 +105,67 @@ def revision(path):
 
 def prepare(root, executable, payload):
     workspace = Workspace(root)
-    artifact = payload["artifact"]
-    if artifact not in {"export", "boundaries"}:
-        raise ValueError("请选择已验证的成果数据")
-    file = read_artifact(workspace, payload["run"], artifact)
-    parent = workspace.root / "host-exchanges"
-    if parent.resolve() != parent:
-        raise ValueError("ArcGIS 交换目录不能指向其他位置")
-    folder = parent / uuid4().hex
-    folder.mkdir(parents=True)
-    dataset = "guizhi_result"
-    if file.suffix.lower() == ".gpkg":
+    material = payload.get("material")
+    provenance = {}
+    if material:
+        file = Path(material["file"]).resolve(strict=True)
+        name = material.get("layer")
+        provenance = {"input": str(file), "layer": name}
+    else:
+        artifact = payload["artifact"]
+        if artifact not in {"export", "boundaries"}:
+            raise ValueError("请选择已验证的成果数据")
+        file = read_artifact(workspace, payload["run"], artifact)
         record = workspace.read(payload["run"])["result"]
         name = record.get("export_layer") if artifact == "export" else "result"
-        if not name:
-            raise ValueError("矢量成果缺少图层")
-        frame = pyogrio.read_dataframe(file, layer=name)
-        data = folder / "result.gdb"
-        tolerance = 1e-8 if frame.crs and frame.crs.is_geographic else 0.0002
-        export_frame(frame, data, dataset, "OpenFileGDB", tolerance)
-        kind, path = "vector", data / dataset
-    elif file.suffix.lower() in {".tif", ".tiff"}:
-        if len(check_source(file)) != 1:
-            raise ValueError("请先生成独立 GeoTIFF 成果")
-        data = folder / "result.tif"
-        shutil.copyfile(file, data)
-        if digest(data) != digest(file):
-            raise ValueError("栅格成果副本校验失败")
-        kind, path = "raster", data
-    else:
-        raise ValueError("ArcGIS 视图支持矢量和 GeoTIFF 成果")
-    layer = folder / "result.lyr"
-    bridge(executable, folder, "layer", {"kind": kind, "source": str(data), "dataset": dataset,
-                                         "name": payload["name"], "output": str(layer)})
-    result = {"path": str(path), "data": str(data), "layer_file": str(layer), "layer_sha256": digest(layer),
-              "revision": revision(data), "source_run": payload["run"], "artifact": artifact, "kind": kind}
-    manifest = folder / "layer.json"
-    json_file(manifest, result)
-    return {**result, "manifest": str(manifest)}
+        provenance = {"source_run": payload["run"], "artifact": artifact}
+    folder = exchange_root(workspace) / uuid4().hex
+    folder.mkdir()
+    dataset = "guizhi_layer"
+    try:
+        suffix = file.suffix.lower()
+        if suffix in {".shp", ".gpkg", ".geojson"}:
+            files = source_files(file)
+            before = source_revision(files)
+            if material and material.get("revision"):
+                expected = data_revision(file) if suffix == ".gpkg" else before
+                if expected != material["revision"]:
+                    raise ValueError("输入图层的快照版本已变化")
+            if not name:
+                raise ValueError("请为矢量数据选择图层")
+            frame = pyogrio.read_dataframe(file, layer=name)
+            data = folder / "display.gdb"
+            tolerance = 1e-8 if frame.crs and frame.crs.is_geographic else 0.0002
+            export_frame(frame, data, dataset, "OpenFileGDB", tolerance)
+            kind, path = "vector", data / dataset
+        elif suffix in {".tif", ".tiff", ".img"}:
+            files = check_source(file)
+            before = source_revision(files)
+            if material and material.get("revision") and material["revision"] != before:
+                raise ValueError("输入栅格的快照版本已变化")
+            data = folder / "display.tif"
+            if len(files) == 1 and suffix in {".tif", ".tiff"}:
+                shutil.copyfile(file, data)
+                if digest(data) != digest(file):
+                    raise ValueError("栅格显示副本校验失败")
+            else:
+                normalize(file, data, lambda: None)
+            kind, path = "raster", data
+        else:
+            raise ValueError("ArcGIS 视图支持矢量和栅格数据")
+        if source_revision(files) != before:
+            raise ValueError("数据在生成显示副本时发生变化")
+        layer = folder / "display.lyr"
+        bridge(executable, folder, "layer", {"kind": kind, "source": str(data), "dataset": dataset,
+                                             "name": payload["name"], "output": str(layer)})
+        result = {"path": str(path), "data": str(data), "layer_file": str(layer), "layer_sha256": digest(layer),
+                  "revision": revision(data), "kind": kind, **provenance}
+        manifest = folder / "layer.json"
+        json_file(manifest, result)
+        return {**result, "manifest": str(manifest)}
+    except Exception:
+        shutil.rmtree(folder)
+        raise
 
 
 def capture(root, payload):

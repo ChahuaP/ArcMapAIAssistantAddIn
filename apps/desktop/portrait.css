@@ -24,6 +24,8 @@ main[data-voice=listening] .contours { stroke-opacity: .82; }
 .actions svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 #bubble { position: absolute; z-index: 4; top: 7px; left: 14px; right: 14px; max-height: 87px; overflow: auto; padding: 8px 12px; border-radius: 13px; line-height: 1.45; overflow-wrap: anywhere; }
 #message { font-weight: 600; }
+#message p { margin: 0 0 4px; }
+#message a { color: var(--accent); }
 #status { font-size: 12px; color: var(--muted); }
 #message:not([hidden]) + #status:not([hidden]) { margin-top: 4px; }
 #status.voice-error { color: var(--error); }

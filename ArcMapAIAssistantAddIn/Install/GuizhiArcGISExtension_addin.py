@@ -291,7 +291,7 @@ class GuizhiArcGISExtension(object):
             return self._snapshot(layers, request)
         if request["action"] == "publish":
             if not self.publish_ready:
-                return {"status": "deferred", "message": u"请从规智重新打开 MXD，使 ArcGIS 诊断输出可用"}
+                return {"status": "deferred", "message": u"等待规智数据视图重新启动"}
             return self._publish(document, frame, layers, request)
         raise ValueError(u"未知 ArcGIS 请求")
 
@@ -334,11 +334,15 @@ class GuizhiArcGISExtension(object):
                 raise ValueError(u"成果图层文件与校验的数据源不一致")
             new_layer.name = request["name"]
             arcpy.mapping.AddLayer(frame, new_layer, "TOP")
+            if not layers:
+                frame.extent = new_layer.getExtent()
         added = [layer for layer in arcpy.mapping.ListLayers(document, "", frame) if canonical(source(layer)) == new_path]
         if len(added) != 1:
             raise ValueError(u"ArcGIS 未能添加唯一的成果图层")
         if len(old) == 1:
             old[0].visible = False
+        if request.get("persist") and os.path.basename(document.filePath) == u"规智数据视图.mxd":
+            document.save()
         arcpy.RefreshTOC()
         arcpy.RefreshActiveView()
         self._changed()

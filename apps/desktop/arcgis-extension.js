@@ -1,101 +1,61 @@
 (() => {
     const h = React.createElement;
-    const { useEffect, useState } = React;
+    const { useState } = React;
     const api = window.guizhi;
     const { button, icon } = window.GuizhiShell;
     const { errorText } = window.GuizhiModel;
-    const basename = value => value?.split(/[\\/]/).at(-1);
 
-    window.GuizhiArcgisExtension = function ArcgisExtension({ configured, sync, task, attach }) {
-        const [session, setSession] = useState(sync.host?.session || sync.hosts[0]?.session || '');
-        const [frame, setFrame] = useState(sync.connection?.frame ?? 0);
-        const [layer, setLayer] = useState('');
+    window.GuizhiArcgisExtension = function Extensions({ sync }) {
         const [busy, setBusy] = useState(false);
         const [error, setError] = useState('');
-        const [notice, setNotice] = useState('');
-        const selected = sync.hosts.find(host => host.session === session);
-        const live = sync.host;
-        const target = sync.connection;
-        const jobs = sync.jobs.filter(job => job.map === target?.map && job.frame === target?.frame);
-        const layers = live?.frames[target?.frame]?.layers.filter(item => item.kind === 'vector') || [];
-        const result = task?.status === 'succeeded' && ['export', 'boundaries'].some(kind =>
-            ['.gpkg', '.tif', '.tiff'].includes(task.deliveryFormats?.[kind]));
-        const alreadyQueued = jobs.some(job => job.task === task?.id);
-        useEffect(() => {
-            if (!selected && sync.hosts.length) {
-                setSession(sync.host?.session || sync.hosts[0].session);
-                setFrame(sync.connection?.frame ?? 0);
-            }
-        }, [selected, sync.hosts.length]);
-        useEffect(() => { setLayer(''); }, [target?.map, target?.frame, live?.generation]);
         async function perform(action) {
             setBusy(true);
             setError('');
-            setNotice('');
             try { await action(); }
             catch (issue) { setError(errorText(issue)); }
             finally { setBusy(false); }
         }
-        const edit = action => () => perform(action);
-        return h('section', { className: 'settings-card arcgis-panel' },
-            h('div', { className: 'section-head' }, h('h2', null, icon('map'), ' ArcGIS'),
-                h(antd.Tag, { color: live ? 'success' : 'default' }, live ? '已连接' : '未连接')),
-            !sync.hosts.length && h('p', { className: 'muted' }, '在 ArcGIS 查看成果，也可将图层或选中要素带回规智。'),
-            sync.hosts.length > 0 && h('div', { className: 'setting-fields' },
-                h('label', null, '已打开的工程', h('select', { value: session, disabled: busy, onChange: event => {
-                    setSession(event.target.value); setFrame(0);
-                } }, ...sync.hosts.map(host => h('option', { key: host.session, value: host.session, title: host.map },
-                    (basename(host.map) || host.caption || '读取当前工程') + ' · ArcGIS ' + host.version)))),
-                h('label', null, '数据框', h('select', { value: frame, disabled: busy,
-                    onChange: event => setFrame(Number(event.target.value)) },
-                    ...((selected?.frames || []).map(item => h('option', { key: item.index, value: item.index }, item.name))))),
-                h('div', { className: 'business-actions' },
-                    button('link', '连接工程', { type: 'primary', disabled: busy || !selected ||
-                        (selected.state !== 'waiting' && !selected.frames[frame]), onClick: edit(async () => {
-                        if (selected.state === 'waiting') {
-                            const discovered = await api.arcgisDiscover(session);
-                            if (!discovered.hosts.find(host => host.session === session)?.frames[frame]) {
-                                throw new Error('未读取到 ArcGIS 数据框，请确认工程已保存并打开');
-                            }
-                        }
-                        await api.arcgisConfigure({ session, frame });
-                    }) }))),
-            h('div', { className: 'business-actions' },
-                button('folder', '打开 ArcGIS 工程', { type: sync.hosts.length ? 'default' : 'primary',
-                    disabled: busy, onClick: edit(async () => {
-                        if (await api.arcgisOpen()) setNotice('工程打开后，在这里点「连接工程」。');
-                    }) }),
-                !configured && button('server', '配置连接组件', { disabled: busy, onClick: edit(() => api.arcmapBridge()) }),
-                !sync.hosts.length && button('plus', '首次使用 · 安装插件', { type: 'link', disabled: busy,
-                    onClick: edit(async () => { await api.arcgisInstall(); setNotice('在 ArcGIS 安装窗口确认后，再打开工程。'); }) })),
-            target && h('section', { className: 'settings-card' },
-                h('div', { className: 'section-head' }, h('strong', { title: target.map }, basename(target.map) + ' · ' + target.frameName),
-                    h(antd.Tag, { color: live ? 'green' : 'default' }, live ? '已连接 · ' + live.version : '等待工程打开')),
-                h('label', { className: 'voice-toggle' }, h('input', { type: 'checkbox', checked: sync.auto, disabled: busy,
-                    onChange: event => perform(() => api.arcgisConfigure({ auto: event.target.checked })) }),
-                    '完成后在 ArcGIS 显示'),
-                live?.editing && h('p', { role: 'status' }, 'ArcGIS 正在编辑，待处理成果将在编辑结束后发布。'),
-                live && !live.publish_ready && h('p', { role: 'status' }, '请用「打开 ArcGIS 工程」重新打开，以启用成果显示。'),
-                sync.newEdits && h(antd.Tag, { color: 'green' }, '有已保存的编辑'),
-                layers.length > 0 && h('label', null, '工作台材料', h('select', { value: layer, disabled: busy || live.editing,
-                    onChange: event => setLayer(event.target.value) }, h('option', { value: '' }, '选择图层'),
-                    ...layers.map(item => h('option', { key: item.index, value: item.index }, item.name)))),
-                layers.length > 0 && h('div', { className: 'business-actions' },
-                    ...[[false, '使用此图层'], [true, '使用已选要素']].map(([selectedOnly, label]) =>
-                        button('layers', label, { key: label, disabled: busy || live.editing || layer === '',
-                            onClick: edit(async () => attach(await api.arcgisCapture(Number(layer), selectedOnly))) }))),
-                result && !alreadyQueued && button('map', '显示此任务成果', { disabled: busy, onClick: edit(() => api.arcgisPublish(task.id)) }),
-                button('close', '断开连接', { type: 'text', disabled: busy, onClick: edit(() => api.arcgisConfigure({ disconnect: true })) })),
-            jobs.length > 0 && h('section', { className: 'arcgis-jobs' }, h('h3', null, '成果同步'),
-                ...jobs.map(job => h('article', { key: job.id, className: 'arcgis-job' },
-                    h('div', { className: 'section-head' }, h('strong', null, job.name),
-                        h(antd.Tag, { color: job.status === 'published' ? 'green' : 'default' },
-                            { pending: live?.editing ? '等待编辑结束' : '等待同步', published: '已显示', history: '历史图层',
-                                failed: '需重试' }[job.status])),
-                    job.message && h('small', null, job.message),
-                    job.status === 'failed' && button('server', '重试', { disabled: busy,
-                        onClick: edit(() => api.arcgisRetry(job.id)) })))),
-            notice && h('p', { role: 'status' }, notice),
-            error && h('p', { role: 'alert', className: 'error' }, error));
+        return h(React.Fragment, null,
+            h('section', { className: 'settings-card' }, h('h2', null, '默认展示载体'),
+                h(antd.Segmented, { value: sync.carrier, disabled: busy, options: [
+                    { value: 'none', label: '无' },
+                    { value: 'arcgis', label: 'ArcGIS', disabled: !sync.available },
+                ], 'aria-label': '默认展示载体', onChange: value => void perform(() => api.arcgisConfigure(value)) })),
+            h('section', { className: 'settings-card arcgis-panel' },
+                h('div', { className: 'section-head' }, h('h2', null, icon('map'), ' ArcGIS'),
+                    h(antd.Tag, { color: sync.installed ? 'success' : 'default' }, sync.installed ? '已安装' : '未安装')),
+                sync.available && !sync.installed && button('plus', '安装扩展', {
+                    disabled: busy, onClick: () => void perform(api.arcgisInstall),
+                }),
+                !sync.available && h('p', { className: 'muted' }, '当前安装缺少 ArcGIS 扩展组件。'),
+                sync.carrier === 'arcgis' && h('p', { role: 'status', className: 'muted' },
+                    sync.starting ? '正在启动数据视图' : sync.host ? '数据视图已连接' : '有空间数据时自动启动'),
+                sync.carrier === 'arcgis' && sync.jobs.length > 0 && h('section', { className: 'arcgis-jobs' },
+                    ...sync.jobs.map(job => h('article', { key: job.id, className: 'arcgis-job' },
+                        h('div', { className: 'section-head' }, h('strong', null, job.name),
+                            h(antd.Tag, { color: job.status === 'published' ? 'success' : 'default' },
+                                { pending: '等待显示', published: '已显示', history: '历史图层', failed: '需重试' }[job.status])),
+                        job.message && h('small', null, job.message),
+                        job.status === 'failed' && button('server', '重试', { disabled: busy || sync.starting,
+                            onClick: () => void perform(() => api.arcgisRetry(job.id)) })))),
+                error && h('p', { role: 'alert', className: 'error' }, error)));
+    };
+
+    window.GuizhiArcgisMaterials = function ArcgisMaterials({ host, disabled, attach, fail }) {
+        const [busy, setBusy] = useState(false);
+        const layers = host?.frames[0]?.layers.filter(layer => layer.kind === 'vector' && layer.visible) || [];
+        if (!layers.length) return null;
+        const items = layers.map(layer => ({ key: String(layer.index), label: layer.name, children: [
+            { key: layer.index + ':all', label: '整个图层' }, { key: layer.index + ':selection', label: '已选要素' },
+        ] }));
+        async function capture({ key }) {
+            const [layer, choice] = key.split(':');
+            setBusy(true);
+            try { attach(await api.arcgisCapture(Number(layer), choice === 'selection')); }
+            catch (issue) { fail(issue); }
+            finally { setBusy(false); }
+        }
+        return h(antd.Dropdown, { trigger: ['click'], menu: { items, onClick: capture }, disabled: disabled || busy || host.editing },
+            button('map', '从 ArcGIS 添加', { type: 'text', loading: busy }));
     };
 })();

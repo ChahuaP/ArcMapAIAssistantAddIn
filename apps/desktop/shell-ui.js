@@ -54,7 +54,7 @@
             h('div', { className: 'title-group' },
                 !onboarding && (settings ? iconButton('back', '返回工作台', { onClick: back })
                     : iconButton('left', '折叠或展开导航栏', { onClick: left, onKeyDown: resize(0) })),
-                brand(!settings && !onboarding), settings && h('span', { className: 'title-path' }, '设置')),
+                brand(true), settings && h('span', { className: 'title-path' }, '设置')),
             !settings && !onboarding && h('div', { className: 'title-group' },
                 button('link', '第三方扩展', { type: 'text', onClick: arcgis,
                     title: connected ? 'ArcGIS 已连接' : '查看第三方扩展' }),

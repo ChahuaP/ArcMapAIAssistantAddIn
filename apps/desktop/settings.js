@@ -96,16 +96,16 @@
                     report.model.at && new Date(report.model.at).toLocaleString()].filter(Boolean).join(' · '),
                     report.model.state === 'verified' ? 'success' : report.model.state === 'failed' ? 'error' : 'default'),
                 voiceRow('asr', '语音识别'), voiceRow('tts', '语音回答'),
-                row('ArcGIS', host ? '已连接' : state.arcgis.connection ? '等待工程打开' : '未连接',
-                    host ? [host.version, host.map?.split(/[\\/]/).at(-1), !host.publish_ready && '需从规智重新打开工程'].filter(Boolean).join(' · ')
-                        : report.bridge ? '连接组件就绪' : '未配置连接组件', host ? 'success' : 'default'),
+                row('ArcGIS', state.arcgis.carrier === 'none' ? '未启用' : host ? '已连接' : '等待数据',
+                    host ? 'ArcGIS Desktop ' + host.version : report.bridge && state.arcgis.installed ? '扩展已安装' : '扩展未就绪',
+                    host ? 'success' : 'default'),
                 row('全局快捷键', report.shortcut.registered ? '已注册' : '未注册', report.shortcut.value),
                 row('成果位置', state.settings.workspace ? '已配置' : '未配置', state.settings.workspace)),
             error && h('p', { role: 'alert', className: 'error' }, error))];
     }
 
     window.GuizhiSettings = function Settings({ state, appearance, saveAppearance, save, close, entries, setEntries,
-        initial, catalog, refresh, plans, initialMarkdown, task, attach }) {
+        initial, catalog, refresh, plans, initialMarkdown }) {
         const [section, select] = useState(typeof initial === 'string' ? initial : state.settings.workspace ? 'model' : 'storage');
         const [value, change] = useState({ ...state.settings, key: '' });
         const [error, setError] = useState('');
@@ -144,7 +144,7 @@
             storage: () => card('成果保存位置', h(Workspace, { value: value.workspace,
                 change: workspace => update('workspace', workspace), fail, disabled: saving })),
             skills: () => h(window.GuizhiBusiness.Business, { catalog, refresh, plans, initialMarkdown, manage: true }),
-            extensions: () => h(window.GuizhiArcgisExtension, { configured: state.settings.arcmapBridge, sync: state.arcgis, task, attach }),
+            extensions: () => h(window.GuizhiArcgisExtension, { sync: state.arcgis }),
             about: () => h(About, { state }),
         };
         const current = sections.find(([id]) => id === section);

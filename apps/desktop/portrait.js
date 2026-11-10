@@ -18,9 +18,10 @@ let pointer;
 let moved;
 let frame = 0;
 let mouthLevel = 0;
+let showingTask = false;
 
 function showMessage(text) {
-    message.textContent = text;
+    message.innerHTML = window.GuizhiMarkdown.render(text);
     message.hidden = !text;
     bubble.hidden = message.hidden && detail.hidden;
 }
@@ -120,7 +121,11 @@ async function receive(token) {
 function followAnswer() {
     if (!session || !waiting) return;
     const task = state.tasks.find(item => item.id === waiting);
-    if (!task || ['running', 'cancelling'].includes(task.status)) return;
+    if (!task) return;
+    if (['running', 'cancelling'].includes(task.status)) {
+        tell(task.step || '让我想一下');
+        return;
+    }
     waiting = null;
     const detail = { cancelled: '这一轮已经结束。', timed_out: '我这次没能及时完成。你可以再试一次。',
         missing_materials: '请先把需要办理的材料发给我。' };
@@ -132,7 +137,13 @@ function update(next) {
     state = next;
     mic.disabled = !available('asr');
     if (session && mic.disabled) void endSession().catch(fail);
-    followAnswer();
+    if (session) followAnswer();
+    else {
+        const task = state.tasks.find(item => item.id === state.focusTask);
+        const working = task?.status === 'running' || task?.status === 'cancelling';
+        if (working || showingTask) tell(working ? task.step || '正在办理' : '');
+        showingTask = working;
+    }
 }
 
 function startSession() {
@@ -167,6 +178,7 @@ figure.addEventListener('click', event => {
 });
 document.querySelector('#type').addEventListener('click', () => void api.openLauncher().catch(fail));
 document.querySelector('#open').addEventListener('click', () => void api.workbench().catch(fail));
+message.addEventListener('click', window.GuizhiMarkdown.open);
 mic.addEventListener('click', () => session ? void endSession().catch(fail) : startSession());
 document.addEventListener('keydown', event => { if (event.key === 'Escape') void endSession().catch(fail); });
 window.addEventListener('pagehide', () => { session = 0; voice.releaseCapture(); });

@@ -96,9 +96,9 @@ class DesktopController {
     }
 
     state() {
-        const { workspace, modelConfig, showOperation, screenHighlight, arcmapBridge, encryptedKey } = this.settings;
+        const { workspace, modelConfig, showOperation, screenHighlight, carrier, encryptedKey } = this.settings;
         return { settings: { workspace, modelConfig, showOperation, screenHighlight,
-            arcmapBridge: arcmapBridge || this.bundledArcmap, keyConfigured: Boolean(modelConfig && encryptedKey) },
+            carrier: carrier || 'none', keyConfigured: Boolean(modelConfig && encryptedKey) },
             tasks: this.tasks, mapView: this.mapView, focusTask: this.focusTask, conversation: this.conversation };
     }
 
@@ -130,7 +130,7 @@ class DesktopController {
             encryptedKey = this.storage.encryptString(key).toString('base64');
         }
         const settings = { workspace, modelConfig: config, showOperation: input.showOperation !== false,
-            screenHighlight: input.screenHighlight !== false, arcmapBridge: this.settings.arcmapBridge, encryptedKey };
+            screenHighlight: input.screenHighlight !== false, carrier: this.settings.carrier, encryptedKey };
         save(this.file, settings);
         this.settings = settings;
         this.tasks = [];
@@ -175,12 +175,10 @@ class DesktopController {
         return this.request('material-intake', { paths: paths.map(this.externalPath), kind });
     }
 
-    selectArcmapBridge(file) {
-        if (this.hostBusy || path.basename(file).toLowerCase() !== 'arcmapbridge.exe') throw new Error('请选择规智提供的 ArcGIS 连接组件');
-        this.settings.arcmapBridge = this.externalPath(file);
-        save(this.file, this.settings);
-        this.onChange(this.state());
-        return this.settings.arcmapBridge;
+    selectCarrier(carrier) {
+        const settings = { ...this.settings, carrier };
+        save(this.file, settings);
+        this.settings = settings;
     }
 
 
@@ -234,6 +232,8 @@ class DesktopController {
             prompt: task.prompt, skill, skillParameters, materials: bindings, previousRun, history, dialogue,
             projectPlan: project?.plan || materials.project?.[0]?.plan,
             controlPlan: control?.plan || materials.control?.[0]?.plan } });
+        try { this.onStarted?.(task); }
+        catch (error) { console.error('ArcGIS display:', error.message); }
         return this.state();
     }
 

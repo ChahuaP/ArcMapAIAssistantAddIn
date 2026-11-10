@@ -95,7 +95,7 @@ def main() -> int:
     notify = commands.add_parser("arcgis-notify")
     notify.add_argument("pid", type=int)
     notify.add_argument("window", type=int)
-    commands.add_parser("arcgis-launcher")
+    commands.add_parser("arcgis-view").add_argument("bridge", type=Path)
     commands.add_parser("_dispatch-replay").add_argument("request", type=Path)
     args = parser.parse_args()
     try:
@@ -143,11 +143,11 @@ def main() -> int:
                       else prepare(args.workspace, json.loads(args.request.read_text(encoding="utf-8-sig"))))
             print(json.dumps(result))
             return 0
-        if args.command in {"arcgis-stage", "arcgis-capture", "arcgis-revision", "arcgis-notify", "arcgis-launcher"}:
+        if args.command in {"arcgis-stage", "arcgis-capture", "arcgis-revision", "arcgis-notify", "arcgis-view"}:
             from guizhi.infrastructure import arcgis_live
 
-            if args.command == "arcgis-launcher":
-                result = arcgis_live.launcher()
+            if args.command == "arcgis-view":
+                result = arcgis_live.view(args.workspace, args.bridge)
             elif args.command == "arcgis-notify":
                 result = arcgis_live.notify(args.pid, args.window)
             elif args.command == "arcgis-revision":

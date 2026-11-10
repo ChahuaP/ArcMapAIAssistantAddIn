@@ -13,6 +13,9 @@
         unassigned: [], freeMode: false });
     const number = value => value.toLocaleString('zh-CN', { maximumFractionDigits: 2 });
     const { Material, RoleMaterials, materialReady, roleReady, mergeMaterials, intake } = window.GuizhiMaterials;
+    const { render, open } = window.GuizhiMarkdown;
+    const markdown = text => h('div', { className: 'answer-markdown', onClick: open,
+        dangerouslySetInnerHTML: { __html: render(text) } });
 
     function Approval({ task, parcel, selectParcel, fail }) {
         const [shown, show] = useState(null);
@@ -58,8 +61,8 @@
             return h('article', { className: 'bubble assistant' },
                 h('div', { className: 'result-head' }, h('img', { src: '/mark.svg', alt: '', width: 29 }),
                     h('strong', null, task.status === 'answered' ? '规智' : '办理结果')),
-                h('p', null, stats?.coverage_ratio !== undefined
-                    ? `项目范围 ${number(stats.project_area_m2)} m²` : task.response),
+                stats?.coverage_ratio !== undefined
+                    ? h('p', null, `项目范围 ${number(stats.project_area_m2)} m²`) : markdown(task.response),
                 stats?.coverage_ratio !== undefined && h('dl', { className: 'metrics' },
                     h('div', null, h('dt', null, '重叠面积'), h('dd', null, number(stats.covered_area_m2), h('small', null, ' m²'))),
                     h('div', null, h('dt', null, '覆盖率'), h('dd', null, (stats.coverage_ratio * 100).toFixed(2), h('small', null, '%')))),
@@ -76,7 +79,7 @@
             invalid_materials: '请确认材料、图层和办理参数。', no_result: '请补充办理要求或从业务能力中选择。',
             timed_out: '办理超时。请检查模型服务或输入文件是否正被占用。' }[task.status];
         return h('article', { className: 'bubble assistant' }, h('strong', null, labels[task.status] || '未完成'),
-            h('p', null, task.response || detail || '请检查材料、坐标和模型设置后继续。'),
+            markdown(task.response || detail || '请检查材料、坐标和模型设置后继续。'),
             h('button', { className: 'report', onClick: () => retry(task) }, '继续处理'));
     }
 
@@ -213,6 +216,10 @@
                 return { ...current, materials: { ...current.materials, inputs: unique } };
             });
         }
+        function attachArcgis(item) {
+            if (draft.skill) setDraft(old => ({ ...old, unassigned: mergeMaterials(old.unassigned, [item]) }));
+            else appendMaterials([item]);
+        }
         async function addMaterials(source) {
             if (adding) return;
             if (!ready) return api.workbench().catch(fail);
@@ -280,6 +287,7 @@
             h('div', { className: 'compose-actions' },
                 !skill && button('paperclip', '添加材料', { type: 'text', loading: adding, onClick: () => addMaterials(() => api.material()) }),
                 !skill && iconButton('folder', '添加材料目录', { disabled: adding, onClick: () => addMaterials(() => api.material('any', true)) }),
+                h(window.GuizhiArcgisMaterials, { host: state?.arcgis.host, disabled: adding || busy, attach: attachArcgis, fail }),
                 h('span', { className: 'spacer' }),
                 iconButton('mic', '语音对话', { type: 'default', onClick: () => {
                     if (!launcher && state?.speech.asr === 'off') showSettings('voice');
@@ -334,7 +342,7 @@
             h('div', { className: 'messages', ref: messages }, task ? [
                 ...history.flatMap(item => [
                     h('article', { key: item.id + '-question', className: 'bubble user' }, item.prompt),
-                    item.response && h('article', { key: item.id + '-answer', className: 'bubble assistant' }, item.response),
+                    item.response && h('article', { key: item.id + '-answer', className: 'bubble assistant' }, markdown(item.response)),
                 ]),
                 h('article', { key: 'user', className: 'bubble user' }, task.prompt),
                 h(Result, { key: 'result', task, retry, fail, parcel, selectParcel, editSkill: text => {
@@ -382,14 +390,8 @@
         const layout = launcher ? quick : !state ? null : !ready ? h(window.GuizhiOnboarding, { state, save: configure })
             : settings ? h(window.GuizhiSettings, {
             state, appearance, saveAppearance, entries: coordinates, setEntries: setCoordinates,
-            initial: settings, catalog, refresh, plans, initialMarkdown, task,
+            initial: settings, catalog, refresh, plans, initialMarkdown,
             close: () => { setInitialMarkdown(''); showSettings(false); },
-            attach: project => {
-                setDraft(old => old.skill ? { ...old, unassigned: mergeMaterials(old.unassigned, [project]) }
-                    : { ...old, materials: { ...old.materials, inputs: mergeMaterials(old.materials.inputs || [], [project]) } });
-                select(null);
-                showSettings(false);
-            },
             save: configure,
         }) : h(Workbench, { appearance, saveAppearance, sidebar, conversation, inspector, fail,
             arcgis: () => showSettings('extensions'),

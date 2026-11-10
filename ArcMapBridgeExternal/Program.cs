@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Text;
 using ESRI.ArcGIS;
 using ESRI.ArcGIS.Carto;
@@ -13,6 +14,9 @@ namespace ArcMapHarness.ArcMapBridgeExternal
 {
     internal static class Program
     {
+        [DllImport("user32.dll")]
+        private static extern int GetDesktopWindow();
+
         [STAThread]
         private static int Main(string[] args)
         {
@@ -20,7 +24,7 @@ namespace ArcMapHarness.ArcMapBridgeExternal
             try
             {
                 if (args.Length != 1)
-                    throw new ArgumentException("Supply a local layer request.");
+                    throw new ArgumentException("Supply a local ArcGIS request.");
                 var request = JObject.Parse(File.ReadAllText(args[0], Encoding.UTF8));
                 if (!RuntimeManager.Bind(ProductCode.Desktop))
                     throw new InvalidOperationException("ArcGIS Desktop runtime could not be bound.");
@@ -28,7 +32,7 @@ namespace ArcMapHarness.ArcMapBridgeExternal
                 try
                 {
                     var product = Acquire(license);
-                    var result = WriteLayer(request);
+                    var result = (string)request["action"] == "view" ? WriteView(request) : WriteLayer(request);
                     result["license"] = product.ToString();
                     Console.WriteLine(result.ToString(Formatting.None));
                     return 0;
@@ -40,6 +44,28 @@ namespace ArcMapHarness.ArcMapBridgeExternal
                 Console.Error.WriteLine(error.GetType().Name + ": " + error.Message);
                 return 1;
             }
+        }
+
+        private static JObject WriteView(JObject request)
+        {
+            string output = Path.GetFullPath((string)request["output"]);
+            if (!output.EndsWith(".mxd", StringComparison.OrdinalIgnoreCase) || File.Exists(output))
+                throw new InvalidOperationException("Write to a new data view.");
+            IMapDocument document = new MapDocumentClass();
+            document.New(output);
+            try
+            {
+                int window = GetDesktopWindow();
+                ((IActiveView)document.PageLayout).Activate(window);
+                var map = document.get_Map(0);
+                map.Name = "Layers";
+                var view = (IActiveView)map;
+                view.Activate(window);
+                document.SetActiveView(view);
+                document.Save(true, false);
+            }
+            finally { document.Close(); }
+            return new JObject { ["output"] = output };
         }
 
         private static esriLicenseProductCode Acquire(IAoInitialize license)
