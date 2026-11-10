@@ -198,8 +198,8 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
             const bound = options.skillParameters !== undefined ? '办理参数已在本机绑定，执行技能时省略 skill_parameters。' : '';
             const context = `已绑定材料数量 ${JSON.stringify(roles)}。已选技能 ${options.skill || '无'}。${bound}有已选历史成果：${Boolean(options.previousRun)}。\n`;
             const conversation = history.length ? '最近对话记录（每项为用户提问与规智答复）：' + JSON.stringify(history) + '\n' : '';
-            const speech = options.dialogue ? '本轮通过语音对话。用自然口语简洁回答，不用 Markdown。\n' : '';
-            const response = await Promise.race([harness.run(context + conversation + speech + '用户请求：' + options.prompt, {
+            const speech = options.dialogue ? '本轮使用语音输入。先实际办理，再用简洁口语回答，不用 Markdown。\n' : '';
+            const run = prompt => Promise.race([harness.run(prompt, {
                 sessionId: id,
                 onNotification(note) {
                     if (note.method === 'session.status') {
@@ -220,6 +220,15 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
                     event(item);
                 },
             }), aborted]);
+            let response = await run(context + conversation + speech + '用户请求：' + options.prompt);
+            const needsMeasurement = options.dialogue && Object.keys(roles).length > 0 &&
+                /统计|计算|清点|多少|数量|覆盖率|重叠面积/u.test(options.prompt);
+            if (needsMeasurement && response?.finishReason === 'completed' && !attempted && !stop.aborted &&
+                    !existsSync(operationPath) && !existsSync(join(directory, 'discovery'))) {
+                event({ kind: 'workflow_retry', reason: 'voice_measurement_without_tool' });
+                response = await run('请调用 execute_workflow，使用本轮已绑定的图层实际计算，取得作业回执再回答。' +
+                    '用户请求：' + options.prompt);
+            }
             if (response === null) {
                 writeFileSync(join(directory, 'cancelled'), '');
                 result = { status: deadline.aborted ? 'timed_out' : 'cancelled' };
@@ -238,7 +247,7 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
                 result = { status, finish_reason: response.finishReason,
                     response: status === 'succeeded' ? verifiedResponse(receipt, options.dialogue)
                         : receipt?.error ?? issue?.error ?? (stopped ? '模型预算已用完，已保存办理进度。'
-                            : attempted ? '本轮没有交付成果。' : answer),
+                            : status === 'no_result' ? '本轮没有生成可核验的成果。可以继续让我重新办理。' : answer),
                     operation: receipt, ...(issue && !receipt ? { input_issue: issue } : {}),
                     ...(status === 'answered' && existsSync(candidatePath) ? { candidate: readJson(candidatePath) } : {}),
                     ...(terminal?.data.reason.error ? { error: safeError(terminal.data.reason.error) } : {}) };

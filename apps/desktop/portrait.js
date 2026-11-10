@@ -65,6 +65,7 @@ function appearance(value) {
 
 function available(kind) {
     const provider = state?.speech[kind];
+    if (provider === 'surf') return Boolean(state.speech.ttsProfile.baseUrl);
     return provider === 'local' ? state.speech.localAvailable
         : provider && provider !== 'off' && state.speech[kind + 'Profile'].keyConfigured;
 }
@@ -86,10 +87,11 @@ async function listen(token) {
 
 async function reply(text, token) {
     if (token !== session) return;
+    showMessage(text);
     if (available('tts')) {
         try { await voice.speak(text, state.speech.speaker); }
-        catch (error) { if (token === session) { showMessage(text); fail(error); } }
-    } else showMessage(text);
+        catch (error) { if (token === session) fail(error); }
+    }
     if (token === session) await listen(token);
 }
 
@@ -98,7 +100,7 @@ async function receive(token) {
     receiving = true;
     let result;
     try {
-        const text = await voice.finish();
+        const text = await voice.finish(partial => { if (token === session) tell(partial); });
         if (token !== session) return;
         if (!text) { await endSession(); return; }
         showMessage('');
@@ -137,13 +139,12 @@ function update(next) {
     state = next;
     mic.disabled = !available('asr');
     if (session && mic.disabled) void endSession().catch(fail);
-    if (session) followAnswer();
-    else {
-        const task = state.tasks[0];
-        const working = task?.status === 'running' || task?.status === 'cancelling';
-        if (working || showingTask) tell(working ? task.step || '正在办理' : '');
-        showingTask = working;
-    }
+    const task = state.tasks[0];
+    const working = task?.status === 'running' || task?.status === 'cancelling';
+    shell.dataset.task = working ? task.visual?.kind || 'think' : '';
+    if (session && waiting) followAnswer();
+    else if (working || showingTask) tell(working ? task.step || '正在办理' : '');
+    showingTask = working;
 }
 
 function startSession() {

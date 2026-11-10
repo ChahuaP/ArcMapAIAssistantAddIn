@@ -1,6 +1,6 @@
 (() => {
     const compact = value => String(value ?? '').normalize('NFKC').trim().replace(/[\s。！!？?，、,]+$/u, '');
-    const reset = new Set(['重开对话', '重新开始对话', '新建对话', '开始新对话', '开始新的对话',
+    const reset = new Set(['新的对话', '重新开始对话', '新建对话', '开始新对话', '开始新的对话',
         '新任务', '开始新任务', '开始新的任务', '结束本轮', '结束这一轮任务', '结束当前任务', '结束任务']);
     const action = value => {
         const command = compact(value);

@@ -17,6 +17,10 @@ main[data-voice=speaking] .smile { display: none; }
 main[data-voice=speaking] #speaking-mouth { display: block; }
 main[data-voice=listening] #figure { animation: none; transform: rotate(-4deg); }
 main[data-voice=listening] .contours { stroke-opacity: .82; }
+main[data-task]:not([data-task=""]) .contours { stroke-opacity: .95; stroke-width: 2; }
+main[data-task=read] .contours, main[data-task=draw] .contours, main[data-task=transform] .contours {
+    stroke-dasharray: 15 4; animation: trace 1.4s linear infinite;
+}
 .actions, #bubble { background: var(--panel); border: 1px solid var(--line); box-shadow: 0 4px 14px var(--shadow); }
 .actions { position: relative; z-index: 3; display: flex; align-items: center; gap: 3px; padding: 4px; border-radius: 15px; }
 .actions > button { width: 34px; height: 32px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 9px; background: transparent; }
@@ -31,4 +35,5 @@ main[data-voice=listening] .contours { stroke-opacity: .82; }
 #status.voice-error { color: var(--error); }
 @keyframes balance { 0%,100% { transform: rotate(-1.4deg); } 50% { transform: rotate(1.4deg); } }
 @keyframes blink { 0%,43%,47%,100% { transform: scaleY(1); } 45% { transform: scaleY(.12); } }
-@media(prefers-reduced-motion: reduce) { #figure, .eyes { animation: none; } main[data-voice=listening] #figure { transform: none; } }
+@keyframes trace { to { stroke-dashoffset: -19; } }
+@media(prefers-reduced-motion: reduce) { #figure, .eyes, main[data-task] .contours { animation: none; } main[data-voice=listening] #figure { transform: none; } }

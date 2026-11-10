@@ -2,10 +2,15 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { endpoint, normalizeKey } = require('../../src/guizhi/infrastructure/dsh/model-config.cjs');
+const { recognizeVolc } = require('./volc-recognition.cjs');
 
 const onlineHost = 'https://api.minimaxi.com';
+const volcHost = 'https://openspeech.bytedance.com';
+const volcModels = { asr: ['volc.seedasr.sauc.duration', 'volc.seedasr.sauc.concurrent'],
+    tts: ['seed-tts-2.0', 'seed-icl-2.0'] };
 const voiceDefault = 'female-shaonv';
-const voices = { custom: 'alloy', azure: 'zh-CN-XiaoxiaoNeural', aliyun: 'longanyang', minimax: voiceDefault };
+const voices = { custom: 'alloy', azure: 'zh-CN-XiaoxiaoNeural', aliyun: 'longanyang', minimax: voiceDefault,
+    surf: 'huayan', volc: 'zh_female_vv_uranus_bigtts' };
 const defaults = { asr: 'off', tts: 'off', voice: voiceDefault,
     microphone: '', speaker: '', dictionary: [], pronunciation: [] };
 const audioLimit = 16_000 * 2 * 30 + 44;
@@ -63,7 +68,7 @@ async function* sse(response) {
             const data = frame.split('\n').filter(line => line.startsWith('data:'))
                 .map(line => line.slice(5).trimStart()).join('\n');
             if (data === '[DONE]') return;
-            if (data) yield validateReply(JSON.parse(data));
+            if (data) yield JSON.parse(data);
         }
         if (buffered.length > 1 << 20) throw new Error('在线识别返回数据过长');
     }
@@ -71,7 +76,7 @@ async function* sse(response) {
 
 class HttpSpeech {
     constructor(key, baseUrl) {
-        this.credentials = { authorization: 'Bearer ' + key };
+        this.credentials = key ? { authorization: 'Bearer ' + key } : {};
         this.baseUrl = baseUrl;
     }
 
@@ -110,7 +115,8 @@ class MiniMaxSpeech extends HttpSpeech {
             return result.text;
         }
         let text = '';
-        for await (const event of sse(response)) {
+        for await (const frame of sse(response)) {
+            const event = validateReply(frame);
             if (typeof event.delta === 'string') {
                 text += event.delta;
                 if (text.length > 4000) throw new Error('识别文字过长');
@@ -216,6 +222,70 @@ class AliyunSpeech extends HttpSpeech {
     }
 }
 
+class SurfSpeech extends HttpSpeech {
+    async synthesize(text, voice, signal) {
+        const response = await this.request('/v1/speak/file', {
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ text, voice, lang: 'zh', format: 'wav', sr: 24000, cache: false }),
+        }, signal);
+        return readAudio(response);
+    }
+}
+
+class VolcSpeech extends HttpSpeech {
+    constructor(profile, websocket) {
+        super('', profile.baseUrl);
+        this.profile = profile;
+        this.websocket = websocket;
+        this.credentials = { 'X-Api-Key': profile.key, 'X-Api-Resource-Id': profile.model };
+    }
+
+    recognize(wav, signal, partial) {
+        return recognizeVolc(this.websocket(), this.profile, wav, signal, partial);
+    }
+
+    async synthesize(text, voice, signal) {
+        const rate = 24000;
+        const response = await this.request('/api/v3/tts/unidirectional/sse', {
+            headers: { 'content-type': 'application/json', accept: 'text/event-stream', 'X-Api-Request-Id': randomUUID() },
+            body: JSON.stringify({ req_params: { text, speaker: voice, audio_params: { format: 'pcm', sample_rate: rate } } }),
+        }, signal);
+        const parts = [];
+        let size = 0;
+        for await (const event of sse(response)) {
+            if (event.code === 20000000) return pcmWave(parts, size, rate);
+            if (event.code !== 0) throw new Error('火山引擎语音合成失败（' + Number(event.code) + '），请检查音色和资源权限');
+            if (!event.data) continue;
+            if (typeof event.data !== 'string' || !/^[A-Za-z0-9+/]+={0,2}$/.test(event.data)) {
+                throw new Error('火山引擎返回了无效的音频数据');
+            }
+            const pcm = Buffer.from(event.data, 'base64');
+            size += pcm.length;
+            if (size > 4 << 20) throw new Error('在线合成音频过长');
+            parts.push(pcm);
+        }
+        throw new Error('火山引擎语音合成未返回完整音频');
+    }
+}
+
+function pcmWave(parts, size, rate) {
+    if (!size || size % 2) throw new Error('火山引擎未返回可播放的音频');
+    const header = Buffer.alloc(44);
+    header.write('RIFF', 0);
+    header.writeUInt32LE(size + 36, 4);
+    header.write('WAVEfmt ', 8);
+    header.writeUInt32LE(16, 16);
+    header.writeUInt16LE(1, 20);
+    header.writeUInt16LE(1, 22);
+    header.writeUInt32LE(rate, 24);
+    header.writeUInt32LE(rate * 2, 28);
+    header.writeUInt16LE(2, 32);
+    header.writeUInt16LE(16, 34);
+    header.write('data', 36);
+    header.writeUInt32LE(size, 40);
+    return Buffer.concat([header, ...parts], 44 + size);
+}
+
 async function readAudio(response) {
     const chunks = [];
     let size = 0;
@@ -233,19 +303,23 @@ function wavBuffer(bytes) {
 }
 
 function selectedVoice(input) {
+    if (input.tts === 'volc' && input.ttsProfile?.model === 'seed-icl-2.0' && !/^S_[a-z0-9_]+$/i.test(input.voice?.trim() || '')) {
+        throw new Error('请填写声音复刻的音色 ID');
+    }
     const voice = input.voice?.trim() || voices[input.tts] || voiceDefault;
     if (voice.length > 100 || /[\r\n]/.test(voice)) throw new Error('音色标识无效');
     return voice;
 }
 
 class SpeechController {
-    constructor({ userData, storage, local, bundledLocalRoot }) {
+    constructor({ userData, storage, local, bundledLocalRoot, websocket }) {
         this.storage = storage;
         this.file = path.join(userData, 'speech.json');
         this.usageFile = path.join(userData, 'speech-usage.json');
         this.settings = { ...defaults, ...(fs.existsSync(this.file) ? JSON.parse(fs.readFileSync(this.file, 'utf8')) : {}) };
         this.local = local;
         this.bundledLocalRoot = bundledLocalRoot;
+        this.websocket = websocket;
         this.usage = fs.existsSync(this.usageFile) ? JSON.parse(fs.readFileSync(this.usageFile, 'utf8')) : [];
         this.clips = new Map();
         this.clipBytes = 0;
@@ -261,7 +335,7 @@ class SpeechController {
         const { asr, tts, voice, microphone, speaker, dictionary, pronunciation } = this.settings;
         return { asr, tts, voice, microphone, speaker, dictionary, pronunciation,
             asrProfile: publicProfile('asr'), ttsProfile: publicProfile('tts'),
-            providers: { asr: ['minimax', 'azure', 'custom'], tts: ['minimax', 'azure', 'aliyun', 'custom'] },
+            providers: { asr: ['volc', 'minimax', 'azure', 'custom'], tts: ['volc', 'surf', 'minimax', 'azure', 'aliyun', 'custom'] },
             localAvailable: Boolean(this.bundledLocalRoot) };
     }
 
@@ -282,10 +356,22 @@ class SpeechController {
         } else if (provider === 'aliyun' && kind === 'tts') {
             if (!/^[a-z0-9][a-z0-9-]{1,79}$/.test(workspace || '')) throw new Error('请填写阿里云百炼工作空间 ID');
             baseUrl = 'https://' + workspace + '.cn-beijing.maas.aliyuncs.com';
-        } else if (provider === 'custom') baseUrl = endpoint(form.baseUrl);
+        } else if (provider === 'surf' && kind === 'tts') {
+            baseUrl = endpoint(form.baseUrl || 'http://127.0.0.1:8765');
+            const url = new URL(baseUrl);
+            if (!['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) || url.pathname !== '/') {
+                throw new Error('SurfVoice 仅接受本机服务地址，如 http://127.0.0.1:8765');
+            }
+        } else if (provider === 'volc') baseUrl = volcHost;
+        else if (provider === 'custom') baseUrl = endpoint(form.baseUrl);
         else if (provider === 'minimax') baseUrl = onlineHost;
         else throw new Error('语音服务不可用');
-        const model = provider === 'aliyun' ? form.model?.trim() || 'cosyvoice-v3-plus' : form.model?.trim();
+        let model = form.model?.trim();
+        if (provider === 'aliyun') model ||= 'cosyvoice-v3-plus';
+        if (provider === 'volc') {
+            model ||= volcModels[kind][0];
+            if (!volcModels[kind].includes(model)) throw new Error('请选择已开通的火山引擎语音资源');
+        }
         if ((provider === 'custom' || provider === 'aliyun') && (!model || model.length > 160 || /[\x00-\x20]/.test(model))) {
             throw new Error('请输入有效的语音模型名称');
         }
@@ -293,7 +379,7 @@ class SpeechController {
         const encryptedKey = saved?.provider === provider && saved.baseUrl === baseUrl ? saved.encryptedKey : undefined;
         const key = normalizeKey(form.key) || (encryptedKey
             ? this.storage.decryptString(Buffer.from(encryptedKey, 'base64')) : '');
-        if (!key) throw new Error(kind === 'asr' ? '请配置识别服务的 API 密钥' : '请配置语音回答服务的 API 密钥');
+        if (!key && provider !== 'surf') throw new Error(kind === 'asr' ? '请配置识别服务的 API 密钥' : '请配置语音回答服务的 API 密钥');
         return { provider, baseUrl, model, region, workspace, encryptedKey, key };
     }
 
@@ -313,6 +399,8 @@ class SpeechController {
         if (profile.provider === 'minimax') return new MiniMaxSpeech(profile.key);
         if (profile.provider === 'azure') return new AzureSpeech(profile);
         if (profile.provider === 'aliyun') return new AliyunSpeech(profile);
+        if (profile.provider === 'surf') return new SurfSpeech(profile.key, profile.baseUrl);
+        if (profile.provider === 'volc') return new VolcSpeech(profile, this.websocket);
         throw new Error('此语音功能已关闭');
     }
 

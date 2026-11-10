@@ -4,7 +4,9 @@
     const api = window.guizhi;
     const { button } = window.GuizhiShell;
     const names = { off: '关闭', local: '本机语音', minimax: 'MiniMax', azure: '微软 Azure 语音',
-        aliyun: '阿里云百炼 CosyVoice', custom: '自定义兼容接口' };
+        aliyun: '阿里云百炼 CosyVoice', custom: '自定义兼容接口', surf: 'SurfVoice 本机服务', volc: '火山引擎豆包语音' };
+    const volcResources = { asr: [['volc.seedasr.sauc.duration', '识别 2.0 · 小时版'], ['volc.seedasr.sauc.concurrent', '识别 2.0 · 并发版']],
+        tts: [['seed-tts-2.0', '语音合成 2.0'], ['seed-icl-2.0', '声音复刻 2.0']] };
     window.GuizhiSpeechNames = names;
     const format = entries => entries.map(entry => entry.heard + '=' + entry.correct).join('\n');
     const errorText = window.GuizhiErrorText;
@@ -111,11 +113,17 @@
                     provider === 'aliyun' && field('百炼工作空间 ID', profile.workspace, next => updateProfile('workspace', next)),
                     provider === 'aliyun' && field('语音模型', profile.model, next => updateProfile('model', next),
                         { placeholder: 'cosyvoice-v3-plus' }),
-                    remote && field(title + '密钥', profile.key, next => updateProfile('key', next),
-                        { type: 'password', autoComplete: 'off', placeholder: configured ? '已配置' : '输入 API 密钥' }),
+                    provider === 'surf' && field('本机服务地址', profile.baseUrl, next => updateProfile('baseUrl', next),
+                        { placeholder: 'http://127.0.0.1:8765' }),
+                    provider === 'volc' && select('语音资源', profile.model || volcResources[kind][0][0], volcResources[kind],
+                        next => updateProfile('model', next)),
+                    remote && field(provider === 'surf' ? '访问令牌（选填）' : title + '密钥', profile.key,
+                        next => updateProfile('key', next), { type: 'password', autoComplete: 'off',
+                            placeholder: configured ? '已配置' : provider === 'surf' ? '按本机服务设置填写' : '输入 API 密钥' }),
                     !asr && remote && field('回答音色', value.voice, next => update('voice', next),
                         { placeholder: { custom: 'alloy', azure: 'zh-CN-XiaoxiaoNeural',
-                            aliyun: 'longanyang', minimax: 'female-shaonv' }[provider] })),
+                            aliyun: 'longanyang', minimax: 'female-shaonv', surf: 'huayan',
+                            volc: profile.model === 'seed-icl-2.0' ? '控制台中的音色 ID' : '使用默认音色' }[provider] })),
                 asr ? button('mic', testing === 'recording' ? '结束并识别' : '试录音',
                     { disabled: provider === 'off' || Boolean(testing && testing !== 'recording'), onClick: record })
                     : button('mic', '试听声音', { disabled: provider === 'off' || Boolean(testing),

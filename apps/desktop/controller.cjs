@@ -184,8 +184,17 @@ class DesktopController {
         if (!this.settings.workspace) throw new Error('请先选择成果保存位置');
         if (this.active) throw new Error('已有任务在运行');
         if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 4000) throw new Error('请输入办理事项');
-        const bindings = materialBindings({ ...materials, ...(project ? { project: [project] } : {}),
+        let bindings = materialBindings({ ...materials, ...(project ? { project: [project] } : {}),
             ...(control ? { control: [control] } : {}) });
+        const suppliedMaterials = Object.keys(bindings).length > 0;
+        if (!suppliedMaterials && !skill) {
+            const previous = this.tasks[0];
+            if (previous) {
+                ({ project, control, materials } = previous);
+                bindings = materialBindings({ ...materials, ...(project ? { project: [project] } : {}),
+                    ...(control ? { control: [control] } : {}) });
+            }
+        }
         const history = [];
         let previousRun;
         for (const prior of this.tasks.slice(0, 4)) {
@@ -228,7 +237,7 @@ class DesktopController {
             prompt: task.prompt, skill, skillParameters, materials: bindings, previousRun, history, dialogue,
             projectPlan: project?.plan || materials.project?.[0]?.plan,
             controlPlan: control?.plan || materials.control?.[0]?.plan } });
-        try { this.onStarted?.(task); }
+        try { if (suppliedMaterials) this.onStarted?.(task); }
         catch (error) { console.error('ArcGIS display:', error.message); }
         return this.state();
     }

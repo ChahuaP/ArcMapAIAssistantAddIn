@@ -70,7 +70,8 @@ async function startDesktop(options) {
     let modelCheck;
     const speech = new SpeechController({ userData: app.getPath('userData'), storage: safeStorage,
         local: new LocalSpeechRuntime(path.join(runtime, 'python', 'python.exe'), externalPath),
-        bundledLocalRoot: options.bundledSpeech });
+        bundledLocalRoot: options.bundledSpeech,
+        websocket: () => require(path.join(dsh || path.join(runtime, 'dsh'), 'node_modules', 'ws')) });
     const withSpeech = state => ({ ...state, speech: speech.state(), appearance: desktop.appearance(), arcgis: sync?.state(), version });
     function broadcast(state) {
         visual?.update(state);
@@ -176,7 +177,7 @@ async function startDesktop(options) {
         }
         const command = action(text);
         if (command === 'workbench') { reveal(); return { reply: '好，工作台已经打开。' }; }
-        if (command === 'reset') { resetConversation({}, true); return { reply: '好，我们重新开始。' }; }
+        if (command === 'reset') { resetConversation({}, true); return { reply: '好，我们开始新的对话。' }; }
         const prompt = command === 'send' ? draft.prompt : text;
         if (!prompt?.trim()) return { reply: '你可以直接告诉我想办理什么。' };
         if (command !== 'send' && isBusinessRequest(prompt)) {
