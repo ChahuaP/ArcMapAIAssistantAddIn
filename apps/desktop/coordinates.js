@@ -14,9 +14,9 @@
         h('option', { value: '' }, '请选择'), ...options.map(([id, label]) => h('option', { key: id, value: id }, label)));
     const precision = value => Number(value).toLocaleString('zh-CN', { maximumFractionDigits: 6 });
 
-    function CoordinateFile({ label, item, change, pick, busy }) {
+    function CoordinateFile({ label, action, item, change, pick, busy }) {
         return h('div', { className: 'coordinate-file' },
-            button('folder', item ? '更换' + label : '选择' + label, { disabled: busy, onClick: pick }),
+            button('folder', item ? '更换' + label : action || '选择' + label, { disabled: busy, onClick: pick }),
             item && h('span', { title: item.file }, item.name),
             item?.layers?.length > 1 && field(label + '图层', select(item.layer, item.layers.map(name => [name, name]),
                 layer => change({ ...item, layer }))));
@@ -143,9 +143,10 @@
             await refresh(); setWizard(false);
         } });
         return h('div', { className: 'coordinate-page' },
-            h(antd.Segmented, { 'aria-label': '坐标管理分类', options: [{ value: 'definition', label: '坐标系' },
-                { value: 'plan', label: '转换方案' }], value: tab, onChange: value => { setTab(value); setError(''); } }),
-            tab === 'definition' ? h(CoordinateFile, { label: '坐标系材料', item: file, busy, change: setFile,
+            h(antd.Tabs, { animated: false, className: 'coordinate-tabs', activeKey: tab,
+                items: [{ key: 'definition', label: '坐标系' }, { key: 'plan', label: '转换方案' }],
+                onChange: value => { setTab(value); setError(''); } }),
+            tab === 'definition' ? h(CoordinateFile, { label: '坐标系文件', action: '添加坐标系', item: file, busy, change: setFile,
                 pick: () => perform(async () => { const picked = await api.coordinateFile('definition'); if (picked) await importFile(picked); }) }) :
                 button('plus', '创建转换', { disabled: busy || !definitions.length, onClick: () => setWizard(true) }),
             file?.layer && tab === 'definition' && button('folder', '导入坐标系', {
@@ -157,8 +158,14 @@
                         '容差 ' + precision(entry.plan.tolerance_m) + ' m']
                     : [entry.definition.name, ...entry.definition.axes.map(axis => axis.unit), entry.source_file?.split(/[\\/]/).at(-1)];
                 return h('article', { className: 'coordinate-record', key: ref(entry) },
-                    h('div', { className: 'section-head' }, h('strong', null, entry.title), h(antd.Tag, null, 'v' + entry.revision),
-                        button('layers', '重命名', { type: 'text', disabled: busy, onClick: () => { setEditing(ref(entry)); setTitle(entry.title); } })),
+                    h('div', { className: 'section-head' }, h('strong', null, entry.title),
+                        h('div', { className: 'coordinate-actions' }, h(antd.Tag, null, 'v' + entry.revision),
+                            button('layers', '重命名', { type: 'text', disabled: busy, onClick: () => { setEditing(ref(entry)); setTitle(entry.title); } }),
+                            !entry.plan && h(antd.Popconfirm, { title: '删除「' + entry.title + '」？',
+                                description: '已有任务和已保存的转换方案仍可追溯。',
+                                okText: '删除', cancelText: '取消', okButtonProps: { danger: true },
+                                onConfirm: () => perform(async () => { setEntries(await api.coordinateRemove(ref(entry))); setEditing(null); }) },
+                                button('trash', '删除', { type: 'text', danger: true, disabled: busy })))),
                     h('small', null, summary.filter(Boolean).join(' · ')),
                     entry.plan && applying !== ref(entry) && button('map', '转换材料', { disabled: busy, onClick: () => {
                         setApplying(ref(entry)); setApplyFile(null);

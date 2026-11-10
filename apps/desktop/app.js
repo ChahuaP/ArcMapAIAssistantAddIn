@@ -96,7 +96,6 @@
         const [coordinates, setCoordinates] = useState([]);
         const [catalog, setCatalog] = useState([]);
         const [business, showBusiness] = useState('');
-        const [arcmap, showArcmap] = useState(false);
         const [tab, setTab] = useState('成果');
         const [initialMarkdown, setInitialMarkdown] = useState('');
         const [adding, setAdding] = useState(false);
@@ -292,10 +291,9 @@
             } }, h('span', { className: 'history-title' }, item.title),
             h('small', null, labels[item.status] || '未完成'));
         const tiles = h('div', { className: 'business-tiles' }, ...catalog.slice(0, 3).map(item =>
-            h('button', { key: reference(item), className: 'business-tile', onClick: () => choose(item) },
-                h('span', { className: 'tile-icon' }, icon('layers')),
-                h('span', null, h('b', null, item.title),
-                    h('small', null, item.materials.slice(0, 2).map(role => role.label).join(' · '))))));
+            h('button', { key: reference(item), className: 'business-tile', title: item.title, onClick: () => choose(item) },
+                h('span', { className: 'tile-icon' }, icon(['layers', 'globe', 'folder'][catalog.indexOf(item)])),
+                h('b', null, item.title))));
         const quick = h('main', { className: 'launcher' },
             h('header', { className: 'launcher-head' }, brand(), h('div', { className: 'title-group' },
                 appearance.shortcutRegistered && h('kbd', null, appearance.shortcut.replaceAll('+', ' + ')),
@@ -317,14 +315,14 @@
             h('div', { className: 'history-label' }, '最近任务'),
             h('nav', { 'aria-label': '最近任务' }, ...recent.map(taskButton)),
             h('button', { className: 'nav-item', onClick: () => showSettings(true) }, icon('settings'), '设置'));
-        const conversation = h('section', { className: 'conversation', 'aria-label': '任务对话' },
-            h('div', { className: 'task-head' }, h('h1', null, task ? task.title : '规智工作台'),
-                task && h('span', { className: 'status-tag' }, labels[task.status] || '未完成')),
+        const conversation = h('section', { className: 'conversation' + (task ? '' : ' conversation-empty'), 'aria-label': '任务对话' },
+            task && h('div', { className: 'task-head' }, h('h1', null, task.title),
+                h('span', { className: 'status-tag' }, labels[task.status] || '未完成')),
             h('div', { className: 'messages' }, task ? [
                 h('article', { key: 'user', className: 'bubble user' }, task.prompt),
                 h(Result, { key: 'result', task, retry, fail, parcel, selectParcel, editSkill: text => {
                     setInitialMarkdown(text);
-                    showBusiness('manage');
+                    showSettings('skills');
                 } }),
             ] : h('div', { className: 'welcome' }, h('img', { src: '/mark.svg', alt: '', width: 50 }),
                 h('h2', null, '今天要办理什么？'), h('p', null, '输入办理要求，或选择已有业务。'), tiles)),
@@ -367,22 +365,20 @@
         const layout = launcher ? quick : !state ? null : !ready ? h(window.GuizhiOnboarding, { state, save: configure })
             : settings ? h(window.GuizhiSettings, {
             state, appearance, saveAppearance, entries: coordinates, setEntries: setCoordinates,
-            close: () => showSettings(false),
-            manage: () => showBusiness('manage'), openArcgis: () => showArcmap(true),
+            initial: settings, catalog, refresh, plans, initialMarkdown, task,
+            close: () => { setInitialMarkdown(''); showSettings(false); },
+            attach: project => {
+                setDraft(old => old.skill ? { ...old, unassigned: mergeMaterials(old.unassigned, [project]) }
+                    : { ...old, materials: { ...old.materials, inputs: mergeMaterials(old.materials.inputs || [], [project]) } });
+                select(null);
+                showSettings(false);
+            },
             save: configure,
         }) : h(Workbench, { appearance, saveAppearance, sidebar, conversation, inspector, fail,
-            arcgis: () => { if (ready) showArcmap(true); else showSettings(true); },
+            arcgis: () => showSettings('extensions'),
             connected: Boolean(state?.arcgis?.host) });
         return h(Theme, { appearance }, layout,
-            business && h(Business, { catalog, refresh, choose, plans, manage: business === 'manage',
-                initialMarkdown, close: () => { setInitialMarkdown(''); showBusiness(''); } }),
-            arcmap && state && h(window.GuizhiArcmap, { configured: state.settings.arcmapBridge, sync: state.arcgis, task,
-                close: () => showArcmap(false), attach: project => {
-                    setDraft(old => old.skill ? { ...old, unassigned: mergeMaterials(old.unassigned, [project]) }
-                        : { ...old, materials: { ...old.materials, inputs: mergeMaterials(old.materials.inputs || [], [project]) } });
-                    select(null);
-                    showSettings(false);
-                } }));
+            business && h(Business, { catalog, choose, close: () => showBusiness('') }));
     }
     ReactDOM.createRoot(document.getElementById('app')).render(h(App));
 })();

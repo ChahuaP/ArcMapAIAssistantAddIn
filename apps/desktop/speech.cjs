@@ -5,6 +5,7 @@ const { endpoint, normalizeKey } = require('../../src/guizhi/infrastructure/dsh/
 
 const onlineHost = 'https://api.minimaxi.com';
 const voiceDefault = 'female-shaonv';
+const voices = { custom: 'alloy', azure: 'zh-CN-XiaoxiaoNeural', aliyun: 'longanyang', minimax: voiceDefault };
 const defaults = { asr: 'off', tts: 'off', voice: voiceDefault, autoSpeak: false,
     microphone: '', speaker: '', dictionary: [], pronunciation: [] };
 const audioLimit = 16_000 * 2 * 30 + 44;
@@ -70,22 +71,15 @@ async function* sse(response) {
 
 class HttpSpeech {
     constructor(key, baseUrl) {
-        this.authorization = 'Bearer ' + key;
+        this.credentials = { authorization: 'Bearer ' + key };
         this.baseUrl = baseUrl;
-    }
-}
-
-class MiniMaxSpeech extends HttpSpeech {
-    constructor(key) {
-        if (!key) throw new Error('请在设置中配置 MiniMax 语音密钥');
-        super(key, onlineHost);
     }
 
     async request(endpoint, options, signal) {
         try {
             const response = await fetch(this.baseUrl + endpoint, { ...options, method: 'POST', redirect: 'error',
                 signal: AbortSignal.any([signal, AbortSignal.timeout(40_000)]),
-                headers: { ...options.headers, authorization: this.authorization } });
+                headers: { ...options.headers, ...this.credentials } });
             if (!response.ok) throw new Error('在线语音服务响应异常（HTTP ' + response.status + '）');
             return response;
         } catch (error) {
@@ -93,6 +87,12 @@ class MiniMaxSpeech extends HttpSpeech {
             if (error instanceof TypeError || error.name === 'TimeoutError') throw new Error('在线语音连接失败，请检查网络');
             throw error;
         }
+    }
+}
+
+class MiniMaxSpeech extends HttpSpeech {
+    constructor(key) {
+        super(key, onlineHost);
     }
 
     async recognize(wav, signal, partial) {
@@ -157,15 +157,74 @@ class CompatibleSpeech extends HttpSpeech {
     async synthesize(text, voice, signal) {
         const response = await this.request('/audio/speech', { headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ model: this.model, input: text, voice, response_format: 'wav' }) }, signal);
-        const chunks = [];
-        let size = 0;
-        for await (const chunk of response.body) {
-            size += chunk.length;
-            if (size > 4 << 20) throw new Error('在线合成音频过长');
-            chunks.push(chunk);
-        }
-        return Buffer.concat(chunks);
+        return readAudio(response);
     }
+}
+
+class AzureSpeech extends HttpSpeech {
+    constructor(profile) {
+        super(profile.key, profile.baseUrl);
+        this.credentials = { 'Ocp-Apim-Subscription-Key': profile.key };
+    }
+
+    async recognize(wav, signal, partial) {
+        const response = await this.request('/speech/recognition/conversation/cognitiveservices/v1?language=zh-CN', {
+            body: wav, headers: { 'content-type': 'audio/wav; codecs=audio/pcm; samplerate=16000' },
+        }, signal);
+        const result = await response.json();
+        if (result.RecognitionStatus !== 'Success' || typeof result.DisplayText !== 'string') {
+            throw new Error('Azure 未识别到可用语音');
+        }
+        partial(result.DisplayText);
+        return result.DisplayText;
+    }
+
+    async synthesize(text, voice, signal) {
+        if (!/^[A-Za-z0-9-]{1,100}$/.test(voice)) throw new Error('Azure 音色标识无效');
+        const escaped = text.replace(/[&<>]/g, mark => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[mark]);
+        const response = await this.request('/cognitiveservices/v1', {
+            headers: { 'content-type': 'application/ssml+xml', 'X-Microsoft-OutputFormat': 'riff-24khz-16bit-mono-pcm' },
+            body: '<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="zh-CN"><voice name="' +
+                voice + '">' + escaped + '</voice></speak>',
+        }, signal);
+        return readAudio(response);
+    }
+}
+
+class AliyunSpeech extends HttpSpeech {
+    constructor(profile) {
+        super(profile.key, profile.baseUrl);
+        this.model = profile.model;
+    }
+
+    async synthesize(text, voice, signal) {
+        const response = await this.request('/api/v1/services/audio/tts/SpeechSynthesizer', {
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ model: this.model, input: { text, voice, format: 'wav', sample_rate: 24_000 } }),
+        }, signal);
+        const { output } = await response.json();
+        if (typeof output?.audio?.url !== 'string') throw new Error('阿里云未返回可用音频');
+        const url = new URL(output.audio.url);
+        if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.port ||
+            !/^dashscope-result-[a-z0-9-]+\.oss-cn-[a-z0-9-]+\.aliyuncs\.com$/.test(url.hostname)) {
+            throw new Error('阿里云返回了无效的音频地址');
+        }
+        url.protocol = 'https:';
+        const audio = await fetch(url, { redirect: 'error', signal: AbortSignal.any([signal, AbortSignal.timeout(20_000)]) });
+        if (!audio.ok) throw new Error('阿里云音频读取失败（HTTP ' + audio.status + '）');
+        return readAudio(audio);
+    }
+}
+
+async function readAudio(response) {
+    const chunks = [];
+    let size = 0;
+    for await (const chunk of response.body) {
+        size += chunk.length;
+        if (size > 4 << 20) throw new Error('在线合成音频过长');
+        chunks.push(chunk);
+    }
+    return Buffer.concat(chunks);
 }
 
 function wavBuffer(bytes) {
@@ -174,7 +233,7 @@ function wavBuffer(bytes) {
 }
 
 function selectedVoice(input) {
-    const voice = input.voice?.trim() || (input.tts === 'custom' ? 'alloy' : voiceDefault);
+    const voice = input.voice?.trim() || voices[input.tts] || voiceDefault;
     if (voice.length > 100 || /[\r\n]/.test(voice)) throw new Error('音色标识无效');
     return voice;
 }
@@ -191,17 +250,19 @@ class SpeechController {
         this.clips = new Map();
         this.clipBytes = 0;
         this.active = null;
+        this.status = {};
     }
 
     state() {
         const publicProfile = kind => {
-            const { baseUrl, model, encryptedKey } = this.settings[kind + 'Profile'] || {};
-            return { baseUrl, model, keyConfigured: Boolean(encryptedKey) };
+            const { baseUrl, model, region, workspace, encryptedKey } = this.settings[kind + 'Profile'] || {};
+            return { baseUrl, model, region, workspace, keyConfigured: Boolean(encryptedKey) };
         };
         const { asr, tts, voice, autoSpeak, microphone, speaker, dictionary, pronunciation } = this.settings;
         return { asr, tts, voice, autoSpeak, microphone, speaker, dictionary, pronunciation,
             asrProfile: publicProfile('asr'), ttsProfile: publicProfile('tts'),
-            providers: ['minimax', 'custom', ...(this.bundledLocalRoot ? ['local'] : [])] };
+            providers: { asr: ['minimax', 'azure', 'custom'], tts: ['minimax', 'azure', 'aliyun', 'custom'] },
+            localAvailable: Boolean(this.bundledLocalRoot) };
     }
 
     profile(kind, input) {
@@ -211,11 +272,21 @@ class SpeechController {
             if (!this.bundledLocalRoot) throw new Error('本机语音组件未安装');
             return { provider };
         }
-        if (!['minimax', 'custom'].includes(provider)) throw new Error('语音服务不可用');
         const form = input[kind + 'Profile'] || {};
-        const baseUrl = provider === 'custom' ? endpoint(form.baseUrl) : onlineHost;
-        const model = provider === 'custom' ? form.model?.trim() : undefined;
-        if (provider === 'custom' && (!model || model.length > 160 || /[\x00-\x20]/.test(model))) {
+        const region = provider === 'azure' ? form.region?.trim().toLowerCase() : undefined;
+        const workspace = provider === 'aliyun' ? form.workspace?.trim().toLowerCase() : undefined;
+        let baseUrl;
+        if (provider === 'azure') {
+            if (!/^[a-z][a-z0-9]{1,31}$/.test(region || '')) throw new Error('请填写 Azure 语音资源的区域，如 eastasia');
+            baseUrl = 'https://' + region + '.' + (kind === 'asr' ? 'stt' : 'tts') + '.speech.microsoft.com';
+        } else if (provider === 'aliyun' && kind === 'tts') {
+            if (!/^[a-z0-9][a-z0-9-]{1,79}$/.test(workspace || '')) throw new Error('请填写阿里云百炼工作空间 ID');
+            baseUrl = 'https://' + workspace + '.cn-beijing.maas.aliyuncs.com';
+        } else if (provider === 'custom') baseUrl = endpoint(form.baseUrl);
+        else if (provider === 'minimax') baseUrl = onlineHost;
+        else throw new Error('语音服务不可用');
+        const model = provider === 'aliyun' ? form.model?.trim() || 'cosyvoice-v3-plus' : form.model?.trim();
+        if ((provider === 'custom' || provider === 'aliyun') && (!model || model.length > 160 || /[\x00-\x20]/.test(model))) {
             throw new Error('请输入有效的语音模型名称');
         }
         const saved = this.settings[kind + 'Profile'];
@@ -223,7 +294,7 @@ class SpeechController {
         const key = normalizeKey(form.key) || (encryptedKey
             ? this.storage.decryptString(Buffer.from(encryptedKey, 'base64')) : '');
         if (!key) throw new Error(kind === 'asr' ? '请配置识别服务的 API 密钥' : '请配置播报服务的 API 密钥');
-        return { provider, baseUrl, model, encryptedKey, key };
+        return { provider, baseUrl, model, region, workspace, encryptedKey, key };
     }
 
     saveProfile(kind, input) {
@@ -240,7 +311,25 @@ class SpeechController {
         if (profile.provider === 'local') return this.local.provider({ localRoot: this.bundledLocalRoot });
         if (profile.provider === 'custom') return new CompatibleSpeech(profile);
         if (profile.provider === 'minimax') return new MiniMaxSpeech(profile.key);
+        if (profile.provider === 'azure') return new AzureSpeech(profile);
+        if (profile.provider === 'aliyun') return new AliyunSpeech(profile);
         throw new Error('此语音功能已关闭');
+    }
+
+    diagnostic(kind) {
+        const provider = this.settings[kind];
+        let state = 'configured';
+        if (provider === 'off') state = 'off';
+        else {
+            try {
+                this.profile(kind, this.settings);
+                if (provider === 'local') {
+                    this.local.verify(this.bundledLocalRoot, kind);
+                    state = 'ready';
+                }
+            } catch { return { provider, state: 'failed' }; }
+        }
+        return { provider, state, ...this.status[kind] };
     }
 
     configure(input) {
@@ -255,6 +344,7 @@ class SpeechController {
         this.clips.clear();
         this.clipBytes = 0;
         this.settings = settings;
+        this.status = {};
         return this.state();
     }
 
@@ -277,9 +367,11 @@ class SpeechController {
                 elapsedMs: Math.round(performance.now() - started), at: new Date().toISOString() }];
             writeRecord(this.usageFile, records);
             this.usage = records;
+            this.status[kind] = { state: 'verified', at: new Date().toISOString() };
             return result;
         } catch (error) {
             if (controller.signal.aborted) return null;
+            this.status[kind] = { state: 'failed', at: new Date().toISOString() };
             throw new Error(profile.key ? String(error.message).replaceAll(profile.key, '[密钥]') : error.message);
         } finally {
             if (this.active === controller) this.active = null;
@@ -324,14 +416,22 @@ class SpeechController {
         const profile = this.profile(kind, input);
         const adapter = this.adapter(profile);
         const signal = AbortSignal.timeout(55_000);
+        const saved = this.settings[kind + 'Profile'];
+        const same = input[kind] === this.settings[kind] && saved?.baseUrl === profile.baseUrl &&
+            saved?.model === profile.model && !normalizeKey(input[kind + 'Profile']?.key) &&
+            (kind === 'asr' || selectedVoice(input) === this.settings.voice);
         try {
+            let output;
             if (kind === 'asr') {
-                const result = await adapter.recognize(readPcmWav(audio), signal, () => {});
-                if (!result.trim() || result.length > 4000) throw new Error('没有识别到可用的文字');
-                return result;
+                output = await adapter.recognize(readPcmWav(audio), signal, () => {});
+                if (!output.trim() || output.length > 4000) throw new Error('没有识别到可用的文字');
+            } else {
+                output = wavBuffer(await adapter.synthesize('你好，我是规智。语音播报已就绪。', selectedVoice(input), signal));
             }
-            return wavBuffer(await adapter.synthesize('你好，我是规智。语音播报已就绪。', selectedVoice(input), signal));
+            if (same) this.status[kind] = { state: 'verified', at: new Date().toISOString() };
+            return output;
         } catch (error) {
+            if (same) this.status[kind] = { state: 'failed', at: new Date().toISOString() };
             throw new Error(profile.key ? String(error.message).replaceAll(profile.key, '[密钥]') : error.message);
         }
     }

@@ -28,7 +28,6 @@
         const [error, setError] = useState('');
         const [operations, setOperations] = useState({});
         const fail = issue => setError(String(issue.message || issue).replace(/^Error invoking remote method '[^']+': Error: /, ''));
-        useEffect(() => { dialog.current.showModal(); }, []);
         function page(value) {
             setEditor(null);
             setSection(value);
@@ -37,16 +36,14 @@
         }
         const keyword = normalized(query);
         const matches = catalog.filter(item => normalized([item.title, item.summary, ...item.aliases].join(' ')).includes(keyword));
-        return h('dialog', { className: 'business-dialog', ref: dialog,
-            onCancel: event => { event.preventDefault(); close(); } },
-            h('div', { className: 'dialog-head' }, h('h2', null, editor ? '编辑业务' : '业务中心'),
-                iconButton('close', '关闭业务中心', { onClick: close })),
+        useEffect(() => { dialog.current?.showModal(); }, []);
+        const content = h(React.Fragment, null,
             editor ? h(React.Fragment, null,
                 button('back', '返回业务', { type: 'text', onClick: () => setEditor(null) }),
                 h(SkillEditor, { initialMarkdown: editor.markdown, onPublished: refresh, plans })) :
                 h(React.Fragment, null,
-                    h('nav', { className: 'business-toolbar', 'aria-label': '业务分类' },
-                        h(antd.Segmented, { options: [{ label: '办理业务', value: 'browse' }, { label: '管理技能', value: 'manage' },
+                    manage && h('nav', { className: 'business-toolbar', 'aria-label': '业务管理分类' },
+                        h(antd.Segmented, { options: [{ label: '业务技能', value: 'manage' },
                             { label: '工具目录', value: 'tools' }], value: section, onChange: page }),
                         section === 'manage' && button('plus', '新建业务', { type: 'primary', onClick: () => setEditor({ markdown: '' }) })),
                     section !== 'tools' ? h(React.Fragment, null,
@@ -72,6 +69,11 @@
                                 h('summary', null, title), h('ul', null, ...tools.map(([name, spec]) => h('li', { key: name }, spec.title))));
                         }))),
             error && h('p', { className: 'error', role: 'alert' }, error));
+        if (manage) return h('div', { className: 'business-page' }, content);
+        return h('dialog', { className: 'business-dialog', ref: dialog,
+            onCancel: event => { event.preventDefault(); close(); } },
+            h('div', { className: 'dialog-head' }, h('h2', null, '业务中心'),
+                iconButton('close', '关闭业务中心', { onClick: close })), content);
     }
     window.GuizhiBusiness = { Business, reference, matchBusiness };
 })();

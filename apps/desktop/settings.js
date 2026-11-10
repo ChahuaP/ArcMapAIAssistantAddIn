@@ -1,56 +1,116 @@
 (() => {
     const h = React.createElement;
-    const { useEffect, useState } = React;
+    const { useEffect, useRef, useState } = React;
     const api = window.guizhi;
-    const { Titlebar, button, icon } = window.GuizhiShell;
+    const { Titlebar, button, icon, productName } = window.GuizhiShell;
     const { ModelForm, Workspace, errorText } = window.GuizhiModel;
     const sections = [
         ['model', 'server', '模式与模型'], ['voice', 'mic', '语音与音色'],
         ['crs', 'globe', '坐标系与转换'], ['appearance', 'sun', '外观与交互'],
-        ['storage', 'folder', '成果与存储'], ['skills', 'grid', '业务与技能'],
-        ['arcgis', 'map', 'ArcGIS 扩展'], ['about', 'info', '关于与诊断'],
+        ['storage', 'folder', '成果与存储'], ['skills', 'grid', '业务管理'],
+        ['extensions', 'link', '第三方扩展'], ['about', 'info', '关于与诊断'],
     ];
     const themes = [{ value: 'system', label: '跟随系统' }, { value: 'light', label: '明亮' },
-        { value: 'dark', label: '深绿暗色' }];
+        { value: 'dark', label: '暗色' }];
     const card = (title, ...children) => h('section', { className: 'settings-card' }, h('h2', null, title), ...children);
 
-    function ImageryResources() {
-        const [models, setModels] = useState([]);
-        const [error, setError] = useState('');
-        const [loading, setLoading] = useState(false);
-        const refresh = () => api.imageryModels().then(setModels);
-        useEffect(() => { refresh().catch(issue => setError(errorText(issue))); }, []);
-        async function perform(action) {
-            setLoading(true);
-            setError('');
-            try { await action(); }
-            catch (issue) { setError(errorText(issue)); }
-            finally { setLoading(false); }
+    function ShortcutCapture({ appearance, save, fail }) {
+        const [recording, setRecording] = useState(false);
+        const active = useRef(false);
+        useEffect(() => {
+            const release = () => {
+                if (!active.current) return;
+                active.current = false;
+                setRecording(false);
+                void api.shortcutCapture(false).catch(fail);
+            };
+            addEventListener('blur', release);
+            return () => { removeEventListener('blur', release); release(); };
+        }, []);
+        async function finish(value) {
+            if (!active.current) return;
+            active.current = false;
+            setRecording(false);
+            try { if (value) await save({ shortcut: value }); }
+            catch (issue) { fail(issue); }
+            finally { await api.shortcutCapture(false).catch(fail); }
         }
-        return card('影像模型资源',
-            ...models.map(model => h('div', { className: 'resource-row', key: model.name + '@' + model.version },
-                h('strong', null, model.name + ' · v' + model.version),
-                model.evaluation === 'simulation' && h(antd.Tag, null, '模拟验证'),
-                !model.enabled && h(antd.Tag, null, '已停用'),
-                h(antd.Button, { disabled: loading, onClick: () => perform(async () =>
-                    setModels(await api.imageryModelActivate(model.name, model.version, !model.enabled))) },
-                model.enabled ? '停用' : '启用'),
-                h('small', null, [model.region, model.sensor, model.start + ' 至 ' + model.end].join(' · ')))),
-            !models.length && h('p', { className: 'muted' }, '暂无可用影像模型'),
-            button('plus', '添加模型资源', { loading, onClick: () => perform(async () => {
-                if (await api.imageryModelAdd()) await refresh();
-            }) }),
-            error && h('p', { role: 'alert', className: 'error' }, error));
+        async function start() {
+            if (active.current) return;
+            active.current = true;
+            try {
+                await api.shortcutCapture(true);
+                if (active.current) setRecording(true);
+            } catch (issue) { active.current = false; fail(issue); }
+        }
+        function record(event) {
+            if (!active.current || event.key === 'Tab') return;
+            event.preventDefault();
+            if (event.key === 'Escape') return void finish();
+            if (event.repeat || event.nativeEvent.isComposing) return;
+            const code = /^(?:Key|Digit)([A-Z0-9])$/.exec(event.code)?.[1] || event.key.toUpperCase();
+            if (event.metaKey || (!event.ctrlKey && !event.altKey) || !/^(?:[A-Z0-9]|F(?:[1-9]|1[0-2]))$/.test(code)) return;
+            void finish([event.ctrlKey && 'Ctrl', event.altKey && 'Alt', event.shiftKey && 'Shift', code].filter(Boolean).join('+'));
+        }
+        return h(React.Fragment, null, h('div', { className: 'field-row' },
+            h('span', null, '全局快捷键'), h('kbd', null, appearance.shortcut.replaceAll('+', ' + ')),
+            h(antd.Button, { className: 'shortcut-capture', 'aria-pressed': recording,
+                onClick: start, onBlur: () => void finish(), onKeyDown: record },
+                recording ? '请按下组合键' : '更改快捷键')),
+            recording && h('small', { role: 'status' }, '按 Ctrl 或 Alt 加字母、数字或功能键。Esc 取消。'),
+            !recording && !appearance.shortcutRegistered && h('small', null, '快捷键尚未注册，可选择其他组合。'));
+    }
+
+    function About({ state }) {
+        const [report, setReport] = useState(null);
+        const [busy, setBusy] = useState(false);
+        const [error, setError] = useState('');
+        async function refresh(check = false) {
+            setBusy(true);
+            setError('');
+            try { setReport(await api.diagnostics(check)); }
+            catch (issue) { setError(errorText(issue)); }
+            finally { setBusy(false); }
+        }
+        useEffect(() => { void refresh(); }, []);
+        const statuses = { off: '关闭', verified: '可用', failed: '检查失败', ready: '组件就绪',
+            configured: '已配置 · 待测试', missing: '未配置' };
+        const row = (title, summary, detail, tone) => h('div', { key: title }, h('dt', null, title), h('dd', null,
+            h(antd.Tag, { color: tone }, summary), detail && h('small', null, detail)));
+        const voiceRow = (kind, title) => {
+            const item = report.voice[kind];
+            return row(title, statuses[item.state],
+                [window.GuizhiSpeechNames[item.provider], item.at && new Date(item.at).toLocaleString()].filter(Boolean).join(' · '),
+                item.state === 'verified' || item.state === 'ready' ? 'success' : item.state === 'failed' ? 'error' : 'default');
+        };
+        const host = state.arcgis.host;
+        return [card('产品信息', h('div', { className: 'about-product' },
+            h('h2', null, productName),
+            h('p', { lang: 'en', className: 'muted' }, 'Smart Governance System for the Liuhe Branch of the Nanjing Municipal Bureau of Planning and Natural Resources'),
+            h('p', null, '规智 · ' + state.version), h('p', null, '版权所有 © 于佳民 · 个人自研'))),
+        card('诊断报告', button('server', '检查运行状态', { loading: busy, onClick: () => void refresh(true) }),
+            report && h('dl', { className: 'diagnostic-list' },
+                row('智能体模型', statuses[report.model.state], [
+                    report.model.mode === 'local' ? '本地' : report.model.mode === 'online' ? '在线' : '',
+                    report.model.name, report.model.detail,
+                    report.model.at && new Date(report.model.at).toLocaleString()].filter(Boolean).join(' · '),
+                    report.model.state === 'verified' ? 'success' : report.model.state === 'failed' ? 'error' : 'default'),
+                voiceRow('asr', '语音识别'), voiceRow('tts', '语音播报'),
+                row('ArcMap', host ? '已连接' : state.arcgis.connection ? '等待工程打开' : '未连接',
+                    host ? [host.version, host.map?.split(/[\\/]/).at(-1), !host.publish_ready && '需从规智重新打开工程'].filter(Boolean).join(' · ')
+                        : report.bridge ? '连接组件就绪' : '未配置连接组件', host ? 'success' : 'default'),
+                row('全局快捷键', report.shortcut.registered ? '已注册' : '未注册', report.shortcut.value),
+                row('成果位置', state.settings.workspace ? '已配置' : '未配置', state.settings.workspace)),
+            error && h('p', { role: 'alert', className: 'error' }, error))];
     }
 
     window.GuizhiSettings = function Settings({ state, appearance, saveAppearance, save, close, entries, setEntries,
-        manage, openArcgis }) {
-        const [section, select] = useState(state.settings.workspace ? 'model' : 'storage');
+        initial, catalog, refresh, plans, initialMarkdown, task, attach }) {
+        const [section, select] = useState(typeof initial === 'string' ? initial : state.settings.workspace ? 'model' : 'storage');
         const [value, change] = useState({ ...state.settings, key: '' });
         const [error, setError] = useState('');
         const [saving, setSaving] = useState(false);
         const [testingModel, setTestingModel] = useState(false);
-        const [shortcut, setShortcut] = useState(appearance.shortcut);
         const fail = issue => setError(errorText(issue));
         const update = (name, next) => change(old => ({ ...old, [name]: next }));
         const checkbox = (key, text) => h('label', { className: 'voice-toggle' },
@@ -72,33 +132,20 @@
         const pages = {
             model: () => h(ModelForm, { value, change, current: state.settings, busy: setTestingModel }),
             voice: () => h(window.GuizhiSpeechSettings, { current: state.speech }),
-            crs: () => card('坐标系与转换', state.settings.workspace
-                ? h(window.GuizhiCoordinates, { entries, setEntries }) : h('p', null, '请先选择成果保存位置。')),
+            crs: () => state.settings.workspace
+                ? h(window.GuizhiCoordinates, { entries, setEntries }) : h('p', null, '请先选择成果保存位置。'),
             appearance: () => [
                 card('主题', h(antd.Segmented, { options: themes, value: appearance.theme,
                     'aria-label': '界面主题', onChange: theme => saveAppearance({ theme }).catch(fail) })),
-                card('快捷面板', h('div', { className: 'field-row' },
-                    h('label', { htmlFor: 'launcher-shortcut' }, '全局快捷键'),
-                    h('input', { id: 'launcher-shortcut', value: shortcut, maxLength: 24,
-                        onChange: event => setShortcut(event.target.value) }),
-                    h(antd.Button, { onClick: () => {
-                        setError('');
-                        saveAppearance({ shortcut }).catch(fail);
-                    } }, '更改快捷键')),
-                    !appearance.shortcutRegistered && h('p', { className: 'muted' },
-                        appearance.shortcut + ' 已被占用。可更改组合，或从托盘和数字形象打开。')),
+                card('快捷面板', h(ShortcutCapture, { appearance, save: saveAppearance, fail })),
                 card('办理过程', checkbox('showOperation', '显示办理过程'),
                     value.showOperation !== false && checkbox('screenHighlight', '高亮屏幕中的对应图层')),
             ],
             storage: () => card('成果保存位置', h(Workspace, { value: value.workspace,
                 change: workspace => update('workspace', workspace), fail, disabled: saving })),
-            skills: () => [card('业务管理', button('grid', '管理业务技能',
-                { onClick: manage, disabled: !state.settings.workspace })), h(ImageryResources, { key: 'imagery' })],
-            arcgis: () => card('ArcGIS 扩展', h('p', { className: 'muted' },
-                state.arcgis?.host ? '已连接 ArcGIS ' + state.arcgis.host.version + ' · ' + state.arcgis.connection.map.split(/[\\/]/).at(-1)
-                    : state.arcgis?.connection ? '等待连接的工程打开' : '请选择正在 ArcGIS 中打开的工程。'),
-                button('map', '打开 ArcGIS 扩展', { onClick: openArcgis, disabled: !state.settings.workspace })),
-            about: () => card('规智', h('p', { className: 'muted' }, state.version)),
+            skills: () => h(window.GuizhiBusiness.Business, { catalog, refresh, plans, initialMarkdown, manage: true }),
+            extensions: () => h(window.GuizhiArcmap, { configured: state.settings.arcmapBridge, sync: state.arcgis, task, attach }),
+            about: () => h(About, { state }),
         };
         const current = sections.find(([id]) => id === section);
         return h('div', { className: 'desktop-frame' }, h(Titlebar, { settings: true, back: close }),

@@ -1,16 +1,26 @@
 :root {
     color-scheme: light;
-    --page: #f3f6f3; --panel: #fff; --sub: #f8faf8; --rail: #f5f8f6; --ink: #17352c; --muted: #536b60;
-    --soft: #e8f3eb; --primary: #146c55; --primary-ink: #fff; --accent: #146c55; --focus: #157b5d;
-    --line: #d5e1d9; --border: #789486; --shadow: #19362a22; --error: #952e23;
-    --map: #e8eee0; --contour: #a9c5b4; --parcel: #377a69; --parcel-fill: #c9e5d6;
-    --overlap: #a97131; --overlap-fill: #e6bc73; --selected-map: #164c9b; --selected-fill: #bad8f4;
+    --page: #f1f5f9; --panel: #fff; --sub: #f7f9fc; --rail: #f1f5f9; --ink: #152235; --muted: #506176;
+    --soft: #e5effb; --primary: #086ca9; --primary-ink: #fff; --accent: #075c93; --focus: #0476bc;
+    --line: #d6e0eb; --border: #8494a8; --shadow: #12264128; --error: #a52432;
+    --map: #eaf1f8; --contour: #b8cce0; --parcel: #26638b; --parcel-fill: #bbd5ec;
+    --overlap: #925918; --overlap-fill: #e6bc73; --selected-map: #164c9b; --selected-fill: #bad8f4;
+    --tile-blue: #14669a; --tile-blue-bg: #e3f1fe;
+    --tile-ochre: #815616; --tile-ochre-bg: #fbefda;
+    --tile-violet: #654798; --tile-violet-bg: #eee8f8;
+    --photo-wash: rgba(245, 249, 253, .63); --photo-edge: #f7f9fc; --photo-input: #ffffffef;
+    --photo-composer: rgba(255, 255, 255, .48);
 }
 :root[data-theme=dark] {
     color-scheme: dark;
-    --page: #0d1c16; --panel: #142b23; --sub: #182f27; --rail: #11251d; --ink: #e7f1eb; --muted: #abc0b3;
-    --soft: #224b3a; --primary: #75c6a0; --primary-ink: #10271e; --accent: #92d9b6; --focus: #91d9b2;
-    --line: #365347; --border: #628675; --shadow: #030e0978; --error: #ffc4aa;
-    --map: #213a2d; --contour: #416753; --parcel: #a5dfbe; --parcel-fill: #548c74;
+    --page: #101824; --panel: #172333; --sub: #1c2a3a; --rail: #131e2d; --ink: #eef3fa; --muted: #bac8d9;
+    --soft: #263c55; --primary: #8ec9ff; --primary-ink: #10243a; --accent: #a6d3fc; --focus: #91cfff;
+    --line: #354860; --border: #6b829d; --shadow: #080e1978; --error: #ffb5be;
+    --map: #1c3046; --contour: #3d5874; --parcel: #a7d4f2; --parcel-fill: #3f6486;
     --overlap: #edba78; --overlap-fill: #9c7545; --selected-map: #a7cfff; --selected-fill: #315a74;
+    --tile-blue: #9cd3fa; --tile-blue-bg: #24445e;
+    --tile-ochre: #f3ce8d; --tile-ochre-bg: #473921;
+    --tile-violet: #d0bbf2; --tile-violet-bg: #3e3555;
+    --photo-wash: rgba(19, 30, 45, .74); --photo-edge: #172333; --photo-input: #1c2a3aef;
+    --photo-composer: rgba(28, 42, 58, .46);
 }

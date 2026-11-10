@@ -26,8 +26,8 @@ function createShell({ userData, icon, verifyStartup }) {
     };
     const webPreferences = { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true };
     const overlay = () => nativeTheme.shouldUseDarkColors
-        ? { color: '#11251d', symbolColor: '#e7f1eb', height: 50 }
-        : { color: '#f5f8f6', symbolColor: '#17352c', height: 50 };
+        ? { color: '#131e2d', symbolColor: '#eef3fa', height: 50 }
+        : { color: '#f1f5f9', symbolColor: '#152235', height: 50 };
     nativeTheme.themeSource = settings.theme;
     const workbench = new BrowserWindow({ width: 1376, height: 824, minWidth: 790, minHeight: 530,
         show: false, title: '规智', titleBarStyle: 'hidden', titleBarOverlay: overlay(), autoHideMenuBar: true,
@@ -160,6 +160,15 @@ function createShell({ userData, icon, verifyStartup }) {
         themeChanged();
     }
 
+    function captureShortcut(active) {
+        if (active && shortcutRegistered) {
+            globalShortcut.unregister(settings.shortcut);
+            shortcutRegistered = false;
+        } else if (!active && !shortcutRegistered) {
+            registerShortcut();
+        }
+    }
+
     function toggleLauncher() {
         if (launcher.isVisible() && launcher.isFocused()) launcher.hide();
         else openLauncher();
@@ -169,7 +178,7 @@ function createShell({ userData, icon, verifyStartup }) {
         if (typeof input !== 'string') throw new Error('快捷键无效');
         const next = input.replace(/\s/g, '').toUpperCase()
             .replace('CTRL', 'Ctrl').replace('ALT', 'Alt').replace('SHIFT', 'Shift');
-        if (!shortcutPattern.test(next)) throw new Error('请输入有效的快捷键，例如 Ctrl+Alt+G');
+        if (!shortcutPattern.test(next)) throw new Error('请按 Ctrl 或 Alt 加字母、数字或功能键');
         if (next === settings.shortcut && shortcutRegistered) return;
         if (!globalShortcut.register(next, toggleLauncher)) throw new Error(next + ' 已被占用，请选择其他组合');
         if (shortcutRegistered) globalShortcut.unregister(settings.shortcut);
@@ -185,7 +194,7 @@ function createShell({ userData, icon, verifyStartup }) {
     }
 
     return { window: workbench, launcher, portrait, windows, appearance, configureAppearance,
-        openLauncher, reveal, showPortrait, voice, registerShortcut, notify, close };
+        openLauncher, reveal, showPortrait, voice, registerShortcut, captureShortcut, notify, close };
 }
 
 module.exports = { createShell };

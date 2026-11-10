@@ -3,7 +3,9 @@
     const { useState, useEffect, useRef } = React;
     const api = window.guizhi;
     const { button } = window.GuizhiShell;
-    const names = { local: '本机语音', minimax: 'MiniMax 在线', custom: 'OpenAI 兼容语音' };
+    const names = { off: '关闭', local: '本机语音', minimax: 'MiniMax', azure: '微软 Azure 语音',
+        aliyun: '阿里云百炼 CosyVoice', custom: '自定义兼容接口' };
+    window.GuizhiSpeechNames = names;
     const format = entries => entries.map(entry => entry.heard + '=' + entry.correct).join('\n');
     const errorText = error => String(error.message || error).replace(/^Error invoking remote method '[^']+': Error: /, '');
 
@@ -65,7 +67,6 @@
             } catch (issue) { fail(issue); }
             finally { testState(''); }
         }
-        const choices = [['off', '关闭'], ...current.providers.map(id => [id, names[id]])];
         const byKind = kind => [['', '系统默认'], ...devices
             .filter(device => device.kind === kind && device.deviceId && device.deviceId !== 'default')
             .map((device, index) => [device.deviceId, device.label || '设备 ' + (index + 1)])];
@@ -82,12 +83,15 @@
             const name = kind + 'Profile';
             const profile = value[name] || {};
             const provider = value[kind];
-            const remote = provider === 'minimax' || provider === 'custom';
+            const remote = !['off', 'local'].includes(provider);
+            const choices = ['off', ...(current.localAvailable ? ['local'] : []), ...current.providers[kind]]
+                .map(id => [id, names[id]]);
             const saved = current[name];
-            const configured = provider === current[kind] && (provider !== 'custom' || saved?.baseUrl === profile.baseUrl) &&
+            const configured = provider === current[kind] &&
+                ['baseUrl', 'region', 'workspace'].every(key => saved?.[key] === profile[key]) &&
                 saved?.keyConfigured;
             const updateProfile = (key, next) => update(name, { ...profile, [key]: next,
-                ...(key === 'baseUrl' ? { key: '' } : {}) });
+                ...(['baseUrl', 'region', 'workspace'].includes(key) ? { key: '' } : {}) });
             return h('section', { className: 'settings-card speech-channel' },
                 h('h2', null, title),
                 h('div', { className: 'setting-fields' },
@@ -99,10 +103,16 @@
                     provider === 'custom' && field(title + '地址', profile.baseUrl, next => updateProfile('baseUrl', next),
                         { placeholder: 'https://speech.example.org/v1' }),
                     provider === 'custom' && field(title + '模型', profile.model, next => updateProfile('model', next)),
+                    provider === 'azure' && field('资源区域', profile.region, next => updateProfile('region', next),
+                        { placeholder: 'eastasia' }),
+                    provider === 'aliyun' && field('百炼工作空间 ID', profile.workspace, next => updateProfile('workspace', next)),
+                    provider === 'aliyun' && field('播报模型', profile.model, next => updateProfile('model', next),
+                        { placeholder: 'cosyvoice-v3-plus' }),
                     remote && field(title + '密钥', profile.key, next => updateProfile('key', next),
                         { type: 'password', autoComplete: 'off', placeholder: configured ? '已配置' : '输入 API 密钥' }),
                     !asr && remote && field('播报音色', value.voice, next => update('voice', next),
-                        { placeholder: provider === 'custom' ? 'alloy' : 'female-shaonv' })),
+                        { placeholder: { custom: 'alloy', azure: 'zh-CN-XiaoxiaoNeural',
+                            aliyun: 'longanyang', minimax: 'female-shaonv' }[provider] })),
                 asr ? button('mic', testing === 'recording' ? '结束并识别' : '试录音',
                     { disabled: provider === 'off' || Boolean(testing && testing !== 'recording'), onClick: record })
                     : button('mic', '试听播报', { disabled: provider === 'off' || Boolean(testing),

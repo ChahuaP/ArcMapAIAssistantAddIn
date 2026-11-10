@@ -9,10 +9,10 @@ button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 main:hover .grip, main:focus-within .grip { opacity: .6; }
 #figure-toggle { background: none; border: none; padding: 0; width: 108px; height: 108px; position: absolute; bottom: 43px; left: calc(50% - 54px); border-radius: 24px; }
 #figure { display: block; width: 100%; height: 100%; filter: drop-shadow(0 7px 7px var(--shadow)); transform-origin: 50% 68%; animation: balance 6.4s ease-in-out infinite; }
-.contours { fill: none; stroke: #397f70; stroke-opacity: .42; stroke-width: 1.6; stroke-linecap: round; }
-.eyes, #speaking-mouth { fill: #173c3c; }
+.contours { fill: none; stroke: #3f6caa; stroke-opacity: .42; stroke-width: 1.6; stroke-linecap: round; }
+.eyes, #speaking-mouth { fill: #193453; }
 .eyes { transform-box: fill-box; transform-origin: center; animation: blink 6.6s infinite; }
-.smile { fill: none; stroke: #173c3c; stroke-width: 2.7; stroke-linecap: round; }
+.smile { fill: none; stroke: #193453; stroke-width: 2.7; stroke-linecap: round; }
 #speaking-mouth { display: none; }
 main[data-voice=speaking] .smile { display: none; }
 main[data-voice=speaking] #speaking-mouth { display: block; }

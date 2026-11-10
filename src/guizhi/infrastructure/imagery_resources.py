@@ -99,7 +99,7 @@ def resolve(workspace, scene_files, values):
                   model.region == values["region"] and model.sensor == values["sensor"] and
                   model.start <= dates[0] < dates[1] <= model.end]
     if not candidates:
-        raise ValueError("未安装覆盖该区域、传感器和日期的影像模型，请在设置中添加资源")
+        raise ValueError("当前部署未覆盖这批影像的区域、传感器或日期，请联系系统维护人员")
     matches = []
     for scene in scene_files:
         check_source(scene)

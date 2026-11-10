@@ -187,7 +187,7 @@ def import_definition(workspace, path, layer=None):
                             (SELECT id,max(revision) FROM crs_catalog WHERE kind='definition' GROUP BY id)""")
         for row in latest:
             entry = json.loads(row[0])
-            if crs.equals(CRS.from_wkt(entry["definition"]["wkt"]), ignore_axis_order=True):
+            if not entry.get("removed") and crs.equals(CRS.from_wkt(entry["definition"]["wkt"]), ignore_axis_order=True):
                 return entry
         return insert(db, "definition", identifier, definition["name"],
                       {"definition": definition, "source_file": str(path), **evidence})

@@ -32,7 +32,7 @@ async function startDesktop(options) {
     const vendor = path.join(rendererRuntime, 'node_modules');
     const localFiles = ['index.html', 'app.js', 'shell-ui.js', 'settings.js', 'map.js', 'coordinates.js', 'skills.js',
         'materials-ui.js', 'skill-editor.js',
-        'style.css', 'theme.css', 'mark.svg', 'model-form.js', 'onboarding.js',
+        'style.css', 'theme.css', 'mark.svg', 'luhe-banner.png', 'model-form.js', 'onboarding.js',
         'portrait.html', 'portrait.css', 'portrait.js', 'task-commands.js', 'speech-settings.js',
         'speech-audio.js', 'voice-input.js', 'visual.html', 'visual.css', 'visual.js', 'arcmap.js'];
     const files = new Map(localFiles.map(name => ['/' + name, path.join(__dirname, name)]));
@@ -65,6 +65,7 @@ async function startDesktop(options) {
     let visual;
     let sync;
     let draft = {};
+    let modelCheck;
     const speech = new SpeechController({ userData: app.getPath('userData'), storage: safeStorage,
         local: new LocalSpeechRuntime(path.join(runtime, 'python', 'python.exe'), externalPath),
         bundledLocalRoot: options.bundledSpeech });
@@ -141,6 +142,10 @@ async function startDesktop(options) {
     }
     bind('state', () => withSpeech(controller.state()));
     bind('appearance', desktop.configureAppearance);
+    bind('shortcutCapture', (surface, enabled) => {
+        if (surface !== window || typeof enabled !== 'boolean') throw new Error('快捷键录入请求无效');
+        desktop.captureShortcut(enabled);
+    }, true);
     bind('readDraft', () => draft);
     bind('saveDraft', (source, next) => {
         if (!next || typeof next !== 'object' || Array.isArray(next)) throw new Error('草稿无效');
@@ -164,6 +169,7 @@ async function startDesktop(options) {
     });
     bind('configure', input => {
         const state = controller.configure(input);
+        modelCheck = undefined;
         sync.refresh();
         broadcast(state);
         return withSpeech(state);
@@ -177,6 +183,27 @@ async function startDesktop(options) {
         const { config, key } = controller.selectModel(input);
         return testModel(controller.runtime, config, key);
     });
+    bind('diagnostics', async (surface, check) => {
+        if (surface !== window || typeof check !== 'boolean') throw new Error('诊断请求无效');
+        const settings = controller.state().settings;
+        const config = settings.modelConfig;
+        if (check && config) {
+            if (controller.active) throw new Error('请在当前任务结束后检查模型');
+            const at = new Date().toISOString();
+            try {
+                const { key } = controller.selectModel({ modelConfig: config });
+                await testModel(controller.runtime, config, key);
+                if (controller.settings.modelConfig === config) modelCheck = { state: 'verified', at };
+            } catch (error) {
+                if (controller.settings.modelConfig === config) modelCheck = { state: 'failed', at, detail: error.message };
+            }
+        }
+        const appearance = desktop.appearance();
+        return { model: { mode: config?.mode, name: config?.model, state: config ? 'configured' : 'missing', ...modelCheck },
+            voice: { asr: speech.diagnostic('asr'), tts: speech.diagnostic('tts') },
+            bridge: Boolean(settings.arcmapBridge && fs.existsSync(settings.arcmapBridge)),
+            shortcut: { registered: appearance.shortcutRegistered, value: appearance.shortcut } };
+    }, true);
     bind('speechConfigure', input => {
         const settings = speech.configure(input);
         broadcast(controller.state());
@@ -231,20 +258,6 @@ async function startDesktop(options) {
         return pick.canceled ? { items: [], issues: [] } : controller.intake(pick.filePaths, kind);
     });
     bind('materialPaths', (paths, kind) => controller.intake(paths, kind));
-    bind('imageryModels', () => controller.python('imagery-models'));
-    bind('imageryModelActivate', (name, version, active) => {
-        if (typeof name !== 'string' || typeof version !== 'string' || typeof active !== 'boolean') throw new Error('模型版本无效');
-        return controller.python('imagery-model-activate', '--', name, version, active ? 'enabled' : 'disabled');
-    });
-    bind('imageryModelAdd', async () => {
-        const model = await dialog.showOpenDialog(window, { title: '选择影像模型', properties: ['openFile'],
-            filters: [{ name: '影像模型', extensions: ['onnx'] }] });
-        if (model.canceled) return null;
-        const profile = await dialog.showOpenDialog(window, { title: '选择模型适用范围清单', properties: ['openFile'],
-            filters: [{ name: '适用范围清单', extensions: ['json'] }] });
-        if (profile.canceled) return null;
-        return controller.python('imagery-model-add', externalPath(model.filePaths[0]), externalPath(profile.filePaths[0]));
-    });
     bind('exportDelivery', async (id, kind, format) => {
         if (!['shp', 'pdf', 'original'].includes(format) || (format === 'pdf') !== (kind === 'report')) {
             throw new Error('成果导出格式无效');
@@ -266,9 +279,6 @@ async function startDesktop(options) {
         shell.showItemInFolder(output);
     });
     bind('mapAction', async (...args) => withSpeech(await controller.mapAction(...args)));
-    bind('layoutReport', async () => {
-        if (await shell.openPath(await controller.layoutReport())) throw new Error('无法打开版面');
-    });
     bind('submit', task => {
         const state = controller.command(task);
         draft = {};
@@ -324,6 +334,12 @@ async function startDesktop(options) {
         return controller.coordinateCatalog();
     });
     bind('coordinateRename', input => controller.request('crs-rename', input));
+    bind('coordinateRemove', reference => {
+        if (typeof reference !== 'string' || !/^[a-f0-9]{64}@[1-9][0-9]{0,7}$/.test(reference)) {
+            throw new Error('请选择有效的坐标系');
+        }
+        return controller.python('crs-remove', reference);
+    });
     bind('coordinateApply', async (input, plan) => shell.showItemInFolder(await controller.transformMaterial(input, plan)));
     bind('coordinateSolve', input => controller.request('crs-solve', { ...input,
         ...Object.fromEntries(['source_points', 'target_points'].map(key => [key, {

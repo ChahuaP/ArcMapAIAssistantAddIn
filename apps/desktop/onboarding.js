@@ -5,7 +5,6 @@
     const { Titlebar } = window.GuizhiShell;
     const { ModelForm, Workspace, initial, errorText } = window.GuizhiModel;
     const steps = ['成果位置', '模式与模型', '语音', '开始使用'];
-    const providers = { off: '关闭', local: '本机语音', minimax: 'MiniMax', custom: '自定义服务' };
 
     window.GuizhiOnboarding = function Onboarding({ state, save }) {
         const [step, setStep] = useState(0);
@@ -44,8 +43,8 @@
             ['成果保存位置', value.workspace],
             ['运行模式', value.modelConfig.mode === 'local' ? '本地服务' : '在线服务'],
             ['模型', value.modelConfig.model],
-            ['语音识别', providers[voice.asr]],
-            ['语音播报', providers[voice.tts]],
+            ['语音识别', window.GuizhiSpeechNames[voice.asr]],
+            ['语音播报', window.GuizhiSpeechNames[voice.tts]],
         ];
         const content = [
             () => h('section', { className: 'settings-card' }, h('h2', null, '成果保存位置'),

@@ -273,11 +273,6 @@ class DesktopController {
         }
     }
 
-    async layoutReport() {
-        if (this.mapView?.mode !== 'layout') throw new Error('请先切换至版面');
-        return checkedArtifact(await this.python('inspect', this.mapView.id), 'report').file;
-    }
-
     async importCoordinate(file, layer) {
         if (this.active) throw new Error('请先结束当前任务');
         return this.python('crs-define', this.externalPath(file), ...(layer ? ['--layer', layer] : []));

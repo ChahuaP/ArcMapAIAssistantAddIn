@@ -53,6 +53,7 @@ def main() -> int:
     define.add_argument("--layer")
     commands.add_parser("crs-solve").add_argument("request", type=Path)
     commands.add_parser("crs-rename").add_argument("request", type=Path)
+    commands.add_parser("crs-remove").add_argument("reference")
     commands.add_parser("crs-show").add_argument("reference")
     commands.add_parser("execute", help="Run a registered operation from a JSON request").add_argument("request", type=Path)
     commands.add_parser("capabilities", help="List registered independent operations")
@@ -225,7 +226,7 @@ def main() -> int:
             print(json.dumps(result))
             return 0
         if args.command.startswith("crs-"):
-            from guizhi.infrastructure.crs_catalog import catalog, get_plan, rename
+            from guizhi.infrastructure.crs_catalog import catalog, get_plan, remove_definition, rename
 
             workspace = Workspace(args.workspace, create=True)
             if args.command == "crs-list":
@@ -234,6 +235,8 @@ def main() -> int:
                 result = get_plan(workspace, args.reference)
             elif args.command == "crs-rename":
                 result = rename(workspace, **json.loads(args.request.read_text(encoding="utf-8-sig")))
+            elif args.command == "crs-remove":
+                result = remove_definition(workspace, args.reference)
             elif args.command == "crs-solve":
                 from guizhi.infrastructure.crs_solve import solve
 

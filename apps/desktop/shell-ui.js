@@ -19,6 +19,8 @@
         server: 'M3 4h18v7H3zM3 14h18v7H3zM7 7h.1M7 17h.1',
         globe: 'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0zM3 12h18M12 3c-4 4-4 14 0 18 4-4 4-14 0-18z',
         info: 'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0zM12 11v5m0-8h.1',
+        link: 'M10 14l4-4m-6 6-2 2a3 3 0 0 1-4-4l5-5a3 3 0 0 1 4 0m2 6a3 3 0 0 0 4 0l5-5a3 3 0 0 0-4-4l-2 2',
+        trash: 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 10v6m4-6v6',
     };
     function icon(name) {
         return h('svg', { viewBox: '0 0 24 24', width: 17, height: 17, fill: 'none', stroke: 'currentColor',
@@ -31,25 +33,31 @@
     function iconButton(glyph, label, props = {}) {
         return button(glyph, null, { type: 'text', title: label, 'aria-label': label, ...props });
     }
-    const brand = () => h('span', { className: 'brand' }, h('img', { src: '/mark.svg', alt: '', width: 28 }), '规智');
+    const productName = '南京市规划和自然资源局六合分局智慧治理系统';
+    const brand = (full = false) => h('span', { className: 'brand' + (full ? ' brand-full' : ''), title: full ? productName : undefined },
+        h('img', { src: '/mark.svg', alt: '', width: 28 }), h('span', null, full ? productName : '规智'));
     function Theme({ appearance, children }) {
         const dark = appearance.dark;
         useEffect(() => { document.documentElement.dataset.theme = dark ? 'dark' : 'light'; }, [dark]);
-        return h(ConfigProvider, { csp: { nonce: document.querySelector('meta[name=style-nonce]').content },
+        return h(ConfigProvider, { button: { autoInsertSpace: false },
+            csp: { nonce: document.querySelector('meta[name=style-nonce]').content },
             theme: { algorithm: dark ? theme.darkAlgorithm : theme.defaultAlgorithm,
-                token: { colorPrimary: dark ? '#75c6a0' : '#146c55', colorText: dark ? '#e7f1eb' : '#17352c',
-                    colorBgContainer: dark ? '#142b23' : '#ffffff', borderRadius: 8, controlHeight: 36,
-                    fontFamily: '"Segoe UI","Microsoft YaHei UI",sans-serif' } } }, children);
+                token: { colorPrimary: dark ? '#8ec9ff' : '#086ca9', colorText: dark ? '#eef3fa' : '#152235',
+                    colorBgContainer: dark ? '#172333' : '#ffffff', borderRadius: 8, controlHeight: 36,
+                    fontFamily: '"Segoe UI","Microsoft YaHei UI",sans-serif' },
+                components: { Segmented: { trackBg: dark ? '#131e2d' : '#eef3f9',
+                    itemSelectedBg: dark ? '#263c55' : '#fff', itemColor: dark ? '#bac8d9' : '#506176' },
+                Tabs: { horizontalItemGutter: 24, inkBarColor: dark ? '#8ec9ff' : '#086ca9' } } } }, children);
     }
     function Titlebar({ settings, onboarding, back, left, right, arcgis, connected, resize }) {
         return h('header', { className: 'titlebar' },
             h('div', { className: 'title-group' },
                 !onboarding && (settings ? iconButton('back', '返回工作台', { onClick: back })
                     : iconButton('left', '折叠或展开导航栏', { onClick: left, onKeyDown: resize(0) })),
-                brand(), !onboarding && h('span', { className: 'title-path' }, settings ? '设置' : '工作台')),
+                brand(!settings && !onboarding), settings && h('span', { className: 'title-path' }, '设置')),
             !settings && !onboarding && h('div', { className: 'title-group' },
-                button('map', 'ArcGIS 扩展', { type: 'text', onClick: arcgis,
-                    title: connected ? '已配置 ArcGIS 扩展' : '配置 ArcGIS 扩展' }),
+                button('link', '第三方扩展', { type: 'text', onClick: arcgis,
+                    title: connected ? 'ArcMap 已连接' : '查看第三方扩展' }),
                 iconButton('right', '折叠或展开材料与成果', { onClick: right, onKeyDown: resize(1) })));
     }
 
@@ -103,5 +111,5 @@
             compact && h(Drawer, { title: '材料与成果', width: 360, getContainer: false,
                 rootStyle: { position: 'absolute' }, open: drawer, onClose: () => showDrawer(false) }, inspector));
     }
-    window.GuizhiShell = { Theme, Workbench, Titlebar, brand, button, iconButton, icon };
+    window.GuizhiShell = { Theme, Workbench, Titlebar, brand, button, iconButton, icon, productName };
 })();

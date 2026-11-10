@@ -33,7 +33,7 @@
             fillOpacity: item.layer ? 0.4 : undefined });
     }
 
-    function MapPanel({ map, choose, selected }) {
+    function MapPanel({ map, choose, selected, editing }) {
         const [zoom, change] = useState(1);
         const [coverage, showCoverage] = useState(true);
         if (!map) return h('section', { className: 'map-panel map-empty', 'aria-label': '地图' },
@@ -41,8 +41,8 @@
                 h('svg', { viewBox: '0 0 350 490' }, ...Array.from({ length: 12 }, (_, i) =>
                     h('ellipse', { key: i, cx: 195, cy: 230, rx: 18 + i * 12, ry: 12 + i * 15,
                         transform: 'rotate(32 195 230)' })))),
-            h('div', { className: 'map-caption' }, h('span', { className: 'locator' }, '◇'), h('h2', null, '空间预览'),
-                h('p', null, '完成核查后，可查看项目范围和重叠区域。')));
+            h('div', { className: 'map-caption' }, h('span', { className: 'locator' }, window.GuizhiShell.icon('map')),
+                h('h2', null, editing ? '暂无自选图层' : '暂无空间成果')));
         const [left, bottom, right, top] = map.bounds;
         const span = Math.max(right - left, top - bottom) || 1;
         const width = Math.max(right - left, span * 0.06) * 1.18 / zoom;
@@ -67,7 +67,6 @@
         const [busy, setBusy] = useState(false);
         const [picked, pick] = useState(null);
         const [pending, chooseMaterial] = useState(null);
-        const [title, setTitle] = useState('');
         async function action(name, params, material) {
             setBusy(true);
             try { onState(await window.guizhi.mapAction(name, params, material)); }
@@ -88,26 +87,20 @@
         const chosen = layers.find(item => item.id === picked?.layer);
         const button = (label, click) => h('button', { type: 'button', disabled: busy, onClick: click }, label);
         return h('div', { className: 'map-workspace' },
-            enabled && h('div', { className: 'map-toolbar' },
-                h(antd.Segmented, { size: 'small', 'aria-label': '地图视图', options: ['成果地图', '图层工作区'],
-                    value: editing ? '图层工作区' : '成果地图', onChange: value => edit(value === '图层工作区') }),
-                editing && button('添加图层', add),
-                editing && layers.length > 0 && button('清空', () => action('clear_layers')),
-                editing && view && button(view.mode === 'layout' ? '切回地图' : '切换版面',
-                    () => action('set_view_mode', { mode: view.mode === 'layout' ? 'map' : 'layout' }))),
+            enabled && h(antd.Tabs, { size: 'small', className: 'map-tabs', animated: false,
+                activeKey: editing ? 'layers' : 'result', onChange: value => edit(value === 'layers'),
+                items: [{ key: 'result', label: '成果地图' }, { key: 'layers', label: '自选图层' }] }),
+            h(MapPanel, { key: editing ? view?.id || 'new' : 'result', map: editing ? view?.data : map, editing,
+                choose: editing ? pick : item => onParcel(item.id || null), selected: editing ? null : parcel }),
+            editing && h('div', { className: 'map-toolbar' },
+                window.GuizhiShell.button('plus', '添加图层', { size: 'small', disabled: busy, onClick: add }),
+                layers.length > 0 && button('清空', () => action('clear_layers'))),
             editing && pending && h('label', { className: 'map-toolbar' }, '图层',
                 h('select', { value: '', onChange: event => {
                     void action('add_layer', {}, { ...pending, layer: event.target.value });
                     chooseMaterial(null);
                 } }, h('option', { value: '' }, '选择图层'),
                 ...pending.layers.map(name => h('option', { key: name }, name)))),
-            editing && view?.mode === 'layout' && h('div', { className: 'map-toolbar' },
-                h('input', { placeholder: view.text.title, 'aria-label': '版面标题', value: title,
-                    onChange: event => setTitle(event.target.value) }),
-                button('保存标题', () => action('set_layout_text', { element: 'title', text: title })),
-                button('打开版面', () => window.guizhi.layoutReport().catch(fail))),
-            h(MapPanel, { key: editing ? view?.id || 'new' : 'result', map: editing ? view?.data : map,
-                choose: editing ? pick : item => onParcel(item.id || null), selected: editing ? null : parcel }),
             editing && layers.length > 0 && h('ul', { className: 'map-layers' },
                 ...layers.map((item, index) => h('li', { key: item.id },
                     h('label', null, h('input', { type: 'checkbox', checked: item.visible, disabled: busy,

@@ -3,10 +3,10 @@ const { contextBridge, ipcRenderer, webUtils } = require('electron');
 const api = {};
 for (const name of ['state', 'configure', 'workspace', 'material', 'submit', 'cancel', 'report',
     'skills', 'capabilities', 'capability', 'skillShow', 'skillPreview', 'skillTrial', 'skillPublish', 'skillOpen', 'skillTemplate', 'delivery',
-    'imageryModels', 'imageryModelAdd', 'imageryModelActivate', 'exportDelivery',
-    'coordinates', 'coordinateFile', 'importCoordinate', 'coordinateRename', 'coordinateSolve', 'coordinateApply',
-    'mapAction', 'layoutReport', 'approvalSource', 'workbench',
-    'appearance', 'readDraft', 'saveDraft', 'openLauncher', 'hideLauncher', 'portraitVoice', 'voiceDraft', 'voiceSubmit',
+    'exportDelivery', 'diagnostics',
+    'coordinates', 'coordinateFile', 'importCoordinate', 'coordinateRename', 'coordinateRemove', 'coordinateSolve', 'coordinateApply',
+    'mapAction', 'approvalSource', 'workbench',
+    'appearance', 'shortcutCapture', 'readDraft', 'saveDraft', 'openLauncher', 'hideLauncher', 'portraitVoice', 'voiceDraft', 'voiceSubmit',
     'workspaceReady', 'modelList', 'modelTest',
     'portraitHit', 'speechConfigure', 'speechRecognize', 'speechSynthesize', 'speechCancel', 'speechTest',
     'arcmapBridge', 'arcgisOpen', 'arcgisInstall', 'arcgisConfigure', 'arcgisDiscover', 'arcgisPublish', 'arcgisRetry', 'arcgisCapture']) {

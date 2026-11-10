@@ -115,7 +115,7 @@
                     field('角色名称', text(role.label, label => change({ label }))),
                     field('角色标识', text(role.id, id => change({ id }), { readOnly: Boolean(role.resource) })),
                     field('用途', text(role.purpose, purpose => change({ purpose }))),
-                    field('材料格式', role.resource ? h('span', null, '影像模型资源') : select(role.kind, kinds,
+                    field('材料格式', role.resource ? h('span', null, '由系统提供') : select(role.kind, kinds,
                         kind => change({ kind, geometry: 'any', coordinate: 'defined' }))),
                     role.kind === 'vector' && field('图形', select(role.geometry, { any: '不限', point: '点', line: '线', polygon: '面' },
                         geometry => change({ geometry }))),

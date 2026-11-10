@@ -69,12 +69,12 @@ function update(next) {
     bubble.hidden = message.hidden && detail.hidden;
     play.hidden = !task?.response;
     mic.disabled = next.speech.asr === 'off' || (next.speech.asr === 'local'
-        ? !next.speech.providers.includes('local') : !next.speech.asrProfile.keyConfigured);
+        ? !next.speech.localAvailable : !next.speech.asrProfile.keyConfigured);
     if (seen === undefined) seen = task?.response ? task.id : '';
     if (task?.response && task.id !== seen) {
         seen = task.id;
         if (next.speech.autoSpeak && next.speech.tts !== 'off' && mode === 'idle' && !held) {
-            const ready = next.speech.tts === 'local' ? next.speech.providers.includes('local')
+            const ready = next.speech.tts === 'local' ? next.speech.localAvailable
                 : next.speech.ttsProfile.keyConfigured;
             if (ready && ['succeeded', 'answered'].includes(task.status)) {
                 void voice.speak(task.response, next.speech.speaker).catch(fail);
