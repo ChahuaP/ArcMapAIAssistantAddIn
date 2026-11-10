@@ -48,7 +48,7 @@ Name: "core"; Description: "规智桌面与本机 GIS"; Flags: fixed; Types: lig
 Name: "speech"; Description: "本地语音"; Types: standard
 #endif
 #if HasArcmap == "1"
-Name: "arcmap"; Description: "ArcMap 扩展"; Types: standard
+Name: "arcmap"; Description: "ArcGIS 扩展"; Types: standard
 #endif
 
 [Tasks]

@@ -371,14 +371,15 @@
             manage: () => showBusiness('manage'), openArcgis: () => showArcmap(true),
             save: configure,
         }) : h(Workbench, { appearance, saveAppearance, sidebar, conversation, inspector, fail,
-            arcgis: () => { if (ready && !busy) showArcmap(true); else if (!ready) showSettings(true); },
-            connected: Boolean(state?.settings.arcmapBridge) });
+            arcgis: () => { if (ready) showArcmap(true); else showSettings(true); },
+            connected: Boolean(state?.arcgis?.host) });
         return h(Theme, { appearance }, layout,
             business && h(Business, { catalog, refresh, choose, plans, manage: business === 'manage',
                 initialMarkdown, close: () => { setInitialMarkdown(''); showBusiness(''); } }),
-            arcmap && state && h(window.GuizhiArcmap, { configured: state.settings.arcmapBridge, task,
+            arcmap && state && h(window.GuizhiArcmap, { configured: state.settings.arcmapBridge, sync: state.arcgis, task,
                 close: () => showArcmap(false), attach: project => {
-                    setDraft({ ...emptyDraft(), project });
+                    setDraft(old => old.skill ? { ...old, unassigned: mergeMaterials(old.unassigned, [project]) }
+                        : { ...old, materials: { ...old.materials, inputs: mergeMaterials(old.materials.inputs || [], [project]) } });
                     select(null);
                     showSettings(false);
                 } }));

@@ -114,7 +114,7 @@ def descriptor(root, entry, *, verify_all=False):
     if "speech" in selected:
         check.add("speech/identity.json")
     if "arcmap" in selected:
-        check.add("arcmap/ArcMapBridge.exe")
+        check.update({"arcmap/ArcMapBridge.exe", "arcmap/ArcMapBridge.build"})
     if not check <= expected.keys():
         raise ValueError("安装组件不完整")
     if verify_all:

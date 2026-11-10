@@ -4,11 +4,12 @@ const api = {};
 for (const name of ['state', 'configure', 'workspace', 'material', 'submit', 'cancel', 'report',
     'skills', 'capabilities', 'capability', 'skillShow', 'skillPreview', 'skillTrial', 'skillPublish', 'skillOpen', 'skillTemplate', 'delivery',
     'imageryModels', 'imageryModelAdd', 'imageryModelActivate', 'exportDelivery',
-    'coordinates', 'importCoordinate', 'mapAction', 'layoutReport', 'approvalSource', 'workbench',
+    'coordinates', 'coordinateFile', 'importCoordinate', 'coordinateRename', 'coordinateSolve', 'coordinateApply',
+    'mapAction', 'layoutReport', 'approvalSource', 'workbench',
     'appearance', 'readDraft', 'saveDraft', 'openLauncher', 'hideLauncher', 'portraitVoice', 'voiceDraft', 'voiceSubmit',
     'workspaceReady', 'modelList', 'modelTest',
     'portraitHit', 'speechConfigure', 'speechRecognize', 'speechSynthesize', 'speechCancel', 'speechTest',
-    'arcmapBridge', 'arcmapFile', 'arcmapExchange']) {
+    'arcmapBridge', 'arcgisOpen', 'arcgisInstall', 'arcgisConfigure', 'arcgisDiscover', 'arcgisPublish', 'arcgisRetry', 'arcgisCapture']) {
     api[name] = (...args) => ipcRenderer.invoke('guizhi:' + name, ...args);
 }
 api.intakeDropped = (files, kind) => ipcRenderer.invoke('guizhi:materialPaths',

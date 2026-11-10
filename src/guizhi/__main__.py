@@ -48,9 +48,11 @@ def main() -> int:
     activation.add_argument("state", choices=("enabled", "disabled"))
     commands.add_parser("crs-list")
     commands.add_parser("crs-import").add_argument("file", type=Path)
-    commands.add_parser("crs-define", help="Import the coordinate definition of a Shapefile").add_argument(
-        "file", type=Path, help=".shp with its matching .prj in the same folder",
-    )
+    define = commands.add_parser("crs-define", help="Import a coordinate definition from a dataset")
+    define.add_argument("file", type=Path)
+    define.add_argument("--layer")
+    commands.add_parser("crs-solve").add_argument("request", type=Path)
+    commands.add_parser("crs-rename").add_argument("request", type=Path)
     commands.add_parser("crs-show").add_argument("reference")
     commands.add_parser("execute", help="Run a registered operation from a JSON request").add_argument("request", type=Path)
     commands.add_parser("capabilities", help="List registered independent operations")
@@ -84,9 +86,15 @@ def main() -> int:
     commands.add_parser("platform-contract", help="Read the local platform connector contract")
     commands.add_parser("platform-handoff", help="Describe verified local artifacts for handoff").add_argument(
         "request", type=Path)
-    host = commands.add_parser("arcmap", help="Exchange a saved MXD with a local ArcMap 10.2 bridge")
-    host.add_argument("bridge", type=Path)
-    host.add_argument("request", type=Path)
+    live = commands.add_parser("arcgis-stage")
+    live.add_argument("bridge", type=Path)
+    live.add_argument("request", type=Path)
+    commands.add_parser("arcgis-capture").add_argument("request", type=Path)
+    commands.add_parser("arcgis-revision").add_argument("database", type=Path)
+    notify = commands.add_parser("arcgis-notify")
+    notify.add_argument("pid", type=int)
+    notify.add_argument("window", type=int)
+    commands.add_parser("arcgis-launcher")
     commands.add_parser("_dispatch-replay").add_argument("request", type=Path)
     args = parser.parse_args()
     try:
@@ -134,10 +142,20 @@ def main() -> int:
                       else prepare(args.workspace, json.loads(args.request.read_text(encoding="utf-8-sig"))))
             print(json.dumps(result))
             return 0
-        if args.command == "arcmap":
-            from guizhi.infrastructure.arcmap import exchange
+        if args.command in {"arcgis-stage", "arcgis-capture", "arcgis-revision", "arcgis-notify", "arcgis-launcher"}:
+            from guizhi.infrastructure import arcgis_live
 
-            print(json.dumps(exchange(args.workspace, args.bridge, json.loads(args.request.read_text(encoding="utf-8-sig")))))
+            if args.command == "arcgis-launcher":
+                result = arcgis_live.launcher()
+            elif args.command == "arcgis-notify":
+                result = arcgis_live.notify(args.pid, args.window)
+            elif args.command == "arcgis-revision":
+                result = {"revision": arcgis_live.revision(args.database)}
+            else:
+                payload = json.loads(args.request.read_text(encoding="utf-8-sig"))
+                result = (arcgis_live.prepare(args.workspace, args.bridge, payload) if args.command == "arcgis-stage"
+                          else arcgis_live.capture(args.workspace, payload))
+            print(json.dumps(result))
             return 0
         if args.command == "_dispatch-replay":
             from guizhi.application.dispatch import replay
@@ -207,18 +225,24 @@ def main() -> int:
             print(json.dumps(result))
             return 0
         if args.command.startswith("crs-"):
-            from guizhi.infrastructure.crs_catalog import catalog, get_plan
+            from guizhi.infrastructure.crs_catalog import catalog, get_plan, rename
 
             workspace = Workspace(args.workspace, create=True)
             if args.command == "crs-list":
                 result = catalog(workspace)
             elif args.command == "crs-show":
                 result = get_plan(workspace, args.reference)
+            elif args.command == "crs-rename":
+                result = rename(workspace, **json.loads(args.request.read_text(encoding="utf-8-sig")))
+            elif args.command == "crs-solve":
+                from guizhi.infrastructure.crs_solve import solve
+
+                result = solve(workspace, json.loads(args.request.read_text(encoding="utf-8-sig")))
             else:
                 from guizhi.infrastructure.coordinates import import_definition, import_plan
 
-                importer = import_plan if args.command == "crs-import" else import_definition
-                result = importer(workspace, args.file)
+                result = (import_plan(workspace, args.file) if args.command == "crs-import"
+                          else import_definition(workspace, args.file, args.layer))
             print(json.dumps(result))
             return 0
         if args.command in {"run", "check"}:

@@ -158,10 +158,17 @@ dialog { color: var(--ink); background: var(--panel); border: 1px solid var(--li
 dialog::backdrop { background: #0d1c1668; }
 .dialog-head { display: flex; align-items: center; justify-content: space-between; }
 dialog label { display: grid; gap: 5px; }
-.coordinate-list, .voice-settings { padding: 8px 0; border-top: 1px solid var(--line); }
-.coordinate-list summary, .voice-settings summary { cursor: pointer; padding: 5px 0; }
-.coordinate-list pre { overflow: auto; max-height: 135px; background: var(--sub); padding: 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
-.coordinate-list p { padding: 6px 0; font-size: 12px; }
+.voice-settings { padding: 8px 0; border-top: 1px solid var(--line); }
+.voice-settings summary { cursor: pointer; padding: 5px 0; }
+.coordinate-page, .coordinate-wizard, .arcgis-jobs { display: grid; gap: 12px; width: 100%; }
+.coordinate-file { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.coordinate-file span { overflow-wrap: anywhere; }
+.coordinate-wizard fieldset { min-width: 0; display: grid; gap: 12px; margin: 0; padding: 0; border: 0; }
+.coordinate-wizard label, .coordinate-file label, .arcgis-dialog label:not(.voice-toggle) { display: grid; gap: 5px; }
+.coordinate-record, .coordinate-result, .arcgis-job { display: grid; min-width: 0; gap: 6px; padding: 12px;
+    border: 1px solid var(--line); border-radius: 10px; background: var(--sub); }
+.coordinate-record pre { max-height: 150px; overflow: auto; overflow-wrap: anywhere; white-space: pre-wrap; }
+.arcgis-dialog .settings-card { margin-top: 0; }
 .coordinate-actions, .business-actions, .delivery-actions { display: flex; flex-wrap: wrap; gap: 7px; }
 .business-dialog { display: grid; gap: 14px; width: min(860px, 94vw); }
 .business-dialog:not([open]) { display: none; }

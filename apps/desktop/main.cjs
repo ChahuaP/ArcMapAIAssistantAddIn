@@ -11,6 +11,7 @@ const { createShell } = require('./shell.cjs');
 const { listModels, testModel } = require('./model-service.cjs');
 const { formats, materialBindings } = require('./materials.cjs');
 const { printReport } = require('./report-export.cjs');
+const { ArcGisSync } = require('./arcgis-sync.cjs');
 
 const origin = 'guizhi://app';
 protocol.registerSchemesAsPrivileged([{ scheme: 'guizhi', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
@@ -62,11 +63,12 @@ async function startDesktop(options) {
     const launcherUrl = workbenchUrl + '?surface=launcher';
     const portraitUrl = origin + '/portrait.html';
     let visual;
+    let sync;
     let draft = {};
     const speech = new SpeechController({ userData: app.getPath('userData'), storage: safeStorage,
         local: new LocalSpeechRuntime(path.join(runtime, 'python', 'python.exe'), externalPath),
         bundledLocalRoot: options.bundledSpeech });
-    const withSpeech = state => ({ ...state, speech: speech.state(), appearance: desktop.appearance(), version });
+    const withSpeech = state => ({ ...state, speech: speech.state(), appearance: desktop.appearance(), arcgis: sync?.state(), version });
     function broadcast(state) {
         visual?.update(state);
         desktop.notify('state', withSpeech(state));
@@ -74,6 +76,9 @@ async function startDesktop(options) {
     const controller = new DesktopController({ userData: app.getPath('userData'), runtime, dsh,
         safeStorage, externalPath, onChange: broadcast, bundledArcmap: options.bundledArcmap,
         installationRoot: options.installationRoot });
+    const hostRoot = process.env.GUIZHI_ARCGIS_HOSTS || path.join(process.env.LOCALAPPDATA, 'Guizhi', 'ArcGIS', 'hosts');
+    sync = new ArcGisSync(controller, hostRoot, () => broadcast(controller.state()));
+    controller.onCompleted = task => sync.completed(task);
     visual = new VisualSession({ python: controller.runtime.python,
         masks: () => portrait.isVisible() ? [portrait.getBounds()] : [],
         cancel: () => broadcast(controller.cancel()) });
@@ -114,6 +119,7 @@ async function startDesktop(options) {
         if (closing) return;
         closing = true;
         desktop.close();
+        sync.close();
         visual.close();
         speech.cancel();
         void controller.close().finally(() => { quitting = true; tray.destroy(); app.quit(); });
@@ -158,6 +164,7 @@ async function startDesktop(options) {
     });
     bind('configure', input => {
         const state = controller.configure(input);
+        sync.refresh();
         broadcast(state);
         return withSpeech(state);
     });
@@ -197,22 +204,24 @@ async function startDesktop(options) {
             filters: [{ name: 'ArcMap Bridge', extensions: ['exe'] }] });
         return pick.canceled ? null : controller.selectArcmapBridge(pick.filePaths[0]);
     });
-    bind('arcmapFile', async () => {
+    bind('arcgisOpen', async () => {
         const pick = await dialog.showOpenDialog(window, { properties: ['openFile'],
-            filters: [{ name: 'ArcGIS 工程或图层文件', extensions: ['mxd', 'json'] }] });
+            filters: [{ name: 'ArcGIS 工程', extensions: ['mxd'] }] });
         if (pick.canceled) return null;
-        const file = pick.filePaths[0];
-        if (path.extname(file).toLowerCase() === '.mxd') return { action: 'describe', map: file };
-        if (fs.statSync(file).size > 2 << 20) throw new Error('ArcGIS 图层文件过大');
-        const payload = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
-        if (payload.action !== 'import' || !payload.map_revision) throw new Error('ArcGIS 图层文件无效');
-        return payload;
+        const file = externalPath(pick.filePaths[0]);
+        await sync.open(file);
+        return file;
     });
-    bind('arcmapExchange', async request => {
-        const result = await controller.arcmap(request);
-        if (request.action === 'publish') shell.showItemInFolder(result.output);
-        return result;
+    bind('arcgisInstall', async () => {
+        const file = options.bundledArcmap && path.join(path.dirname(options.bundledArcmap), 'Guizhi.esriaddin');
+        if (!file || !fs.existsSync(file)) throw new Error('请从规智交付目录安装 Guizhi.esriaddin');
+        if (await shell.openPath(file)) throw new Error('无法打开 ArcGIS 扩展安装程序');
     });
+    bind('arcgisConfigure', input => sync.configure(input));
+    bind('arcgisDiscover', session => sync.discover(session));
+    bind('arcgisPublish', id => sync.enqueue(controller.tasks.find(task => task.id === id)));
+    bind('arcgisRetry', id => sync.retry(id));
+    bind('arcgisCapture', (index, selected) => sync.capture(index, selected));
     bind('material', async (kind = 'any', folder = false) => {
         if (kind !== 'any' && !Object.hasOwn(formats, kind)) throw new Error('材料格式无效');
         const groups = kind === 'any' ? Object.values(formats) : [formats[kind]];
@@ -300,15 +309,26 @@ async function startDesktop(options) {
     bind('approvalSource', async (...args) => {
         if (await shell.openPath(await controller.approvalSource(...args))) throw new Error('无法打开依据');
     });
-    bind('importCoordinate', async kind => {
-        if (!['plan', 'definition'].includes(kind)) throw new Error('请选择坐标资料类型');
+    bind('coordinateFile', async kind => {
+        if (!['definition', 'points'].includes(kind)) throw new Error('请选择坐标材料类型');
         const pick = await dialog.showOpenDialog(window, { properties: ['openFile'], filters: [
-            kind === 'plan' ? { name: '坐标转换方案', extensions: ['json'] }
-                : { name: 'Shapefile', extensions: ['shp'] },
+            { name: '坐标材料', extensions: ['shp', 'gpkg', 'geojson', ...(kind === 'definition' ? ['tif', 'tiff', 'img'] : [])] },
         ] });
-        if (!pick.canceled) await controller.importCoordinate(kind, pick.filePaths[0]);
+        if (pick.canceled) return null;
+        const file = externalPath(pick.filePaths[0]);
+        return kind === 'points' || ['.gpkg', '.geojson'].includes(path.extname(file).toLowerCase())
+            ? controller.describe(file) : { file, name: path.basename(file), layers: [], layer: null };
+    });
+    bind('importCoordinate', async (file, layer) => {
+        await controller.importCoordinate(file, layer);
         return controller.coordinateCatalog();
     });
+    bind('coordinateRename', input => controller.request('crs-rename', input));
+    bind('coordinateApply', async (input, plan) => shell.showItemInFolder(await controller.transformMaterial(input, plan)));
+    bind('coordinateSolve', input => controller.request('crs-solve', { ...input,
+        ...Object.fromEntries(['source_points', 'target_points'].map(key => [key, {
+            file: externalPath(input[key].file), layer: input[key].layer,
+        }])) }));
     bind('report', async id => {
         const error = await shell.openPath(await controller.report(id));
         if (error) throw new Error('无法打开报告');
@@ -319,7 +339,7 @@ async function startDesktop(options) {
         if (!controller.settings.workspace || !controller.settings.modelConfig) reveal();
         desktop.showPortrait();
     }
-    return { window, launcher, portrait, tray, controller, speech, visual };
+    return { window, launcher, portrait, tray, controller, speech, visual, arcgis: sync };
 }
 
 module.exports = { startDesktop };

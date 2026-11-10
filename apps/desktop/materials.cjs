@@ -21,7 +21,8 @@ function materialBindings(groups) {
                     (kind === 'vector' ? !item.layers?.includes(item.layer) : item.layer !== null)) {
                 throw new Error('请补齐材料文件及矢量图层');
             }
-            return { file: item.file, layer: item.layer };
+            if (item.revision && !/^[a-f0-9]{64}$/.test(item.revision)) throw new Error('材料快照版本无效');
+            return { file: item.file, layer: item.layer, ...(item.revision ? { revision: item.revision } : {}) };
         })]));
 }
 

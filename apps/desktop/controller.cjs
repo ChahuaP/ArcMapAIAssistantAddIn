@@ -142,13 +142,16 @@ class DesktopController {
         try {
             const result = await exec(this.runtime.python, ['-I', '-B', cli, '--workspace',
                 this.settings.workspace, command, ...args], {
-                windowsHide: true, timeout: ['skill-trial', 'skill-publish', 'material-intake'].includes(command) ? 240000
-                    : command === 'arcmap' ? 95000 : 30000,
+                windowsHide: true, timeout: ['skill-trial', 'skill-publish', 'material-intake', 'crs-solve', 'crs-define',
+                    'arcgis-capture', 'arcgis-revision'].includes(command) ? 240000 : command === 'arcgis-stage' ? 95000 : 30000,
                 maxBuffer: 8 << 20 });
             return JSON.parse(result.stdout);
         } catch (error) {
             let message;
-            try { message = JSON.parse(error.stderr).error; } catch { /* Process failed before producing a record. */ }
+            try {
+                message = JSON.parse(error.stderr || error.stdout).error;
+                if (message?.startsWith('{')) message = JSON.parse(message).error;
+            } catch { /* Process failed before producing a record. */ }
             throw new Error(message?.replace(/^(ValueError|ValidationError|Fault): /, '').trim() || '无法读取材料或成果');
         }
     }
@@ -157,13 +160,13 @@ class DesktopController {
         return this.python('material-describe', file);
     }
 
-    async request(command, payload) {
+    async request(command, payload, ...prefix) {
         if (!this.settings.workspace) throw new Error('请先选择成果保存位置');
         const file = path.join(this.settings.workspace, 'request-' + randomUUID() + '.json');
         try {
             if (typeof payload === 'string') fs.writeFileSync(file, payload, { flag: 'wx' });
             else save(file, payload);
-            return await this.python(command, file);
+            return await this.python(command, ...prefix, file);
         } finally { fs.rmSync(file, { force: true }); }
     }
 
@@ -180,30 +183,14 @@ class DesktopController {
         return this.settings.arcmapBridge;
     }
 
-    async arcmap(request) {
-        const { workspace } = this.settings;
-        const arcmapBridge = this.settings.arcmapBridge || this.bundledArcmap;
-        if (!workspace || !arcmapBridge) throw new Error('请先选择 ArcMap Bridge');
-        if (this.active || this.hostBusy || this.mapBusy) throw new Error('请先结束当前操作');
-        const file = path.join(workspace, 'arcmap-' + randomUUID() + '.json');
-        this.hostBusy = true;
-        try {
-            save(file, request);
-            const result = await this.python('arcmap', arcmapBridge, file);
-            return request.action === 'import' ? { ...result, material: await this.describe(result.file) } : result;
-        } finally {
-            fs.rmSync(file, { force: true });
-            this.hostBusy = false;
-        }
-    }
 
     submit({ prompt, project, control, skill, materials = {}, previousTask, skillParameters, parameterText }) {
         if (!this.settings.workspace) throw new Error('请先选择成果保存位置');
         if (this.active) throw new Error('已有任务在运行');
         if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 4000) throw new Error('请输入办理事项');
-        const bindings = materialBindings(materials);
+        const bindings = materialBindings({ ...materials, ...(project ? { project: [project] } : {}),
+            ...(control ? { control: [control] } : {}) });
         const previousRun = this.tasks.find(item => item.id === previousTask && item.status === 'succeeded')?.runId;
-        materialBindings({ project: project ? [project] : [], control: control ? [control] : [] });
         if (skill && !/^[a-z][a-z0-9_-]{0,39}@[1-9]\d*$/.test(skill)) throw new Error('请选择已发布的技能');
         if (skillParameters && Buffer.byteLength(JSON.stringify(skillParameters)) > 65536) throw new Error('办理参数最多 64 KB');
         const { config, key } = this.selectModel({ modelConfig: this.settings.modelConfig });
@@ -235,8 +222,7 @@ class DesktopController {
         });
         child.send({ type: 'start', options: { ...this.runtime, workspace: this.settings.workspace,
             modelConfig: config, apiKey: key,
-            prompt: task.prompt, input: project?.file, layer: project?.layer,
-            control: control?.file, controlLayer: control?.layer, skill, skillParameters, materials: bindings, previousRun,
+            prompt: task.prompt, skill, skillParameters, materials: bindings, previousRun,
             projectPlan: project?.plan || materials.project?.[0]?.plan,
             controlPlan: control?.plan || materials.control?.[0]?.plan } });
         return this.state();
@@ -292,10 +278,16 @@ class DesktopController {
         return checkedArtifact(await this.python('inspect', this.mapView.id), 'report').file;
     }
 
-    async importCoordinate(kind, file) {
+    async importCoordinate(file, layer) {
         if (this.active) throw new Error('请先结束当前任务');
-        if (!['plan', 'definition'].includes(kind)) throw new Error('请选择坐标资料类型');
-        return this.python(kind === 'plan' ? 'crs-import' : 'crs-define', file);
+        return this.python('crs-define', this.externalPath(file), ...(layer ? ['--layer', layer] : []));
+    }
+
+    async transformMaterial(input, plan) {
+        const file = this.externalPath(input.file);
+        const [material] = materialBindings({ input: [{ ...input, file }] }).input;
+        const run = await this.request('execute', { operation: 'crs.transform', inputs: [material], parameters: { plan } });
+        return checkedArtifact(run, 'export').file;
     }
 
     async complete(task, receipt) {
@@ -328,6 +320,10 @@ class DesktopController {
             this.active = null;
             this.persist();
             this.onChange(this.state());
+            if (status === 'succeeded') {
+                try { this.onCompleted?.(task); }
+                catch (error) { console.error('ArcGIS publication:', error.message); }
+            }
         }
     }
 

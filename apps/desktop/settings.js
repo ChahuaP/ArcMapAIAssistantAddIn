@@ -95,7 +95,8 @@
             skills: () => [card('业务管理', button('grid', '管理业务技能',
                 { onClick: manage, disabled: !state.settings.workspace })), h(ImageryResources, { key: 'imagery' })],
             arcgis: () => card('ArcGIS 扩展', h('p', { className: 'muted' },
-                state.settings.arcmapBridge ? '已配置 ArcMap Bridge' : '配置 ArcMap Bridge 后可使用工程与图层。'),
+                state.arcgis?.host ? '已连接 ArcGIS ' + state.arcgis.host.version + ' · ' + state.arcgis.connection.map.split(/[\\/]/).at(-1)
+                    : state.arcgis?.connection ? '等待连接的工程打开' : '请选择正在 ArcGIS 中打开的工程。'),
                 button('map', '打开 ArcGIS 扩展', { onClick: openArcgis, disabled: !state.settings.workspace })),
             about: () => card('规智', h('p', { className: 'muted' }, state.version)),
         };
