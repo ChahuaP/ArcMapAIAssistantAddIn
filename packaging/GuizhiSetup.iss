@@ -23,10 +23,12 @@ CloseApplications=no
 RestartApplications=no
 OutputDir={#OutputDir}
 OutputBaseFilename=GuizhiSetup-{#Build}
+SetupIconFile={#Stage}\bootstrap\guizhi.ico
 Compression=lzma2/fast
 SolidCompression=yes
 WizardStyle=modern
 UninstallDisplayName=规智
+UninstallDisplayIcon={app}\bootstrap\guizhi.ico
 
 [Languages]
 Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
@@ -68,8 +70,8 @@ Source: "{#Stage}\payload\arcmap\*"; DestDir: "{code:ReleaseDirectory}\arcmap"; 
 #endif
 
 [Icons]
-Name: "{group}\规智"; Filename: "{app}\bootstrap\pythonw.exe"; Parameters: "-I -B ""{app}\bootstrap\install_state.py"" --root ""{app}"" launch --user-data ""{localappdata}\Guizhi\Desktop"""
-Name: "{userdesktop}\规智"; Filename: "{app}\bootstrap\pythonw.exe"; Parameters: "-I -B ""{app}\bootstrap\install_state.py"" --root ""{app}"" launch --user-data ""{localappdata}\Guizhi\Desktop"""; Tasks: desktopicon
+Name: "{group}\规智"; Filename: "{app}\bootstrap\pythonw.exe"; Parameters: "-I -B ""{app}\bootstrap\install_state.py"" --root ""{app}"" launch --user-data ""{localappdata}\Guizhi\Desktop"""; IconFilename: "{app}\bootstrap\guizhi.ico"
+Name: "{userdesktop}\规智"; Filename: "{app}\bootstrap\pythonw.exe"; Parameters: "-I -B ""{app}\bootstrap\install_state.py"" --root ""{app}"" launch --user-data ""{localappdata}\Guizhi\Desktop"""; IconFilename: "{app}\bootstrap\guizhi.ico"; Check: InstallDesktopIcon
 
 [Run]
 Filename: "{app}\bootstrap\pythonw.exe"; Parameters: "-I -B ""{app}\bootstrap\install_state.py"" --root ""{app}"" launch --user-data ""{localappdata}\Guizhi\Desktop"""; Description: "打开规智"; Flags: postinstall nowait skipifsilent unchecked
@@ -83,6 +85,25 @@ Type: files; Name: "{app}\last-install-error.txt"
 var
   Attempt: String;
   RemoveSettings: Boolean;
+
+function InstallDesktopIcon: Boolean;
+var
+  Shortcut, Target: String;
+  Shell, Link: Variant;
+begin
+  Result := WizardIsTaskSelected('desktopicon');
+  if Result then Exit;
+  Shortcut := ExpandConstant('{userdesktop}\规智.lnk');
+  if not FileExists(Shortcut) then Exit;
+  try
+    Shell := CreateOleObject('WScript.Shell');
+    Link := Shell.CreateShortcut(Shortcut);
+    Target := Link.TargetPath;
+    Result := CompareText(Target, ExpandConstant('{app}\bootstrap\pythonw.exe')) = 0;
+  except
+    Result := False;
+  end;
+end;
 
 function ReleaseDirectory(Param: String): String;
 var

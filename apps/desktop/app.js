@@ -55,15 +55,18 @@
                         : h('small', { key: index }, locator(ref)))))));
     }
 
-    function Result({ task, retry, fail, editSkill, parcel, selectParcel, showMap }) {
+    function Result({ task, retry, fail, editSkill, parcel, selectParcel, showMap, voiceReply }) {
         if (active(task)) return h('article', { className: 'bubble assistant working', role: 'status' },
             h('i', { className: 'pulse' }), task.status === 'cancelling' ? '正在结束任务' : task.step || '正在理解任务');
+        if (voiceReply?.task === task.id) return h('article', { className: 'bubble assistant' },
+            voiceReply.text ? h('p', { className: 'voice-caption' }, voiceReply.text)
+                : h('span', { role: 'status' }, h('i', { className: 'pulse' }), '规智正在准备语音'));
         if (task.status === 'succeeded' || task.status === 'answered') {
             const stats = task.statistics;
             return h('article', { className: 'bubble assistant' },
                 h('div', { className: 'result-head' }, h('img', { src: '/mark.svg', alt: '', width: 29 }),
                     h('strong', null, task.status === 'answered' ? '规智' : '办理结果')),
-                stats?.coverage_ratio !== undefined
+                stats?.coverage_ratio !== undefined && !task.dialogue
                     ? h('p', null, `项目范围 ${number(stats.project_area_m2)} m²`) : markdown(task.response),
                 stats?.coverage_ratio !== undefined && h('dl', { className: 'metrics' },
                     h('div', null, h('dt', null, '重叠面积'), h('dd', null, number(stats.covered_area_m2), h('small', null, ' m²'))),
@@ -87,6 +90,7 @@
 
     function App() {
         const [state, setState] = useState(null);
+        const [voiceReply, setVoiceReply] = useState(null);
         const [draft, renderDraft] = useState(emptyDraft);
         const shared = useRef(draft);
         const [appearance, setAppearance] = useState({
@@ -122,11 +126,12 @@
         useEffect(() => {
             api.state().then(value => {
                 setState(value);
+                setVoiceReply(value.voiceReply);
                 setAppearance(value.appearance);
             }).catch(fail);
             api.readDraft().then(receiveDraft).catch(fail);
             const callbacks = [
-                api.onState(setState),
+                api.onState(setState), api.onVoiceCaption(setVoiceReply),
                 api.onSettings(() => showSettings(true)), api.onAppearance(setAppearance), api.onDraft(receiveDraft),
                 api.onLauncherFocus(() => document.querySelector('.launcher textarea')?.focus()),
             ];
@@ -155,6 +160,12 @@
         useEffect(() => {
             if (messages.current) messages.current.scrollTop = messages.current.scrollHeight;
         }, [task?.id, task?.status]);
+        useEffect(() => {
+            const panel = messages.current;
+            if (voiceReply && panel && panel.scrollHeight - panel.scrollTop - panel.clientHeight < 64) {
+                panel.scrollTop = panel.scrollHeight;
+            }
+        }, [voiceReply]);
         const busy = state?.busy || sending;
         const skill = draft.skillDefinition;
         useEffect(() => {
@@ -342,7 +353,7 @@
                 h('span', { className: 'status-tag' }, labels[task.status] || '未完成')),
             h('div', { className: 'messages', ref: messages }, task ? turns.flatMap(item => [
                 h('article', { key: item.id + '-question', className: 'bubble user' }, item.prompt),
-                h(Result, { key: item.id + '-answer', task: item, retry, fail,
+                h(Result, { key: item.id + '-answer', task: item, retry, fail, voiceReply,
                     parcel: resultTask?.id === item.id ? parcel : null, selectParcel: id => { viewResult(item.id); selectParcel(id); },
                     showMap: item.map && item.id !== resultTask?.id ? () => { viewResult(item.id); selectParcel(null); setTab('成果'); } : undefined,
                     editSkill: text => { setInitialMarkdown(text); showSettings('skills'); } }),

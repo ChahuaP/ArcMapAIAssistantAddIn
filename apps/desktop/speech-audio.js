@@ -26,33 +26,48 @@ export function wavFromFrames(frames) {
 }
 
 export function speechPieces(text) {
-    const clauses = text.trim().match(/[^。！？；\n]{1,140}[。！？；\n]?|[。！？；]/gu) ?? [];
+    const clauses = text.trim().match(/[^。！？；，\n]+[。！？；，\n]*|[。！？；，\n]+/gu) ?? [];
     const pieces = [];
     for (const clause of clauses) {
-        if (pieces.length && pieces.at(-1).length + clause.length <= 140) pieces[pieces.length - 1] += clause;
-        else pieces.push(clause);
+        if (pieces.length > 1 && pieces.at(-1).length + clause.length <= 96) {
+            pieces[pieces.length - 1] += clause;
+            continue;
+        }
+        const characters = [...clause];
+        while (characters.length) pieces.push(characters.splice(0, pieces.length ? 96 : 36).join(''));
     }
     return pieces;
 }
 
-export function voiceBoundary() {
+export function conversationFrames({ isPlaying, onSpeech, onTurn }) {
+    let lead = [];
+    let utterance = null;
     let voiced = 0;
     let quiet = 0;
-    let heard = false;
-    return {
-        get heard() { return heard; },
-        add(samples) {
-            const rms = Math.sqrt(samples.reduce((sum, value) => sum + value * value, 0) / samples.length);
-            if (rms >= 0.012) {
-                voiced += samples.length;
-                quiet = 0;
-                heard ||= voiced >= 3200;
-            } else {
-                if (!heard) voiced = 0;
-                quiet += samples.length;
-            }
-            return heard && quiet >= 14400;
-        },
+    let length = 0;
+    return samples => {
+        const rms = Math.sqrt(samples.reduce((sum, value) => sum + value * value, 0) / samples.length);
+        if (!utterance) {
+            lead.push(samples);
+            if (lead.length > 4) lead.shift();
+            const playing = isPlaying();
+            voiced = rms >= (playing ? 0.028 : 0.012) ? voiced + samples.length : 0;
+            if (voiced < (playing ? 4800 : 2600)) return;
+            utterance = lead;
+            lead = [];
+            length = utterance.reduce((total, frame) => total + frame.length, 0);
+            quiet = 0;
+            onSpeech();
+            return;
+        }
+        utterance.push(samples);
+        length += samples.length;
+        quiet = rms < 0.012 ? quiet + samples.length : 0;
+        if (quiet < 11520 && length < 460800) return;
+        const complete = utterance;
+        utterance = null;
+        voiced = 0;
+        onTurn(complete);
     };
 }
 
@@ -61,37 +76,41 @@ export class VoiceAudio {
         this.api = api;
         this.status = status;
         this.generation = 0;
+        this.captureGeneration = 0;
         this.source = null;
         this.capture = null;
         this.context = null;
         this.analyser = null;
     }
 
-    async stop() {
-        const token = ++this.generation;
+    stop() {
         this.releaseCapture();
+        return this.interrupt();
+    }
+
+    async interrupt() {
+        const token = ++this.generation;
         if (this.source) {
             this.source.stop();
             this.source = null;
         }
         await this.api.speechCancel();
-        if (token === this.generation) this.status('idle');
+        if (token === this.generation) this.status(this.capture ? 'listening' : 'idle');
         return token;
     }
 
     releaseCapture() {
+        this.captureGeneration++;
         const capture = this.capture;
         this.capture = null;
         if (!capture) return;
         clearTimeout(capture.timer);
-        clearTimeout(capture.inactive);
         capture.stream.getTracks().forEach(track => track.stop());
         void capture.context.close();
     }
 
-    async listen(microphone, limitReached, automatic = false) {
-        const token = await this.stop();
-        if (token !== this.generation) return false;
+    async openCapture(microphone, onFrame) {
+        const token = ++this.captureGeneration;
         this.status('opening');
         const stream = await navigator.mediaDevices.getUserMedia({ audio: {
             deviceId: microphone ? { exact: microphone } : undefined,
@@ -99,74 +118,81 @@ export class VoiceAudio {
         } }).catch(error => {
             throw new Error(window.GuizhiErrorText(error, 'microphone'));
         });
-        if (token !== this.generation) {
+        if (token !== this.captureGeneration) {
             stream.getTracks().forEach(track => track.stop());
-            return false;
+            return null;
         }
         const context = new AudioContext({ sampleRate: 16000 });
-        const frames = [];
-        const capture = { stream, context, frames, activity: automatic ? voiceBoundary() : null };
+        const capture = { stream, context };
         this.capture = capture;
         try {
             await context.audioWorklet.addModule('/voice-input.js');
             const worklet = new AudioWorkletNode(context, 'guizhi-pcm');
             const silent = context.createGain();
             silent.gain.value = 0;
-            const finishTurn = () => {
-                if (this.capture !== capture || capture.ending) return;
-                capture.ending = true;
-                limitReached();
-            };
-            worklet.port.onmessage = event => {
-                const samples = event.data;
-                frames.push(samples);
-                if (!capture.ending && capture.activity?.add(samples)) finishTurn();
+            worklet.port.onmessage = ({ data }) => {
+                if (this.capture === capture) onFrame(data);
             };
             context.createMediaStreamSource(stream).connect(worklet).connect(silent).connect(context.destination);
             await context.resume();
-            if (this.capture !== capture || token !== this.generation) return false;
-            this.capture.worklet = worklet;
-            capture.timer = setTimeout(finishTurn, 29_000);
-            if (automatic) capture.inactive = setTimeout(() => { if (!capture.activity.heard) finishTurn(); }, 18_000);
+            if (this.capture !== capture) return null;
+            capture.worklet = worklet;
             this.status('listening');
-            return true;
+            return capture;
         } catch (error) {
             if (this.capture === capture) this.releaseCapture();
             throw error;
         }
     }
 
+    async listen(microphone, limitReached) {
+        const token = await this.stop();
+        if (token !== this.generation) return false;
+        const frames = [];
+        const capture = await this.openCapture(microphone, samples => frames.push(samples));
+        if (!capture) return false;
+        capture.frames = frames;
+        capture.timer = setTimeout(limitReached, 29_000);
+        return true;
+    }
+
+    async converse(microphone, { onSpeech, onTurn, onDisconnect }) {
+        const token = await this.stop();
+        if (token !== this.generation) return;
+        const capture = await this.openCapture(microphone,
+            conversationFrames({ isPlaying: () => Boolean(this.source), onSpeech, onTurn }));
+        capture?.stream.getAudioTracks()[0]?.addEventListener('ended', () => {
+            if (this.capture === capture) onDisconnect();
+        }, { once: true });
+    }
+
     async finish(onPartial = () => {}) {
         const capture = this.capture;
-        if (!capture?.worklet) {
-            await this.stop();
-            return null;
-        }
-        if (capture.activity && !capture.activity.heard) {
-            this.releaseCapture();
-            this.status('idle');
-            return null;
-        }
-        const token = this.generation;
+        if (!capture?.worklet) return null;
         capture.worklet.port.postMessage('flush');
         await new Promise(resolve => setTimeout(resolve, 32));
-        if (token !== this.generation) return null;
+        if (this.capture !== capture) return null;
         this.releaseCapture();
+        return this.recognize(capture.frames, onPartial);
+    }
+
+    async recognize(frames, onPartial = () => {}) {
+        const token = this.generation;
         this.status('recognizing');
         const off = this.api.onSpeechPartial(text => {
             if (token === this.generation) onPartial(text);
         });
         try {
-            const text = await this.api.speechRecognize(wavFromFrames(capture.frames));
+            const text = await this.api.speechRecognize(wavFromFrames(frames));
             return token === this.generation ? text : null;
         } finally {
             off();
-            if (token === this.generation) this.status('idle');
+            if (token === this.generation) this.status(this.capture ? 'listening' : 'idle');
         }
     }
 
-    async speak(text, speaker) {
-        const token = await this.stop();
+    async speak(text, speaker, onCaption = () => {}) {
+        const token = await this.interrupt();
         if (token !== this.generation) return;
         this.context ??= new AudioContext();
         if (speaker) {
@@ -178,31 +204,73 @@ export class VoiceAudio {
             await this.context.setSinkId('');
         }
         await this.context.resume();
-        this.analyser ??= this.context.createAnalyser();
-        this.analyser.fftSize = 128;
-        this.analyser.connect(this.context.destination);
-        try {
-            for (const piece of speechPieces(text)) {
-                if (token !== this.generation) return;
-                this.status('synthesizing');
-                const wav = await this.api.speechSynthesize(piece);
-                if (!wav || token !== this.generation) return;
-                const buffer = await this.context.decodeAudioData(wav);
-                if (token !== this.generation) return;
-                const source = this.context.createBufferSource();
-                source.buffer = buffer;
-                source.connect(this.analyser);
-                this.source = source;
-                this.status('speaking');
-                await new Promise(resolve => {
-                    source.onended = resolve;
-                    source.start();
-                });
-                if (this.source === source) this.source = null;
-            }
-        } finally {
-            if (token === this.generation) this.status('idle');
+        if (!this.analyser) {
+            this.analyser = this.context.createAnalyser();
+            this.analyser.fftSize = 128;
+            this.analyser.connect(this.context.destination);
         }
+        const pieces = speechPieces(text);
+        const prepare = piece => {
+            const clip = { ready: false };
+            clip.result = this.api.speechSynthesize(piece)
+                .then(wav => wav && token === this.generation ? this.context.decodeAudioData(wav) : null)
+                .then(buffer => ({ buffer }), error => ({ error }))
+                .finally(() => { clip.ready = true; });
+            return clip;
+        };
+        try {
+            if (!pieces.length || token !== this.generation) return;
+            let spoken = '';
+            let pending = prepare(pieces[0]);
+            for (const [index, piece] of pieces.entries()) {
+                if (token !== this.generation) return;
+                if (!pending.ready) this.status('synthesizing');
+                const { buffer, error } = await pending.result;
+                if (token !== this.generation) return;
+                if (error) throw error;
+                if (!buffer) return;
+                const playing = this.play(buffer, piece, token, caption => onCaption(spoken + caption));
+                if (index + 1 < pieces.length) pending = prepare(pieces[index + 1]);
+                await playing;
+                spoken += piece;
+            }
+            return token === this.generation;
+        } finally {
+            if (token === this.generation) this.status(this.capture ? 'listening' : 'idle');
+        }
+    }
+
+    play(buffer, text, token, onCaption) {
+        const source = this.context.createBufferSource();
+        source.buffer = buffer;
+        source.connect(this.analyser);
+        this.source = source;
+        const characters = Array.from(new Intl.Segmenter().segment(text), part => part.segment);
+        this.status('speaking');
+        return new Promise(resolve => {
+            const started = this.context.currentTime;
+            let visible = 0;
+            let frame;
+            const reveal = count => {
+                if (token !== this.generation || count <= visible) return;
+                visible = count;
+                onCaption(characters.slice(0, visible).join(''));
+            };
+            const update = () => {
+                if (token !== this.generation) return;
+                const fraction = (this.context.currentTime - started) / buffer.duration;
+                reveal(Math.min(characters.length, Math.ceil(fraction * characters.length)));
+                frame = requestAnimationFrame(update);
+            };
+            source.onended = () => {
+                cancelAnimationFrame(frame);
+                reveal(characters.length);
+                if (this.source === source) this.source = null;
+                resolve();
+            };
+            source.start(started);
+            frame = requestAnimationFrame(update);
+        });
     }
 
     level() {

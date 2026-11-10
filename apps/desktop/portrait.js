@@ -11,8 +11,10 @@ const figure = document.querySelector('#figure-toggle');
 let state;
 let session = 0;
 let sequence = 0;
+let turn = 0;
 let waiting;
-let receiving = false;
+let queued;
+let submitting = false;
 let passThrough;
 let pointer;
 let moved;
@@ -24,6 +26,13 @@ function showMessage(text) {
     message.innerHTML = window.GuizhiMarkdown.render(text);
     message.hidden = !text;
     bubble.hidden = message.hidden && detail.hidden;
+}
+
+function showCaption(text) {
+    message.textContent = text;
+    message.hidden = !text;
+    bubble.hidden = message.hidden && detail.hidden;
+    bubble.scrollTop = bubble.scrollHeight;
 }
 
 function tell(text, error = false) {
@@ -73,56 +82,72 @@ function available(kind) {
 async function endSession() {
     session = 0;
     waiting = null;
-    receiving = false;
+    queued = null;
     paintMic();
     showMessage('');
-    await voice.stop();
+    await Promise.all([voice.stop(), api.voiceCaption(null, null)]);
 }
 
-async function listen(token) {
-    if (token !== session) return;
-    try { await voice.listen(state.speech.microphone, () => void receive(token), true); }
-    catch (error) { if (token === session) { await endSession(); fail(error); } }
-}
+const isCurrent = (token, revision) => token === session && revision === turn;
 
-async function reply(text, token) {
-    if (token !== session) return;
-    showMessage(text);
-    if (available('tts')) {
-        try { await voice.speak(text, state.speech.speaker); }
-        catch (error) { if (token === session) fail(error); }
-    }
-    if (token === session) await listen(token);
-}
-
-async function receive(token) {
-    if (token !== session || receiving) return;
-    receiving = true;
-    let result;
+async function reply(text, token, revision, taskId) {
+    if (!isCurrent(token, revision)) return;
     try {
-        const text = await voice.finish(partial => { if (token === session) tell(partial); });
-        if (token !== session) return;
-        if (!text) { await endSession(); return; }
-        showMessage('');
-        tell('让我想一下');
-        result = await api.voiceTurn(text);
-        if (token !== session) return;
+        const played = available('tts') && await voice.speak(text, state.speech.speaker, caption => {
+            if (!isCurrent(token, revision)) return;
+            showCaption(caption);
+            if (taskId) void api.voiceCaption(taskId, caption).catch(fail);
+        });
+        if (!played && isCurrent(token, revision)) showMessage(text);
     } catch (error) {
-        if (token === session) { await endSession(); fail(error); }
-        return;
+        if (isCurrent(token, revision)) { showMessage(text); fail(error); }
     } finally {
-        if (token === session) receiving = false;
+        if (taskId) await api.voiceCaption(taskId, null);
     }
-    if (result.reply) await reply(result.reply, token);
-    else {
-        waiting = result.task;
-        followAnswer();
+}
+
+async function receive(token, revision, frames) {
+    try {
+        const text = await voice.recognize(frames, partial => {
+            if (isCurrent(token, revision)) tell(partial);
+        });
+        if (!text || !isCurrent(token, revision)) return;
+        queued = { text, token, revision };
+        tell('让我想一下');
+        void sendQueued();
+    } catch (error) {
+        if (isCurrent(token, revision)) fail(error);
+    }
+}
+
+async function sendQueued() {
+    if (!queued || submitting || state.busy) return;
+    const { text, token, revision } = queued;
+    queued = null;
+    if (!isCurrent(token, revision)) return;
+    submitting = true;
+    try {
+        const result = await api.voiceTurn(text);
+        if (!isCurrent(token, revision)) {
+            if (result.task) await api.voiceCaption(result.task, null);
+        } else if (result.reply) {
+            void reply(result.reply, token, revision).catch(fail);
+        } else {
+            waiting = { taskId: result.task, token, revision };
+            followAnswer();
+        }
+    } catch (error) {
+        if (isCurrent(token, revision)) fail(error);
+    } finally {
+        submitting = false;
+        if (queued) void sendQueued();
     }
 }
 
 function followAnswer() {
-    if (!session || !waiting) return;
-    const task = state.tasks.find(item => item.id === waiting);
+    if (!waiting) return;
+    const { taskId, token, revision } = waiting;
+    const task = state.tasks.find(item => item.id === taskId);
     if (!task) return;
     if (['running', 'cancelling'].includes(task.status)) {
         tell(task.step || '让我想一下');
@@ -131,7 +156,8 @@ function followAnswer() {
     waiting = null;
     const detail = { cancelled: '这一轮已经结束。', timed_out: '我这次没能及时完成。你可以再试一次。',
         missing_materials: '请先把需要办理的材料发给我。' };
-    void reply(task.response || detail[task.status] || '这次没能完成。可以打开工作台看详情。', session).catch(fail);
+    void reply(task.response || detail[task.status] || '这次没能完成。可以打开工作台看详情。',
+        token, revision, taskId).catch(fail);
 }
 
 function update(next) {
@@ -145,15 +171,33 @@ function update(next) {
     if (session && waiting) followAnswer();
     else if (working || showingTask) tell(working ? task.step || '正在办理' : '');
     showingTask = working;
+    if (queued) void sendQueued();
 }
 
 function startSession() {
     if (!available('asr')) { tell('可在设置中开启语音对话。'); return; }
     if (session) return;
-    session = ++sequence;
+    const token = session = ++sequence;
     paintMic();
     showMessage('');
-    void listen(session);
+    const disconnect = async error => {
+        if (token !== session) return;
+        await endSession();
+        fail(error);
+    };
+    void voice.converse(state.speech.microphone, {
+        onSpeech() {
+            if (token !== session) return;
+            turn++;
+            queued = null;
+            if (waiting) void api.voiceCaption(waiting.taskId, null).catch(fail);
+            waiting = null;
+            showMessage('');
+            void voice.interrupt().catch(fail);
+        },
+        onTurn: frames => { if (token === session) void receive(token, turn, frames); },
+        onDisconnect: () => void disconnect(new Error('麦克风已断开，请重新连接后开始语音对话。')).catch(fail),
+    }).catch(disconnect).catch(fail);
 }
 
 figure.addEventListener('pointerdown', event => {

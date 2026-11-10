@@ -65,6 +65,7 @@ svg { flex: none; vertical-align: middle; }
 .bubble.user { max-width: 88%; align-self: flex-end; background: var(--soft); border-bottom-right-radius: 3px; }
 .bubble.assistant { background: var(--sub); border: 1px solid var(--line); }
 .assistant p { margin: 8px 0; }
+.voice-caption { white-space: pre-wrap; }
 .answer-markdown { min-width: 0; overflow-x: auto; margin-block: 8px; }
 .answer-markdown :first-child { margin-top: 0; }
 .answer-markdown :last-child { margin-bottom: 0; }

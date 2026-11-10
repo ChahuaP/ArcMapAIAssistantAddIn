@@ -109,6 +109,7 @@ def build(stage, runtime, desktop, dsh, speech, arcmap, addin, tree, commit):
         if file.suffix.lower() in {".dll", ".pyd"}:
             copy_file(file, bootstrap / file.name)
     copy_file(SOURCE / "packaging/install_state.py", bootstrap / "install_state.py")
+    copy_file(SOURCE / "packaging/guizhi.ico", bootstrap / "guizhi.ico")
 
     components = []
     if speech:

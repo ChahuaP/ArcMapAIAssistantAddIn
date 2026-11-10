@@ -68,11 +68,18 @@ async function startDesktop(options) {
     let sync;
     let draft = {};
     let modelCheck;
+    let voiceReply = null;
     const speech = new SpeechController({ userData: app.getPath('userData'), storage: safeStorage,
         local: new LocalSpeechRuntime(path.join(runtime, 'python', 'python.exe'), externalPath),
         bundledLocalRoot: options.bundledSpeech,
         websocket: () => require(path.join(dsh || path.join(runtime, 'dsh'), 'node_modules', 'ws')) });
-    const withSpeech = state => ({ ...state, speech: speech.state(), appearance: desktop.appearance(), arcgis: sync?.state(), version });
+    const withSpeech = state => ({ ...state, speech: speech.state(), voiceReply,
+        appearance: desktop.appearance(), arcgis: sync?.state(), version });
+    function setVoiceReply(value) {
+        if (!voiceReply && !value) return;
+        voiceReply = value;
+        desktop.notify('voiceCaption', voiceReply);
+    }
     function broadcast(state) {
         visual?.update(state);
         desktop.notify('state', withSpeech(state));
@@ -171,6 +178,13 @@ async function startDesktop(options) {
     }, true);
     bind('hideLauncher', () => launcher.hide());
     bind('portraitVoice', desktop.voice);
+    bind('voiceCaption', (surface, task, text) => {
+        if (surface !== portrait || (task !== null && typeof task !== 'string') ||
+                (text !== null && (typeof text !== 'string' || text.length > 65536))) throw new Error('语音字幕无效');
+        if (task === null && text === null) setVoiceReply(null);
+        else if (voiceReply?.task === task) setVoiceReply(text === null ? null : { task, text });
+    }, true);
+    portrait.webContents.on('render-process-gone', () => setVoiceReply(null));
     bind('voiceTurn', async (surface, text) => {
         if (surface !== portrait || typeof text !== 'string' || !text.trim() || text.length > 4000) {
             throw new Error('语音对话内容无效');
@@ -204,7 +218,11 @@ async function startDesktop(options) {
     bind('configure', input => {
         const workspace = controller.settings.workspace;
         const state = controller.configure(input);
-        if (state.settings.workspace !== workspace) replaceDraft();
+        if (state.settings.workspace !== workspace) {
+            setVoiceReply(null);
+            replaceDraft();
+            portrait.webContents.send('guizhi:voiceStop');
+        }
         modelCheck = undefined;
         sync.refresh();
         broadcast(state);
@@ -310,6 +328,7 @@ async function startDesktop(options) {
     }
     function resetConversation(next = {}, fromVoice = false) {
         const state = controller.resetConversation();
+        setVoiceReply(null);
         replaceDraft(next);
         if (!fromVoice) portrait.webContents.send('guizhi:voiceStop');
         broadcast(state);
@@ -321,6 +340,7 @@ async function startDesktop(options) {
     });
     function submitTask(task) {
         const state = controller.submit(task);
+        if (task.dialogue && speech.state().tts !== 'off') setVoiceReply({ task: state.tasks[0].id, text: '' });
         replaceDraft();
         broadcast(state);
         return withSpeech(state);

@@ -207,7 +207,7 @@ class DesktopController {
         if (skillParameters && Buffer.byteLength(JSON.stringify(skillParameters)) > 65536) throw new Error('办理参数最多 64 KB');
         const { config, key } = this.selectModel({ modelConfig: this.settings.modelConfig });
         const task = { id: randomUUID(), title: [...prompt.trim()].slice(0, 32).join(''), prompt: prompt.trim(),
-            project, control, skill, materials, parameterText, status: 'running', createdAt: new Date().toISOString() };
+            project, control, skill, materials, parameterText, dialogue, status: 'running', createdAt: new Date().toISOString() };
         const next = [task, ...this.tasks];
         this.persist(next);
         this.tasks = next;
