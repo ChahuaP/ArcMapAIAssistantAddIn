@@ -19,6 +19,8 @@ class Role(Strict):
     coordinate: Literal["any", "defined", "projected_meters"] = "defined"
     minimum: Annotated[int, Field(ge=0, le=32)] = 1
     maximum: Annotated[int, Field(ge=1, le=32)] = 1
+    purpose: str = Field(default="", max_length=200)
+    resource: Literal["imagery-model"] | None = None
 
 
 class Step(Strict):

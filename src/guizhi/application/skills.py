@@ -62,6 +62,14 @@ def parse_skill(text):
     roles = {item.id for item in skill.materials}
     if len(roles) != len(skill.materials) or any(role.minimum > role.maximum for role in skill.materials):
         raise ValueError("Material role names and quantity ranges must be valid")
+    resources = [role for role in skill.materials if role.resource]
+    if any(role.kind == "model" and not role.resource for role in skill.materials):
+        raise ValueError("请将影像模型设为已安装资源")
+    if resources and (len(resources) != 1 or resources[0].kind != "model" or
+                      (resources[0].minimum, resources[0].maximum) != (1, 1) or
+                      not {"region", "sensor", "from_date", "to_date"} <= skill.parameters.keys() or
+                      not {"from", "to"} <= roles or "profile" in skill.parameters):
+        raise ValueError("影像模型资源需要两期影像及区域、传感器、日期参数")
     validate_steps(skill.steps, roles)
     steps = {item.id for item in skill.steps}
     if any(item.step not in steps for item in (*skill.rules, *skill.evidence)):
@@ -88,6 +96,9 @@ def catalog(workspace, *, include_history=False):
 
 def summaries(workspace):
     return [{**{key: item[key] for key in ("id", "title", "aliases", "materials", "revision")},
+             "summary": next((line.strip() for line in item["markdown"].split("---", 2)[-1].splitlines()
+                              if line.strip() and not line.startswith("#")), "")[:250],
+             "outputs": list(dict.fromkeys(ref["kind"] for ref in item["evidence"])),
              "parameters": item.get("parameters", {}), "release_version": release_version(item)} for item in catalog(workspace)]
 
 
@@ -126,7 +137,12 @@ def specification(workspace, materials, *, skill=None, steps=None, candidate=Non
     if not isinstance(values, dict) or values.keys() != declared.keys():
         raise ValueError("Supply exactly the declared skill parameters: " + ", ".join(declared))
     json.dumps(values, allow_nan=False)
+    managed = [role for role in required if role.get("resource")]
     for role in required:
+        if role.get("resource"):
+            if role["id"] in clean:
+                raise ValueError("影像模型由已安装的业务资源匹配")
+            continue
         size = len(clean.get(role["id"], []))
         if not role["minimum"] <= size <= role["maximum"]:
             raise ValueError(f"Missing or excess materials: {role['label']} ({role['minimum']}–{role['maximum']})")
@@ -137,6 +153,15 @@ def specification(workspace, materials, *, skill=None, steps=None, candidate=Non
         from guizhi.application.improvement import apply_profile
 
         values, parameter_profile = apply_profile(selected, clean, values)
+    if managed:
+        from guizhi.infrastructure.imagery_resources import resolve
+
+        if any(len(clean.get(role, [])) != 1 or Material.model_validate(clean[role][0]).kind != "raster"
+               for role in ("from", "to")):
+            raise ValueError("请选择各一份前期影像和后期影像")
+        item, profile = resolve(workspace, [clean[role][0]["file"] for role in ("from", "to")], values)
+        clean[managed[0]["id"]] = [item]
+        values = {**values, "profile": profile}
     validate_steps(fixed + extra, set(clean) | {role["id"] for role in required})
     return {"mode": "combined" if selected and extra else "fixed" if selected else "free",
             "materials": clean, "skill": selected, "steps": [step.model_dump(mode="json") for step in fixed + extra],
@@ -159,15 +184,31 @@ def submit(workspace, plan, *, cancel_requested=None, key=None):
                                           "idempotency_key": key}, cancel_requested)
 
 
-def publish(root, text, materials, skill_parameters=None):
+def trial(root, text, materials, skill_parameters=None, coordinate_plans=None):
+    result = execute(root, materials, candidate=entry(text, 0), skill_parameters=skill_parameters,
+                     coordinate_plans=coordinate_plans)
+    return {"run_id": result["id"], "status": result["status"], "error": result["error"],
+            "statistics": (result["result"] or {}).get("statistics", {}),
+            "deliveries": [item["step"] for item in (result["result"] or {}).get("evidence", [])]}
+
+
+def publish(root, text, trial_run):
+    from guizhi.infrastructure.cache import verified_run
+
     workspace = Workspace(root, create=True)
     draft = entry(text, 0)
-    result = execute(workspace.root, materials, candidate=draft, skill_parameters=skill_parameters)
-    if result["status"] != "succeeded":
-        raise ValueError(f"Skill sample failed: {result['error'] or result['status']}")
+    result = workspace.read(trial_run)
+    specification = (result["task"].get("request") or {}).get("parameters", {}).get("specification", {})
+    if (result["task"]["operation"] != "workflow.execute" or specification.get("skill") != draft or
+            not verified_run(workspace, trial_run)):
+        raise ValueError("请先对当前草稿完成一次有效试办")
     manifest = next(item for item in result["result"]["evidence"] if item["step"] == "workflow")
     with workspace.connect() as db:
         db.execute("BEGIN IMMEDIATE")
+        existing = db.execute("SELECT body FROM skills WHERE id=? AND json_extract(body, '$.verification.run_id')=?",
+                              (draft["id"], trial_run)).fetchone()
+        if existing:
+            return json.loads(existing[0])
         first = int(any(parse_skill((SKILLS / name).read_text(encoding="utf-8")).id == draft["id"] for name in BUILT_INS))
         current = db.execute("SELECT coalesce(max(revision), ?) FROM skills WHERE id=?", (first, draft["id"])).fetchone()[0]
         latest = db.execute("SELECT body FROM skills WHERE id=? AND revision=?", (draft["id"], current)).fetchone()

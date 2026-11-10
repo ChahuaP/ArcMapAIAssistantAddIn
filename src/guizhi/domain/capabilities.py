@@ -8,17 +8,20 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 Hash = Annotated[str, StringConstraints(pattern=r"^[a-f0-9]{64}$")]
 
 MATERIAL_FORMATS = {
-    ".gpkg": "vector", ".tif": "raster", ".tiff": "raster", ".dxf": "cad",
-    ".pdf": "document", ".docx": "document", ".xlsx": "document", ".onnx": "model",
+    ".gpkg": "vector", ".shp": "vector", ".geojson": "vector", ".tif": "raster", ".tiff": "raster",
+    ".img": "raster", ".dxf": "cad", ".pdf": "document", ".docx": "document", ".xlsx": "document",
+    ".txt": "document", ".onnx": "model",
 }
 
 
 def material_kind(file):
     suffix = Path(file).suffix.lower()
     if suffix == ".dwg":
-        raise ValueError("DWG decoding is unavailable. Export an exchange DXF first.")
+        raise ValueError("当前运行组件无法读取 DWG，请在 CAD 中另存为 DXF 后添加")
+    if suffix in {".doc", ".xls"}:
+        raise ValueError("请将旧版 Office 文件另存为 DOCX、XLSX 或 PDF 后添加")
     if suffix not in MATERIAL_FORMATS:
-        raise ValueError(f"Unsupported material format: {suffix}")
+        raise ValueError(f"不支持的材料格式 {suffix}")
     return MATERIAL_FORMATS[suffix]
 
 
@@ -131,7 +134,7 @@ class Material(BaseModel):
     def kind(self):
         kind = material_kind(self.file)
         if (self.layer is not None) != (kind == "vector"):
-            raise ValueError("GeoPackage materials require an explicit layer; other formats use a file")
+            raise ValueError("矢量材料需要指定图层，其他材料使用文件")
         return kind
 
 

@@ -49,7 +49,8 @@ def remember_plan(workspace, key, record):
     if key is None or record["status"] != "succeeded":
         return
     plan = record["task"]["request"]["parameters"]["specification"]
-    if all(item["operation"] in READ_OPERATIONS for item in plan["steps"]):
+    if not any(role.get("resource") for role in (plan["skill"] or {}).get("materials", [])) and \
+            all(item["operation"] in READ_OPERATIONS for item in plan["steps"]):
         write_entry(workspace, "plan", key, {"run_id": record["id"]})
 
 

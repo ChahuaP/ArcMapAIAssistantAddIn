@@ -1,4 +1,4 @@
-"""Process local self-contained GeoTIFFs without preserving invalid sample values."""
+"""Process GeoTIFF and ERDAS IMAGINE rasters without preserving invalid samples."""
 from contextlib import ExitStack
 from datetime import date
 from math import fsum, isclose
@@ -10,6 +10,7 @@ import numpy as np
 from pyproj import CRS
 from pyproj.transformer import TransformerGroup
 import rasterio as rio
+from rasterio.shutil import copy as copy_dataset
 from rasterio.enums import Resampling
 from rasterio.features import geometry_mask, geometry_window
 from rasterio.merge import merge
@@ -17,17 +18,54 @@ from rasterio.warp import calculate_default_transform, reproject as warp
 from rasterio.windows import Window, transform as window_transform
 
 
-def check_source(file):
+def source_files(file):
+    file = Path(file).absolute()
     with rio.open(file) as src:
-        if src.driver != "GTiff" or src.crs is None or not src.count or src.subdatasets:
-            raise ValueError("Expected a georeferenced GeoTIFF with directly readable bands")
-        if {Path(item).resolve() for item in src.files} != {Path(file).resolve()}:
-            raise ValueError("Supply a self-contained GeoTIFF without auxiliary files")
+        driver = "HFA" if file.suffix.lower() == ".img" else "GTiff"
+        if src.driver != driver or src.crs is None or not src.count or src.subdatasets:
+            raise ValueError("请选择有坐标定义且波段可读的 GeoTIFF 或 ERDAS IMG")
         if any(np.dtype(dtype).kind not in "iuf" or
                (np.dtype(dtype).kind in "iu" and np.dtype(dtype).itemsize > 4) for dtype in src.dtypes):
             raise ValueError("Raster samples must be real numbers representable exactly as float64")
         if any(not np.isfinite(value) for value in src.transform):
             raise ValueError("Invalid raster transform")
+        names = {file.name.casefold() + ext for ext in (".aux.xml", ".msk", ".msk.aux.xml", ".ovr")}
+        if driver == "HFA":
+            names.update(file.stem.casefold() + ext for ext in (".ige", ".rrd", ".aux"))
+        parts = sorted({Path(name).absolute() for name in src.files if Path(name).absolute() != file},
+                       key=lambda part: part.name.casefold())
+        if any(part.parent != file.parent or part.name.casefold() not in names or
+               not part.is_file() or part.is_symlink() for part in parts):
+            raise ValueError("栅格配套文件缺失或位于其他目录，请将影像及其配套文件放在同一目录")
+        return [file, *parts]
+
+
+def check_source(file):
+    return source_files(file)
+
+
+def normalize(source, target, check):
+    # Copying the GDAL dataset includes georeferencing, masks, descriptions and metadata.
+    with rio.Env(GDAL_TIFF_INTERNAL_MASK=True):
+        copy_dataset(source, target, driver="GTiff", strict=True, compress="deflate", BIGTIFF="IF_SAFER")
+    with rio.open(source) as before:
+        scope = before.tags(ns="GUIZHI")
+    if scope:
+        with rio.open(target, "r+") as output:
+            output.update_tags(ns="GUIZHI", **scope)
+    before_info, after_info = metadata(source), metadata(target)
+    del before_info["crs"], after_info["crs"]
+    if source_files(target) != [target] or before_info != after_info:
+        raise ValueError("栅格快照未通过空间参考、波段和缺测值校验")
+    with rio.open(source) as before, rio.open(target) as after:
+        if before.crs != after.crs or before.descriptions != after.descriptions or \
+                any(before.tags(i) != after.tags(i) for i in before.indexes):
+            raise ValueError("栅格快照未保留波段描述或波段属性")
+        for _, window in after.block_windows(1):
+            check()
+            if not np.array_equal(before.read(window=window), after.read(window=window), equal_nan=True) or \
+                    not np.array_equal(before.read_masks(window=window), after.read_masks(window=window)):
+                raise ValueError("栅格快照像元或掩膜校验失败")
 
 
 def metadata(file):

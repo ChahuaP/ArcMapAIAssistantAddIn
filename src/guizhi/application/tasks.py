@@ -120,17 +120,17 @@ def run_vector(root: Path, source: Path, layer: str, object_id: str | None,
                project_plan: str | None = None, control_plan: str | None = None) -> dict:
     definition = OPERATIONS[operation]
     source = source.resolve(strict=True)
-    if not source.is_file() or source.suffix.lower() != ".gpkg":
-        raise ValueError("Input must be a GeoPackage file")
+    if not source.is_file() or source.suffix.lower() not in {".gpkg", ".shp", ".geojson"}:
+        raise ValueError("请选择 SHP、GeoJSON 或 GeoPackage 矢量材料")
     if not layer.strip() or (object_id is not None and not object_id.strip()):
         raise ValueError("Layer and any supplied object ID must be non-empty")
     control_source = control_layer = None
     if operation == "control_check":
         if control is None or not control[1].strip():
-            raise ValueError("Control GeoPackage and layer are required")
+            raise ValueError("请选择管控范围的矢量材料和图层")
         target = control[0].resolve(strict=True)
-        if not target.is_file() or target.suffix.lower() != ".gpkg":
-            raise ValueError("Control input must be a GeoPackage file")
+        if not target.is_file() or target.suffix.lower() not in {".gpkg", ".shp", ".geojson"}:
+            raise ValueError("请选择 SHP、GeoJSON 或 GeoPackage 管控范围")
         control_source, control_layer = str(target), control[1]
     workspace = Workspace(root, create=True)
     if project_plan or control_plan:

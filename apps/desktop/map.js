@@ -76,7 +76,10 @@
         }
         async function add() {
             try {
-                const material = await window.guizhi.material();
+                const { items, issues } = await window.guizhi.material('vector');
+                if (issues.length) fail(issues.map(item => item.name + ' · ' + item.message).join('\n'));
+                if (items.length > 1) throw new Error('请选择一份矢量材料以添加图层');
+                const material = items[0];
                 if (material?.layer) await action('add_layer', {}, material);
                 else if (material) chooseMaterial(material);
             } catch (error) { fail(error); }

@@ -3,8 +3,8 @@ id: control-check
 title: 管控线核查
 aliases: [管控线检查, 叠加核查, 覆盖率]
 materials:
-  - {id: project, label: 项目范围, geometry: polygon, minimum: 1, maximum: 1}
-  - {id: control, label: 管控范围, geometry: polygon, minimum: 1, maximum: 1}
+  - {id: project, label: 项目范围, purpose: 需要核查的地块或用地边界, geometry: polygon, minimum: 1, maximum: 1}
+  - {id: control, label: 管控范围, purpose: 与项目边界叠加的管控区面图层, geometry: polygon, minimum: 1, maximum: 1}
 steps:
   - id: check
     operation: control_check

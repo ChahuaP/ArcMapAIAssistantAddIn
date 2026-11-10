@@ -16,7 +16,8 @@ def describe(ctx):
     bounds = [float(n) for n in frame.total_bounds]
     return {"statistics": {"feature_count": len(frame)}, "revision": ctx.selection_hashes[0],
             "layer": ctx.request.inputs[0].layer, "bounds": bounds if np.isfinite(bounds).all() else None,
-            "crs": frame.crs.to_string() if frame.crs else None, "geometry_type": info["geometry_type"]}
+            "crs": frame.crs.to_string() if frame.crs else None, "geometry_type": info["geometry_type"],
+            "geometry_types": sorted(frame.geom_type.dropna().unique().tolist())}
 
 
 def list_fields(ctx):

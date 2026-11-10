@@ -1,6 +1,6 @@
 (() => {
     const h = React.createElement;
-    const { useState } = React;
+    const { useEffect, useState } = React;
     const api = window.guizhi;
     const { Titlebar, button, icon } = window.GuizhiShell;
     const { ModelForm, Workspace, errorText } = window.GuizhiModel;
@@ -13,6 +13,35 @@
     const themes = [{ value: 'system', label: '跟随系统' }, { value: 'light', label: '明亮' },
         { value: 'dark', label: '深绿暗色' }];
     const card = (title, ...children) => h('section', { className: 'settings-card' }, h('h2', null, title), ...children);
+
+    function ImageryResources() {
+        const [models, setModels] = useState([]);
+        const [error, setError] = useState('');
+        const [loading, setLoading] = useState(false);
+        const refresh = () => api.imageryModels().then(setModels);
+        useEffect(() => { refresh().catch(issue => setError(errorText(issue))); }, []);
+        async function perform(action) {
+            setLoading(true);
+            setError('');
+            try { await action(); }
+            catch (issue) { setError(errorText(issue)); }
+            finally { setLoading(false); }
+        }
+        return card('影像模型资源',
+            ...models.map(model => h('div', { className: 'resource-row', key: model.name + '@' + model.version },
+                h('strong', null, model.name + ' · v' + model.version),
+                model.evaluation === 'simulation' && h(antd.Tag, null, '模拟验证'),
+                !model.enabled && h(antd.Tag, null, '已停用'),
+                h(antd.Button, { disabled: loading, onClick: () => perform(async () =>
+                    setModels(await api.imageryModelActivate(model.name, model.version, !model.enabled))) },
+                model.enabled ? '停用' : '启用'),
+                h('small', null, [model.region, model.sensor, model.start + ' 至 ' + model.end].join(' · ')))),
+            !models.length && h('p', { className: 'muted' }, '暂无可用影像模型'),
+            button('plus', '添加模型资源', { loading, onClick: () => perform(async () => {
+                if (await api.imageryModelAdd()) await refresh();
+            }) }),
+            error && h('p', { role: 'alert', className: 'error' }, error));
+    }
 
     window.GuizhiSettings = function Settings({ state, appearance, saveAppearance, save, close, entries, setEntries,
         manage, openArcgis }) {
@@ -63,8 +92,8 @@
             ],
             storage: () => card('成果保存位置', h(Workspace, { value: value.workspace,
                 change: workspace => update('workspace', workspace), fail, disabled: saving })),
-            skills: () => card('业务管理', button('grid', '管理业务技能',
-                { onClick: manage, disabled: !state.settings.workspace })),
+            skills: () => [card('业务管理', button('grid', '管理业务技能',
+                { onClick: manage, disabled: !state.settings.workspace })), h(ImageryResources, { key: 'imagery' })],
             arcgis: () => card('ArcGIS 扩展', h('p', { className: 'muted' },
                 state.settings.arcmapBridge ? '已配置 ArcMap Bridge' : '配置 ArcMap Bridge 后可使用工程与图层。'),
                 button('map', '打开 ArcGIS 扩展', { onClick: openArcgis, disabled: !state.settings.workspace })),

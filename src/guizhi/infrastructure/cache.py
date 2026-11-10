@@ -6,7 +6,7 @@ from pathlib import Path
 import time
 
 from guizhi.infrastructure.workspace import SOURCE_ROOT
-from guizhi.infrastructure.vector import digest
+from guizhi.infrastructure.vector import digest, source_files, source_revision
 
 MAX_ENTRIES = 512
 MAX_BYTES = 32 << 20
@@ -40,22 +40,26 @@ def file_stamp(path):
 def input_signature(item):
     path = Path(item["file"])
     layer = item.get("layer")
-    if path.suffix.lower() in {".tif", ".tiff"}:
-        from guizhi.infrastructure.operations.raster import check_source
+    suffix = path.suffix.lower()
+    enumerate_files = source_files
+    if suffix in {".tif", ".tiff", ".img"}:
+        from guizhi.infrastructure.operations.raster import source_files as raster_files
 
-        check_source(path)
+        enumerate_files = raster_files
     # SQLite writers can modify a sidecar while leaving the main file untouched.
-    sidecars = [path.with_name(path.name + suffix) for suffix in ("-wal", "-journal")] if layer else []
+    sqlite = suffix == ".gpkg" and layer
+    sidecars = [path.with_name(path.name + ext) for ext in ("-wal", "-journal")] if sqlite else []
     if any(sidecar.exists() for sidecar in sidecars):
         return None
-    stamp = file_stamp(path)
-    if layer:
+    files = enumerate_files(path)
+    stamps = [file_stamp(item) for item in files]
+    if sqlite:
         from guizhi.infrastructure.operations.runner import data_revision
 
         revision = data_revision(path)
     else:
-        revision = digest(path)
-    if stamp != file_stamp(path) or any(sidecar.exists() for sidecar in sidecars):
+        revision = source_revision(files)
+    if files != enumerate_files(path) or stamps != [file_stamp(item) for item in files] or any(sidecar.exists() for sidecar in sidecars):
         return None
     if item.get("revision") and item["revision"] != revision:
         raise ValueError("Input differs from its expected snapshot revision")
@@ -123,6 +127,7 @@ def record_dependencies(record):
     result = record.get("result") or {}
     if "workflow" in result:
         ids.update(step["run_id"] for step in result["workflow"]["steps"])
+        ids.update(ref for group in result["workflow"]["material_runs"].values() for ref in group if isinstance(ref, str))
     if record["task"]["operation"] == "knowledge.register_catalog":
         for name in ("editions", "terms", "models"):
             for item in parameters.get(name, []):

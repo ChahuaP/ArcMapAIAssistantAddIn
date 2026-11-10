@@ -5,13 +5,12 @@ const path = require('node:path');
 const { promisify } = require('node:util');
 const { action } = require('./task-commands.js');
 const { startAgent } = require('./agent-process.cjs');
+const { materialBindings } = require('./materials.cjs');
 const { visualRecipe } = require('./visual-recipes.cjs');
 const { modelConfig, modelKey, credentialScope, normalizeKey } = require('../../src/guizhi/infrastructure/dsh/model-config.cjs');
 
 const exec = promisify(execFile);
 const cli = path.join(__dirname, '../../src/guizhi/__main__.py');
-const formats = { '.gpkg': 'vector', '.pdf': 'document', '.docx': 'document', '.xlsx': 'document',
-    '.tif': 'raster', '.tiff': 'raster', '.dxf': 'cad', '.onnx': 'model' };
 
 function load(file, initial) {
     return fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : initial;
@@ -143,26 +142,34 @@ class DesktopController {
         try {
             const result = await exec(this.runtime.python, ['-I', '-B', cli, '--workspace',
                 this.settings.workspace, command, ...args], {
-                windowsHide: true, ...(command !== 'skill-publish' && { timeout: command === 'arcmap' ? 95000 : 30000 }),
+                windowsHide: true, timeout: ['skill-trial', 'skill-publish', 'material-intake'].includes(command) ? 240000
+                    : command === 'arcmap' ? 95000 : 30000,
                 maxBuffer: 8 << 20 });
             return JSON.parse(result.stdout);
         } catch (error) {
             let message;
             try { message = JSON.parse(error.stderr).error; } catch { /* Process failed before producing a record. */ }
-            throw new Error(message?.split('\n')[0].replace(/^ValueError: /, '') || '无法读取材料或成果');
+            throw new Error(message?.replace(/^(ValueError|ValidationError|Fault): /, '').trim() || '无法读取材料或成果');
         }
     }
 
     async describe(file) {
-        const kind = formats[path.extname(file).toLowerCase()];
-        if (!kind) throw new Error('请选择受支持的业务材料');
-        if (kind !== 'vector') {
-            if (!fs.statSync(file).isFile()) throw new Error('请选择材料文件');
-            return { file, name: path.basename(file), kind, layer: null, layers: [] };
-        }
-        const layers = await this.python('layers', file);
-        if (!layers.length) throw new Error('此文件没有可用的矢量图层');
-        return { file, name: path.basename(file), kind, layers, layer: layers.length === 1 ? layers[0] : '' };
+        return this.python('material-describe', file);
+    }
+
+    async request(command, payload) {
+        if (!this.settings.workspace) throw new Error('请先选择成果保存位置');
+        const file = path.join(this.settings.workspace, 'request-' + randomUUID() + '.json');
+        try {
+            if (typeof payload === 'string') fs.writeFileSync(file, payload, { flag: 'wx' });
+            else save(file, payload);
+            return await this.python(command, file);
+        } finally { fs.rmSync(file, { force: true }); }
+    }
+
+    intake(paths, kind) {
+        if (!Array.isArray(paths) || !paths.length || paths.length > 32) throw new Error('一次请选择 1 至 32 份材料');
+        return this.request('material-intake', { paths: paths.map(this.externalPath), kind });
     }
 
     selectArcmapBridge(file) {
@@ -248,19 +255,13 @@ class DesktopController {
         return this.settings.workspace ? this.python('crs-list') : [];
     }
 
-    async skillRequest(command, markdown, materials, parameters) {
-        if (!this.settings.workspace || this.skillBusy) throw new Error('请先结束当前操作');
+    async skillRequest(command, markdown, payload) {
+        if (!this.settings.workspace || this.skillBusy || this.active) throw new Error('请先结束当前操作');
         if (typeof markdown !== 'string' || Buffer.byteLength(markdown) > 65536) throw new Error('技能文件最多 64 KB');
-        const file = path.join(this.settings.workspace, 'skill-' + randomUUID());
         this.skillBusy = true;
         try {
-            if (command === 'skill-preview') fs.writeFileSync(file, markdown, { flag: 'wx' });
-            else save(file, { text: markdown, materials: materialBindings(materials), skill_parameters: parameters });
-            return await this.python(command, file);
-        } finally {
-            fs.rmSync(file, { force: true });
-            this.skillBusy = false;
-        }
+            return await this.request(command, command === 'skill-preview' ? markdown : { text: markdown, ...payload });
+        } finally { this.skillBusy = false; }
     }
 
     async mapAction(action, parameters = {}, material = null) {
@@ -315,8 +316,9 @@ class DesktopController {
                 task.hasReport = Boolean(checkedArtifact(record, 'report'));
                 const findings = checkedArtifact(record, 'case');
                 if (findings) task.approval = JSON.parse(findings.bytes);
-                task.deliveries = record.result.evidence.filter(item => ['export', 'table', 'workflow', 'package', 'boundaries'].includes(item.step))
-                    .map(item => item.step);
+                const deliveries = record.result.evidence.filter(item => ['export', 'table', 'workflow', 'package', 'boundaries'].includes(item.step));
+                task.deliveries = deliveries.map(item => item.step);
+                task.deliveryFormats = Object.fromEntries(deliveries.map(item => [item.step, path.extname(item.path).toLowerCase()]));
             }
         } catch {
             status = 'failed';
@@ -376,17 +378,6 @@ class DesktopController {
             child.once('exit', () => { clearTimeout(timer); resolve(); });
         });
     }
-}
-
-function materialBindings(groups) {
-    return Object.fromEntries(Object.entries(groups).filter(([, items]) => items.length).map(([role, items]) => [role, items.map(item => {
-        const kind = item?.file && formats[path.extname(item.file).toLowerCase()];
-        if (!kind || !path.isAbsolute(item.file) ||
-                (kind === 'vector' ? !item.layers?.includes(item.layer) : item.layer !== null)) {
-            throw new Error('请选择材料图层');
-        }
-        return { file: item.file, layer: item.layer };
-    })]));
 }
 
 module.exports = { DesktopController };

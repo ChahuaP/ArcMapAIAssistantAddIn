@@ -9,6 +9,8 @@ const { LocalSpeechRuntime } = require('./local-speech.cjs');
 const { VisualSession } = require('./visual.cjs');
 const { createShell } = require('./shell.cjs');
 const { listModels, testModel } = require('./model-service.cjs');
+const { formats, materialBindings } = require('./materials.cjs');
+const { printReport } = require('./report-export.cjs');
 
 const origin = 'guizhi://app';
 protocol.registerSchemesAsPrivileged([{ scheme: 'guizhi', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
@@ -28,6 +30,7 @@ async function startDesktop(options) {
     }
     const vendor = path.join(rendererRuntime, 'node_modules');
     const localFiles = ['index.html', 'app.js', 'shell-ui.js', 'settings.js', 'map.js', 'coordinates.js', 'skills.js',
+        'materials-ui.js', 'skill-editor.js',
         'style.css', 'theme.css', 'mark.svg', 'model-form.js', 'onboarding.js',
         'portrait.html', 'portrait.css', 'portrait.js', 'task-commands.js', 'speech-settings.js',
         'speech-audio.js', 'voice-input.js', 'visual.html', 'visual.css', 'visual.js', 'arcmap.js'];
@@ -210,17 +213,49 @@ async function startDesktop(options) {
         if (request.action === 'publish') shell.showItemInFolder(result.output);
         return result;
     });
-    bind('material', async (kind = 'vector') => {
-        const formats = { vector: { name: 'GeoPackage', extensions: ['gpkg'] },
-            raster: { name: 'GeoTIFF', extensions: ['tif', 'tiff'] }, cad: { name: 'DXF', extensions: ['dxf'] },
-            document: { name: '审批材料', extensions: ['pdf', 'docx', 'xlsx'] },
-            model: { name: 'ONNX', extensions: ['onnx'] } };
+    bind('material', async (kind = 'any', folder = false) => {
         if (kind !== 'any' && !Object.hasOwn(formats, kind)) throw new Error('材料格式无效');
-        const pick = await dialog.showOpenDialog(BrowserWindow.getFocusedWindow() || window, { properties: ['openFile'],
-            filters: kind === 'any' ? Object.values(formats) : [formats[kind]] });
-        return pick.canceled ? null : controller.describe(pick.filePaths[0]);
+        const groups = kind === 'any' ? Object.values(formats) : [formats[kind]];
+        const pick = await dialog.showOpenDialog(BrowserWindow.getFocusedWindow() || window, folder ? { properties: ['openDirectory'] }
+            : { properties: ['openFile', 'multiSelections'], filters: [
+                { name: '可用材料', extensions: [...groups.flatMap(group => group.extensions), 'zip'] }, ...groups] });
+        return pick.canceled ? { items: [], issues: [] } : controller.intake(pick.filePaths, kind);
     });
-    bind('materialPath', file => controller.describe(externalPath(file)));
+    bind('materialPaths', (paths, kind) => controller.intake(paths, kind));
+    bind('imageryModels', () => controller.python('imagery-models'));
+    bind('imageryModelActivate', (name, version, active) => {
+        if (typeof name !== 'string' || typeof version !== 'string' || typeof active !== 'boolean') throw new Error('模型版本无效');
+        return controller.python('imagery-model-activate', '--', name, version, active ? 'enabled' : 'disabled');
+    });
+    bind('imageryModelAdd', async () => {
+        const model = await dialog.showOpenDialog(window, { title: '选择影像模型', properties: ['openFile'],
+            filters: [{ name: '影像模型', extensions: ['onnx'] }] });
+        if (model.canceled) return null;
+        const profile = await dialog.showOpenDialog(window, { title: '选择模型适用范围清单', properties: ['openFile'],
+            filters: [{ name: '适用范围清单', extensions: ['json'] }] });
+        if (profile.canceled) return null;
+        return controller.python('imagery-model-add', externalPath(model.filePaths[0]), externalPath(profile.filePaths[0]));
+    });
+    bind('exportDelivery', async (id, kind, format) => {
+        if (!['shp', 'pdf', 'original'].includes(format) || (format === 'pdf') !== (kind === 'report')) {
+            throw new Error('成果导出格式无效');
+        }
+        const source = kind === 'report' ? await controller.report(id) : await controller.delivery(id, kind);
+        const extension = format === 'shp' ? '.zip' : format === 'pdf' ? '.pdf' : path.extname(source);
+        const pick = await dialog.showSaveDialog(window, { defaultPath: '规智-' + path.basename(source, path.extname(source)) + extension,
+            filters: [{ name: format === 'shp' ? 'SHP 成果包' : extension.slice(1).toUpperCase(), extensions: [extension.slice(1)] }] });
+        if (pick.canceled) return;
+        const output = externalPath(pick.filePath);
+        const relative = path.relative(path.join(controller.settings.workspace, 'runs'), output);
+        if (path.extname(output).toLowerCase() !== extension || relative === '' ||
+                (!path.isAbsolute(relative) && relative.split(path.sep)[0] !== '..')) throw new Error('请选择独立的成果保存位置');
+        if (format === 'shp') {
+            const task = controller.tasks.find(item => item.id === id);
+            await controller.python('export-shp', task.runId, kind, output);
+        } else if (format === 'pdf') fs.writeFileSync(output, await printReport(source));
+        else fs.copyFileSync(source, output);
+        shell.showItemInFolder(output);
+    });
     bind('mapAction', async (...args) => withSpeech(await controller.mapAction(...args)));
     bind('layoutReport', async () => {
         if (await shell.openPath(await controller.layoutReport())) throw new Error('无法打开版面');
@@ -243,7 +278,10 @@ async function startDesktop(options) {
     bind('capability', operation => controller.python('capability-show', operation));
     bind('skillShow', reference => controller.python('skill-show', reference));
     bind('skillPreview', markdown => controller.skillRequest('skill-preview', markdown));
-    bind('skillPublish', (markdown, materials, parameters) => controller.skillRequest('skill-publish', markdown, materials, parameters));
+    bind('skillTrial', (markdown, materials, parameters) => controller.skillRequest('skill-trial', markdown,
+        { materials: materialBindings(materials), skill_parameters: parameters, coordinate_plans: Object.fromEntries(
+            ['project', 'control'].filter(key => materials[key]?.[0]?.plan).map(key => [key + '_plan', materials[key][0].plan])) }));
+    bind('skillPublish', (markdown, run) => controller.skillRequest('skill-publish', markdown, { trial_run: run }));
     const skillFile = { name: '业务技能', extensions: ['md'] };
     bind('skillOpen', async () => {
         const pick = await dialog.showOpenDialog(window, { properties: ['openFile'], filters: [skillFile] });

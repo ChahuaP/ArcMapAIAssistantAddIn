@@ -66,10 +66,15 @@ svg { flex: none; vertical-align: middle; }
 .compose-actions, .materials, .field-row { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
 .compose-actions { padding: 6px 9px 9px; }
 .materials { max-height: 126px; overflow: auto; padding: 0 9px; }
-.material { display: flex; align-items: center; gap: 4px; max-width: 100%; }
-.material button, .material select { padding: 5px 7px; font-size: 12px; }
-.material .attached { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 168px; background: var(--soft); }
-.material .remove { background: transparent; border-color: transparent; }
+.material-row { display: grid; gap: 4px; min-width: 0; max-width: 100%; padding: 4px 8px 6px;
+    background: var(--sub); border: 1px solid var(--line); border-radius: 8px; }
+.material-file { display: flex; gap: 6px; align-items: center; min-width: 0; }
+.material-file span:not(.ant-btn-icon) { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.material-row small { overflow-wrap: anywhere; }
+.skill-materials, .unassigned { display: grid; gap: 8px; }
+.unassigned-material { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.business-suggestion { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 8px 10px; }
+.composer .error { white-space: pre-line; }
 .plan-select { max-width: 144px; }
 .inspector { height: 100%; display: flex; flex-direction: column; min-width: 0; background: var(--sub); }
 .inspector-tabs { flex: none; display: flex; gap: 16px; padding: 0 14px; border-bottom: 1px solid var(--line); background: var(--panel); }
@@ -158,15 +163,26 @@ dialog label { display: grid; gap: 5px; }
 .coordinate-list pre { overflow: auto; max-height: 135px; background: var(--sub); padding: 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .coordinate-list p { padding: 6px 0; font-size: 12px; }
 .coordinate-actions, .business-actions, .delivery-actions { display: flex; flex-wrap: wrap; gap: 7px; }
-.business-dialog { display: grid; gap: 14px; }
+.business-dialog { display: grid; gap: 14px; width: min(860px, 94vw); }
 .business-dialog:not([open]) { display: none; }
-.skill-cards, .skill-editor, .skill-samples, .voice-fields { display: grid; gap: 8px; }
-.skill-card { display: grid; grid-template-columns: auto 1fr auto; gap: 5px 10px; align-items: center; border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
-.skill-card span { grid-column: 1/3; grid-row: 2; color: var(--muted); }
-.skill-card button { grid-column: 3; grid-row: 1/3; }
-.role-material { display: flex; gap: 7px; flex-wrap: wrap; align-items: center; }
-.role-material > span, .capability-group code { color: var(--muted); }
-.skill-editor textarea { max-height: 280px; font: 13px monospace; }
+.skill-cards, .skill-editor, .voice-fields { display: grid; gap: 12px; }
+.skill-cards { grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); }
+.skill-card, .skill-section, .role-material { display: grid; gap: 8px; min-width: 0;
+    border: 1px solid var(--line); border-radius: 12px; padding: 12px; background: var(--panel); }
+.skill-card h3 { display: flex; gap: 8px; align-items: center; margin: 0; }
+.skill-card p { margin: 0; color: var(--muted); }
+.skill-card > button, .role-material > button, .skill-section > button { justify-self: start; }
+.skill-facts { display: grid; grid-template-columns: auto 1fr; gap: 5px 12px; margin: 0; }
+.skill-facts dt { color: var(--muted); }
+.skill-facts dd { margin: 0; overflow-wrap: anywhere; }
+.business-toolbar, .resource-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
+.delivery-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.business-search, .skill-editor textarea { width: 100%; }
+.skill-editor textarea { max-height: 280px; }
+.skill-editor fieldset { margin: 0; padding: 0; min-width: 0; border: 0; display: grid; gap: 12px; }
+.skill-editor label { display: grid; gap: 5px; }
+.skill-row { display: flex; align-items: start; gap: 8px; padding-block: 8px; border-top: 1px solid var(--line); }
+.skill-row .setting-fields { flex: 1; }
 .approval-results { display: grid; gap: 6px; margin-block: 12px; }
 .voice-toggle { display: flex; align-items: center; gap: 7px; }
 .finding { padding: 6px 0; border-top: 1px solid var(--line); }

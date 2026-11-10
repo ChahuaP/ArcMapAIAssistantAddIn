@@ -18,7 +18,7 @@ from pydantic import ConfigDict, ValidationError, create_model
 from guizhi.domain.capabilities import CAPABILITIES, OperationRequest
 from guizhi.domain.contracts import EvidenceRef
 from guizhi.domain.diagnostics import Fault
-from guizhi.infrastructure.vector import digest, import_layer
+from guizhi.infrastructure.vector import digest, import_layer, source_revision
 
 
 def handler(operation):
@@ -85,18 +85,20 @@ class Execution:
                 {"raster": self.rasters, "cad": self.drawings, "model": self.models}[material.kind].append(file)
                 self.snapshot(ref, None, ref["sha256"])
                 continue
-            frame, info, revision, evidence = import_layer(
+            source = Path(material.file)
+            frame, info, revision, evidence, originals = import_layer(
                 material.file, material.layer, directory, f"input-{i + 1}.gpkg", job["id"], check,
                 allow_undefined=request.operation in {"data.describe", "data.list_fields", "crs.assign"},
+                expected_source_revision=material.revision,
             )
             stable = data_revision(directory / evidence.path)
-            if material.revision is not None and material.revision != stable:
+            if source.suffix.lower() == ".gpkg" and material.revision is not None and material.revision != stable:
                 raise Fault("association", "input_revision_mismatch", f"Input {i + 1} differs from its expected snapshot revision",
                             input_number=i + 1, expected=material.revision, actual=stable)
             self.frames.append(frame)
             self.info.append(info)
             self.datasets.append(asdict(revision))
-            self.evidence.append(asdict(evidence))
+            self.evidence.extend(asdict(ref) for ref in (evidence, *originals))
             self.selection_hashes.append(stable)
             self.snapshot(asdict(evidence), material.layer, stable)
         progress("inputs_sealed", count=len(request.inputs))
@@ -106,7 +108,7 @@ class Execution:
 
     def seal_document(self, source, expected, number):
         if Path(source).stat().st_size > 50 << 20:
-            raise ValueError("Expected a PDF, DOCX or XLSX document up to 50 MB")
+            raise ValueError("审批文档大小不得超过 50 MB")
         return self.seal_file("document", source, expected, number)
 
     def seal_file(self, kind, source, expected, number):
@@ -114,15 +116,33 @@ class Execution:
         source = Path(source)
         if kind == "model" and not 0 < source.stat().st_size <= 50 << 20:
             raise ValueError("Expected a self-contained ONNX model up to 50 MB")
+        step = f"{kind}-{number}"
         if kind == "raster":
-            from guizhi.infrastructure.operations.raster import check_source
+            from guizhi.infrastructure.operations.raster import normalize, source_files
 
-            check_source(source)
+            files = source_files(source)
+            if len(files) > 1:
+                before = source_revision(files)
+                if expected and expected != before:
+                    raise Fault("association", "input_revision_mismatch", "影像或配套文件已变化，请重新添加")
+                original = self.path(step + "-original")
+                original.mkdir()
+                copies = []
+                for i, file in enumerate(files, 1):
+                    self.check()
+                    target = original / file.name
+                    shutil.copyfile(file, target)
+                    self.record(f"{step}-source-{i}", target)
+                    copies.append(target)
+                if source_revision(copies) != before or source_revision(source_files(source)) != before:
+                    raise ValueError("复制期间影像或配套文件已变化")
+                output = self.path(step + ".tif")
+                normalize(copies[0], output, self.check)
+                return output, self.record(step, output)
         before = digest(source)
         if expected is not None and before != expected:
             raise Fault("association", "input_revision_mismatch", "Material differs from its expected revision",
                         input_number=number, expected=expected, actual=before)
-        step = f"{kind}-{number}"
         copy = self.path(f"{step}{source.suffix.lower()}")
         shutil.copyfile(source, copy)
         ref = self.record(step, copy)

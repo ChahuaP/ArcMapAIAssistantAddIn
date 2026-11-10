@@ -32,6 +32,20 @@ def main() -> int:
     for command in ("inspect", "cancel", "_worker"):
         commands.add_parser(command).add_argument("run_id")
     commands.add_parser("layers").add_argument("file", type=Path)
+    commands.add_parser("material-describe").add_argument("file", type=Path)
+    commands.add_parser("material-intake").add_argument("request", type=Path)
+    shapefile = commands.add_parser("export-shp")
+    shapefile.add_argument("run_id")
+    shapefile.add_argument("kind")
+    shapefile.add_argument("output", type=Path)
+    commands.add_parser("imagery-models")
+    resource = commands.add_parser("imagery-model-add")
+    resource.add_argument("model_file", type=Path)
+    resource.add_argument("profile_file", type=Path)
+    activation = commands.add_parser("imagery-model-activate")
+    activation.add_argument("name")
+    activation.add_argument("version")
+    activation.add_argument("state", choices=("enabled", "disabled"))
     commands.add_parser("crs-list")
     commands.add_parser("crs-import").add_argument("file", type=Path)
     commands.add_parser("crs-define", help="Import the coordinate definition of a Shapefile").add_argument(
@@ -44,6 +58,7 @@ def main() -> int:
     commands.add_parser("skills", help="List active skills")
     commands.add_parser("skill-show").add_argument("reference")
     commands.add_parser("skill-preview").add_argument("request", type=Path)
+    commands.add_parser("skill-trial").add_argument("request", type=Path)
     commands.add_parser("skill-publish").add_argument("request", type=Path)
     commands.add_parser("workflow").add_argument("request", type=Path)
     for name in ("diagnose-run", "replay-run"):
@@ -144,7 +159,7 @@ def main() -> int:
             result = run_operation(args.workspace, json.loads(args.request.read_text(encoding="utf-8-sig")))
             print(json.dumps(result))
             return {"succeeded": 0, "cancelled": 130}.get(result["status"], 1)
-        if args.command in {"skills", "skill-show", "skill-preview", "skill-publish", "workflow"}:
+        if args.command in {"skills", "skill-show", "skill-preview", "skill-trial", "skill-publish", "workflow"}:
             from guizhi.application import skills
 
             workspace = Workspace(args.workspace, create=True)
@@ -156,18 +171,40 @@ def main() -> int:
                 result = skills.parse_skill(args.request.read_text(encoding="utf-8-sig")).model_dump(mode="json")
             else:
                 payload = json.loads(args.request.read_text(encoding="utf-8-sig"))
-                handler = skills.publish if args.command == "skill-publish" else skills.execute
+                handler = {"skill-publish": skills.publish, "skill-trial": skills.trial, "workflow": skills.execute}[args.command]
                 result = handler(workspace.root, **payload)
             print(json.dumps(result))
             if args.command == "workflow":
                 return {"succeeded": 0, "cancelled": 130}.get(result["status"], 1)
             return 0
-        if args.command == "layers":
-            import pyogrio
+        if args.command in {"imagery-models", "imagery-model-add", "imagery-model-activate"}:
+            from guizhi.infrastructure import imagery_resources
 
-            if not args.file.is_file() or args.file.suffix.lower() != ".gpkg":
-                raise ValueError("请选择 GeoPackage 文件")
-            print(json.dumps([name for name, geometry in pyogrio.list_layers(args.file) if geometry]))
+            workspace = Workspace(args.workspace, create=True)
+            if args.command == "imagery-models":
+                result = imagery_resources.catalog(workspace)
+            elif args.command == "imagery-model-add":
+                result = imagery_resources.install(workspace, args.model_file, args.profile_file)
+            else:
+                result = imagery_resources.activate(workspace, args.name, args.version, args.state == "enabled")
+            print(json.dumps(result))
+            return 0
+        if args.command == "export-shp":
+            from guizhi.infrastructure.export import shapefile
+
+            print(json.dumps(shapefile(Workspace(args.workspace), args.run_id, args.kind, args.output)))
+            return 0
+        if args.command in {"layers", "material-describe", "material-intake"}:
+            from guizhi.infrastructure.materials import describe, intake
+
+            if args.command == "material-intake":
+                payload = json.loads(args.request.read_text(encoding="utf-8-sig"))
+                result = intake(Workspace(args.workspace, create=True), **payload)
+            else:
+                result = describe(args.file)
+                if args.command == "layers":
+                    result = result["layers"]
+            print(json.dumps(result))
             return 0
         if args.command.startswith("crs-"):
             from guizhi.infrastructure.crs_catalog import catalog, get_plan

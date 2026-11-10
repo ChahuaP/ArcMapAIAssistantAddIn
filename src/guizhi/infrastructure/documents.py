@@ -79,8 +79,27 @@ def sheet_fragments(path, check):
         book.close()
 
 
+def text_fragments(path, check):
+    raw = path.read_bytes()
+    try:
+        encoding = "utf-16" if raw.startswith((b"\xff\xfe", b"\xfe\xff")) else "utf-8-sig"
+        text = raw.decode(encoding)
+    except UnicodeDecodeError:
+        try:
+            text = raw.decode("gb18030")
+        except UnicodeDecodeError as error:
+            raise ValueError("TXT 编码无法识别，请另存为 UTF-8 后添加") from error
+    if "\0" in text:
+        raise ValueError("TXT 含有无效的文本字符，请另存为 UTF-8 后添加")
+    for i, line in enumerate(text.splitlines(), 1):
+        check()
+        if line.strip():
+            yield {"line": i, "method": "text"}, line
+
+
 def fragments(path, check):
-    parse = {".pdf": pdf_fragments, ".docx": word_fragments, ".xlsx": sheet_fragments}[path.suffix]
+    parse = {".pdf": pdf_fragments, ".docx": word_fragments, ".xlsx": sheet_fragments,
+             ".txt": text_fragments}[path.suffix]
     for i, (locator, text) in enumerate(parse(path, check), 1):
         if i > 25000 or len(text) > 100000:
             raise ValueError("Document exceeds the supported extraction size")

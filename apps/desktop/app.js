@@ -9,26 +9,10 @@
         missing_materials: '待补材料', invalid_materials: '材料有误', no_result: '待补信息', answered: '已答复',
         budget_exhausted: '已保存进度' };
     const active = task => task && ['running', 'cancelling'].includes(task.status);
-    const emptyDraft = () => ({ prompt: '', project: null, control: null, skill: null, materials: {}, parameterText: {} });
+    const emptyDraft = () => ({ prompt: '', project: null, control: null, skill: null, materials: {}, parameterText: {},
+        unassigned: [], freeMode: false });
     const number = value => value.toLocaleString('zh-CN', { maximumFractionDigits: 2 });
-
-    function Material({ label, item, change, fail, plans, kind = 'vector' }) {
-        return h('div', { className: 'material' },
-            h('button', { type: 'button', className: item ? 'attached' : 'attach', title: item?.name || label,
-                onClick: () => api.material(kind).then(value => { if (value) change(value); }).catch(fail) },
-                h('span', { 'aria-hidden': true }, item ? '◇' : '＋'), ' ', item?.name || label),
-            item && item.layers.length > 1 && h('select', { 'aria-label': label + '图层', value: item.layer,
-                onChange: event => change({ ...item, layer: event.target.value }) },
-                h('option', { value: '' }, '选择图层'), ...item.layers.map(layer => h('option', { key: layer }, layer))),
-            item?.layer && plans.length > 0 && h('select', { className: 'plan-select', 'aria-label': label + '坐标方案',
-                value: item.plan || '', onChange: event => change({ ...item, plan: event.target.value }) },
-                h('option', { value: '' }, '沿用坐标'),
-                ...plans.map(plan => {
-                    const id = plan.id + '@' + plan.revision;
-                    return h('option', { key: id, value: id }, plan.title + ' · v' + plan.revision);
-                })),
-            item && h('button', { type: 'button', className: 'remove', 'aria-label': '移除' + label, onClick: () => change(null) }, '×'));
-    }
+    const { Material, RoleMaterials, materialReady, roleReady, mergeMaterials, intake } = window.GuizhiMaterials;
 
     function Approval({ task, parcel, selectParcel, fail }) {
         const [shown, show] = useState(null);
@@ -41,6 +25,7 @@
             const loc = ref.locator;
             if (loc.page) return '第 ' + loc.page + ' 页';
             if (loc.sheet) return loc.sheet + ' · ' + loc.cell;
+            if (loc.line) return '第 ' + loc.line + ' 行';
             if (loc.block) return '第 ' + loc.block + ' 个文档块' + (loc.row ? ' · ' + loc.row + ' 行 ' + loc.column + ' 列' : '');
             return '要素 ' + loc.fid;
         }
@@ -114,8 +99,9 @@
         const [arcmap, showArcmap] = useState(false);
         const [tab, setTab] = useState('成果');
         const [initialMarkdown, setInitialMarkdown] = useState('');
-        const { Business, RoleMaterials, ParameterFields, materialReady, parametersReady, parameterValues,
-            reference } = window.GuizhiBusiness;
+        const [adding, setAdding] = useState(false);
+        const { Business, reference, matchBusiness } = window.GuizhiBusiness;
+        const { ParameterFields, parametersReady, parameterValues } = window.GuizhiSkillEditor;
         const fail = error => setError(String(error.message || error).replace(/^Error invoking remote method '[^']+': Error: /, ''));
         function receiveDraft(value) {
             shared.current = { ...emptyDraft(), ...value };
@@ -166,12 +152,13 @@
         useEffect(() => { selectParcel(null); }, [selected]);
         const busy = state?.tasks.some(active) || sending;
         const skill = draft.skillDefinition;
-        const materialsReady = !skill || skill.materials.every(role => {
-            const items = draft.materials[role.id] || [];
-            return items.length >= role.minimum && items.every(materialReady);
-        });
+        const freeInputs = skill ? draft.unassigned : draft.materials.inputs || [];
+        const materialsReady = skill ? draft.unassigned.length === 0 && skill.materials.every(role => roleReady(role, draft.materials[role.id]))
+            : [draft.project, draft.control, ...freeInputs].filter(Boolean).every(materialReady);
         const fields = skill?.parameters || {};
-        const canSubmit = materialsReady && parametersReady(fields, draft.parameterText);
+        const suggestion = !skill && !draft.freeMode ? matchBusiness(draft.prompt, catalog) : { items: [] };
+        const canSubmit = materialsReady && parametersReady(fields, draft.parameterText) &&
+            (suggestion.items.length < 2 || suggestion.exact);
         async function submit(event) {
             event.preventDefault();
             const action = window.GuizhiTaskCommand(draft.prompt);
@@ -180,8 +167,10 @@
                 startNew();
                 return;
             }
-            if (busy || !draft.prompt.trim() || !canSubmit) return;
+            if (busy || adding || !draft.prompt.trim()) return;
             if (!ready) return api.workbench().catch(fail);
+            if (suggestion.exact) return choose(suggestion.items[0], true);
+            if (!canSubmit) return;
             setError('');
             setSending(true);
             try {
@@ -199,8 +188,11 @@
             } else setDraft({ ...emptyDraft(), ...item, skillDefinition: restored });
             select(null);
         }
-        function choose(item) {
-            setDraft({ ...emptyDraft(), skill: reference(item), skillDefinition: item, prompt: '请办理' + item.title });
+        function choose(item, preservePrompt = false) {
+            setDraft(old => ({ ...emptyDraft(), skill: reference(item), skillDefinition: item,
+                prompt: preservePrompt ? old.prompt : '请办理' + item.title,
+                unassigned: [...old.unassigned, ...Object.values(old.materials).flat(), ...[old.project, old.control].filter(Boolean)] }));
+            setError('');
             select(null);
             showBusiness('');
         }
@@ -211,31 +203,45 @@
             void api.submit({ prompt: '开始新任务' }).then(setState).catch(fail);
         }
         const ready = Boolean(state?.settings.workspace && state?.settings.modelConfig);
-        const freeInputs = draft.materials.inputs || [];
-        const picked = [draft.project, draft.control, ...Object.values(draft.materials).flat()].filter(Boolean);
+        const picked = [draft.project, draft.control, ...draft.unassigned, ...Object.values(draft.materials).flat()].filter(Boolean);
         function appendMaterials(items) {
             setDraft(current => {
-                const inputs = [...(current.materials.inputs || []), ...items];
-                if (inputs.length > 30) throw new Error('一次最多添加 30 份材料');
-                return { ...current, materials: { ...current.materials, inputs } };
+                const unique = mergeMaterials(current.materials.inputs || [], items);
+                if (unique.length > 30) throw new Error('一次最多添加 30 份自由材料');
+                return { ...current, materials: { ...current.materials, inputs: unique } };
             });
         }
-        async function pickFile() {
-            try {
-                if (!ready) return await api.workbench();
-                const item = await api.material('any');
-                if (item) appendMaterials([item]);
-            } catch (issue) { fail(issue); }
+        async function addMaterials(source) {
+            if (adding) return;
+            if (!ready) return api.workbench().catch(fail);
+            setAdding(true);
+            setError('');
+            try { await intake(source(), appendMaterials, fail); }
+            finally { setAdding(false); }
         }
-        async function drop(event) {
+        function drop(event) {
             event.preventDefault();
-            try {
-                if (skill) throw new Error('请按下方业务材料类型添加文件');
-                if (!ready) return await api.workbench();
-                const files = [...event.dataTransfer.files];
-                if (files.length > 30 - freeInputs.length) throw new Error('一次最多添加 30 份材料');
-                appendMaterials(await Promise.all(files.map(file => api.describeDroppedFile(file))));
-            } catch (issue) { fail(issue); }
+            const files = [...event.dataTransfer.files];
+            if (!files.length) return;
+            if (skill) return fail('请把材料拖到对应的业务角色');
+            void addMaterials(() => api.intakeDropped(files, 'any'));
+        }
+        function freeMaterial(item, index) {
+            const roles = skill?.materials.filter(role => !role.resource && role.kind === item.kind &&
+                (draft.materials[role.id]?.length || 0) < role.maximum) || [];
+            const change = (next, role = '') => {
+                const inputs = freeInputs.slice();
+                if (next && !role) inputs[index] = next;
+                else inputs.splice(index, 1);
+                if (skill) {
+                    setDraft({ ...draft, unassigned: inputs, materials: { ...draft.materials,
+                        ...(role ? { [role]: [...(draft.materials[role] || []), next] } : {}) } });
+                } else update('materials', { ...draft.materials, inputs });
+            };
+            return h('div', { key: item.file + '#' + index, className: 'unassigned-material' }, h(Material, { item, change }),
+                roles.length > 0 && h('select', { 'aria-label': '分配 ' + item.name, value: '',
+                    onChange: event => change(item, event.target.value) }, h('option', { value: '' }, '分配到材料角色'),
+                    ...roles.map(role => h('option', { key: role.id, value: role.id }, role.label))));
         }
         const composer = h('form', { className: 'composer', onSubmit: submit,
             onDragOver: event => event.preventDefault(), onDrop: drop },
@@ -249,30 +255,34 @@
                         event.currentTarget.form.requestSubmit();
                     }
                 } }),
+            suggestion.items.length > 0 && h('div', { className: 'business-suggestion' },
+                h('span', null, suggestion.items.length > 1 ? '请选择要办理的业务' : '匹配业务'),
+                ...suggestion.items.map(item => button('layers', item.title,
+                    { key: reference(item), onClick: () => choose(item, true) })),
+                h(antd.Button, { type: 'text', onClick: () => update('freeMode', true) }, '按自由任务')),
             skill && h('div', { className: 'materials skill-materials' },
-                h('button', { type: 'button', className: 'attached', onClick: () => setDraft(emptyDraft()) }, skill.title + ' ×'),
+                h('div', { className: 'section-head' }, h('strong', null, skill.title),
+                    h(antd.Button, { type: 'text', onClick: () => setDraft(old => ({ ...emptyDraft(), prompt: old.prompt,
+                        freeMode: true, materials: { inputs: [...old.unassigned, ...Object.values(old.materials).flat()] } })) }, '改为自由任务')),
+                freeInputs.length > 0 && h('div', { className: 'unassigned' }, h('small', null, '请为已添加的材料分配角色'),
+                    ...freeInputs.map(freeMaterial)),
                 h(RoleMaterials, { roles: skill.materials, materials: draft.materials,
-                    change: value => update('materials', value), Material, plans, fail }),
-                Object.keys(fields).length > 0 && h(ParameterFields, { fields, values: draft.parameterText,
-                    disabled: busy, change: value => update('parameterText', value) })),
+                    change: value => update('materials', value), plans, fail, disabled: busy }),
+                Object.keys(fields).length > 0 && h('div', { className: 'setting-fields' }, h(ParameterFields, {
+                    fields, values: draft.parameterText, disabled: busy, change: value => update('parameterText', value) }))),
             !skill && picked.length > 0 && h('div', { className: 'materials' },
                 ...['project', 'control'].filter(key => draft[key]).map(key => h(Material, {
-                    key, label: draft[key].name, item: draft[key], change: value => update(key, value), fail, plans,
+                    key, item: draft[key], change: value => update(key, value), plans,
                 })),
-                ...freeInputs.map((item, index) => h(Material, { key: index, label: item.name, item, kind: 'any', fail, plans: [],
-                    change: value => {
-                        const inputs = freeInputs.slice();
-                        if (value) inputs[index] = value;
-                        else inputs.splice(index, 1);
-                        update('materials', { ...draft.materials, inputs });
-                    } }))),
+                ...freeInputs.map(freeMaterial)),
             h('div', { className: 'compose-actions' },
-                !skill && button('paperclip', '添加材料', { type: 'text', onClick: pickFile }),
+                !skill && button('paperclip', '添加材料', { type: 'text', loading: adding, onClick: () => addMaterials(() => api.material()) }),
+                !skill && iconButton('folder', '添加材料目录', { disabled: adding, onClick: () => addMaterials(() => api.material('any', true)) }),
                 h('span', { className: 'spacer' }),
                 iconButton('mic', '语音输入', { type: 'default', onClick: () => api.portraitVoice().catch(fail) }),
                 busy ? h(antd.Button, { onClick: () => api.cancel().then(setState).catch(fail) }, '停止')
                     : button('send', '发送', { type: 'primary', htmlType: 'submit',
-                        disabled: !draft.prompt.trim() || !canSubmit })));
+                        disabled: adding || !draft.prompt.trim() || (!suggestion.exact && !canSubmit) })));
         const recent = state?.tasks || [];
         const taskButton = item => h('button', { key: item.id, className: 'history' + (item.id === selected ? ' selected' : ''),
             onClick: () => {
@@ -335,9 +345,19 @@
                         enabled: ready, onState: setState, fail }),
                     (task?.hasReport || task?.deliveries?.length > 0) && h('section', { className: 'artifact-list' },
                         h('h2', null, '成果文件'),
-                        task.hasReport && button('file', '办理报告', { onClick: () => api.report(task.id).catch(fail) }),
-                        ...(task.deliveries || []).map(kind => h('div', { key: kind },
-                            button('file', deliveries[kind] || kind, { onClick: () => api.delivery(task.id, kind).catch(fail) })))))));
+                        task.hasReport && h('div', { className: 'delivery-row' },
+                            button('file', '办理报告', { onClick: () => api.report(task.id).catch(fail) }),
+                            button('file', '导出 PDF', { onClick: () => api.exportDelivery(task.id, 'report', 'pdf').catch(fail) })),
+                        ...(task.deliveries || []).map(kind => {
+                            const extension = task.deliveryFormats?.[kind];
+                            const name = extension === '.tif' ? 'GeoTIFF' : extension === '.xlsx' ? 'Excel' : null;
+                            return h('div', { key: kind, className: 'delivery-row' },
+                                button('file', deliveries[kind] || kind, { onClick: () => api.delivery(task.id, kind).catch(fail) }),
+                                extension && button('folder', name ? '导出 ' + name : '另存为', {
+                                    onClick: () => api.exportDelivery(task.id, kind, 'original').catch(fail) }),
+                                extension === '.gpkg' && button('file', '导出 SHP', {
+                                    onClick: () => api.exportDelivery(task.id, kind, 'shp').catch(fail) }));
+                        })))));
         async function configure(value) {
             const next = await api.configure(value);
             setState(next);
@@ -354,7 +374,7 @@
             arcgis: () => { if (ready && !busy) showArcmap(true); else if (!ready) showSettings(true); },
             connected: Boolean(state?.settings.arcmapBridge) });
         return h(Theme, { appearance }, layout,
-            business && h(Business, { catalog, refresh, choose, Material, manage: business === 'manage',
+            business && h(Business, { catalog, refresh, choose, plans, manage: business === 'manage',
                 initialMarkdown, close: () => { setInitialMarkdown(''); showBusiness(''); } }),
             arcmap && state && h(window.GuizhiArcmap, { configured: state.settings.arcmapBridge, task,
                 close: () => showArcmap(false), attach: project => {

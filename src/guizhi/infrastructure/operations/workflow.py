@@ -109,9 +109,11 @@ def execute(ctx, specification: dict):
             requirement = roles.get(role, {})
             expected = requirement.get("geometry", "any")
             if expected != "any":
-                name = (data["geometry_type"] or "").casefold().replace("multi", "", 1).split(" ")[0]
-                if {"linestring": "line"}.get(name, name) != expected:
-                    raise ValueError(f"Material {role} must contain {expected} geometry")
+                names = {name.casefold().removeprefix("multi").split(" ")[0]
+                         for name in (data["geometry_types"] or [data["geometry_type"] or ""])}
+                if {{"linestring": "line"}.get(name, name) for name in names} != {expected}:
+                    geometry = {"point": "点", "line": "线", "polygon": "面"}[expected]
+                    raise ValueError(f"{requirement['label']}需要{geometry}图层")
             policy = requirement.get("coordinate", "any")
             if policy != "any" and data["crs"] is None:
                 raise ValueError(f"Material {role} requires a defined coordinate system")

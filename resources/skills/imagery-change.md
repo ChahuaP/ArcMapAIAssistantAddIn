@@ -5,9 +5,8 @@ aliases: [识别地类, 提取地类边界, 两期影像变化, 变更调查影�
 materials:
   - {id: from, label: 前期多波段影像, kind: raster, coordinate: projected_meters}
   - {id: to, label: 后期多波段影像, kind: raster, coordinate: projected_meters}
-  - {id: model, label: 地类识别模型, kind: model}
+  - {id: model, label: 地类识别模型, kind: model, resource: imagery-model}
 parameters:
-  profile: 模型适用范围与波段清单
   region: 调查区域
   sensor: 传感器标识
   from_date: 前期影像日期

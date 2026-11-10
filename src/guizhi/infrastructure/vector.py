@@ -1,9 +1,10 @@
 """GeoPackage snapshot, inventory and verified export."""
 from contextlib import closing
 from dataclasses import asdict
-from hashlib import file_digest
+from hashlib import file_digest, sha256
 from pathlib import Path
 import sqlite3
+import shutil
 from time import monotonic
 from uuid import uuid4
 import warnings
@@ -70,10 +71,85 @@ def digest(path: Path) -> str:
         return file_digest(stream, "sha256").hexdigest()
 
 
-def import_layer(source_path, layer, directory, filename, job_id, ensure_supervised, *, allow_undefined=False):
+def source_files(path):
+    if path.suffix.lower() != ".shp":
+        return [path]
+    allowed = {".shp", ".shx", ".dbf", ".prj", ".cpg"}
+    parts = {}
+    for item in path.parent.iterdir():
+        suffix = item.suffix.lower()
+        if item.stem.casefold() == path.stem.casefold() and suffix in allowed and item.is_file():
+            if suffix in parts or item.is_symlink():
+                raise ValueError(f"SHP 配套文件重复或指向其他位置：{item.name}")
+            parts[suffix] = item
+    missing = {".shp", ".shx", ".dbf"} - parts.keys()
+    if missing:
+        raise ValueError(f"{path.name} 缺少同名配套文件：{'、'.join(sorted(missing))}")
+    return [parts[suffix] for suffix in sorted(parts)]
+
+
+def source_revision(files):
+    if len(files) == 1:
+        return digest(files[0])
+    return sha256("\n".join(f"{file.name.casefold()} {digest(file)}" for file in files).encode()).hexdigest()
+
+
+def snapshot_external(source, snapshot, layer, ensure_supervised, allow_undefined, expected):
+    files = source_files(source)
+    initial = source_revision(files)
+    if expected and expected != initial:
+        raise Fault("association", "input_revision_mismatch", "矢量材料或配套文件已变化，请重新添加")
+    original = snapshot.parent / (snapshot.stem + "-original")
+    original.mkdir()
+    copies = []
+    # Use a common basename so GDAL finds companions after copying, including on case-sensitive hosts.
+    for file in files:
+        ensure_supervised()
+        target = original / (source.stem + file.suffix.lower())
+        shutil.copyfile(file, target)
+        copies.append(target)
+    if source_revision(copies) != initial or source_revision(source_files(source)) != initial:
+        raise ValueError("复制期间矢量材料或配套文件已变化")
+    copied = original / (source.stem + source.suffix.lower())
+    info = pyogrio.read_info(copied, layer=layer)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        frame = pyogrio.read_dataframe(copied, layer=layer, fid_as_index=True)
+        if not isinstance(frame, geopandas.GeoDataFrame):
+            raise ValueError("请选择含空间要素的矢量图层")
+        if frame.crs is None and not allow_undefined:
+            raise ValueError(f"{source.name} 缺少坐标定义，请补齐同名 .prj 或先定义已知坐标系")
+        names = {name.casefold() for name in frame.columns}
+        fid, geometry = "fid", "geom"
+        while fid in names:
+            fid += "_"
+        while geometry in names:
+            geometry += "_"
+        # GDAL uses the FID-valued column when creating the SQLite feature table.
+        data = frame.assign(**{fid: frame.index.astype("int64")})
+        pyogrio.write_dataframe(data.reset_index(drop=True), snapshot, layer=layer, driver="GPKG",
+                                geometry_type=info["geometry_type"], promote_to_multi=False,
+                                layer_options={"FID": fid, "GEOMETRY_NAME": geometry})
+    defined = frame.crs is not None
+    reopened = pyogrio.read_dataframe(snapshot, layer=layer, fid_as_index=True)
+    if ((defined and reopened.crs != frame.crs) or not reopened.index.equals(frame.index) or
+            shapely.to_wkb(reopened.geometry).tolist() != shapely.to_wkb(frame.geometry).tolist()):
+        raise ValueError("矢量快照未通过坐标系、要素编号或几何校验")
+    assert_frame_equal(frame.drop(columns=frame.geometry.name), reopened.drop(columns=reopened.geometry.name),
+                       check_dtype=False, check_exact=True)
+    return defined, copies
+
+
+def import_layer(source_path, layer, directory, filename, job_id, ensure_supervised, *, allow_undefined=False,
+                 expected_source_revision=None):
     source = Path(source_path)
     snapshot = directory / "artifacts" / filename
-    defined = snapshot_gpkg(source, snapshot, layer, ensure_supervised, allow_undefined=allow_undefined)
+    originals = []
+    if source.suffix.lower() == ".gpkg":
+        defined = snapshot_gpkg(source, snapshot, layer, ensure_supervised, allow_undefined=allow_undefined)
+    else:
+        defined, originals = snapshot_external(source, snapshot, layer, ensure_supervised, allow_undefined,
+                                               expected_source_revision)
     info = pyogrio.read_info(snapshot, layer=layer)
     with warnings.catch_warnings():
         warnings.simplefilter("error", RuntimeWarning)
@@ -88,13 +164,15 @@ def import_layer(source_path, layer, directory, filename, job_id, ensure_supervi
                             snapshot.relative_to(directory).as_posix(), digest(snapshot))
     dataset = DatasetRevision(revision_id, str(source), layer, input_ref.id,
                               frame.crs.to_wkt() if frame.crs else None)
-    return frame, info, dataset, input_ref
+    raw_refs = [EvidenceRef(uuid4().hex, revision_id, job_id, f"{snapshot.stem}-source-{i}",
+                           file.relative_to(directory).as_posix(), digest(file)) for i, file in enumerate(originals, 1)]
+    return frame, info, dataset, input_ref, raw_refs
 
 
 def inventory(task: dict, job: dict, directory: Path, progress, ensure_supervised) -> dict:
     export = directory / "artifacts" / "result.gpkg"
     progress("import_started")
-    frame, info, dataset, input_ref = import_layer(
+    frame, info, dataset, input_ref, originals = import_layer(
         task["source"], task["layer"], directory, "input.gpkg", job["id"], ensure_supervised,
     )
     frame = frame.reset_index(drop=True)
@@ -136,7 +214,7 @@ def inventory(task: dict, job: dict, directory: Path, progress, ensure_supervise
         "dataset_revision": asdict(dataset),
         "object_revision": asdict(obj),
         "claim_revision": asdict(claim),
-        "evidence": [asdict(input_ref), asdict(export_ref)],
+        "evidence": [asdict(ref) for ref in (input_ref, *originals, export_ref)],
         "statistics": stats,
         "validation": checks,
         "export_layer": "inventory",

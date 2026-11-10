@@ -83,14 +83,14 @@ def write_report(path, stats):
 
 def check_control(task: dict, job: dict, directory: Path, progress, ensure_supervised, workspace_root: Path) -> dict:
     progress("import_started")
-    project, _, project_rev, project_ref = import_layer(
+    project, _, project_rev, project_ref, project_sources = import_layer(
         task["source"], task["layer"], directory, "input.gpkg", job["id"], ensure_supervised,
     )
-    control, _, control_rev, control_ref = import_layer(
+    control, _, control_rev, control_ref, control_sources = import_layer(
         task["control_source"], task["control_layer"], directory, "control.gpkg", job["id"], ensure_supervised,
     )
     progress("imported", datasets=[asdict(project_rev), asdict(control_rev)])
-    evidence = [project_ref, control_ref]
+    evidence = [project_ref, control_ref, *project_sources, *control_sources]
 
     def transform_role(frame, role, revision):
         plan = task.get(role + "_plan")
