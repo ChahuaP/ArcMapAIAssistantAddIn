@@ -16,9 +16,7 @@
         onChange: event => change(event.target.value) });
     const select = (value, values, change) => h('select', { value, onChange: event => change(event.target.value) }, ...options(values));
     const array = value => value.split(/[,，]/).map(part => part.trim()).filter(Boolean);
-    const scalar = value => { try { return JSON.parse(value); } catch { return value; } };
-    const parametersReady = (fields, values) => Object.keys(fields).every(name => values[name]?.trim());
-    const parameterValues = (fields, values) => Object.fromEntries(Object.keys(fields).map(name => [name, scalar(values[name].trim())]));
+    const { parametersReady, parameterValues } = window.GuizhiTaskFields;
     function ParameterFields({ fields, values, change, disabled }) {
         return Object.entries(fields).map(([name, label]) => h('label', { key: name }, label,
             text(values[name], value => change({ ...values, [name]: value }), { disabled,

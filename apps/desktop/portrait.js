@@ -4,21 +4,26 @@ const api = window.guizhi;
 const bubble = document.querySelector('#bubble');
 const message = document.querySelector('#message');
 const mic = document.querySelector('#mic');
-const play = document.querySelector('#play');
-const stop = document.querySelector('#stop');
 const detail = document.querySelector('#status');
 const shell = document.querySelector('main');
 const mouth = document.querySelector('#speaking-mouth');
+const figure = document.querySelector('#figure-toggle');
 let state;
-let mode = 'idle';
-let held = false;
-let holdId = 0;
-let seen;
-let task;
-let conversation;
+let session = 0;
+let sequence = 0;
+let waiting;
+let receiving = false;
 let passThrough;
-let speechFrame = 0;
+let pointer;
+let moved;
+let frame = 0;
 let mouthLevel = 0;
+
+function showMessage(text) {
+    message.textContent = text;
+    message.hidden = !text;
+    bubble.hidden = message.hidden && detail.hidden;
+}
 
 function tell(text, error = false) {
     detail.textContent = text;
@@ -27,152 +32,154 @@ function tell(text, error = false) {
     bubble.hidden = message.hidden && detail.hidden;
 }
 
-function animateMouth() {
-    mouthLevel += (voice.level() - mouthLevel) * 0.55;
-    mouth.setAttribute('ry', (2.5 + mouthLevel * 6).toFixed(2));
-    speechFrame = requestAnimationFrame(animateMouth);
-}
-
-const voice = new VoiceAudio(api, next => {
-    mode = next;
-    shell.dataset.voice = next;
-    mic.setAttribute('aria-pressed', String(next === 'listening'));
-    mic.title = next === 'listening' ? '松开识别' : '按住说话';
-    mic.setAttribute('aria-label', mic.title);
-    stop.hidden = next === 'idle';
-    cancelAnimationFrame(speechFrame);
-    mouthLevel = 0;
-    if (next === 'speaking') speechFrame = requestAnimationFrame(animateMouth);
-    tell({ opening: '正在打开麦克风', listening: '正在听', recognizing: '正在转成文字',
-        synthesizing: '正在准备播报', speaking: '正在播报' }[next] || '');
-});
-
 function fail(error) {
     tell(String(error.message || error).replace(/^Error invoking remote method '[^']+': Error: /, ''), true);
 }
+
+function animateMouth() {
+    mouthLevel += (voice.level() - mouthLevel) * 0.55;
+    mouth.setAttribute('ry', (2.5 + mouthLevel * 6).toFixed(2));
+    frame = requestAnimationFrame(animateMouth);
+}
+
+function paintMic() {
+    mic.setAttribute('aria-pressed', String(Boolean(session)));
+    const label = session ? '结束语音对话' : '语音对话';
+    mic.title = label;
+    mic.setAttribute('aria-label', label);
+}
+
+const voice = new VoiceAudio(api, mode => {
+    shell.dataset.voice = mode;
+    cancelAnimationFrame(frame);
+    mouthLevel = 0;
+    if (mode === 'speaking') frame = requestAnimationFrame(animateMouth);
+    tell({ opening: '正在打开麦克风', listening: '我在听', recognizing: '我听到了',
+        synthesizing: '让我想一下', speaking: '规智正在回答' }[mode] || '');
+});
+
 function appearance(value) {
     document.documentElement.dataset.theme = value.dark ? 'dark' : 'light';
 }
 
+function available(kind) {
+    const provider = state?.speech[kind];
+    return provider === 'local' ? state.speech.localAvailable
+        : provider && provider !== 'off' && state.speech[kind + 'Profile'].keyConfigured;
+}
+
+async function endSession() {
+    session = 0;
+    waiting = null;
+    receiving = false;
+    paintMic();
+    showMessage('');
+    await voice.stop();
+}
+
+async function listen(token) {
+    if (token !== session) return;
+    try { await voice.listen(state.speech.microphone, () => void receive(token), true); }
+    catch (error) { if (token === session) { await endSession(); fail(error); } }
+}
+
+async function reply(text, token) {
+    if (token !== session) return;
+    if (available('tts')) {
+        try { await voice.speak(text, state.speech.speaker); }
+        catch (error) { if (token === session) { showMessage(text); fail(error); } }
+    } else showMessage(text);
+    if (token === session) await listen(token);
+}
+
+async function receive(token) {
+    if (token !== session || receiving) return;
+    receiving = true;
+    let result;
+    try {
+        const text = await voice.finish();
+        if (token !== session) return;
+        if (!text) { await endSession(); return; }
+        showMessage('');
+        tell('让我想一下');
+        result = await api.voiceTurn(text);
+        if (token !== session) return;
+    } catch (error) {
+        if (token === session) { await endSession(); fail(error); }
+        return;
+    } finally {
+        if (token === session) receiving = false;
+    }
+    if (result.reply) await reply(result.reply, token);
+    else {
+        waiting = result.task;
+        followAnswer();
+    }
+}
+
+function followAnswer() {
+    if (!session || !waiting) return;
+    const task = state.tasks.find(item => item.id === waiting);
+    if (!task || ['running', 'cancelling'].includes(task.status)) return;
+    waiting = null;
+    const detail = { cancelled: '这一轮已经结束。', timed_out: '我这次没能及时完成。你可以再试一次。',
+        missing_materials: '请先把需要办理的材料发给我。' };
+    void reply(task.response || detail[task.status] || '这次没能完成。可以打开工作台看详情。', session).catch(fail);
+}
+
 function update(next) {
     appearance(next.appearance);
-    if (conversation !== undefined && next.conversation !== conversation) {
-        void voice.stop().catch(fail);
-    }
-    conversation = next.conversation;
     state = next;
-    task = next.tasks.find(item => item.id === next.focusTask);
-    shell.dataset.task = task?.status || 'idle';
-    message.textContent = task?.response || (task?.status === 'running' ? task.step || '正在理解任务' :
-        task?.status === 'cancelling' ? '正在结束任务' : '');
-    message.hidden = !message.textContent;
-    bubble.hidden = message.hidden && detail.hidden;
-    play.hidden = !task?.response;
-    mic.disabled = next.speech.asr === 'off' || (next.speech.asr === 'local'
-        ? !next.speech.localAvailable : !next.speech.asrProfile.keyConfigured);
-    if (seen === undefined) seen = task?.response ? task.id : '';
-    if (task?.response && task.id !== seen) {
-        seen = task.id;
-        if (next.speech.autoSpeak && next.speech.tts !== 'off' && mode === 'idle' && !held) {
-            const ready = next.speech.tts === 'local' ? next.speech.localAvailable
-                : next.speech.ttsProfile.keyConfigured;
-            if (ready && ['succeeded', 'answered'].includes(task.status)) {
-                void voice.speak(task.response, next.speech.speaker).catch(fail);
-            }
-        }
-    }
+    mic.disabled = !available('asr');
+    if (session && mic.disabled) void endSession().catch(fail);
+    followAnswer();
 }
 
-async function send(text) {
-    if (!text.trim()) return;
-    await voice.stop();
-    if (!state?.settings.workspace || window.GuizhiTaskCommand(text) === 'workbench') {
-        await api.workbench();
-        return;
-    }
-    const result = await api.submit({ prompt: text, previousTask: state.focusTask });
-    update(result);
+function startSession() {
+    if (!available('asr')) { tell('可在设置中开启语音对话。'); return; }
+    if (session) return;
+    session = ++sequence;
+    paintMic();
+    showMessage('');
+    void listen(session);
 }
 
-async function begin() {
-    if (held || mic.disabled) return;
-    held = true;
-    const pointer = ++holdId;
-    try {
-        const active = await voice.listen(state?.speech.microphone, () => void end());
-        if (active && (!held || pointer !== holdId)) await voice.stop();
-    } catch (error) {
-        held = false;
-        fail(error);
-    }
-}
-
-async function end() {
-    if (!held) return;
-    held = false;
-    holdId += 1;
-    try {
-        const text = await voice.finish(partial => tell(partial));
-        if (!text) return;
-        const action = window.GuizhiTaskCommand(text);
-        if (action === 'send') {
-            const { prompt } = await api.readDraft();
-            if (prompt?.trim()) return await api.voiceSubmit();
-        }
-        if (action === 'reset' || action === 'workbench') return await send(text);
-        await api.voiceDraft(text);
-    } catch (error) {
-        fail(error);
-    }
-}
-
-mic.addEventListener('pointerdown', event => {
+figure.addEventListener('pointerdown', event => {
     if (event.button !== 0) return;
-    mic.setPointerCapture(event.pointerId);
-    void begin();
+    pointer = { id: event.pointerId, x: event.screenX, y: event.screenY };
+    moved = false;
+    figure.setPointerCapture(event.pointerId);
+    void api.portraitDrag('start', { x: pointer.x, y: pointer.y }).catch(fail);
 });
-mic.addEventListener('pointerup', () => void end());
-mic.addEventListener('pointercancel', () => { held = false; void voice.stop().catch(fail); });
-mic.addEventListener('keydown', event => {
-    if ((event.code === 'Space' || event.code === 'Enter') && !event.repeat) {
-        event.preventDefault();
-        void begin();
-    }
+figure.addEventListener('pointermove', event => {
+    if (pointer?.id !== event.pointerId) return;
+    moved ||= Math.hypot(event.screenX - pointer.x, event.screenY - pointer.y) >= 5;
+    if (moved) void api.portraitDrag('move', { x: event.screenX, y: event.screenY }).catch(fail);
 });
-mic.addEventListener('keyup', event => {
-    if (event.code === 'Space' || event.code === 'Enter') {
-        event.preventDefault();
-        void end();
-    }
-});
-for (const selector of ['#type', '#figure-toggle']) {
-    document.querySelector(selector).addEventListener('click', () => void api.openLauncher().catch(fail));
+function release(event) {
+    if (pointer?.id !== event.pointerId) return;
+    pointer = null;
+    void api.portraitDrag('end').catch(fail);
 }
+for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) figure.addEventListener(type, release);
+figure.addEventListener('click', event => {
+    if (!moved || event.detail === 0) void api.openLauncher().catch(fail);
+});
+document.querySelector('#type').addEventListener('click', () => void api.openLauncher().catch(fail));
 document.querySelector('#open').addEventListener('click', () => void api.workbench().catch(fail));
-stop.addEventListener('click', () => {
-    held = false;
-    void voice.stop().catch(fail);
-});
-play.addEventListener('click', () => {
-    if (task?.response) void voice.speak(task.response, state.speech.speaker).catch(fail);
-});
-document.addEventListener('keydown', event => {
-    if (event.key === 'Escape') {
-        held = false;
-        void voice.stop().catch(fail);
-    }
-});
-window.addEventListener('pagehide', () => { held = false; voice.releaseCapture(); });
-document.addEventListener('pointermove', event => {
+mic.addEventListener('click', () => session ? void endSession().catch(fail) : startSession());
+document.addEventListener('keydown', event => { if (event.key === 'Escape') void endSession().catch(fail); });
+window.addEventListener('pagehide', () => { session = 0; voice.releaseCapture(); });
+document.addEventListener('mousemove', event => {
     const transparent = !event.target.closest('[data-hit]');
     if (transparent !== passThrough) {
         passThrough = transparent;
-        void api.portraitHit(!transparent);
+        void api.portraitHit(!transparent).catch(fail);
     }
 });
 
 api.onState(update);
 api.onAppearance(appearance);
-api.onPortraitVoice(() => mic.focus({ preventScroll: true }));
-api.onPortraitHide(() => { held = false; void voice.stop().catch(fail); });
+api.onPortraitVoice(() => { mic.focus({ preventScroll: true }); startSession(); });
+api.onPortraitHide(() => void endSession().catch(fail));
 api.state().then(update).catch(fail);

@@ -18,7 +18,7 @@ def json_file(path, value):
 def bridge(bridge_exe, directory, name, request):
     bridge_exe = bridge_exe.resolve(strict=True)
     if bridge_exe.name.casefold() != "arcmapbridge.exe" or not bridge_exe.is_file():
-        raise ValueError("请选择规智发布的 ArcMapBridge.exe")
+        raise ValueError("请选择规智提供的 ArcGIS 连接组件")
     identity = bridge_exe.with_name("ArcMapBridge.build")
     facts = dict(line.split("=", 1) for line in identity.read_text(encoding="utf-8-sig").splitlines() if "=" in line)
     if facts.get("binary_sha256") != digest(bridge_exe):
@@ -66,11 +66,11 @@ def export_frame(frame, output, name, driver, tolerance=0):
         raise ValueError("The data has no defined coordinate system")
     if driver == "OpenFileGDB":
         if shapely.has_z(frame.geometry.array).any() or shapely.has_m(frame.geometry.array).any():
-            raise ValueError("ArcMap 10.2 publication currently accepts 2D vector results")
+            raise ValueError("ArcGIS Desktop 10.2 publication currently accepts 2D vector results")
         # ArcMap 10.2 stores wide integers as double; reject values that would lose precision.
         for series in (frame[col] for col in frame.select_dtypes(include="integer").columns):
             if any(abs(int(value)) > 2 ** 53 for value in series.dropna()):
-                raise ValueError("An integer attribute cannot be represented exactly in ArcMap 10.2")
+                raise ValueError("An integer attribute cannot be represented exactly in ArcGIS Desktop 10.2")
     with warnings.catch_warnings():
         if driver == "OpenFileGDB":
             warnings.filterwarnings("ignore", message="Field .* of type Integer64 will be written as a Float64", category=RuntimeWarning)
@@ -78,11 +78,11 @@ def export_frame(frame, output, name, driver, tolerance=0):
     check = pyogrio.read_dataframe(output, layer=name)
     left, right = frame.geometry, check.geometry
     if len(frame) != len(check) or frame.crs != check.crs:
-        raise ValueError("ArcMap exchange changed feature count or coordinate system")
+        raise ValueError("ArcGIS exchange changed feature count or coordinate system")
     if not all((a is None and b is None) or
                (a is not None and b is not None and
                 (a.equals_exact(b, tolerance, normalize=True) or a.equals(b)))
                for a, b in zip(left, right, strict=True)):
-        raise ValueError("ArcMap exchange geometry failed round-trip verification")
+        raise ValueError("ArcGIS exchange geometry failed round-trip verification")
     assert_frame_equal(frame.drop(columns=left.name).reset_index(drop=True), check.drop(columns=right.name),
                        check_dtype=False, check_exact=True)

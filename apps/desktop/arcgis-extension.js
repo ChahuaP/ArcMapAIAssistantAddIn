@@ -6,7 +6,7 @@
     const { errorText } = window.GuizhiModel;
     const basename = value => value?.split(/[\\/]/).at(-1);
 
-    window.GuizhiArcmap = function Arcmap({ configured, sync, task, attach }) {
+    window.GuizhiArcgisExtension = function ArcgisExtension({ configured, sync, task, attach }) {
         const [session, setSession] = useState(sync.host?.session || sync.hosts[0]?.session || '');
         const [frame, setFrame] = useState(sync.connection?.frame ?? 0);
         const [layer, setLayer] = useState('');
@@ -38,9 +38,9 @@
         }
         const edit = action => () => perform(action);
         return h('section', { className: 'settings-card arcgis-panel' },
-            h('div', { className: 'section-head' }, h('h2', null, icon('map'), ' ArcMap'),
+            h('div', { className: 'section-head' }, h('h2', null, icon('map'), ' ArcGIS'),
                 h(antd.Tag, { color: live ? 'success' : 'default' }, live ? '已连接' : '未连接')),
-            !sync.hosts.length && h('p', { className: 'muted' }, '在 ArcMap 查看成果，也可将图层或选中要素带回规智。'),
+            !sync.hosts.length && h('p', { className: 'muted' }, '在 ArcGIS 查看成果，也可将图层或选中要素带回规智。'),
             sync.hosts.length > 0 && h('div', { className: 'setting-fields' },
                 h('label', null, '已打开的工程', h('select', { value: session, disabled: busy, onChange: event => {
                     setSession(event.target.value); setFrame(0);
@@ -55,19 +55,19 @@
                         if (selected.state === 'waiting') {
                             const discovered = await api.arcgisDiscover(session);
                             if (!discovered.hosts.find(host => host.session === session)?.frames[frame]) {
-                                throw new Error('未读取到 ArcMap 数据框，请确认工程已保存并打开');
+                                throw new Error('未读取到 ArcGIS 数据框，请确认工程已保存并打开');
                             }
                         }
                         await api.arcgisConfigure({ session, frame });
                     }) }))),
             h('div', { className: 'business-actions' },
-                button('folder', '打开 ArcMap 工程', { type: sync.hosts.length ? 'default' : 'primary',
+                button('folder', '打开 ArcGIS 工程', { type: sync.hosts.length ? 'default' : 'primary',
                     disabled: busy, onClick: edit(async () => {
                         if (await api.arcgisOpen()) setNotice('工程打开后，在这里点「连接工程」。');
                     }) }),
                 !configured && button('server', '配置连接组件', { disabled: busy, onClick: edit(() => api.arcmapBridge()) }),
                 !sync.hosts.length && button('plus', '首次使用 · 安装插件', { type: 'link', disabled: busy,
-                    onClick: edit(async () => { await api.arcgisInstall(); setNotice('在 ArcMap 安装窗口确认后，再打开工程。'); }) })),
+                    onClick: edit(async () => { await api.arcgisInstall(); setNotice('在 ArcGIS 安装窗口确认后，再打开工程。'); }) })),
             target && h('section', { className: 'settings-card' },
                 h('div', { className: 'section-head' }, h('strong', { title: target.map }, basename(target.map) + ' · ' + target.frameName),
                     h(antd.Tag, { color: live ? 'green' : 'default' }, live ? '已连接 · ' + live.version : '等待工程打开')),
@@ -75,7 +75,7 @@
                     onChange: event => perform(() => api.arcgisConfigure({ auto: event.target.checked })) }),
                     '完成后在 ArcGIS 显示'),
                 live?.editing && h('p', { role: 'status' }, 'ArcGIS 正在编辑，待处理成果将在编辑结束后发布。'),
-                live && !live.publish_ready && h('p', { role: 'status' }, '请用「打开 ArcMap 工程」重新打开，以启用成果显示。'),
+                live && !live.publish_ready && h('p', { role: 'status' }, '请用「打开 ArcGIS 工程」重新打开，以启用成果显示。'),
                 sync.newEdits && h(antd.Tag, { color: 'green' }, '有已保存的编辑'),
                 layers.length > 0 && h('label', null, '工作台材料', h('select', { value: layer, disabled: busy || live.editing,
                     onChange: event => setLayer(event.target.value) }, h('option', { value: '' }, '选择图层'),

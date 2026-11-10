@@ -63,7 +63,7 @@
                 source.buffer = await context.decodeAudioData(wav);
                 source.connect(context.destination);
                 await new Promise(resolve => { source.onended = resolve; source.start(); });
-                setMessage('播报试听完成');
+                setMessage('试听完成');
             } catch (issue) { fail(issue); }
             finally { testState(''); }
         }
@@ -78,7 +78,7 @@
                 onChange: event => onChange(event.target.value) }));
         function section(kind) {
             const asr = kind === 'asr';
-            const title = asr ? '语音识别' : '语音播报';
+            const title = asr ? '语音识别' : '语音回答';
             const device = asr ? 'microphone' : 'speaker';
             const name = kind + 'Profile';
             const profile = value[name] || {};
@@ -106,22 +106,19 @@
                     provider === 'azure' && field('资源区域', profile.region, next => updateProfile('region', next),
                         { placeholder: 'eastasia' }),
                     provider === 'aliyun' && field('百炼工作空间 ID', profile.workspace, next => updateProfile('workspace', next)),
-                    provider === 'aliyun' && field('播报模型', profile.model, next => updateProfile('model', next),
+                    provider === 'aliyun' && field('语音模型', profile.model, next => updateProfile('model', next),
                         { placeholder: 'cosyvoice-v3-plus' }),
                     remote && field(title + '密钥', profile.key, next => updateProfile('key', next),
                         { type: 'password', autoComplete: 'off', placeholder: configured ? '已配置' : '输入 API 密钥' }),
-                    !asr && remote && field('播报音色', value.voice, next => update('voice', next),
+                    !asr && remote && field('回答音色', value.voice, next => update('voice', next),
                         { placeholder: { custom: 'alloy', azure: 'zh-CN-XiaoxiaoNeural',
                             aliyun: 'longanyang', minimax: 'female-shaonv' }[provider] })),
                 asr ? button('mic', testing === 'recording' ? '结束并识别' : '试录音',
                     { disabled: provider === 'off' || Boolean(testing && testing !== 'recording'), onClick: record })
-                    : button('mic', '试听播报', { disabled: provider === 'off' || Boolean(testing),
+                    : button('mic', '试听声音', { disabled: provider === 'off' || Boolean(testing),
                         loading: testing === 'tts', onClick: listen }));
         }
         return h('div', { className: 'speech-form' }, section('asr'), section('tts'),
-            h('label', { className: 'voice-toggle' }, h('input', { type: 'checkbox', checked: value.autoSpeak,
-                disabled: value.tts === 'off' || Boolean(testing), onChange: event => update('autoSpeak', event.target.checked) }),
-                '任务完成后自动播报'),
             testing === 'recording' && h('p', { role: 'status', className: 'muted' }, '正在录音'),
             testing === 'asr' && h('p', { role: 'status', className: 'muted' }, '正在识别'),
             message && h('p', { role: 'status', className: 'muted' }, message),
@@ -159,7 +156,7 @@
                 h('div', { className: 'voice-fields' },
                     h('label', null, '术语纠错', h('textarea', { rows: 2, placeholder: '原词=正确词', value: words,
                         onChange: event => setWords(event.target.value) })),
-                    h('label', null, '发音词表', h('textarea', { rows: 2, placeholder: '原词=播报读法', value: pronunciation,
+                    h('label', null, '发音词表', h('textarea', { rows: 2, placeholder: '原词=发音读法', value: pronunciation,
                         onChange: event => setPronunciation(event.target.value) })))),
             h(antd.Button, { type: 'primary', disabled: testing, loading: saving, onClick: save }, '保存语音设置'),
             message && h('p', { role: 'status' }, message),

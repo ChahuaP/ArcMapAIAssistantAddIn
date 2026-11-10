@@ -20,7 +20,7 @@ class LocalSpeechRuntime {
         }
         const installed = JSON.parse(fs.readFileSync(identity, 'utf8'));
         if (installed.engine !== spec.engine || !installed.modes.includes(kind)) {
-            throw new Error(kind === 'asr' ? '本地识别模型未安装' : '本地播报模型未安装');
+            throw new Error(kind === 'asr' ? '本地识别模型未安装' : '本地语音回答模型未安装');
         }
         for (const asset of spec.models[kind].files) {
             const file = path.join(root, 'models', kind, asset.file);

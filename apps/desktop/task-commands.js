@@ -8,6 +8,14 @@
         if (['打开成果', '打开工作台', '打开结果'].includes(command)) return 'workbench';
         return null;
     };
-    if (typeof module === 'object') module.exports = { action };
-    else window.GuizhiTaskCommand = action;
+    const parametersReady = (fields, values) => Object.keys(fields).every(name => values[name]?.trim());
+    const parameterValues = (fields, values) => Object.fromEntries(Object.keys(fields).map(name => {
+        const value = values[name].trim();
+        try { return [name, JSON.parse(value)]; } catch { return [name, value]; }
+    }));
+    if (typeof module === 'object') module.exports = { action, parametersReady, parameterValues };
+    else {
+        window.GuizhiTaskCommand = action;
+        window.GuizhiTaskFields = { parametersReady, parameterValues };
+    }
 })();

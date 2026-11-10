@@ -123,12 +123,11 @@
             const callbacks = [
                 api.onState(value => {
                     setState(value);
-                    if (value.focusTask && value.focusTask !== focusTask.current) select(value.focusTask);
+                    if (value.focusTask !== focusTask.current) select(value.focusTask);
                     focusTask.current = value.focusTask;
                 }),
                 api.onSettings(() => showSettings(true)), api.onAppearance(setAppearance), api.onDraft(receiveDraft),
                 api.onLauncherFocus(() => document.querySelector('.launcher textarea')?.focus()),
-                api.onLauncherSubmit(() => document.querySelector('.launcher form')?.requestSubmit()),
                 api.onOpenTask(id => { showSettings(false); select(id); }),
             ];
             const dismiss = event => {
@@ -140,6 +139,7 @@
             return () => { callbacks.forEach(unsubscribe => unsubscribe()); removeEventListener('keydown', dismiss); };
         }, []);
         const focusTask = useRef(null);
+        const messages = useRef(null);
         useEffect(() => {
             if (state?.settings.workspace) {
                 api.coordinates().then(setCoordinates).catch(fail);
@@ -149,6 +149,9 @@
         const plans = coordinates.filter(entry => entry.kind === 'plan');
         const task = state?.tasks.find(item => item.id === selected);
         useEffect(() => { selectParcel(null); }, [selected]);
+        useEffect(() => {
+            if (messages.current) messages.current.scrollTop = messages.current.scrollHeight;
+        }, [task?.id, task?.status]);
         const busy = state?.tasks.some(active) || sending;
         const skill = draft.skillDefinition;
         const freeInputs = skill ? draft.unassigned : draft.materials.inputs || [];
@@ -278,7 +281,10 @@
                 !skill && button('paperclip', '添加材料', { type: 'text', loading: adding, onClick: () => addMaterials(() => api.material()) }),
                 !skill && iconButton('folder', '添加材料目录', { disabled: adding, onClick: () => addMaterials(() => api.material('any', true)) }),
                 h('span', { className: 'spacer' }),
-                iconButton('mic', '语音输入', { type: 'default', onClick: () => api.portraitVoice().catch(fail) }),
+                iconButton('mic', '语音对话', { type: 'default', onClick: () => {
+                    if (!launcher && state?.speech.asr === 'off') showSettings('voice');
+                    else void api.portraitVoice().catch(fail);
+                } }),
                 busy ? h(antd.Button, { onClick: () => api.cancel().then(setState).catch(fail) }, '停止')
                     : button('send', '发送', { type: 'primary', htmlType: 'submit',
                         disabled: adding || !draft.prompt.trim() || (!suggestion.exact && !canSubmit) })));
@@ -315,10 +321,21 @@
             h('div', { className: 'history-label' }, '最近任务'),
             h('nav', { 'aria-label': '最近任务' }, ...recent.map(taskButton)),
             h('button', { className: 'nav-item', onClick: () => showSettings(true) }, icon('settings'), '设置'));
+        const history = [];
+        let prior = recent.find(item => item.id === task?.previousTask);
+        for (let depth = 0; prior && depth < 12; depth++) {
+            history.unshift(prior);
+            const id = prior.previousTask;
+            prior = recent.find(item => item.id === id);
+        }
         const conversation = h('section', { className: 'conversation' + (task ? '' : ' conversation-empty'), 'aria-label': '任务对话' },
             task && h('div', { className: 'task-head' }, h('h1', null, task.title),
                 h('span', { className: 'status-tag' }, labels[task.status] || '未完成')),
-            h('div', { className: 'messages' }, task ? [
+            h('div', { className: 'messages', ref: messages }, task ? [
+                ...history.flatMap(item => [
+                    h('article', { key: item.id + '-question', className: 'bubble user' }, item.prompt),
+                    item.response && h('article', { key: item.id + '-answer', className: 'bubble assistant' }, item.response),
+                ]),
                 h('article', { key: 'user', className: 'bubble user' }, task.prompt),
                 h(Result, { key: 'result', task, retry, fail, parcel, selectParcel, editSkill: text => {
                     setInitialMarkdown(text);

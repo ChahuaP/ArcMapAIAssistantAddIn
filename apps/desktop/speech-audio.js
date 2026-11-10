@@ -26,7 +26,34 @@ export function wavFromFrames(frames) {
 }
 
 export function speechPieces(text) {
-    return text.trim().match(/[^。！？；\n]{1,140}[。！？；\n]?|[。！？；]/gu)?.map(item => item.trim()).filter(Boolean) ?? [];
+    const clauses = text.trim().match(/[^。！？；\n]{1,140}[。！？；\n]?|[。！？；]/gu) ?? [];
+    const pieces = [];
+    for (const clause of clauses) {
+        if (pieces.length && pieces.at(-1).length + clause.length <= 140) pieces[pieces.length - 1] += clause;
+        else pieces.push(clause);
+    }
+    return pieces;
+}
+
+export function voiceBoundary() {
+    let voiced = 0;
+    let quiet = 0;
+    let heard = false;
+    return {
+        get heard() { return heard; },
+        add(samples) {
+            const rms = Math.sqrt(samples.reduce((sum, value) => sum + value * value, 0) / samples.length);
+            if (rms >= 0.012) {
+                voiced += samples.length;
+                quiet = 0;
+                heard ||= voiced >= 3200;
+            } else {
+                if (!heard) voiced = 0;
+                quiet += samples.length;
+            }
+            return heard && quiet >= 14400;
+        },
+    };
 }
 
 export class VoiceAudio {
@@ -41,14 +68,15 @@ export class VoiceAudio {
     }
 
     async stop() {
-        this.generation += 1;
+        const token = ++this.generation;
         this.releaseCapture();
         if (this.source) {
             this.source.stop();
             this.source = null;
         }
         await this.api.speechCancel();
-        this.status('idle');
+        if (token === this.generation) this.status('idle');
+        return token;
     }
 
     releaseCapture() {
@@ -56,13 +84,14 @@ export class VoiceAudio {
         this.capture = null;
         if (!capture) return;
         clearTimeout(capture.timer);
+        clearTimeout(capture.inactive);
         capture.stream.getTracks().forEach(track => track.stop());
         void capture.context.close();
     }
 
-    async listen(microphone, limitReached) {
-        await this.stop();
-        const token = this.generation;
+    async listen(microphone, limitReached, automatic = false) {
+        const token = await this.stop();
+        if (token !== this.generation) return false;
         this.status('opening');
         const stream = await navigator.mediaDevices.getUserMedia({ audio: {
             deviceId: microphone ? { exact: microphone } : undefined,
@@ -74,30 +103,46 @@ export class VoiceAudio {
         }
         const context = new AudioContext({ sampleRate: 16000 });
         const frames = [];
-        this.capture = { stream, context, frames };
+        const capture = { stream, context, frames, activity: automatic ? voiceBoundary() : null };
+        this.capture = capture;
         try {
             await context.audioWorklet.addModule('/voice-input.js');
             const worklet = new AudioWorkletNode(context, 'guizhi-pcm');
             const silent = context.createGain();
             silent.gain.value = 0;
-            worklet.port.onmessage = event => frames.push(event.data);
+            const finishTurn = () => {
+                if (this.capture !== capture || capture.ending) return;
+                capture.ending = true;
+                limitReached();
+            };
+            worklet.port.onmessage = event => {
+                const samples = event.data;
+                frames.push(samples);
+                if (!capture.ending && capture.activity?.add(samples)) finishTurn();
+            };
             context.createMediaStreamSource(stream).connect(worklet).connect(silent).connect(context.destination);
             await context.resume();
-            if (!this.capture || token !== this.generation) return false;
+            if (this.capture !== capture || token !== this.generation) return false;
             this.capture.worklet = worklet;
-            this.capture.timer = setTimeout(limitReached, 29_000);
+            capture.timer = setTimeout(finishTurn, 29_000);
+            if (automatic) capture.inactive = setTimeout(() => { if (!capture.activity.heard) finishTurn(); }, 18_000);
             this.status('listening');
             return true;
         } catch (error) {
-            this.releaseCapture();
+            if (this.capture === capture) this.releaseCapture();
             throw error;
         }
     }
 
-    async finish(onPartial) {
+    async finish(onPartial = () => {}) {
         const capture = this.capture;
         if (!capture?.worklet) {
             await this.stop();
+            return null;
+        }
+        if (capture.activity && !capture.activity.heard) {
+            this.releaseCapture();
+            this.status('idle');
             return null;
         }
         const token = this.generation;
@@ -119,8 +164,8 @@ export class VoiceAudio {
     }
 
     async speak(text, speaker) {
-        await this.stop();
-        const token = this.generation;
+        const token = await this.stop();
+        if (token !== this.generation) return;
         this.context ??= new AudioContext();
         if (speaker) {
             if (!this.context.setSinkId) throw new Error('当前系统无法选择播放设备');

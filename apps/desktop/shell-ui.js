@@ -57,7 +57,7 @@
                 brand(!settings && !onboarding), settings && h('span', { className: 'title-path' }, '设置')),
             !settings && !onboarding && h('div', { className: 'title-group' },
                 button('link', '第三方扩展', { type: 'text', onClick: arcgis,
-                    title: connected ? 'ArcMap 已连接' : '查看第三方扩展' }),
+                    title: connected ? 'ArcGIS 已连接' : '查看第三方扩展' }),
                 iconButton('right', '折叠或展开材料与成果', { onClick: right, onKeyDown: resize(1) })));
     }
 

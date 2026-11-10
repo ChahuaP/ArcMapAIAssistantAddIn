@@ -45,7 +45,7 @@ class ArcGisSync {
         const logs = path.join(path.dirname(this.root), 'diagnostics');
         fs.mkdirSync(logs, { recursive: true });
         const env = { ...process.env, GUIZHI_ARCGIS_HOSTS: this.root,
-            FORT0: path.join(logs, 'ArcMap-' + identity() + '.log') };
+            FORT0: path.join(logs, 'ArcGIS-' + identity() + '.log') };
         return new Promise((resolve, reject) => {
             const child = spawn(executable, [file], { detached: true, windowsHide: true, stdio: 'ignore', env });
             child.once('error', () => reject(new Error('无法打开 ArcGIS 工程')));
@@ -253,7 +253,7 @@ class ArcGisSync {
 
     async publish(job, connection) {
         const bridge = this.controller.settings.arcmapBridge || this.controller.bundledArcmap;
-        if (!bridge) throw new Error('请先配置 ArcMap Bridge');
+        if (!bridge) throw new Error('请先配置 ArcGIS 连接组件');
         if (!job.staged) {
             job.staged = await this.controller.request('arcgis-stage',
                 { run: job.run, artifact: job.artifact, name: job.name }, bridge);

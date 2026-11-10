@@ -6,7 +6,7 @@ const { endpoint, normalizeKey } = require('../../src/guizhi/infrastructure/dsh/
 const onlineHost = 'https://api.minimaxi.com';
 const voiceDefault = 'female-shaonv';
 const voices = { custom: 'alloy', azure: 'zh-CN-XiaoxiaoNeural', aliyun: 'longanyang', minimax: voiceDefault };
-const defaults = { asr: 'off', tts: 'off', voice: voiceDefault, autoSpeak: false,
+const defaults = { asr: 'off', tts: 'off', voice: voiceDefault,
     microphone: '', speaker: '', dictionary: [], pronunciation: [] };
 const audioLimit = 16_000 * 2 * 30 + 44;
 
@@ -258,8 +258,8 @@ class SpeechController {
             const { baseUrl, model, region, workspace, encryptedKey } = this.settings[kind + 'Profile'] || {};
             return { baseUrl, model, region, workspace, keyConfigured: Boolean(encryptedKey) };
         };
-        const { asr, tts, voice, autoSpeak, microphone, speaker, dictionary, pronunciation } = this.settings;
-        return { asr, tts, voice, autoSpeak, microphone, speaker, dictionary, pronunciation,
+        const { asr, tts, voice, microphone, speaker, dictionary, pronunciation } = this.settings;
+        return { asr, tts, voice, microphone, speaker, dictionary, pronunciation,
             asrProfile: publicProfile('asr'), ttsProfile: publicProfile('tts'),
             providers: { asr: ['minimax', 'azure', 'custom'], tts: ['minimax', 'azure', 'aliyun', 'custom'] },
             localAvailable: Boolean(this.bundledLocalRoot) };
@@ -293,7 +293,7 @@ class SpeechController {
         const encryptedKey = saved?.provider === provider && saved.baseUrl === baseUrl ? saved.encryptedKey : undefined;
         const key = normalizeKey(form.key) || (encryptedKey
             ? this.storage.decryptString(Buffer.from(encryptedKey, 'base64')) : '');
-        if (!key) throw new Error(kind === 'asr' ? '请配置识别服务的 API 密钥' : '请配置播报服务的 API 密钥');
+        if (!key) throw new Error(kind === 'asr' ? '请配置识别服务的 API 密钥' : '请配置语音回答服务的 API 密钥');
         return { provider, baseUrl, model, region, workspace, encryptedKey, key };
     }
 
@@ -335,7 +335,7 @@ class SpeechController {
     configure(input) {
         const voice = selectedVoice(input);
         const device = id => typeof id === 'string' && id.length <= 200 ? id : '';
-        const settings = { asr: input.asr, tts: input.tts, voice, autoSpeak: Boolean(input.autoSpeak),
+        const settings = { asr: input.asr, tts: input.tts, voice,
             microphone: device(input.microphone), speaker: device(input.speaker),
             dictionary: dictionary(input.dictionary ?? []), pronunciation: dictionary(input.pronunciation ?? []),
             asrProfile: this.saveProfile('asr', input), ttsProfile: this.saveProfile('tts', input) };
@@ -390,9 +390,9 @@ class SpeechController {
     }
 
     synthesize(text) {
-        if (typeof text !== 'string' || !text.trim() || text.length > 360) throw new Error('播报片段长度无效');
+        if (typeof text !== 'string' || !text.trim() || text.length > 360) throw new Error('语音片段长度无效');
         const spoken = correctTerms(text.trim(), this.settings.pronunciation);
-        if (spoken.length > 360) throw new Error('应用发音词表后播报片段过长');
+        if (spoken.length > 360) throw new Error('应用发音词表后语音片段过长');
         return this.perform('tts', { characters: [...spoken].length }, async (provider, signal) => {
             const cached = this.clips.has(spoken);
             const bytes = this.clips.get(spoken) ?? await provider.synthesize(spoken, this.settings.voice, signal);
@@ -426,7 +426,7 @@ class SpeechController {
                 output = await adapter.recognize(readPcmWav(audio), signal, () => {});
                 if (!output.trim() || output.length > 4000) throw new Error('没有识别到可用的文字');
             } else {
-                output = wavBuffer(await adapter.synthesize('你好，我是规智。语音播报已就绪。', selectedVoice(input), signal));
+                output = wavBuffer(await adapter.synthesize('你好，我是规智。我们可以开始对话了。', selectedVoice(input), signal));
             }
             if (same) this.status[kind] = { state: 'verified', at: new Date().toISOString() };
             return output;

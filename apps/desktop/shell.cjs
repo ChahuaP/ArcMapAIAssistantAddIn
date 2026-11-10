@@ -43,6 +43,7 @@ function createShell({ userData, icon, verifyStartup }) {
     let shortcutRegistered = false;
     let displayId = settings.displayId ?? screen.getPrimaryDisplay().id;
     let movingPortrait = false;
+    let portraitDrag;
 
     function save() {
         const pending = file + '.' + randomUUID() + '.pending';
@@ -108,13 +109,42 @@ function createShell({ userData, icon, verifyStartup }) {
     }
 
     function recordPortrait() {
-        if (movingPortrait) return;
+        if (movingPortrait || portraitDrag) return;
         const bounds = portrait.getBounds();
         const display = screen.getDisplayMatching(bounds);
         displayId = display.id;
         settings.displayId = display.id;
         settings.positions[displayId] = { x: bounds.x - display.workArea.x, y: bounds.y - display.workArea.y };
         save();
+    }
+
+    function portraitHit(active) {
+        if (!portraitDrag) portrait.setIgnoreMouseEvents(!active, active ? {} : { forward: true });
+    }
+
+    function dragPortrait(phase, point) {
+        if (phase === 'start') {
+            portraitDrag = { start: point, origin: portrait.getBounds(), moved: false };
+            portrait.setIgnoreMouseEvents(false);
+            return;
+        }
+        if (!portraitDrag) return;
+        const drag = portraitDrag;
+        if (phase === 'move') {
+            drag.moved = true;
+            drag.last = { x: Math.round(point.x), y: Math.round(point.y) };
+            portrait.setPosition(Math.round(drag.origin.x + point.x - drag.start.x),
+                Math.round(drag.origin.y + point.y - drag.start.y));
+            return;
+        }
+        if (drag.moved) {
+            const { x, y, width, height } = screen.getDisplayNearestPoint(drag.last).workArea;
+            const bounds = portrait.getBounds();
+            portrait.setPosition(clamp(bounds.x, x, Math.max(x, x + width - bounds.width)),
+                clamp(bounds.y, y, Math.max(y, y + height - bounds.height)));
+        }
+        portraitDrag = null;
+        if (drag.moved) recordPortrait();
     }
 
     function openLauncher() {
@@ -152,6 +182,7 @@ function createShell({ userData, icon, verifyStartup }) {
     powerMonitor.on('resume', placePortrait);
     nativeTheme.on('updated', themeChanged);
     portrait.on('moved', recordPortrait);
+    portrait.on('hide', () => dragPortrait('end'));
     placePortrait();
 
     function registerShortcut() {
@@ -194,7 +225,7 @@ function createShell({ userData, icon, verifyStartup }) {
     }
 
     return { window: workbench, launcher, portrait, windows, appearance, configureAppearance,
-        openLauncher, reveal, showPortrait, voice, registerShortcut, captureShortcut, notify, close };
+        openLauncher, reveal, showPortrait, voice, portraitHit, dragPortrait, registerShortcut, captureShortcut, notify, close };
 }
 
 module.exports = { createShell };

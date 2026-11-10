@@ -123,7 +123,7 @@ def build(stage, runtime, desktop, dsh, speech, arcmap, addin, tree, commit):
         components.append("speech")
     if arcmap:
         if not all((arcmap / name).is_file() for name in ("ArcMapBridge.exe", "ArcMapBridge.build")):
-            raise ValueError("The ArcMap component requires the verified x86 Bridge")
+            raise ValueError("The ArcGIS component requires the verified x86 Bridge")
         for file in arcmap.iterdir():
             if file.is_file() and (file.suffix.lower() in {".exe", ".dll"} or
                                    file.name in {"ArcMapBridge.exe.config", "ArcMapBridge.build"}):
@@ -132,7 +132,7 @@ def build(stage, runtime, desktop, dsh, speech, arcmap, addin, tree, commit):
             copy_file(addin, payload / "arcmap/Guizhi.esriaddin")
         components.append("arcmap")
     elif addin:
-        raise ValueError("The ArcMap Add-in requires the optional Bridge component")
+        raise ValueError("The ArcGIS extension requires the optional Bridge component")
     hashes = {name: checksum(file) for name, file in files(payload)}
     boot = {name: checksum(file) for name, file in files(bootstrap)}
     manifest = {"schema": 1, "version": version, "components": components, "source_tree": tree,

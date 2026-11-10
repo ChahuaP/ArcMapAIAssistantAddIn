@@ -6,15 +6,15 @@ for (const name of ['state', 'configure', 'workspace', 'material', 'submit', 'ca
     'exportDelivery', 'diagnostics',
     'coordinates', 'coordinateFile', 'importCoordinate', 'coordinateRename', 'coordinateRemove', 'coordinateSolve', 'coordinateApply',
     'mapAction', 'approvalSource', 'workbench',
-    'appearance', 'shortcutCapture', 'readDraft', 'saveDraft', 'openLauncher', 'hideLauncher', 'portraitVoice', 'voiceDraft', 'voiceSubmit',
+    'appearance', 'shortcutCapture', 'readDraft', 'saveDraft', 'openLauncher', 'hideLauncher', 'portraitVoice', 'voiceTurn',
     'workspaceReady', 'modelList', 'modelTest',
-    'portraitHit', 'speechConfigure', 'speechRecognize', 'speechSynthesize', 'speechCancel', 'speechTest',
+    'portraitHit', 'portraitDrag', 'speechConfigure', 'speechRecognize', 'speechSynthesize', 'speechCancel', 'speechTest',
     'arcmapBridge', 'arcgisOpen', 'arcgisInstall', 'arcgisConfigure', 'arcgisDiscover', 'arcgisPublish', 'arcgisRetry', 'arcgisCapture']) {
     api[name] = (...args) => ipcRenderer.invoke('guizhi:' + name, ...args);
 }
 api.intakeDropped = (files, kind) => ipcRenderer.invoke('guizhi:materialPaths',
     files.map(file => webUtils.getPathForFile(file)).filter(Boolean), kind);
-for (const name of ['state', 'settings', 'speechPartial', 'appearance', 'draft', 'launcherFocus', 'launcherSubmit',
+for (const name of ['state', 'settings', 'speechPartial', 'appearance', 'draft', 'launcherFocus',
     'openTask', 'portraitVoice', 'portraitHide']) {
     api['on' + name[0].toUpperCase() + name.slice(1)] = callback => {
         const listener = (_, payload) => callback(payload);

@@ -27,7 +27,7 @@
                     const workspace = await api.workspaceReady(value.workspace);
                     change(previous => ({ ...previous, workspace }));
                 } else if (step === 2) {
-                    const next = await api.speechConfigure(skip ? { ...voice, asr: 'off', tts: 'off', autoSpeak: false } : voice);
+                    const next = await api.speechConfigure(skip ? { ...voice, asr: 'off', tts: 'off' } : voice);
                     setSavedVoice(next);
                     setVoice(next);
                 } else if (step === 3) {
@@ -44,7 +44,7 @@
             ['运行模式', value.modelConfig.mode === 'local' ? '本地服务' : '在线服务'],
             ['模型', value.modelConfig.model],
             ['语音识别', window.GuizhiSpeechNames[voice.asr]],
-            ['语音播报', window.GuizhiSpeechNames[voice.tts]],
+            ['语音回答', window.GuizhiSpeechNames[voice.tts]],
         ];
         const content = [
             () => h('section', { className: 'settings-card' }, h('h2', null, '成果保存位置'),

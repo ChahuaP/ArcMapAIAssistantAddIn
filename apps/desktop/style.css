@@ -54,11 +54,11 @@ svg { flex: none; vertical-align: middle; }
 .conversation { display: flex; flex-direction: column; height: 100%; min-width: 0;
     background: linear-gradient(180deg, var(--photo-wash) 0 180px, var(--panel) 340px),
         url('/luhe-banner.png') center 50px / max(1500px, 100%) auto no-repeat; }
-.conversation-empty { overflow-y: auto;
+.conversation-empty {
     background: linear-gradient(180deg, var(--photo-wash) 0 220px, var(--panel) 410px),
         url('/luhe-banner.png') center top / max(2050px, 100%) auto no-repeat; }
-.conversation-empty .messages { flex: none; overflow: visible; padding-top: clamp(32px, 9vh, 88px); padding-bottom: 12px; }
-.conversation-empty .compose-wrap { width: min(100%, 778px); margin-inline: auto; }
+.conversation-empty .welcome { margin: auto auto 0; }
+.conversation-empty .compose-wrap { flex: none; }
 .task-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 19px 24px; border-bottom: 1px solid var(--line); }
 .status-tag { border-radius: 20px; padding: 4px 10px; color: var(--accent); background: var(--soft); white-space: nowrap; font-size: 12px; }
 .messages { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 15px; padding: 20px 24px; }
@@ -136,7 +136,7 @@ svg { flex: none; vertical-align: middle; }
     background: linear-gradient(180deg, var(--photo-wash) 0 190px, var(--photo-edge) 310px),
         url('/luhe-banner.png') center top / max(1550px, 100%) auto no-repeat; }
 .launcher .composer textarea { min-height: 84px; font-size: 21px; padding: 15px; }
-.conversation-empty .composer, .launcher .composer { background: var(--photo-composer); }
+.launcher .composer { background: var(--photo-composer); }
 .quick-section { margin-top: 17px; }
 .section-head, .launcher-footer, .setting-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .recent-tasks { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 7px; }
@@ -180,7 +180,6 @@ kbd { display: inline-block; color: var(--muted); font: 12px "Segoe UI",sans-ser
 .mode-choice b, .mode-choice small { display: block; }
 .service-actions, .service-actions .business-actions { flex-wrap: wrap; }
 .speech-form { width: 100%; }
-.speech-form > .voice-toggle { margin-top: 14px; }
 .field-row input { flex: 1; min-width: 0; }
 dialog { color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 16px; width: min(680px,92vw); max-height: 90vh; padding: 20px; box-shadow: 0 16px 60px var(--shadow); }
 dialog::backdrop { background: #10182468; }

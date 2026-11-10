@@ -72,7 +72,7 @@ Name: "{group}\规智"; Filename: "{app}\bootstrap\pythonw.exe"; Parameters: "-I
 Name: "{userdesktop}\规智"; Filename: "{app}\bootstrap\pythonw.exe"; Parameters: "-I -B ""{app}\bootstrap\install_state.py"" --root ""{app}"" launch --user-data ""{localappdata}\Guizhi\Desktop"""; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\bootstrap\pythonw.exe"; Parameters: "-I -B ""{app}\bootstrap\install_state.py"" --root ""{app}"" launch --user-data ""{localappdata}\Guizhi\Desktop"""; Description: "打开规智"; Flags: postinstall nowait skipifsilent
+Filename: "{app}\bootstrap\pythonw.exe"; Parameters: "-I -B ""{app}\bootstrap\install_state.py"" --root ""{app}"" launch --user-data ""{localappdata}\Guizhi\Desktop"""; Description: "打开规智"; Flags: postinstall nowait skipifsilent unchecked
 
 [UninstallDelete]
 Type: files; Name: "{app}\active.json"
@@ -110,18 +110,18 @@ begin
   begin
     Root := ExpandConstant('{app}');
     Parameters := '-I -B "' + Root + '\bootstrap\install_state.py" --root "' + Root +
-      '" activate --release "' + Attempt + '" --manifest "{#Manifest}"';
+      '" activate --release "' + Attempt + '"';
 #if HasSpeech == "1"
     if WizardIsComponentSelected('speech') then Parameters := Parameters + ' --component speech';
 #endif
 #if HasArcmap == "1"
     if WizardIsComponentSelected('arcmap') then Parameters := Parameters + ' --component arcmap';
 #endif
-    WizardForm.StatusLabel.Caption := '正在验证规智启动';
+    WizardForm.StatusLabel.Caption := '正在切换到新版本';
     if not Exec(Root + '\bootstrap\pythonw.exe', Parameters, Root, SW_HIDE, ewWaitUntilTerminated, Code) then
-      RaiseException('无法启动安装检查。');
+      RaiseException('无法切换到新版本。');
     if Code <> 0 then
-      RaiseException('新版未通过启动检查。详情见安装目录中的 last-install-error.txt。');
+      RaiseException('未能切换到新版本。详情见安装目录中的 last-install-error.txt。');
   end;
 end;
 

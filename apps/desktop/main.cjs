@@ -12,6 +12,7 @@ const { listModels, testModel } = require('./model-service.cjs');
 const { formats, materialBindings } = require('./materials.cjs');
 const { printReport } = require('./report-export.cjs');
 const { ArcGisSync } = require('./arcgis-sync.cjs');
+const { action, parameterValues, parametersReady } = require('./task-commands.js');
 
 const origin = 'guizhi://app';
 protocol.registerSchemesAsPrivileged([{ scheme: 'guizhi', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
@@ -34,7 +35,7 @@ async function startDesktop(options) {
         'materials-ui.js', 'skill-editor.js',
         'style.css', 'theme.css', 'mark.svg', 'luhe-banner.png', 'model-form.js', 'onboarding.js',
         'portrait.html', 'portrait.css', 'portrait.js', 'task-commands.js', 'speech-settings.js',
-        'speech-audio.js', 'voice-input.js', 'visual.html', 'visual.css', 'visual.js', 'arcmap.js'];
+        'speech-audio.js', 'voice-input.js', 'visual.html', 'visual.css', 'visual.js', 'arcgis-extension.js'];
     const files = new Map(localFiles.map(name => ['/' + name, path.join(__dirname, name)]));
     files.set('/react.js', path.join(vendor, 'react', 'umd', 'react.production.min.js'));
     files.set('/react-dom.js', path.join(vendor, 'react-dom', 'umd', 'react-dom.production.min.js'));
@@ -157,16 +158,24 @@ async function startDesktop(options) {
     bind('openLauncher', desktop.openLauncher);
     bind('hideLauncher', () => launcher.hide());
     bind('portraitVoice', desktop.voice);
-    bind('voiceSubmit', () => {
-        desktop.openLauncher();
-        launcher.webContents.send('guizhi:launcherSubmit');
-    });
-    bind('voiceDraft', prompt => {
-        if (typeof prompt !== 'string') throw new Error('语音内容无效');
-        draft = { ...draft, prompt: prompt.slice(0, 4000) };
-        desktop.notify('draft', draft);
-        desktop.openLauncher();
-    });
+    bind('voiceTurn', (surface, text) => {
+        if (surface !== portrait || typeof text !== 'string' || !text.trim() || text.length > 4000) {
+            throw new Error('语音对话内容无效');
+        }
+        const command = action(text);
+        if (command === 'workbench') { reveal(); return { reply: '好，工作台已经打开。' }; }
+        if (command === 'reset') { submitTask({ prompt: text }); return { reply: '好，我们开始新的任务。' }; }
+        const prompt = command === 'send' ? draft.prompt : text;
+        if (!prompt?.trim()) return { reply: '你可以直接告诉我想办理什么。' };
+        if (draft.unassigned?.length) return { reply: '请先在工作台为材料选择用途。' };
+        const fields = draft.skillDefinition?.parameters || {};
+        const values = draft.parameterText || {};
+        const skillParameters = draft.skill && Object.keys(fields).length && parametersReady(fields, values)
+            ? parameterValues(fields, values) : undefined;
+        const state = submitTask({ ...draft, prompt, previousTask: draft.previousTask || controller.focusTask,
+            skillParameters, dialogue: true });
+        return { task: state.focusTask };
+    }, true);
     bind('configure', input => {
         const state = controller.configure(input);
         modelCheck = undefined;
@@ -215,7 +224,17 @@ async function startDesktop(options) {
     bind('speechSynthesize', text => speech.synthesize(text));
     bind('speechTest', (kind, input, audio) => speech.test(kind, input, audio));
     bind('speechCancel', () => speech.cancel());
-    bind('portraitHit', active => portrait.setIgnoreMouseEvents(!active, active ? {} : { forward: true }));
+    bind('portraitHit', (surface, active) => {
+        if (surface !== portrait || typeof active !== 'boolean') throw new Error('数字形象交互请求无效');
+        desktop.portraitHit(active);
+    }, true);
+    bind('portraitDrag', (surface, phase, point) => {
+        if (surface !== portrait || !['start', 'move', 'end'].includes(phase) ||
+            (phase !== 'end' && ![point?.x, point?.y].every(value => Number.isFinite(value) && Math.abs(value) < 100000))) {
+            throw new Error('拖动请求无效');
+        }
+        desktop.dragPortrait(phase, point);
+    }, true);
     bind('workbench', id => {
         reveal();
         if (typeof id === 'string' && controller.tasks.some(item => item.id === id)) {
@@ -228,7 +247,7 @@ async function startDesktop(options) {
     });
     bind('arcmapBridge', async () => {
         const pick = await dialog.showOpenDialog(window, { properties: ['openFile'],
-            filters: [{ name: 'ArcMap Bridge', extensions: ['exe'] }] });
+            filters: [{ name: 'ArcGIS 连接组件', extensions: ['exe'] }] });
         return pick.canceled ? null : controller.selectArcmapBridge(pick.filePaths[0]);
     });
     bind('arcgisOpen', async () => {
@@ -279,13 +298,14 @@ async function startDesktop(options) {
         shell.showItemInFolder(output);
     });
     bind('mapAction', async (...args) => withSpeech(await controller.mapAction(...args)));
-    bind('submit', task => {
+    function submitTask(task) {
         const state = controller.command(task);
         draft = {};
         desktop.notify('draft', draft);
         broadcast(state);
         return withSpeech(state);
-    });
+    }
+    bind('submit', task => submitTask({ ...task, dialogue: false }));
     bind('cancel', () => {
         const state = controller.cancel();
         broadcast(state);

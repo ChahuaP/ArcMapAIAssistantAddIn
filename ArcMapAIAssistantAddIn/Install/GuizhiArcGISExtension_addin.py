@@ -47,7 +47,7 @@ def arcmap_window(thread):
 
     USER32.EnumThreadWindows(thread, collect, 0)
     if len(windows) != 1:
-        raise ValueError(u"等待 ArcMap 主窗口")
+        raise ValueError(u"等待 ArcGIS 主窗口")
     return windows[0]
 
 

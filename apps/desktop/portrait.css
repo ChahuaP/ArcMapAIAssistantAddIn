@@ -5,9 +5,8 @@ main { position: relative; height: 100vh; display: flex; flex-direction: column;
 button { font: inherit; color: inherit; cursor: pointer; }
 button:disabled { opacity: .4; cursor: default; }
 button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-.grip { position: absolute; z-index: 4; bottom: 149px; left: calc(50% - 32px); width: 64px; height: 15px; app-region: drag; -webkit-app-region: drag; border-top: 2px solid var(--border); opacity: 0; border-radius: 12px; }
-main:hover .grip, main:focus-within .grip { opacity: .6; }
-#figure-toggle { background: none; border: none; padding: 0; width: 108px; height: 108px; position: absolute; bottom: 43px; left: calc(50% - 54px); border-radius: 24px; }
+#figure-toggle { background: none; border: none; padding: 0; width: 108px; height: 108px; position: absolute; bottom: 43px; left: calc(50% - 54px); border-radius: 24px; cursor: grab; touch-action: none; user-select: none; }
+#figure-toggle:active { cursor: grabbing; }
 #figure { display: block; width: 100%; height: 100%; filter: drop-shadow(0 7px 7px var(--shadow)); transform-origin: 50% 68%; animation: balance 6.4s ease-in-out infinite; }
 .contours { fill: none; stroke: #3f6caa; stroke-opacity: .42; stroke-width: 1.6; stroke-linecap: round; }
 .eyes, #speaking-mouth { fill: #193453; }
@@ -21,14 +20,13 @@ main[data-voice=listening] .contours { stroke-opacity: .82; }
 .actions, #bubble { background: var(--panel); border: 1px solid var(--line); box-shadow: 0 4px 14px var(--shadow); }
 .actions { position: relative; z-index: 3; display: flex; align-items: center; gap: 3px; padding: 4px; border-radius: 15px; }
 .actions > button { width: 34px; height: 32px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 9px; background: transparent; }
-.actions > button:hover, .actions > button[aria-pressed=true], .speech-actions button:hover { background: var(--soft); color: var(--accent); }
+.actions > button:hover, .actions > button[aria-pressed=true] { background: var(--soft); color: var(--accent); }
 .actions svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 #bubble { position: absolute; z-index: 4; top: 7px; left: 14px; right: 14px; max-height: 87px; overflow: auto; padding: 8px 12px; border-radius: 13px; line-height: 1.45; overflow-wrap: anywhere; }
 #message { font-weight: 600; }
 #status { font-size: 12px; color: var(--muted); }
 #message:not([hidden]) + #status:not([hidden]) { margin-top: 4px; }
 #status.voice-error { color: var(--error); }
-.speech-actions button { border: 0; border-radius: 6px; padding: 4px 6px; background: transparent; color: var(--accent); }
 @keyframes balance { 0%,100% { transform: rotate(-1.4deg); } 50% { transform: rotate(1.4deg); } }
 @keyframes blink { 0%,43%,47%,100% { transform: scaleY(1); } 45% { transform: scaleY(.12); } }
 @media(prefers-reduced-motion: reduce) { #figure, .eyes { animation: none; } main[data-voice=listening] #figure { transform: none; } }

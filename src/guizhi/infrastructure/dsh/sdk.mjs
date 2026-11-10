@@ -15,11 +15,16 @@ const readJson = path => JSON.parse(readFileSync(path, 'utf8'));
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const exec = promisify(execFile);
 
-function verifiedResponse(receipt) {
+function assistantAnswer(text) {
+    if (typeof text !== 'string') return '';
+    return text.replace(/^[\s\S]*<\/think\s*>/i, '').replace(/<think\b[^>]*>[\s\S]*$/i, '').trim();
+}
+
+function verifiedResponse(receipt, dialogue) {
     const stats = receipt.statistics;
     const area = value => value.toLocaleString('zh-CN', { maximumFractionDigits: 2 });
     const parts = [];
-    if (receipt.mode) parts.push(`已完成 ${stats.step_count} 个步骤。`);
+    if (receipt.mode && !dialogue) parts.push(`已完成 ${stats.step_count} 个步骤。`);
     if (stats.reused_steps) parts.push(`其中复用 ${stats.reused_steps} 个步骤。`);
     if (stats.changed_parcels) parts.push(`更新涉及 ${stats.changed_parcels} 宗地。`);
     for (const item of receipt.steps ?? [{ statistics: stats }]) {
@@ -29,14 +34,15 @@ function verifiedResponse(receipt) {
         }
     }
     if (stats.feature_count !== undefined) parts.push(`共 ${stats.feature_count} 个要素。`);
-    if (stats.geometry_types) parts.push(Object.entries(stats.geometry_types)
+    if (stats.geometry_types && !dialogue) parts.push(Object.entries(stats.geometry_types)
         .map(([name, count]) => `${name} ${count} 个`).join('，') + '。');
     if (stats.row_count !== undefined) parts.push(`共 ${stats.row_count} 行。`);
     if (stats.changed_area_m2 !== undefined && stats.evaluation) {
         if (stats.evaluation === 'simulation') parts.push('本轮使用模拟样本。');
         parts.push(`变化面积 ${area(stats.changed_area_m2)} m²，另有 ${area(stats.unknown_pixels)} 个未知像元和 ${area(stats.nodata_pixels)} 个缺测像元。`);
     }
-    return parts.join('') || '已完成办理，成果和证据已保存。';
+    const answer = parts.join('') || '已完成办理，成果和证据已保存。';
+    return dialogue ? answer.replaceAll(' m²', '平方米') : answer;
 }
 
 function within(root, path) {
@@ -118,8 +124,11 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
     const profile = fileURLToPath(new URL('./profile.yml', import.meta.url));
     const schema = ['capabilities', 'skills', 'semantics', 'knowledge']
         .map(name => readFileSync(join(source, 'src', 'guizhi', 'domain', name + '.py')));
+    const history = options.history || [];
+    const request = history.length || options.dialogue
+        ? JSON.stringify({ prompt: options.prompt, history, dialogue: Boolean(options.dialogue) }) : options.prompt;
     const provenance = { provider, model, route_sha256: hash(JSON.stringify(modelConfig)),
-        profile_sha256: hash(readFileSync(profile)), request_sha256: hash(options.prompt),
+        profile_sha256: hash(readFileSync(profile)), request_sha256: hash(request),
         schema_sha256: hash(Buffer.concat(schema)), retrieval_version: '1.0.0' };
     const mcpArgs = ['-I', '-B', fileURLToPath(new URL('./mcp.py', import.meta.url)),
         '--workspace', workspace, '--dispatch', directory, '--model-provenance', JSON.stringify(provenance)];
@@ -169,7 +178,7 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
             writeFileSync(operationPath, JSON.stringify(prepared.operation));
             result = { status: prepared.operation.status, finish_reason: 'recorded_plan', plan_reused: true,
                 operation: prepared.operation, response: prepared.operation.status === 'succeeded'
-                    ? verifiedResponse(prepared.operation) : prepared.operation.error };
+                    ? verifiedResponse(prepared.operation, options.dialogue) : prepared.operation.error };
         } else if (stop.aborted) {
             result = { status: deadline.aborted ? 'timed_out' : 'cancelled' };
         } else {
@@ -188,7 +197,9 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
             const roles = Object.fromEntries(Object.entries(materials).map(([role, items]) => [role, items.length]));
             const bound = options.skillParameters !== undefined ? '办理参数已在本机绑定，执行技能时省略 skill_parameters。' : '';
             const context = `已绑定材料数量 ${JSON.stringify(roles)}。已选技能 ${options.skill || '无'}。${bound}有已选历史成果：${Boolean(options.previousRun)}。\n`;
-            const response = await Promise.race([harness.run(context + '用户请求：' + options.prompt, {
+            const conversation = history.length ? '最近对话记录（每项为用户提问与规智答复）：' + JSON.stringify(history) + '\n' : '';
+            const speech = options.dialogue ? '本轮通过语音对话。用自然口语简洁回答，不用 Markdown。\n' : '';
+            const response = await Promise.race([harness.run(context + conversation + speech + '用户请求：' + options.prompt, {
                 sessionId: id,
                 onNotification(note) {
                     if (note.method === 'session.status') {
@@ -217,15 +228,17 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
                 const receipt = existsSync(operationPath) ? readJson(operationPath) : null;
                 const issue = existsSync(issuePath) ? readJson(issuePath) : null;
                 const stopped = existsSync(budgetPath) && readJson(budgetPath).status === 'exhausted';
+                const answer = assistantAnswer(response.finalResponse);
                 const status = receipt?.status ?? (stopped ? 'budget_exhausted' : response.finishReason !== 'completed' ? 'failed' : issue?.status ??
-                    (attempted ? 'no_result' : existsSync(join(directory, 'discovery')) ? 'answered'
+                    (attempted ? 'no_result' : existsSync(join(directory, 'discovery')) ||
+                        (!Object.keys(roles).length && !options.skill && answer) ? 'answered'
                         : Object.keys(roles).length ? 'no_result' : 'missing_materials'));
                 const terminal = response.events.findLast(fact => fact.type === 'turn/end');
                 const candidatePath = join(directory, 'candidate.json');
                 result = { status, finish_reason: response.finishReason,
-                    response: status === 'succeeded' ? verifiedResponse(receipt)
+                    response: status === 'succeeded' ? verifiedResponse(receipt, options.dialogue)
                         : receipt?.error ?? issue?.error ?? (stopped ? '模型预算已用完，已保存办理进度。'
-                            : attempted ? '本轮没有交付成果。' : response.finalResponse),
+                            : attempted ? '本轮没有交付成果。' : answer),
                     operation: receipt, ...(issue && !receipt ? { input_issue: issue } : {}),
                     ...(status === 'answered' && existsSync(candidatePath) ? { candidate: readJson(candidatePath) } : {}),
                     ...(terminal?.data.reason.error ? { error: safeError(terminal.data.reason.error) } : {}) };

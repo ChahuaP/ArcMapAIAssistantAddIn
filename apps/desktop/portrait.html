@@ -7,12 +7,10 @@
 <title>规智</title>
 <link rel="stylesheet" href="/theme.css">
 <link rel="stylesheet" href="/portrait.css">
-<script defer src="/task-commands.js"></script>
 <script type="module" src="/portrait.js"></script>
 </head>
 <body><main>
-<div class="grip" data-hit title="拖动规智"></div>
-<button id="figure-toggle" type="button" aria-label="打开文字输入" data-hit>
+<button id="figure-toggle" type="button" aria-label="打开文字对话" data-hit>
 <svg id="figure" viewBox="0 0 128 128" aria-hidden="true">
     <defs>
         <linearGradient id="jade" x1="0" x2=".83" y1="0" y2="1">
@@ -37,16 +35,12 @@
 <div id="bubble" hidden role="status" data-hit>
     <div id="message" hidden></div>
     <div id="status" hidden></div>
-    <div class="speech-actions">
-        <button type="button" id="play" hidden>重新播报</button>
-        <button type="button" id="stop" hidden>停止语音</button>
-    </div>
 </div>
 <div class="actions" data-hit aria-label="规智操作">
-    <button type="button" id="type" aria-label="文字输入" title="文字输入">
+    <button type="button" id="type" aria-label="文字对话" title="文字对话">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 5H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-7M10 14l1-4 7-7 3 3-7 7z"/></svg>
     </button>
-    <button type="button" id="mic" aria-pressed="false" aria-label="按住说话" title="按住说话">
+    <button type="button" id="mic" aria-pressed="false" aria-label="语音对话" title="语音对话">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 10v4m4-7v10m3-13v16m3-13v10m4-7v4"/></svg>
     </button>
     <button type="button" id="open" aria-label="打开工作台" title="打开工作台">

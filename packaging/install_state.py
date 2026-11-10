@@ -11,19 +11,15 @@ import re
 import stat
 import subprocess
 import sys
-from tempfile import TemporaryDirectory
 from uuid import uuid4
 
 VERSION = r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
 RELEASE = r"[a-z0-9][a-z0-9.-]{0,90}"
 OPTIONAL = {"speech", "arcmap"}
 REQUIRED = (
-    "core/VERSION", "core/src/guizhi/__main__.py", "core/apps/desktop/entry.cjs",
+    "core/src/guizhi/__main__.py", "core/apps/desktop/entry.cjs",
     "runtime/python/python.exe", "runtime/node/node.exe",
-    "runtime/dsh/node_modules/@deepseek-ai/dsh/package.json",
-    "runtime/dsh/node_modules/@deepseek-ai/dsh-sdk-client/package.json",
-    "renderer/node_modules/electron/dist/electron.exe", "renderer/node_modules/react/umd/react.production.min.js",
-    "renderer/node_modules/react-dom/umd/react-dom.production.min.js",
+    "renderer/node_modules/electron/dist/electron.exe",
 )
 
 
@@ -93,14 +89,12 @@ def lock(root):
             msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
 
 
-def descriptor(root, entry, *, verify_all=False):
+def descriptor(root, entry):
     release = entry["release"]
     if not re.fullmatch(RELEASE, release):
         raise ValueError("安装版本标识无效")
     candidate = contained(root, "releases", release)
     file = contained(candidate, "installation.json")
-    if checksum(file) != entry["manifest"]:
-        raise ValueError("安装清单校验失败")
     manifest = json.loads(file.read_text(encoding="utf-8"))
     selected = set(entry["components"])
     available = set(manifest["components"])
@@ -108,29 +102,14 @@ def descriptor(root, entry, *, verify_all=False):
             not re.fullmatch(VERSION, manifest["version"]) or
             not release.startswith(manifest["build"] + "-")):
         raise ValueError("安装版本与组件清单不匹配")
-    expected = {key: value for key, value in manifest["files"].items()
-                if key.split("/", 1)[0] not in OPTIONAL - selected}
     check = set(REQUIRED)
     if "speech" in selected:
         check.add("speech/identity.json")
     if "arcmap" in selected:
-        check.update({"arcmap/ArcMapBridge.exe", "arcmap/ArcMapBridge.build"})
-    if not check <= expected.keys():
-        raise ValueError("安装组件不完整")
-    if verify_all:
-        for name, path in files(candidate):
-            if name == "installation.json":
-                continue
-            if expected.pop(name, None) != checksum(path):
-                raise ValueError(f"安装文件校验失败 {name}")
-        if expected:
-            raise ValueError("安装资源缺失")
-    else:
-        for name in check:
-            if checksum(contained(candidate, *name.split("/"))) != expected[name]:
-                raise ValueError(f"安装文件校验失败 {name}")
-    if (candidate / "core/VERSION").read_text(encoding="ascii").strip() != manifest["version"]:
-        raise ValueError("应用版本与安装清单不一致")
+        check.add("arcmap/ArcMapBridge.exe")
+    for name in sorted(check):
+        if not contained(candidate, *name.split("/")).is_file():
+            raise ValueError(f"安装入口缺失 {name}")
     return candidate, manifest["version"]
 
 
@@ -152,37 +131,14 @@ def desktop_command(candidate, user_data, components):
     return command
 
 
-def verify_start(candidate, version, components):
-    with TemporaryDirectory(prefix="guizhi-install-") as location:
-        temporary = Path(location)
-        request = temporary / "health.json"
-        request.write_text('{"operation":"system.health"}', encoding="ascii")
-        python = candidate / "runtime/python/python.exe"
-        main = candidate / "core/src/guizhi/__main__.py"
-        check = subprocess.run([str(python), "-I", "-B", str(main), "--version"],
-                               capture_output=True, timeout=20, check=True)
-        if check.stdout.decode("ascii").strip() != version:
-            raise ValueError("GIS 运行版本检查失败")
-        health = subprocess.run([str(python), "-I", "-B", str(main), "--workspace", str(temporary / "workspace"),
-                                 "execute", str(request)], capture_output=True, timeout=40, check=True)
-        if json.loads(health.stdout)["result"]["health"]["mode"] != "independent":
-            raise ValueError("本地 GIS 启动检查失败")
-        receipt = temporary / "startup.json"
-        command = desktop_command(candidate, temporary / "profile", components)
-        subprocess.run(command + ["--verify-startup", str(receipt)], capture_output=True, timeout=40, check=True)
-        if json.loads(receipt.read_text(encoding="utf-8")) != {"workbench": True, "portrait": True}:
-            raise ValueError("桌面启动检查失败")
-
-
 def activate(root, entry):
     with lock(root):
         previous = active(root)
-        candidate, version = descriptor(root, entry, verify_all=True)
+        _, version = descriptor(root, entry)
         if previous:
-            _, prior_version = descriptor(root, previous["current"])
-            if tuple(map(int, version.split("."))) < tuple(map(int, prior_version.split("."))):
+            prior_version = previous["current"]["release"].split("-", 1)[0]
+            if re.fullmatch(VERSION, prior_version) and tuple(map(int, version.split("."))) < tuple(map(int, prior_version.split("."))):
                 raise ValueError("请使用恢复入口切换到上一版本")
-        verify_start(candidate, version, set(entry["components"]))
         if not previous or previous["current"] != entry:
             write_pointer(root, {"current": entry, "previous": previous["current"] if previous else None})
     return version
@@ -194,8 +150,7 @@ def restore(root):
         if not state or not state["previous"]:
             raise ValueError("未找到上一版安装")
         previous = state["previous"]
-        candidate, version = descriptor(root, previous, verify_all=True)
-        verify_start(candidate, version, set(previous["components"]))
+        _, version = descriptor(root, previous)
         write_pointer(root, {"current": previous, "previous": None})
     return version
 
@@ -203,7 +158,7 @@ def restore(root):
 def launch(root, user_data):
     state = active(root)
     if not state:
-        raise ValueError("未找到已验证的规智安装")
+        raise ValueError("未找到当前规智安装")
     if user_data.is_relative_to(root) or root.is_relative_to(user_data):
         raise ValueError("用户设置应与安装目录分开")
     entry = state["current"]
@@ -219,7 +174,6 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     setup = commands.add_parser("activate")
     setup.add_argument("--release", required=True)
-    setup.add_argument("--manifest", required=True)
     setup.add_argument("--component", choices=sorted(OPTIONAL), action="append", default=[])
     run = commands.add_parser("launch")
     run.add_argument("--user-data", type=Path, required=True)
@@ -228,7 +182,7 @@ def main():
     try:
         root = absolute(args.root)
         if args.command == "activate":
-            activate(root, {"release": args.release, "manifest": args.manifest, "components": sorted(set(args.component))})
+            activate(root, {"release": args.release, "components": sorted(set(args.component))})
         elif args.command == "restore":
             restore(root)
         else:
@@ -236,8 +190,6 @@ def main():
         return 0
     except (KeyError, TypeError, ValueError, OSError, subprocess.SubprocessError) as exc:
         message = str(exc)
-        if isinstance(exc, subprocess.CalledProcessError) and exc.stderr:
-            message += "\n" + exc.stderr.decode("utf-8", "replace")[-1500:]
         if args.command == "launch":
             import ctypes
 

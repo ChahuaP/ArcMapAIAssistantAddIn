@@ -176,7 +176,7 @@ class DesktopController {
     }
 
     selectArcmapBridge(file) {
-        if (this.hostBusy || path.basename(file).toLowerCase() !== 'arcmapbridge.exe') throw new Error('请选择 ArcMapBridge.exe');
+        if (this.hostBusy || path.basename(file).toLowerCase() !== 'arcmapbridge.exe') throw new Error('请选择规智提供的 ArcGIS 连接组件');
         this.settings.arcmapBridge = this.externalPath(file);
         save(this.file, this.settings);
         this.onChange(this.state());
@@ -184,13 +184,22 @@ class DesktopController {
     }
 
 
-    submit({ prompt, project, control, skill, materials = {}, previousTask, skillParameters, parameterText }) {
+    submit({ prompt, project, control, skill, materials = {}, previousTask, skillParameters, parameterText, dialogue = false }) {
         if (!this.settings.workspace) throw new Error('请先选择成果保存位置');
         if (this.active) throw new Error('已有任务在运行');
         if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 4000) throw new Error('请输入办理事项');
         const bindings = materialBindings({ ...materials, ...(project ? { project: [project] } : {}),
             ...(control ? { control: [control] } : {}) });
-        const previousRun = this.tasks.find(item => item.id === previousTask && item.status === 'succeeded')?.runId;
+        const history = [];
+        let previousRun;
+        let prior = this.tasks.find(item => item.id === previousTask);
+        for (let depth = 0; prior && depth < 4; depth++) {
+            if (prior.status === 'succeeded') previousRun ??= prior.runId;
+            if (prior.response && ['answered', 'succeeded', 'missing_materials', 'no_result'].includes(prior.status)) {
+                history.unshift([prior.prompt.slice(0, 600), prior.response.slice(0, 600)]);
+            }
+            prior = this.tasks.find(item => item.id === prior.previousTask);
+        }
         if (skill && !/^[a-z][a-z0-9_-]{0,39}@[1-9]\d*$/.test(skill)) throw new Error('请选择已发布的技能');
         if (skillParameters && Buffer.byteLength(JSON.stringify(skillParameters)) > 65536) throw new Error('办理参数最多 64 KB');
         const { config, key } = this.selectModel({ modelConfig: this.settings.modelConfig });
@@ -222,7 +231,7 @@ class DesktopController {
         });
         child.send({ type: 'start', options: { ...this.runtime, workspace: this.settings.workspace,
             modelConfig: config, apiKey: key,
-            prompt: task.prompt, skill, skillParameters, materials: bindings, previousRun,
+            prompt: task.prompt, skill, skillParameters, materials: bindings, previousRun, history, dialogue,
             projectPlan: project?.plan || materials.project?.[0]?.plan,
             controlPlan: control?.plan || materials.control?.[0]?.plan } });
         return this.state();

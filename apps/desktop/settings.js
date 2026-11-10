@@ -95,8 +95,8 @@
                     report.model.name, report.model.detail,
                     report.model.at && new Date(report.model.at).toLocaleString()].filter(Boolean).join(' · '),
                     report.model.state === 'verified' ? 'success' : report.model.state === 'failed' ? 'error' : 'default'),
-                voiceRow('asr', '语音识别'), voiceRow('tts', '语音播报'),
-                row('ArcMap', host ? '已连接' : state.arcgis.connection ? '等待工程打开' : '未连接',
+                voiceRow('asr', '语音识别'), voiceRow('tts', '语音回答'),
+                row('ArcGIS', host ? '已连接' : state.arcgis.connection ? '等待工程打开' : '未连接',
                     host ? [host.version, host.map?.split(/[\\/]/).at(-1), !host.publish_ready && '需从规智重新打开工程'].filter(Boolean).join(' · ')
                         : report.bridge ? '连接组件就绪' : '未配置连接组件', host ? 'success' : 'default'),
                 row('全局快捷键', report.shortcut.registered ? '已注册' : '未注册', report.shortcut.value),
@@ -144,7 +144,7 @@
             storage: () => card('成果保存位置', h(Workspace, { value: value.workspace,
                 change: workspace => update('workspace', workspace), fail, disabled: saving })),
             skills: () => h(window.GuizhiBusiness.Business, { catalog, refresh, plans, initialMarkdown, manage: true }),
-            extensions: () => h(window.GuizhiArcmap, { configured: state.settings.arcmapBridge, sync: state.arcgis, task, attach }),
+            extensions: () => h(window.GuizhiArcgisExtension, { configured: state.settings.arcmapBridge, sync: state.arcgis, task, attach }),
             about: () => h(About, { state }),
         };
         const current = sections.find(([id]) => id === section);
