@@ -100,7 +100,7 @@ class ArcGisSync {
     configure(carrier) {
         if (this.busy) throw new Error('请等待当前图层同步完成');
         if (!['none', 'arcgis'].includes(carrier) || (carrier === 'arcgis' && !this.bridge)) {
-            throw new Error('所选展示载体不可用');
+            throw new Error('所选扩展不可用');
         }
         this.controller.selectCarrier(carrier);
         this.refresh();
@@ -124,13 +124,13 @@ class ArcGisSync {
         if (seen.size) { this.save(); void this.tick(); }
     }
 
-    completed(task) {
+    completed(task, previousTask) {
         if (this.carrier !== 'arcgis') return;
         const artifact = ['export', 'boundaries'].find(kind => ['.gpkg', '.tif', '.tiff'].includes(task.deliveryFormats?.[kind]));
         if (!artifact) return;
         this.refresh();
         if (this.jobs.some(job => job.task === task.id && job.artifact === artifact)) return;
-        const previous = this.jobs.findLast(job => job.task === task.previousTask && job.artifact && job.status === 'published');
+        const previous = this.jobs.findLast(job => job.task === previousTask && job.artifact && job.status === 'published');
         this.jobs.push({ id: identity(), task: task.id, run: task.runId, artifact, previous: previous?.id,
             name: '成果 · ' + task.title.slice(0, 26) + ' · ' + task.runId.slice(0, 6), status: 'pending' });
         this.save();

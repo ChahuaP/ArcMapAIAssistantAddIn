@@ -3,8 +3,6 @@ const { createHash, randomUUID } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { promisify } = require('node:util');
-const { action } = require('./task-commands.js');
-const { conversations } = require('./conversations.cjs');
 const { startAgent } = require('./agent-process.cjs');
 const { materialBindings } = require('./materials.cjs');
 const { visualRecipe } = require('./visual-recipes.cjs');
@@ -39,6 +37,7 @@ function checkedArtifact(record, step) {
 class DesktopController {
     constructor({ userData, runtime, dsh, safeStorage, externalPath, onChange, bundledArcmap, installationRoot }) {
         this.file = path.join(userData, 'settings.json');
+        this.historyFile = path.join(userData, 'desktop-conversation.json');
         fs.mkdirSync(userData, { recursive: true });
         this.settings = load(this.file, { workspace: '' });
         this.runtime = { python: path.join(runtime, 'python', 'python.exe'),
@@ -50,19 +49,18 @@ class DesktopController {
         this.onChange = onChange;
         this.tasks = [];
         this.active = null;
-        this.focusTask = null;
         this.restore();
     }
 
-    historyPath() {
-        return path.join(this.settings.workspace, 'desktop-tasks.json');
+    removeLegacyHistory() {
+        fs.rmSync(path.join(this.settings.workspace, 'desktop-tasks.json'), { force: true });
     }
 
     restore() {
         if (!this.settings.workspace) return;
         this.settings.workspace = this.workspacePath(this.settings.workspace);
-        this.tasks = load(this.historyPath(), []);
-        this.focusTask = conversations(this.tasks).find(group => !group.root.archived)?.turns.at(-1).id ?? null;
+        this.tasks = load(this.historyFile, []);
+        this.removeLegacyHistory();
         let changed = false;
         for (const task of this.tasks) {
             if (['running', 'cancelling'].includes(task.status)) {
@@ -75,7 +73,7 @@ class DesktopController {
     }
 
     persist(tasks = this.tasks) {
-        save(this.historyPath(), tasks);
+        save(this.historyFile, tasks);
     }
 
     workspacePath(file) {
@@ -96,10 +94,7 @@ class DesktopController {
         const { workspace, modelConfig, showOperation, screenHighlight, carrier, encryptedKey } = this.settings;
         return { settings: { workspace, modelConfig, showOperation, screenHighlight,
             carrier: carrier || 'none', keyConfigured: Boolean(modelConfig && encryptedKey) },
-            tasks: this.tasks, focusTask: this.focusTask,
-            conversations: conversations(this.tasks).map(({ root, turns }) => ({
-                id: root.id, title: root.title, archived: Boolean(root.archived), turnIds: turns.map(turn => turn.id),
-            })) };
+            tasks: this.tasks, busy: Boolean(this.active) };
     }
 
     workspaceReady(value) {
@@ -134,7 +129,10 @@ class DesktopController {
         save(this.file, settings);
         const changedWorkspace = workspace !== this.settings.workspace;
         this.settings = settings;
-        if (changedWorkspace) this.restore();
+        if (changedWorkspace) {
+            this.resetConversation();
+            this.removeLegacyHistory();
+        }
         return this.state();
     }
 
@@ -190,25 +188,20 @@ class DesktopController {
             ...(control ? { control: [control] } : {}) });
         const history = [];
         let previousRun;
-        const previousTask = this.focusTask;
-        const byId = new Map(this.tasks.map(item => [item.id, item]));
-        let prior = byId.get(previousTask);
-        for (let depth = 0; prior && depth < 4; depth++) {
+        for (const prior of this.tasks.slice(0, 4)) {
             if (prior.status === 'succeeded') previousRun ??= prior.runId;
             if (prior.response && ['answered', 'succeeded', 'missing_materials', 'no_result'].includes(prior.status)) {
                 history.unshift([prior.prompt.slice(0, 600), prior.response.slice(0, 600)]);
             }
-            prior = byId.get(prior.previousTask);
         }
         if (skill && !/^[a-z][a-z0-9_-]{0,39}@[1-9]\d*$/.test(skill)) throw new Error('请选择已发布的技能');
         if (skillParameters && Buffer.byteLength(JSON.stringify(skillParameters)) > 65536) throw new Error('办理参数最多 64 KB');
         const { config, key } = this.selectModel({ modelConfig: this.settings.modelConfig });
         const task = { id: randomUUID(), title: [...prompt.trim()].slice(0, 32).join(''), prompt: prompt.trim(),
-            project, control, skill, materials, previousTask, parameterText, status: 'running', createdAt: new Date().toISOString() };
+            project, control, skill, materials, parameterText, status: 'running', createdAt: new Date().toISOString() };
         const next = [task, ...this.tasks];
         this.persist(next);
         this.tasks = next;
-        this.focusTask = task.id;
         const child = startAgent(this.runtime, this.settings.workspace);
         this.active = { child, task };
         child.on('message', message => {
@@ -240,35 +233,10 @@ class DesktopController {
         return this.state();
     }
 
-    command(input) {
-        if (action(input.prompt) !== 'reset') return this.submit(input);
+    resetConversation() {
+        this.persist([]);
+        this.tasks = [];
         this.cancel();
-        this.focusTask = null;
-        return this.state();
-    }
-
-    manageConversation(action, id) {
-        const group = conversations(this.tasks).find(item => item.root.id === id);
-        if (!group) throw new Error('对话已不存在');
-        const { root, turns } = group;
-        const latest = turns.at(-1);
-        if (action === 'open') {
-            if (root.archived) throw new Error('请先恢复这段对话');
-            if (this.active && this.focusTask !== latest.id) throw new Error('请等当前办理完成后再切换对话');
-            this.focusTask = latest.id;
-        } else {
-            const archive = action === 'archive' && !root.archived;
-            const restore = action === 'restore' && root.archived;
-            const remove = action === 'delete' && root.archived;
-            if (!archive && !restore && !remove) throw new Error('当前无法执行此操作');
-            if (turns.includes(this.active?.task)) throw new Error('请等当前办理完成后再归档');
-            const ids = new Set(turns.map(turn => turn.id));
-            const next = remove ? this.tasks.filter(task => !ids.has(task.id)) : this.tasks.map(task =>
-                task.id === id ? { ...task, archived: archive } : task);
-            this.persist(next);
-            this.tasks = next;
-            if (archive && ids.has(this.focusTask)) this.focusTask = null;
-        }
         return this.state();
     }
 
@@ -307,7 +275,7 @@ class DesktopController {
                 : receipt.operation?.error || receipt.error || receipt.response;
             task.statistics = receipt.operation?.statistics;
             task.candidate = receipt.candidate?.markdown;
-            if (status === 'succeeded') {
+            if (status === 'succeeded' && this.tasks.includes(task)) {
                 const record = await this.python('inspect', task.runId);
                 if (record.status !== 'succeeded') throw new Error('成果未发布');
                 const map = checkedArtifact(record, 'map');
@@ -325,20 +293,22 @@ class DesktopController {
             task.status = status;
             delete task.visual;
             this.active = null;
-            this.persist();
+            const current = this.tasks.includes(task);
+            if (current) this.persist();
             this.onChange(this.state());
-            if (status === 'succeeded') {
-                try { this.onCompleted?.(task); }
+            if (current && status === 'succeeded') {
+                try { this.onCompleted?.(task, this.tasks[1]?.id); }
                 catch (error) { console.error('ArcGIS publication:', error.message); }
             }
         }
     }
 
     cancel() {
-        if (this.active?.child.connected) {
-            this.active.task.status = 'cancelling';
-            this.persist();
-            this.active.child.send({ type: 'cancel' });
+        const active = this.active;
+        if (active?.child.connected && !active.settling && active.task.status !== 'cancelling') {
+            active.task.status = 'cancelling';
+            if (this.tasks.includes(active.task)) this.persist();
+            active.child.send({ type: 'cancel' }, error => { if (error) console.error('Agent cancellation:', error.message); });
         }
         return this.state();
     }

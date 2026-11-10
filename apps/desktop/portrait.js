@@ -139,7 +139,7 @@ function update(next) {
     if (session && mic.disabled) void endSession().catch(fail);
     if (session) followAnswer();
     else {
-        const task = state.tasks.find(item => item.id === state.focusTask);
+        const task = state.tasks[0];
         const working = task?.status === 'running' || task?.status === 'cancelling';
         if (working || showingTask) tell(working ? task.step || '正在办理' : '');
         showingTask = working;
@@ -193,5 +193,5 @@ document.addEventListener('mousemove', event => {
 api.onState(update);
 api.onAppearance(appearance);
 api.onPortraitVoice(() => { mic.focus({ preventScroll: true }); startSession(); });
-api.onPortraitHide(() => void endSession().catch(fail));
+api.onVoiceStop(() => void endSession().catch(fail));
 api.state().then(update).catch(fail);

@@ -16,11 +16,11 @@
             finally { setBusy(false); }
         }
         return h(React.Fragment, null,
-            h('section', { className: 'settings-card' }, h('h2', null, '默认展示载体'),
+            h('section', { className: 'settings-card' }, h('h2', null, '默认扩展'),
                 h(antd.Segmented, { value: sync.carrier, disabled: busy, options: [
                     { value: 'none', label: '无' },
                     { value: 'arcgis', label: 'ArcGIS', disabled: !sync.available },
-                ], 'aria-label': '默认展示载体', onChange: value => void perform(() => api.arcgisConfigure(value)) })),
+                ], 'aria-label': '默认扩展', onChange: value => void perform(() => api.arcgisConfigure(value)) })),
             h('section', { className: 'settings-card arcgis-panel' },
                 h('div', { className: 'section-head' }, h('h2', null, icon('map'), ' ArcGIS'),
                     h(antd.Tag, { color: sync.installed ? 'success' : 'default' }, sync.installed ? '已安装' : '未安装')),

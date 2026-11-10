@@ -12,7 +12,7 @@ const { listModels, testModel } = require('./model-service.cjs');
 const { formats, materialBindings } = require('./materials.cjs');
 const { printReport } = require('./report-export.cjs');
 const { ArcGisSync } = require('./arcgis-sync.cjs');
-const { action, parameterValues, parametersReady } = require('./task-commands.js');
+const { action, parameterValues, parametersReady, isBusinessRequest, matchBusiness, reference } = require('./task-commands.js');
 
 const origin = 'guizhi://app';
 protocol.registerSchemesAsPrivileged([{ scheme: 'guizhi', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
@@ -82,7 +82,7 @@ async function startDesktop(options) {
     const hostRoot = process.env.GUIZHI_ARCGIS_HOSTS || path.join(process.env.LOCALAPPDATA, 'Guizhi', 'ArcGIS', 'hosts');
     sync = new ArcGisSync(controller, hostRoot, app.getPath('documents'), () => broadcast(controller.state()));
     controller.onStarted = task => sync.started(task);
-    controller.onCompleted = task => sync.completed(task);
+    controller.onCompleted = (task, previousTask) => sync.completed(task, previousTask);
     visual = new VisualSession({ python: controller.runtime.python,
         masks: () => portrait.isVisible() ? [portrait.getBounds()] : [],
         cancel: () => broadcast(controller.cancel()) });
@@ -102,7 +102,7 @@ async function startDesktop(options) {
         { label: '快捷面板', click: desktop.openLauncher },
         { label: '显示数字形象', click: desktop.showPortrait },
         { label: '隐藏数字形象', click: () => {
-            portrait.webContents.send('guizhi:portraitHide');
+            portrait.webContents.send('guizhi:voiceStop');
             speech.cancel();
             portrait.hide();
         } },
@@ -170,15 +170,27 @@ async function startDesktop(options) {
     }, true);
     bind('hideLauncher', () => launcher.hide());
     bind('portraitVoice', desktop.voice);
-    bind('voiceTurn', (surface, text) => {
+    bind('voiceTurn', async (surface, text) => {
         if (surface !== portrait || typeof text !== 'string' || !text.trim() || text.length > 4000) {
             throw new Error('语音对话内容无效');
         }
         const command = action(text);
         if (command === 'workbench') { reveal(); return { reply: '好，工作台已经打开。' }; }
-        if (command === 'reset') { submitTask({ prompt: text }); return { reply: '好，我们开始一段新对话。' }; }
+        if (command === 'reset') { resetConversation({}, true); return { reply: '好，我们重新开始。' }; }
         const prompt = command === 'send' ? draft.prompt : text;
         if (!prompt?.trim()) return { reply: '你可以直接告诉我想办理什么。' };
+        if (command !== 'send' && isBusinessRequest(prompt)) {
+            const current = draft;
+            const workspace = controller.settings.workspace;
+            const { exact, items } = matchBusiness(prompt, await controller.python('skills'));
+            if (current !== draft || workspace !== controller.settings.workspace) throw new Error('对话已更新，请重新说一遍');
+            if (exact && reference(items[0]) !== draft.skill) {
+                const item = items[0];
+                resetConversation({ prompt, skill: reference(item), skillDefinition: item }, true);
+                reveal();
+                return { reply: '好，已开始办理' + item.title + '。请在工作台补充材料。' };
+            }
+        }
         if (draft.unassigned?.length) return { reply: '请先在工作台为材料选择用途。' };
         const fields = draft.skillDefinition?.parameters || {};
         const values = draft.parameterText || {};
@@ -186,12 +198,12 @@ async function startDesktop(options) {
             ? parameterValues(fields, values) : undefined;
         const state = submitTask({ ...draft, prompt,
             skillParameters, dialogue: true });
-        return { task: state.focusTask };
+        return { task: state.tasks[0].id };
     }, true);
     bind('configure', input => {
         const workspace = controller.settings.workspace;
         const state = controller.configure(input);
-        if (state.settings.workspace !== workspace) clearDraft();
+        if (state.settings.workspace !== workspace) replaceDraft();
         modelCheck = undefined;
         sync.refresh();
         broadcast(state);
@@ -250,13 +262,6 @@ async function startDesktop(options) {
         desktop.dragPortrait(phase, point);
     }, true);
     bind('workbench', reveal);
-    bind('conversationAction', (action, id) => {
-        const before = controller.focusTask;
-        const state = controller.manageConversation(action, id);
-        if (state.focusTask !== before) clearDraft();
-        broadcast(state);
-        return withSpeech(state);
-    });
     bind('workspace', async () => {
         const pick = await dialog.showOpenDialog(window, { properties: ['openDirectory', 'createDirectory'] });
         return pick.canceled ? null : pick.filePaths[0];
@@ -298,17 +303,28 @@ async function startDesktop(options) {
         else fs.copyFileSync(source, output);
         shell.showItemInFolder(output);
     });
-    function clearDraft() {
-        draft = {};
+    function replaceDraft(next = {}) {
+        draft = next;
         desktop.notify('draft', draft);
     }
-    function submitTask(task) {
-        const state = controller.command(task);
-        clearDraft();
+    function resetConversation(next = {}, fromVoice = false) {
+        const state = controller.resetConversation();
+        replaceDraft(next);
+        if (!fromVoice) portrait.webContents.send('guizhi:voiceStop');
         broadcast(state);
         return withSpeech(state);
     }
-    bind('submit', task => submitTask({ ...task, dialogue: false }));
+    bind('resetConversation', next => {
+        if (!next || typeof next !== 'object' || Array.isArray(next)) throw new Error('草稿无效');
+        return resetConversation(next);
+    });
+    function submitTask(task) {
+        const state = controller.submit(task);
+        replaceDraft();
+        broadcast(state);
+        return withSpeech(state);
+    }
+    bind('submit', task => action(task.prompt) === 'reset' ? resetConversation() : submitTask({ ...task, dialogue: false }));
     bind('cancel', () => {
         const state = controller.cancel();
         broadcast(state);

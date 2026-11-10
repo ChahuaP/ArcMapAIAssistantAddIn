@@ -43,17 +43,10 @@ svg { flex: none; vertical-align: middle; }
 .workbench-panels, .workbench-panels > .ant-splitter-panel { min-height: 0; overflow: hidden; }
 .sidebar, .settings-nav { display: flex; flex-direction: column; gap: 5px; padding: 15px 12px; background: var(--rail); min-height: 0; }
 .sidebar { height: 100%; }
-.sidebar nav { flex: 1; min-height: 0; overflow: auto; }
+.sidebar > .nav-item:last-child { margin-top: auto; }
 .new-task { width: 100%; margin-bottom: 7px; }
 .nav-item { display: flex; align-items: center; gap: 9px; min-height: 40px; padding: 8px 10px; text-align: left; border-radius: 8px; border-color: transparent; background: transparent; }
-.nav-item.selected, .thread-row.selected { background: var(--soft); color: var(--accent); font-weight: 650; }
-.history-label { color: var(--muted); padding: 12px 10px 4px; font-size: 12px; }
-.thread-row { display: flex; align-items: center; gap: 2px; border-radius: 8px; padding-right: 3px; margin-bottom: 4px; }
-.history { flex: 1; min-width: 0; text-align: left; border-color: transparent; background: transparent; padding: 8px 9px; }
-.history-title { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
-.archived-list { list-style: none; padding: 0; max-height: 55vh; overflow: auto; }
-.archived-list li { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--line); }
-.archived-list li > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.nav-item.selected { background: var(--soft); color: var(--accent); font-weight: 650; }
 .conversation { display: flex; flex-direction: column; height: 100%; min-width: 0;
     background: linear-gradient(180deg, var(--photo-wash) 0 180px, var(--panel) 340px),
         url('/luhe-banner.png') center 50px / max(1500px, 100%) auto no-repeat; }
@@ -224,9 +217,6 @@ dialog label { display: grid; gap: 5px; }
 .coordinate-actions, .business-actions, .delivery-actions { display: flex; flex-wrap: wrap; gap: 7px; }
 .business-dialog { display: grid; gap: 14px; width: min(860px, 94vw); }
 .business-dialog:not([open]) { display: none; }
-.archive-dialog { width: min(560px, 94vw); }
-.archive-confirm { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
-.archive-confirm p { width: 100%; }
 .skill-cards, .skill-editor, .voice-fields { display: grid; gap: 12px; }
 .skill-cards { grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); }
 .skill-card, .skill-section, .role-material { display: grid; gap: 8px; min-width: 0;

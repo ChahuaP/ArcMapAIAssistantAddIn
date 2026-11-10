@@ -4,22 +4,11 @@
     const api = window.guizhi;
     const { button, iconButton, icon } = window.GuizhiShell;
     const { SkillEditor, deliverables } = window.GuizhiSkillEditor;
-    const reference = item => item.id + '@' + item.revision;
+    const { reference, normalizeBusiness } = window.GuizhiTaskCommands;
     const domainTitles = { data: '数据', vector: '空间分析', geometry: '几何', table: '属性表',
         crs: '坐标', presentation: '地图与版面', evidence: '留痕', system: '运行状态', semantics: '审批材料',
         knowledge: '业务知识', governance: '依据与解释', raster: '栅格', cad: 'CAD',
         annual: '年度地类', imagery: '影像识别', delivery: '共享交付', business: '业务' };
-    const normalized = text => text.toLowerCase().replace(/\s+/g, '').replace(/[，。！!？?、]+$/u, '');
-    function matchBusiness(prompt, catalog) {
-        const query = normalized(prompt);
-        if (!query) return { exact: false, items: [] };
-        const explicit = query.replace(/^(?:请(?:帮我)?|帮我)?(?:开始)?(?:办理|发起|启动)?/u, '').replace(/业务$/u, '');
-        const matches = item => [item.title, ...item.aliases].map(normalized);
-        const exact = catalog.filter(item => matches(item).includes(explicit));
-        if (exact.length) return { exact: exact.length === 1, items: exact };
-        return { exact: false, items: catalog.filter(item => matches(item).some(alias => alias.length > 2 && query.includes(alias))) };
-    }
-
     function Business({ catalog, refresh, choose, close, manage, initialMarkdown, plans }) {
         const dialog = useRef(null);
         const [editor, setEditor] = useState(initialMarkdown ? { markdown: initialMarkdown } : null);
@@ -34,8 +23,8 @@
             setError('');
             if (value === 'tools' && !Object.keys(operations).length) api.capabilities().then(setOperations).catch(fail);
         }
-        const keyword = normalized(query);
-        const matches = catalog.filter(item => normalized([item.title, item.summary, ...item.aliases].join(' ')).includes(keyword));
+        const keyword = normalizeBusiness(query);
+        const matches = catalog.filter(item => normalizeBusiness([item.title, item.summary, ...item.aliases].join(' ')).includes(keyword));
         useEffect(() => { dialog.current?.showModal(); }, []);
         const content = h(React.Fragment, null,
             editor ? h(React.Fragment, null,
@@ -75,5 +64,5 @@
             h('div', { className: 'dialog-head' }, h('h2', null, '业务中心'),
                 iconButton('close', '关闭业务中心', { onClick: close })), content);
     }
-    window.GuizhiBusiness = { Business, reference, matchBusiness };
+    window.GuizhiBusiness = { Business };
 })();
