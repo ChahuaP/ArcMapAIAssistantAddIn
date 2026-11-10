@@ -30,7 +30,7 @@
             event.preventDefault();
             if (!busy) close();
         } },
-            h('div', { className: 'dialog-head' }, h('h2', null, 'ArcMap 交接'),
+            h('div', { className: 'dialog-head' }, h('h2', null, 'ArcGIS 扩展'),
                 h('button', { type: 'button', disabled: busy, onClick: close }, '关闭')),
             !ready ? h('button', { type: 'button', disabled: busy, onClick: () => perform(async () => {
                 if (await api.arcmapBridge()) setReady(true);
@@ -40,7 +40,7 @@
                 const result = await api.arcmapExchange(payload);
                 if (result.material) { attach(result.material); close(); }
                 else { setSnapshot(result); setFrame(0); setLayer(''); setStyled(false); }
-            }) }, snapshot ? '更换工程' : '打开工程或交接文件'),
+            }) }, snapshot ? '更换工程' : '打开工程或图层文件'),
             snapshot && h(React.Fragment, null,
                 h('p', null, snapshot.map.split(/[\\/]/).at(-1)),
                 h('label', null, '数据框', h('select', { value: frame, disabled: busy, onChange: event => {
@@ -71,7 +71,7 @@
                             name: '规智成果', style: styled ? Number(layer) : null });
                         setNotice('已生成 MXD 副本 · ' + result.feature_count + ' 个要素');
                     }) }, '发布到 MXD 副本'))),
-            busy && h('p', { role: 'status' }, '正在交接'),
+            busy && h('p', { role: 'status' }, '正在处理 ArcGIS 请求'),
             notice && h('p', { role: 'status' }, notice),
             error && h('p', { role: 'alert', className: 'error' }, error));
     };

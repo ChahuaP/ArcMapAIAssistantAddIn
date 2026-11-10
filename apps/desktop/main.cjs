@@ -1,4 +1,5 @@
-const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, net, protocol, safeStorage, screen, shell, Tray } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, net, protocol, safeStorage, shell, Tray } = require('electron');
+const { randomBytes } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
@@ -6,6 +7,7 @@ const { DesktopController } = require('./controller.cjs');
 const { SpeechController } = require('./speech.cjs');
 const { LocalSpeechRuntime } = require('./local-speech.cjs');
 const { VisualSession } = require('./visual.cjs');
+const { createShell } = require('./shell.cjs');
 
 const origin = 'guizhi://app';
 protocol.registerSchemesAsPrivileged([{ scheme: 'guizhi', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
@@ -24,49 +26,50 @@ async function startDesktop(options) {
         if (!item || !path.isAbsolute(item)) throw new Error('请选择有效的运行目录');
     }
     const vendor = path.join(rendererRuntime, 'node_modules');
-    const localFiles = ['index.html', 'app.js', 'map.js', 'coordinates.js', 'skills.js', 'style.css', 'mark.svg',
+    const localFiles = ['index.html', 'app.js', 'shell-ui.js', 'settings.js', 'map.js', 'coordinates.js', 'skills.js',
+        'style.css', 'theme.css', 'mark.svg',
         'portrait.html', 'portrait.css', 'portrait.js', 'task-commands.js', 'speech-settings.js',
         'speech-audio.js', 'voice-input.js', 'visual.html', 'visual.css', 'visual.js', 'arcmap.js'];
     const files = new Map(localFiles.map(name => ['/' + name, path.join(__dirname, name)]));
     files.set('/react.js', path.join(vendor, 'react', 'umd', 'react.production.min.js'));
     files.set('/react-dom.js', path.join(vendor, 'react-dom', 'umd', 'react-dom.production.min.js'));
+    files.set('/dayjs.js', path.join(vendor, 'dayjs', 'dayjs.min.js'));
+    files.set('/antd.js', path.join(vendor, 'antd', 'dist', 'antd.min.js'));
     for (const file of files.values()) {
         if (!fs.existsSync(file)) throw new Error('桌面运行依赖不完整');
     }
+    const nonce = randomBytes(18).toString('base64');
     protocol.handle('guizhi', async request => {
         const url = new URL(request.url);
         if (url.hostname !== 'app') return new Response('', { status: 404 });
         const file = files.get(url.pathname);
         if (!file) return new Response('', { status: 404 });
+        if (url.pathname === '/index.html') {
+            return new Response(fs.readFileSync(file, 'utf8').replaceAll('STYLE_NONCE', nonce),
+                { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+        }
         return net.fetch(pathToFileURL(file).href);
     });
-    let window;
-    let portrait;
+    const desktop = createShell({ userData: app.getPath('userData'), verifyStartup: options.verifyStartup,
+        icon: path.join(__dirname, 'mark.png') });
+    const { window, portrait, launcher, reveal } = desktop;
+    const version = fs.readFileSync(path.join(__dirname, '../../VERSION'), 'utf8').trim();
+    const workbenchUrl = origin + '/index.html';
+    const launcherUrl = workbenchUrl + '?surface=launcher';
+    const portraitUrl = origin + '/portrait.html';
     let visual;
+    let draft = {};
     const speech = new SpeechController({ userData: app.getPath('userData'), storage: safeStorage,
         local: new LocalSpeechRuntime(path.join(runtime, 'python', 'python.exe'), externalPath),
         bundledLocalRoot: options.bundledSpeech });
-    const withSpeech = state => ({ ...state, speech: speech.state() });
+    const withSpeech = state => ({ ...state, speech: speech.state(), appearance: desktop.appearance(), version });
     function broadcast(state) {
         visual?.update(state);
-        for (const item of [window, portrait]) {
-            if (item && !item.isDestroyed()) item.webContents.send('guizhi:state', withSpeech(state));
-        }
+        desktop.notify('state', withSpeech(state));
     }
     const controller = new DesktopController({ userData: app.getPath('userData'), runtime, dsh,
         safeStorage, externalPath, onChange: broadcast, bundledArcmap: options.bundledArcmap,
         installationRoot: options.installationRoot });
-    window = new BrowserWindow({ width: 1270, height: 820, minWidth: 790, minHeight: 590,
-        show: false, title: '规智', autoHideMenuBar: true, backgroundColor: '#f3f7f7',
-        icon: path.join(__dirname, 'mark.png'),
-        webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true } });
-    const area = screen.getPrimaryDisplay().workArea;
-    portrait = new BrowserWindow({ width: 312, height: 275, x: area.x + area.width - 328,
-        y: area.y + area.height - 292, frame: false, transparent: true, backgroundColor: '#00000000',
-        resizable: false, skipTaskbar: true, alwaysOnTop: true, show: false, hasShadow: false, title: '规智数字形象',
-        webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true,
-            autoplayPolicy: 'no-user-gesture-required' } });
-    const portraitUrl = origin + '/portrait.html';
     visual = new VisualSession({ python: controller.runtime.python,
         masks: () => portrait.isVisible() ? [portrait.getBounds()] : [],
         cancel: () => broadcast(controller.cancel()) });
@@ -78,12 +81,12 @@ async function startDesktop(options) {
     partition.setPermissionCheckHandler((source, permission, requestingOrigin, details) =>
         [portrait.webContents, window.webContents].includes(source) && requestingOrigin === origin &&
         (permission === 'speaker-selection' || (permission === 'media' && details.mediaType !== 'video')));
-    const reveal = () => { window.show(); window.focus(); };
     const tray = new Tray(nativeImage.createFromPath(path.join(__dirname, 'mark.png')).resize({ width: 24, height: 24 }));
     tray.setToolTip('规智');
     tray.setContextMenu(Menu.buildFromTemplate([
-        { label: '打开规智', click: reveal },
-        { label: '显示数字形象', click: () => portrait.showInactive() },
+        { label: '打开工作台', click: reveal },
+        { label: '快捷面板', click: desktop.openLauncher },
+        { label: '显示数字形象', click: desktop.showPortrait },
         { label: '隐藏数字形象', click: () => {
             portrait.webContents.send('guizhi:portraitHide');
             speech.cancel();
@@ -105,28 +108,49 @@ async function startDesktop(options) {
         event.preventDefault();
         if (closing) return;
         closing = true;
+        desktop.close();
         visual.close();
         speech.cancel();
         void controller.close().finally(() => { quitting = true; tray.destroy(); app.quit(); });
     });
-    window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-    window.webContents.on('will-navigate', (event, url) => {
-        if (url !== origin + '/index.html') event.preventDefault();
-    });
-    portrait.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-    portrait.webContents.on('will-navigate', (event, url) => { if (url !== portraitUrl) event.preventDefault(); });
+    const pages = new Map([[window, workbenchUrl], [launcher, launcherUrl], [portrait, portraitUrl]]);
+    for (const [surface, url] of pages) {
+        surface.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+        surface.webContents.on('will-navigate', (event, target) => { if (target !== url) event.preventDefault(); });
+    }
 
-    function bind(method, handler) {
+    function bind(method, handler, withSurface = false) {
         ipcMain.handle('guizhi:' + method, (event, ...args) => {
-            const source = event.senderFrame?.url;
-            if (!(!window.isDestroyed() && event.sender === window.webContents && source === origin + '/index.html') &&
-                    !(!portrait.isDestroyed() && event.sender === portrait.webContents && source === portraitUrl)) {
+            const surface = desktop.windows.find(candidate => candidate.webContents === event.sender);
+            if (!pages.has(surface) || event.senderFrame?.parent || pages.get(surface) !== event.senderFrame?.url) {
                 throw new Error('请求来源无效');
             }
-            return handler(...args);
+            return withSurface ? handler(surface, ...args) : handler(...args);
         });
     }
     bind('state', () => withSpeech(controller.state()));
+    bind('appearance', desktop.configureAppearance);
+    bind('readDraft', () => draft);
+    bind('saveDraft', (source, next) => {
+        if (!next || typeof next !== 'object' || Array.isArray(next)) throw new Error('草稿无效');
+        draft = next;
+        for (const surface of [window, launcher]) {
+            if (surface !== source) surface.webContents.send('guizhi:draft', draft);
+        }
+    }, true);
+    bind('openLauncher', desktop.openLauncher);
+    bind('hideLauncher', () => launcher.hide());
+    bind('portraitVoice', desktop.voice);
+    bind('voiceSubmit', () => {
+        desktop.openLauncher();
+        launcher.webContents.send('guizhi:launcherSubmit');
+    });
+    bind('voiceDraft', prompt => {
+        if (typeof prompt !== 'string') throw new Error('语音内容无效');
+        draft = { ...draft, prompt: prompt.slice(0, 4000) };
+        desktop.notify('draft', draft);
+        desktop.openLauncher();
+    });
     bind('configure', input => {
         const state = controller.configure(input);
         broadcast(state);
@@ -147,12 +171,12 @@ async function startDesktop(options) {
         return pick.canceled ? null : externalPath(pick.filePaths[0]);
     });
     bind('portraitHit', active => portrait.setIgnoreMouseEvents(!active, active ? {} : { forward: true }));
-    bind('portraitInput', () => {
-        portrait.show();
-        portrait.focus();
-        portrait.webContents.send('guizhi:portraitInput');
+    bind('workbench', id => {
+        reveal();
+        if (typeof id === 'string' && controller.tasks.some(item => item.id === id)) {
+            window.webContents.send('guizhi:openTask', id);
+        }
     });
-    bind('workbench', reveal);
     bind('workspace', async () => {
         const pick = await dialog.showOpenDialog(window, { properties: ['openDirectory', 'createDirectory'] });
         return pick.canceled ? null : pick.filePaths[0];
@@ -164,13 +188,13 @@ async function startDesktop(options) {
     });
     bind('arcmapFile', async () => {
         const pick = await dialog.showOpenDialog(window, { properties: ['openFile'],
-            filters: [{ name: 'ArcMap 工程或交接文件', extensions: ['mxd', 'json'] }] });
+            filters: [{ name: 'ArcGIS 工程或图层文件', extensions: ['mxd', 'json'] }] });
         if (pick.canceled) return null;
         const file = pick.filePaths[0];
         if (path.extname(file).toLowerCase() === '.mxd') return { action: 'describe', map: file };
-        if (fs.statSync(file).size > 2 << 20) throw new Error('ArcMap 交接文件过大');
+        if (fs.statSync(file).size > 2 << 20) throw new Error('ArcGIS 图层文件过大');
         const payload = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
-        if (payload.action !== 'import' || !payload.map_revision) throw new Error('ArcMap 交接文件无效');
+        if (payload.action !== 'import' || !payload.map_revision) throw new Error('ArcGIS 图层文件无效');
         return payload;
     });
     bind('arcmapExchange', async request => {
@@ -184,16 +208,19 @@ async function startDesktop(options) {
             document: { name: '审批材料', extensions: ['pdf', 'docx', 'xlsx'] },
             model: { name: 'ONNX', extensions: ['onnx'] } };
         if (kind !== 'any' && !Object.hasOwn(formats, kind)) throw new Error('材料格式无效');
-        const pick = await dialog.showOpenDialog(window, { properties: ['openFile'],
+        const pick = await dialog.showOpenDialog(BrowserWindow.getFocusedWindow() || window, { properties: ['openFile'],
             filters: kind === 'any' ? Object.values(formats) : [formats[kind]] });
         return pick.canceled ? null : controller.describe(pick.filePaths[0]);
     });
+    bind('materialPath', file => controller.describe(externalPath(file)));
     bind('mapAction', async (...args) => withSpeech(await controller.mapAction(...args)));
     bind('layoutReport', async () => {
         if (await shell.openPath(await controller.layoutReport())) throw new Error('无法打开版面');
     });
     bind('submit', task => {
         const state = controller.command(task);
+        draft = {};
+        desktop.notify('draft', draft);
         broadcast(state);
         return withSpeech(state);
     });
@@ -240,12 +267,13 @@ async function startDesktop(options) {
         const error = await shell.openPath(await controller.report(id));
         if (error) throw new Error('无法打开报告');
     });
-    await Promise.all([window.loadURL(origin + '/index.html'), portrait.loadURL(portraitUrl)]);
+    await Promise.all([...pages].map(([surface, url]) => surface.loadURL(url)));
+    desktop.registerShortcut();
     if (!options.verifyStartup) {
         if (!controller.settings.workspace) reveal();
-        portrait.showInactive();
+        desktop.showPortrait();
     }
-    return { window, portrait, tray, controller, speech, visual };
+    return { window, launcher, portrait, tray, controller, speech, visual };
 }
 
 module.exports = { startDesktop };

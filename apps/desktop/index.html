@@ -3,17 +3,23 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'nonce-STYLE_NONCE'; img-src 'self'; base-uri 'none'; form-action 'none'">
+<meta name="style-nonce" content="STYLE_NONCE">
 <title>规智</title>
+<link rel="stylesheet" href="/theme.css">
 <link rel="stylesheet" href="/style.css">
 <script defer src="/react.js"></script>
 <script defer src="/react-dom.js"></script>
+<script defer src="/dayjs.js"></script>
+<script defer src="/antd.js"></script>
+<script defer src="/shell-ui.js"></script>
 <script defer src="/map.js"></script>
 <script defer src="/coordinates.js"></script>
 <script defer src="/skills.js"></script>
 <script defer src="/arcmap.js"></script>
 <script defer src="/task-commands.js"></script>
 <script defer src="/speech-settings.js"></script>
+<script defer src="/settings.js"></script>
 <script defer src="/app.js"></script>
 </head>
 <body><div id="app"></div></body>

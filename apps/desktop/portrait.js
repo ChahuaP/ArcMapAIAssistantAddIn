@@ -1,15 +1,11 @@
 import { VoiceAudio } from './speech-audio.js';
 
 const api = window.guizhi;
-const pane = document.querySelector('#interaction');
-const draft = document.querySelector('#draft');
 const bubble = document.querySelector('#bubble');
 const message = document.querySelector('#message');
 const mic = document.querySelector('#mic');
 const play = document.querySelector('#play');
 const stop = document.querySelector('#stop');
-const more = document.querySelector('#more');
-const morePanel = document.querySelector('#more-panel');
 const detail = document.querySelector('#status');
 const shell = document.querySelector('main');
 const mouth = document.querySelector('#speaking-mouth');
@@ -54,24 +50,13 @@ const voice = new VoiceAudio(api, next => {
 function fail(error) {
     tell(String(error.message || error).replace(/^Error invoking remote method '[^']+': Error: /, ''), true);
 }
-function toggle(force) {
-    showMore(false);
-    pane.hidden = typeof force === 'boolean' ? !force : !pane.hidden;
-    if (!pane.hidden) draft.focus({ preventScroll: true });
-}
-
-function showMore(open) {
-    morePanel.hidden = !open;
-    more.setAttribute('aria-expanded', String(open));
-    if (open) {
-        pane.hidden = true;
-        morePanel.querySelector('button').focus({ preventScroll: true });
-    }
+function appearance(value) {
+    document.documentElement.dataset.theme = value.dark ? 'dark' : 'light';
 }
 
 function update(next) {
+    appearance(next.appearance);
     if (conversation !== undefined && next.conversation !== conversation) {
-        draft.value = '';
         void voice.stop().catch(fail);
     }
     conversation = next.conversation;
@@ -104,8 +89,6 @@ async function send(text) {
         return;
     }
     const result = await api.submit({ prompt: text, previousTask: state.focusTask });
-    draft.value = '';
-    toggle(false);
     update(result);
 }
 
@@ -126,21 +109,17 @@ async function end() {
     if (!held) return;
     held = false;
     holdId += 1;
-    const priorText = draft.value;
     try {
-        const text = await voice.finish(partial => {
-            toggle(true);
-            draft.value = partial;
-        });
+        const text = await voice.finish(partial => tell(partial));
         if (!text) return;
         const action = window.GuizhiTaskCommand(text);
-        if (action === 'send' && priorText.trim()) return await send(priorText);
+        if (action === 'send') {
+            const { prompt } = await api.readDraft();
+            if (prompt?.trim()) return await api.voiceSubmit();
+        }
         if (action === 'reset' || action === 'workbench') return await send(text);
-        toggle(true);
-        draft.value = text;
-        draft.select();
+        await api.voiceDraft(text);
     } catch (error) {
-        draft.value = priorText;
         fail(error);
     }
 }
@@ -164,43 +143,22 @@ mic.addEventListener('keyup', event => {
         void end();
     }
 });
-document.querySelector('#type').addEventListener('click', () => toggle());
-document.querySelector('#figure-toggle').addEventListener('click', () => toggle());
-more.addEventListener('click', () => showMore(morePanel.hidden));
-document.querySelector('#open').addEventListener('click', () => {
-    showMore(false);
-    void api.workbench().catch(fail);
-});
+for (const selector of ['#type', '#figure-toggle']) {
+    document.querySelector(selector).addEventListener('click', () => void api.openLauncher().catch(fail));
+}
+document.querySelector('#open').addEventListener('click', () => void api.workbench().catch(fail));
 stop.addEventListener('click', () => {
-    showMore(false);
     held = false;
     void voice.stop().catch(fail);
 });
 play.addEventListener('click', () => {
-    showMore(false);
     if (task?.response) void voice.speak(task.response, state.speech.speaker).catch(fail);
-});
-pane.addEventListener('submit', event => { event.preventDefault(); void send(draft.value).catch(fail); });
-draft.addEventListener('keydown', event => {
-    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
-        event.preventDefault();
-        pane.requestSubmit();
-    }
 });
 document.addEventListener('keydown', event => {
     if (event.key === 'Escape') {
-        if (!morePanel.hidden) {
-            showMore(false);
-            more.focus();
-            return;
-        }
         held = false;
         void voice.stop().catch(fail);
-        toggle(false);
     }
-});
-document.addEventListener('pointerdown', event => {
-    if (!morePanel.hidden && !event.target.closest('#more, #more-panel')) showMore(false);
 });
 window.addEventListener('pagehide', () => { held = false; voice.releaseCapture(); });
 document.addEventListener('pointermove', event => {
@@ -212,6 +170,7 @@ document.addEventListener('pointermove', event => {
 });
 
 api.onState(update);
-api.onPortraitInput(() => toggle(true));
+api.onAppearance(appearance);
+api.onPortraitVoice(() => mic.focus({ preventScroll: true }));
 api.onPortraitHide(() => { held = false; void voice.stop().catch(fail); });
 api.state().then(update).catch(fail);

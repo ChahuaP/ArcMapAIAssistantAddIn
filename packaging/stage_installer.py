@@ -95,6 +95,11 @@ def build(stage, runtime, desktop, dsh, speech, arcmap, addin, tree, commit):
                          (desktop / "node_modules/react", "renderer/node_modules/react"),
                          (desktop / "node_modules/react-dom", "renderer/node_modules/react-dom")):
         copy_tree(source, payload / name)
+    for package, asset in (("antd", "dist/antd.min.js"), ("dayjs", "dayjs.min.js")):
+        source = desktop / "node_modules" / package
+        target = payload / "renderer/node_modules" / package
+        copy_file(source / asset, target / asset)
+        copy_file(source / "LICENSE", target / "LICENSE")
     bootstrap = stage / "bootstrap"
     bootstrap.mkdir()
     for name in BOOTSTRAP_FILES:

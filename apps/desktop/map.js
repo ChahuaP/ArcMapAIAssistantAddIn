@@ -86,7 +86,8 @@
         const button = (label, click) => h('button', { type: 'button', disabled: busy, onClick: click }, label);
         return h('div', { className: 'map-workspace' },
             enabled && h('div', { className: 'map-toolbar' },
-                button(editing ? '返回成果地图' : '地图工作区', () => edit(!editing)),
+                h(antd.Segmented, { size: 'small', 'aria-label': '地图视图', options: ['成果地图', '图层工作区'],
+                    value: editing ? '图层工作区' : '成果地图', onChange: value => edit(value === '图层工作区') }),
                 editing && button('添加图层', add),
                 editing && layers.length > 0 && button('清空', () => action('clear_layers')),
                 editing && view && button(view.mode === 'layout' ? '切回地图' : '切换版面',

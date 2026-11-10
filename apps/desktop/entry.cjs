@@ -22,19 +22,34 @@ async function main() {
         installationRoot: values['installation-root'],
         bundledSpeech: values['bundled-speech'], bundledArcmap: values['bundled-arcmap'], verifyStartup: Boolean(probe) });
     if (probe && desktop) {
-        const [workbench, portrait] = await Promise.all([
+        const [workbench, launcher, portrait] = await Promise.all([
             desktop.window.webContents.executeJavaScript(`new Promise(resolve => {
                 let attempts = 20;
-                function check() {
-                    if (window.guizhi && window.GuizhiBusiness && document.getElementById('app')?.childElementCount) resolve(true);
+                async function check() {
+                    if (window.guizhi && window.GuizhiBusiness && document.getElementById('app')?.childElementCount) {
+                        try { resolve(Boolean((await window.guizhi.state()).appearance)); }
+                        catch { resolve(false); }
+                    }
                     else if (attempts-- > 0) setTimeout(check, 100);
                     else resolve(false);
                 }
                 check();
             })`),
-            desktop.portrait.webContents.executeJavaScript("Boolean(window.guizhi && document.getElementById('interaction'))"),
+            desktop.launcher.webContents.executeJavaScript(`new Promise(resolve => {
+                let attempts = 20;
+                async function check() {
+                    if (document.querySelector('.launcher textarea')) {
+                        try { resolve(Boolean((await window.guizhi.state()).appearance)); }
+                        catch { resolve(false); }
+                    }
+                    else if (attempts-- > 0) setTimeout(check, 100);
+                    else resolve(false);
+                }
+                check();
+            })`),
+            desktop.portrait.webContents.executeJavaScript("Boolean(window.guizhi && document.getElementById('open'))"),
         ]);
-        if (!workbench || !portrait) throw new Error('规智界面启动检查失败');
+        if (!workbench || !launcher || !portrait) throw new Error('规智界面启动检查失败');
         fs.writeFileSync(probe, JSON.stringify({ workbench, portrait }), { flag: 'wx' });
         app.exit(0);
     }

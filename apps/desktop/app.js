@@ -2,6 +2,8 @@
     const h = React.createElement;
     const { useEffect, useRef, useState } = React;
     const api = window.guizhi;
+    const { Theme, Workbench, brand, button, iconButton, icon } = window.GuizhiShell;
+    const launcher = new URLSearchParams(location.search).get('surface') === 'launcher';
     const labels = { running: '正在办理', cancelling: '正在停止', succeeded: '已完成',
         failed: '未完成', cancelled: '已停止', timed_out: '已超时', interrupted: '已中断',
         missing_materials: '待补材料', invalid_materials: '材料有误', no_result: '待补信息', answered: '已答复',
@@ -9,48 +11,6 @@
     const active = task => task && ['running', 'cancelling'].includes(task.status);
     const emptyDraft = () => ({ prompt: '', project: null, control: null, skill: null, materials: {}, parameterText: {} });
     const number = value => value.toLocaleString('zh-CN', { maximumFractionDigits: 2 });
-
-    function Settings({ current, speech, close, save, entries, setEntries, manage }) {
-        const dialog = useRef(null);
-        const [value, change] = useState({ ...current, key: '' });
-        const [settingsError, setSettingsError] = useState('');
-        const fail = error => setSettingsError(String(error.message || error)
-            .replace(/^Error invoking remote method '[^']+': Error: /, ''));
-        const update = (name, next) => change(old => ({ ...old, [name]: next }));
-        useEffect(() => { dialog.current.showModal(); }, []);
-        return h('dialog', { ref: dialog, onCancel: event => {
-            event.preventDefault();
-            if (current.workspace) close();
-        } },
-        h('form', { onSubmit: event => {
-            event.preventDefault();
-            setSettingsError('');
-            void save(value).catch(fail);
-        } },
-            h('div', { className: 'dialog-head' }, h('h2', null, '设置'),
-                current.workspace && h('button', { type: 'button', className: 'quiet', onClick: close }, '关闭')),
-            h('label', null, '成果保存位置', h('div', { className: 'field-row' },
-                h('input', { readOnly: true, value: value.workspace, required: true, placeholder: '选择一个文件夹' }),
-                h('button', { type: 'button', onClick: () => api.workspace().then(folder => {
-                    if (folder) update('workspace', folder);
-                }).catch(fail) }, '选择'))),
-            h('label', null, 'MiniMax 在线模型', h('input', { value: value.model, required: true,
-                onChange: event => update('model', event.target.value) })),
-            h('label', null, 'API 密钥', h('input', { type: 'password', value: value.key,
-                placeholder: current.keyConfigured ? '已配置，可输入新密钥' : '输入 MiniMax API 密钥',
-                autoComplete: 'off', onChange: event => update('key', event.target.value) })),
-            h('label', { className: 'voice-toggle' },
-                h('input', { type: 'checkbox', checked: value.showOperation !== false,
-                    onChange: event => update('showOperation', event.target.checked) }), '显示办理过程'),
-            value.showOperation !== false && h('label', { className: 'voice-toggle' },
-                h('input', { type: 'checkbox', checked: value.screenHighlight !== false,
-                    onChange: event => update('screenHighlight', event.target.checked) }), '高亮屏幕中的对应图层'),
-            current.workspace && h(window.GuizhiCoordinates, { entries, setEntries }),
-            speech && h(window.GuizhiSpeechSettings, { current: speech }),
-            current.workspace && h('button', { type: 'button', onClick: manage }, '管理业务技能'),
-            settingsError && h('p', { role: 'alert', className: 'error' }, settingsError),
-            h('button', { className: 'primary', disabled: !value.workspace, type: 'submit' }, '保存设置')));
-    }
 
     function Material({ label, item, change, fail, plans, kind = 'vector' }) {
         return h('div', { className: 'material' },
@@ -137,7 +97,12 @@
 
     function App() {
         const [state, setState] = useState(null);
-        const [draft, setDraft] = useState(emptyDraft);
+        const [draft, renderDraft] = useState(emptyDraft);
+        const shared = useRef(draft);
+        const [appearance, setAppearance] = useState({
+            theme: 'system', dark: matchMedia('(prefers-color-scheme: dark)').matches, panels: [222, 362],
+            shortcut: 'Ctrl+G',
+        });
         const [selected, select] = useState(null);
         const [parcel, selectParcel] = useState(null);
         const [settings, showSettings] = useState(false);
@@ -147,18 +112,50 @@
         const [catalog, setCatalog] = useState([]);
         const [business, showBusiness] = useState('');
         const [arcmap, showArcmap] = useState(false);
+        const [tab, setTab] = useState('成果');
         const [initialMarkdown, setInitialMarkdown] = useState('');
         const { Business, RoleMaterials, ParameterFields, materialReady, parametersReady, parameterValues,
             reference } = window.GuizhiBusiness;
         const fail = error => setError(String(error.message || error).replace(/^Error invoking remote method '[^']+': Error: /, ''));
+        function receiveDraft(value) {
+            shared.current = { ...emptyDraft(), ...value };
+            renderDraft(shared.current);
+        }
+        function setDraft(next) {
+            receiveDraft(typeof next === 'function' ? next(shared.current) : next);
+            void api.saveDraft(shared.current).catch(fail);
+        }
+        const saveAppearance = input => api.appearance(input).then(setAppearance);
         const update = (key, value) => setDraft(old => ({ ...old, [key]: value }));
         const refresh = () => api.skills().then(setCatalog);
         useEffect(() => {
-            api.state().then(value => { setState(value); select(value.tasks[0]?.id || null); }).catch(fail);
-            const off = api.onState(setState);
-            const offSettings = api.onSettings(() => showSettings(true));
-            return () => { off(); offSettings(); };
+            api.state().then(value => {
+                setState(value);
+                setAppearance(value.appearance);
+                select(value.focusTask);
+                if (!launcher && !value.settings.workspace) showSettings(true);
+            }).catch(fail);
+            api.readDraft().then(receiveDraft).catch(fail);
+            const callbacks = [
+                api.onState(value => {
+                    setState(value);
+                    if (value.focusTask && value.focusTask !== focusTask.current) select(value.focusTask);
+                    focusTask.current = value.focusTask;
+                }),
+                api.onSettings(() => showSettings(true)), api.onAppearance(setAppearance), api.onDraft(receiveDraft),
+                api.onLauncherFocus(() => document.querySelector('.launcher textarea')?.focus()),
+                api.onLauncherSubmit(() => document.querySelector('.launcher form')?.requestSubmit()),
+                api.onOpenTask(id => { showSettings(false); select(id); }),
+            ];
+            const dismiss = event => {
+                if (launcher && event.key === 'Escape' && !event.isComposing && !document.querySelector('dialog[open]')) {
+                    void api.hideLauncher().catch(fail);
+                }
+            };
+            addEventListener('keydown', dismiss);
+            return () => { callbacks.forEach(unsubscribe => unsubscribe()); removeEventListener('keydown', dismiss); };
         }, []);
+        const focusTask = useRef(null);
         useEffect(() => {
             if (state?.settings.workspace) {
                 api.coordinates().then(setCoordinates).catch(fail);
@@ -178,19 +175,22 @@
         const canSubmit = materialsReady && parametersReady(fields, draft.parameterText);
         async function submit(event) {
             event.preventDefault();
-            if (window.GuizhiTaskCommand(draft.prompt) === 'reset') {
+            const action = window.GuizhiTaskCommand(draft.prompt);
+            if (action === 'workbench') return api.workbench().catch(fail);
+            if (action === 'reset') {
                 startNew();
                 return;
             }
             if (busy || !draft.prompt.trim() || !canSubmit) return;
+            if (!state?.settings.workspace) return api.workbench().catch(fail);
             setError('');
             setSending(true);
             try {
-                const next = await api.submit({ ...draft, previousTask: draft.previousTask || task?.id,
+                const next = await api.submit({ ...draft, previousTask: draft.previousTask || (launcher ? state.focusTask : task?.id),
                     skillParameters: skill ? parameterValues(fields, draft.parameterText) : undefined });
                 setState(next);
                 select(next.tasks[0].id);
-                setDraft(emptyDraft());
+                if (launcher) await api.workbench(next.focusTask);
             } catch (error) { fail(error); } finally { setSending(false); }
         }
         function retry(item) {
@@ -211,81 +211,152 @@
             select(null);
             void api.submit({ prompt: '开始新任务' }).then(setState).catch(fail);
         }
-        return h('div', { className: 'shell' },
-            h('aside', { className: 'sidebar' },
-                h('div', { className: 'brand' }, h('img', { src: '/mark.svg', alt: '', width: 39 }), h('span', null, '规智')),
-                h('button', { className: 'new-task', onClick: startNew }, '＋ 新任务'),
-                h('button', { disabled: !state?.settings.workspace, onClick: () => showBusiness('browse') }, '业务能力'),
-                h('button', { disabled: !state?.settings.workspace || busy, onClick: () => showArcmap(true) }, 'ArcMap 交接'),
-                h('div', { className: 'history-label' }, '办理记录'),
-                h('nav', { 'aria-label': '办理记录' }, ...(state?.tasks || []).map(item =>
-                    h('button', { key: item.id, className: item.id === selected ? 'history selected' : 'history',
-                        onClick: () => { select(item.id); setError(''); } },
-                        h('span', { className: 'history-title' }, item.title), h('small', null, labels[item.status] || '未完成')))),
-                h('button', { className: 'settings-link', onClick: () => showSettings(true) }, '设置')),
-            h('main', { className: 'content' },
-                h('header', null, h('h1', null, task ? task.title : '规智工作台'),
-                    state && h('span', { className: 'model-chip' }, h('i'), '在线模型')),
-                h('div', { className: 'workbench' },
-                    h('section', { className: 'conversation', 'aria-label': '任务对话' },
-                        h('div', { className: 'messages' }, task ? [
-                            h('article', { key: 'user', className: 'bubble user' }, task.prompt),
-                            h(Result, { key: 'result', task, retry, fail, parcel, selectParcel, editSkill: text => {
-                                setInitialMarkdown(text);
-                                showBusiness('manage');
-                            } }),
-                        ] : h('div', { className: 'welcome' },
-                            h('img', { src: '/mark.svg', alt: '', width: 70 }),
-                            h('h2', null, '今天要办理什么？'),
-                            h('p', null, '输入办理要求，或选择已有业务。'),
-                            ...catalog.slice(0, 3).map(item => h('button', { key: reference(item), className: 'suggestion',
-                                onClick: () => choose(item) }, item.title + ' ↗')))),
-                        h('form', { className: 'composer', onSubmit: submit },
-                            error && h('p', { role: 'alert', className: 'error' }, error),
-                            skill ? h('div', { className: 'materials skill-materials' },
-                                h('button', { type: 'button', className: 'attached', onClick: () => setDraft(emptyDraft()) },
-                                    skill.title + ' ×'),
-                                h(RoleMaterials, { roles: skill.materials, materials: draft.materials,
-                                    change: value => update('materials', value), Material, plans, fail }),
-                                Object.keys(fields).length > 0 && h('div', { className: 'skill-samples' },
-                                    h(ParameterFields, { fields, values: draft.parameterText, disabled: busy,
-                                        change: value => update('parameterText', value) })))
-                            : h('div', { className: 'materials' },
-                                h(Material, { label: '项目范围', item: draft.project, change: value => update('project', value), fail, plans }),
-                                h(Material, { label: '管控范围', item: draft.control, change: value => update('control', value), fail, plans }),
-                                h(RoleMaterials, { roles: [{ id: 'inputs', label: '其他材料', kind: 'any', maximum: 30 }],
-                                    materials: draft.materials, change: value => update('materials', value), Material, plans: [], fail })),
-                            h('div', { className: 'compose-row' },
-                                h('button', { type: 'button', title: '打开语音输入', onClick: () => api.portraitInput().catch(fail) }, '语音'),
-                                h('textarea', { 'aria-label': '办理事项', placeholder: '输入办理事项…', rows: 2,
-                                    value: draft.prompt, maxLength: 4000, onChange: event => update('prompt', event.target.value),
-                                    onKeyDown: event => {
-                                        if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-                                            event.preventDefault();
-                                            event.currentTarget.form.requestSubmit();
-                                        }
-                                    } }),
-                                busy ? h('button', { type: 'button', onClick: () => api.cancel().then(setState).catch(fail) }, '停止')
-                                    : h('button', { type: 'submit', className: 'primary', disabled: !draft.prompt.trim() || !canSubmit }, '发送 ↑')))),
-                    h(window.GuizhiMap, { key: task?.id || 'empty', map: task?.map, view: state?.mapView,
-                        parcel, onParcel: selectParcel,
-                        enabled: Boolean(state?.settings.workspace), onState: setState, fail }))),
+        const ready = Boolean(state?.settings.workspace);
+        const freeInputs = draft.materials.inputs || [];
+        const picked = [draft.project, draft.control, ...Object.values(draft.materials).flat()].filter(Boolean);
+        function appendMaterials(items) {
+            setDraft(current => {
+                const inputs = [...(current.materials.inputs || []), ...items];
+                if (inputs.length > 30) throw new Error('一次最多添加 30 份材料');
+                return { ...current, materials: { ...current.materials, inputs } };
+            });
+        }
+        async function pickFile() {
+            try {
+                if (!ready) return await api.workbench();
+                const item = await api.material('any');
+                if (item) appendMaterials([item]);
+            } catch (issue) { fail(issue); }
+        }
+        async function drop(event) {
+            event.preventDefault();
+            try {
+                if (skill) throw new Error('请按下方业务材料类型添加文件');
+                if (!ready) return await api.workbench();
+                const files = [...event.dataTransfer.files];
+                if (files.length > 30 - freeInputs.length) throw new Error('一次最多添加 30 份材料');
+                appendMaterials(await Promise.all(files.map(file => api.describeDroppedFile(file))));
+            } catch (issue) { fail(issue); }
+        }
+        const composer = h('form', { className: 'composer', onSubmit: submit,
+            onDragOver: event => event.preventDefault(), onDrop: drop },
+            error && h('p', { role: 'alert', className: 'error' }, error),
+            h('textarea', { 'aria-label': '办理事项', placeholder: launcher
+                ? '说说需要办理什么，也可以把材料拖到这里' : '继续提问或补充办理要求', rows: 2,
+                value: draft.prompt, maxLength: 4000, onChange: event => update('prompt', event.target.value),
+                onKeyDown: event => {
+                    if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) {
+                        event.preventDefault();
+                        event.currentTarget.form.requestSubmit();
+                    }
+                } }),
+            skill && h('div', { className: 'materials skill-materials' },
+                h('button', { type: 'button', className: 'attached', onClick: () => setDraft(emptyDraft()) }, skill.title + ' ×'),
+                h(RoleMaterials, { roles: skill.materials, materials: draft.materials,
+                    change: value => update('materials', value), Material, plans, fail }),
+                Object.keys(fields).length > 0 && h(ParameterFields, { fields, values: draft.parameterText,
+                    disabled: busy, change: value => update('parameterText', value) })),
+            !skill && picked.length > 0 && h('div', { className: 'materials' },
+                ...['project', 'control'].filter(key => draft[key]).map(key => h(Material, {
+                    key, label: draft[key].name, item: draft[key], change: value => update(key, value), fail, plans,
+                })),
+                ...freeInputs.map((item, index) => h(Material, { key: index, label: item.name, item, kind: 'any', fail, plans: [],
+                    change: value => {
+                        const inputs = freeInputs.slice();
+                        if (value) inputs[index] = value;
+                        else inputs.splice(index, 1);
+                        update('materials', { ...draft.materials, inputs });
+                    } }))),
+            h('div', { className: 'compose-actions' },
+                !skill && button('paperclip', '添加材料', { type: 'text', onClick: pickFile }),
+                h('span', { className: 'spacer' }),
+                iconButton('mic', '语音输入', { type: 'default', onClick: () => api.portraitVoice().catch(fail) }),
+                busy ? h(antd.Button, { onClick: () => api.cancel().then(setState).catch(fail) }, '停止')
+                    : button('send', '发送', { type: 'primary', htmlType: 'submit',
+                        disabled: !draft.prompt.trim() || !canSubmit })));
+        const recent = state?.tasks || [];
+        const taskButton = item => h('button', { key: item.id, className: 'history' + (item.id === selected ? ' selected' : ''),
+            onClick: () => {
+                if (launcher) return api.workbench(item.id).catch(fail);
+                select(item.id);
+                setError('');
+            } }, h('span', { className: 'history-title' }, item.title),
+            h('small', null, labels[item.status] || '未完成'));
+        const tiles = h('div', { className: 'business-tiles' }, ...catalog.slice(0, 3).map(item =>
+            h('button', { key: reference(item), className: 'business-tile', onClick: () => choose(item) },
+                h('span', { className: 'tile-icon' }, icon('layers')),
+                h('span', null, h('b', null, item.title),
+                    h('small', null, item.materials.slice(0, 2).map(role => role.label).join(' · '))))));
+        const quick = h('main', { className: 'launcher' },
+            h('header', { className: 'launcher-head' }, brand(), h('div', { className: 'title-group' },
+                appearance.shortcutRegistered && h('kbd', null, appearance.shortcut.replaceAll('+', ' + ')),
+                button('app', '打开工作台', { type: 'text', onClick: () => api.workbench().catch(fail) }),
+                iconButton('close', '收起快捷面板', { onClick: () => api.hideLauncher().catch(fail) }))),
+            h('div', { className: 'launcher-body' }, composer,
+                recent.length > 0 && h('section', { className: 'quick-section' }, h('h2', null, '最近使用'),
+                    h('div', { className: 'recent-tasks' }, ...recent.slice(0, 2).map(taskButton))),
+                ready && h('section', { className: 'quick-section' }, h('div', { className: 'section-head' },
+                    h('h2', null, '常用业务'), h(antd.Button, { type: 'link', onClick: () => showBusiness('browse') }, '全部业务')), tiles)),
+            h('footer', { className: 'launcher-footer' },
+                h('span', { className: 'muted' }, ready ? '在线服务' : '请在工作台选择成果保存位置'),
+                h('span', null, h('kbd', null, 'Enter'), ' 发送　', h('kbd', null, 'Esc'), ' 收起')));
+        const sidebar = h('aside', { className: 'sidebar' },
+            button('plus', '新建任务', { type: 'primary', className: 'new-task', onClick: startNew }),
+            h('div', { className: 'nav-item selected' }, icon('app'), '工作台'),
+            h('button', { className: 'nav-item', disabled: !ready, onClick: () => showBusiness('browse') }, icon('grid'), '业务中心'),
+            h('div', { className: 'history-label' }, '最近任务'),
+            h('nav', { 'aria-label': '最近任务' }, ...recent.map(taskButton)),
+            h('button', { className: 'nav-item', onClick: () => showSettings(true) }, icon('settings'), '设置'));
+        const conversation = h('section', { className: 'conversation', 'aria-label': '任务对话' },
+            h('div', { className: 'task-head' }, h('h1', null, task ? task.title : '规智工作台'),
+                task && h('span', { className: 'status-tag' }, labels[task.status] || '未完成')),
+            h('div', { className: 'messages' }, task ? [
+                h('article', { key: 'user', className: 'bubble user' }, task.prompt),
+                h(Result, { key: 'result', task, retry, fail, parcel, selectParcel, editSkill: text => {
+                    setInitialMarkdown(text);
+                    showBusiness('manage');
+                } }),
+            ] : h('div', { className: 'welcome' }, h('img', { src: '/mark.svg', alt: '', width: 50 }),
+                h('h2', null, '今天要办理什么？'), h('p', null, '输入办理要求，或选择已有业务。'), tiles)),
+            h('div', { className: 'compose-wrap' }, composer));
+        const materials = task ? [task.project, task.control, ...Object.values(task.materials || {}).flat()].filter(Boolean) : picked;
+        const deliveries = { export: '成果数据', table: '属性表', workflow: '办理留痕', package: '共享数据包', boundaries: '边界图层' };
+        const inspector = h('aside', { className: 'inspector', 'aria-label': '材料与成果' },
+            h('div', { className: 'inspector-tabs' }, ...['材料', '成果'].map(name =>
+                h('button', { key: name, className: 'inspector-tab' + (tab === name ? ' selected' : ''),
+                    'aria-pressed': tab === name, onClick: () => setTab(name) }, name,
+                    h('small', null, name === '材料' ? materials.length : (task?.deliveries?.length || 0) + Number(Boolean(task?.hasReport)))))),
+            h('div', { className: 'inspector-body' }, tab === '材料'
+                ? materials.length ? materials.map((item, index) => h('div', { key: index, className: 'artifact-row' },
+                    icon('file'), h('span', null, item.name || item.file?.split(/[\\/]/).at(-1)),
+                    item.layer && h('small', null, item.layer))) : h('p', { className: 'muted' }, '暂无材料')
+                : h(React.Fragment, null,
+                    h(window.GuizhiMap, { key: task?.id || 'empty', map: task?.map, view: state?.mapView, parcel, onParcel: selectParcel,
+                        enabled: ready, onState: setState, fail }),
+                    (task?.hasReport || task?.deliveries?.length > 0) && h('section', { className: 'artifact-list' },
+                        h('h2', null, '成果文件'),
+                        task.hasReport && button('file', '办理报告', { onClick: () => api.report(task.id).catch(fail) }),
+                        ...(task.deliveries || []).map(kind => h('div', { key: kind },
+                            button('file', deliveries[kind] || kind, { onClick: () => api.delivery(task.id, kind).catch(fail) })))))));
+        const layout = launcher ? quick : settings && state ? h(window.GuizhiSettings, {
+            state, appearance, saveAppearance, entries: coordinates, setEntries: setCoordinates,
+            close: () => showSettings(false),
+            manage: () => showBusiness('manage'), openArcgis: () => showArcmap(true),
+            save: async value => {
+                const next = await api.configure(value);
+                setState(next);
+                if (value.workspace !== state.settings.workspace) select(next.focusTask);
+            },
+        }) : h(Workbench, { appearance, saveAppearance, sidebar, conversation, inspector, fail,
+            arcgis: () => { if (ready && !busy) showArcmap(true); else if (!ready) showSettings(true); },
+            connected: Boolean(state?.settings.arcmapBridge) });
+        return h(Theme, { appearance }, layout,
             business && h(Business, { catalog, refresh, choose, Material, manage: business === 'manage',
                 initialMarkdown, close: () => { setInitialMarkdown(''); showBusiness(''); } }),
-            arcmap && h(window.GuizhiArcmap, { configured: state.settings.arcmapBridge, task,
+            arcmap && state && h(window.GuizhiArcmap, { configured: state.settings.arcmapBridge, task,
                 close: () => showArcmap(false), attach: project => {
                     setDraft({ ...emptyDraft(), project });
                     select(null);
-                } }),
-            state && (settings || !state.settings.workspace) && h(Settings, { current: state.settings,
-                speech: state.speech,
-                entries: coordinates, setEntries: setCoordinates,
-                manage: () => { showSettings(false); showBusiness('manage'); },
-                close: () => showSettings(false), save: async value => {
-                    const next = await api.configure(value);
-                    setState(next);
-                    setDraft(emptyDraft());
-                    select(next.tasks[0]?.id || null);
                     showSettings(false);
                 } }));
     }
