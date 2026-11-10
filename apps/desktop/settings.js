@@ -92,7 +92,7 @@
             report && h('dl', { className: 'diagnostic-list' },
                 row('智能体模型', statuses[report.model.state], [
                     report.model.mode === 'local' ? '本地' : report.model.mode === 'online' ? '在线' : '',
-                    report.model.name, report.model.detail,
+                    report.model.name, report.model.detail && errorText(report.model.detail),
                     report.model.at && new Date(report.model.at).toLocaleString()].filter(Boolean).join(' · '),
                     report.model.state === 'verified' ? 'success' : report.model.state === 'failed' ? 'error' : 'default'),
                 voiceRow('asr', '语音识别'), voiceRow('tts', '语音回答'),

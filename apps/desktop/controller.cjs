@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { promisify } = require('node:util');
 const { action } = require('./task-commands.js');
+const { conversations } = require('./conversations.cjs');
 const { startAgent } = require('./agent-process.cjs');
 const { materialBindings } = require('./materials.cjs');
 const { visualRecipe } = require('./visual-recipes.cjs');
@@ -49,9 +50,6 @@ class DesktopController {
         this.onChange = onChange;
         this.tasks = [];
         this.active = null;
-        this.mapView = null;
-        this.mapBusy = false;
-        this.conversation = 0;
         this.focusTask = null;
         this.restore();
     }
@@ -64,8 +62,7 @@ class DesktopController {
         if (!this.settings.workspace) return;
         this.settings.workspace = this.workspacePath(this.settings.workspace);
         this.tasks = load(this.historyPath(), []);
-        this.focusTask = this.tasks[0]?.id ?? null;
-        this.mapView = load(path.join(this.settings.workspace, 'desktop-view.json'), null);
+        this.focusTask = conversations(this.tasks).find(group => !group.root.archived)?.turns.at(-1).id ?? null;
         let changed = false;
         for (const task of this.tasks) {
             if (['running', 'cancelling'].includes(task.status)) {
@@ -77,8 +74,8 @@ class DesktopController {
         if (changed) this.persist();
     }
 
-    persist() {
-        save(this.historyPath(), this.tasks);
+    persist(tasks = this.tasks) {
+        save(this.historyPath(), tasks);
     }
 
     workspacePath(file) {
@@ -99,7 +96,10 @@ class DesktopController {
         const { workspace, modelConfig, showOperation, screenHighlight, carrier, encryptedKey } = this.settings;
         return { settings: { workspace, modelConfig, showOperation, screenHighlight,
             carrier: carrier || 'none', keyConfigured: Boolean(modelConfig && encryptedKey) },
-            tasks: this.tasks, mapView: this.mapView, focusTask: this.focusTask, conversation: this.conversation };
+            tasks: this.tasks, focusTask: this.focusTask,
+            conversations: conversations(this.tasks).map(({ root, turns }) => ({
+                id: root.id, title: root.title, archived: Boolean(root.archived), turnIds: turns.map(turn => turn.id),
+            })) };
     }
 
     workspaceReady(value) {
@@ -121,7 +121,7 @@ class DesktopController {
     }
 
     configure(input) {
-        if (this.active || this.mapBusy || this.skillBusy || this.hostBusy) throw new Error('请先结束当前任务');
+        if (this.active || this.skillBusy || this.hostBusy) throw new Error('请先结束当前任务');
         const { config, key, encrypted } = this.selectModel(input);
         const workspace = this.workspaceReady(input.workspace);
         let encryptedKey = encrypted;
@@ -132,9 +132,9 @@ class DesktopController {
         const settings = { workspace, modelConfig: config, showOperation: input.showOperation !== false,
             screenHighlight: input.screenHighlight !== false, carrier: this.settings.carrier, encryptedKey };
         save(this.file, settings);
+        const changedWorkspace = workspace !== this.settings.workspace;
         this.settings = settings;
-        this.tasks = [];
-        this.restore();
+        if (changedWorkspace) this.restore();
         return this.state();
     }
 
@@ -182,7 +182,7 @@ class DesktopController {
     }
 
 
-    submit({ prompt, project, control, skill, materials = {}, previousTask, skillParameters, parameterText, dialogue = false }) {
+    submit({ prompt, project, control, skill, materials = {}, skillParameters, parameterText, dialogue = false }) {
         if (!this.settings.workspace) throw new Error('请先选择成果保存位置');
         if (this.active) throw new Error('已有任务在运行');
         if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 4000) throw new Error('请输入办理事项');
@@ -190,22 +190,25 @@ class DesktopController {
             ...(control ? { control: [control] } : {}) });
         const history = [];
         let previousRun;
-        let prior = this.tasks.find(item => item.id === previousTask);
+        const previousTask = this.focusTask;
+        const byId = new Map(this.tasks.map(item => [item.id, item]));
+        let prior = byId.get(previousTask);
         for (let depth = 0; prior && depth < 4; depth++) {
             if (prior.status === 'succeeded') previousRun ??= prior.runId;
             if (prior.response && ['answered', 'succeeded', 'missing_materials', 'no_result'].includes(prior.status)) {
                 history.unshift([prior.prompt.slice(0, 600), prior.response.slice(0, 600)]);
             }
-            prior = this.tasks.find(item => item.id === prior.previousTask);
+            prior = byId.get(prior.previousTask);
         }
         if (skill && !/^[a-z][a-z0-9_-]{0,39}@[1-9]\d*$/.test(skill)) throw new Error('请选择已发布的技能');
         if (skillParameters && Buffer.byteLength(JSON.stringify(skillParameters)) > 65536) throw new Error('办理参数最多 64 KB');
         const { config, key } = this.selectModel({ modelConfig: this.settings.modelConfig });
         const task = { id: randomUUID(), title: [...prompt.trim()].slice(0, 32).join(''), prompt: prompt.trim(),
             project, control, skill, materials, previousTask, parameterText, status: 'running', createdAt: new Date().toISOString() };
+        const next = [task, ...this.tasks];
+        this.persist(next);
+        this.tasks = next;
         this.focusTask = task.id;
-        this.tasks.unshift(task);
-        this.persist();
         const child = startAgent(this.runtime, this.settings.workspace);
         this.active = { child, task };
         child.on('message', message => {
@@ -240,9 +243,32 @@ class DesktopController {
     command(input) {
         if (action(input.prompt) !== 'reset') return this.submit(input);
         this.cancel();
-        this.conversation += 1;
         this.focusTask = null;
-        this.onChange(this.state());
+        return this.state();
+    }
+
+    manageConversation(action, id) {
+        const group = conversations(this.tasks).find(item => item.root.id === id);
+        if (!group) throw new Error('对话已不存在');
+        const { root, turns } = group;
+        const latest = turns.at(-1);
+        if (action === 'open') {
+            if (root.archived) throw new Error('请先恢复这段对话');
+            if (this.active && this.focusTask !== latest.id) throw new Error('请等当前办理完成后再切换对话');
+            this.focusTask = latest.id;
+        } else {
+            const archive = action === 'archive' && !root.archived;
+            const restore = action === 'restore' && root.archived;
+            const remove = action === 'delete' && root.archived;
+            if (!archive && !restore && !remove) throw new Error('当前无法执行此操作');
+            if (turns.includes(this.active?.task)) throw new Error('请等当前办理完成后再归档');
+            const ids = new Set(turns.map(turn => turn.id));
+            const next = remove ? this.tasks.filter(task => !ids.has(task.id)) : this.tasks.map(task =>
+                task.id === id ? { ...task, archived: archive } : task);
+            this.persist(next);
+            this.tasks = next;
+            if (archive && ids.has(this.focusTask)) this.focusTask = null;
+        }
         return this.state();
     }
 
@@ -257,29 +283,6 @@ class DesktopController {
         try {
             return await this.request(command, command === 'skill-preview' ? markdown : { text: markdown, ...payload });
         } finally { this.skillBusy = false; }
-    }
-
-    async mapAction(action, parameters = {}, material = null) {
-        const actions = ['add_layer', 'set_visibility', 'remove_layer', 'clear_layers', 'reorder_layers',
-            'zoom_to_dataset', 'zoom_to_selection', 'set_layout_text', 'set_view_mode'];
-        if (!actions.includes(action) || !this.settings.workspace) throw new Error('无法执行地图操作');
-        if (this.mapBusy) throw new Error('地图正在更新');
-        const request = path.join(this.settings.workspace, 'map-' + randomUUID() + '.json');
-        this.mapBusy = true;
-        try {
-            save(request, { operation: 'presentation.' + action,
-                inputs: material ? [{ file: material.file, layer: material.layer }] : [],
-                parameters: { ...parameters, ...(this.mapView ? { view_run: this.mapView.id } : {}) } });
-            const run = await this.python('execute', request);
-            const artifact = checkedArtifact(run, 'map');
-            this.mapView = { id: run.id, data: artifact ? JSON.parse(artifact.bytes) : null,
-                ...run.result.presentation };
-            save(path.join(this.settings.workspace, 'desktop-view.json'), this.mapView);
-            return this.state();
-        } finally {
-            fs.rmSync(request, { force: true });
-            this.mapBusy = false;
-        }
     }
 
     async importCoordinate(file, layer) {

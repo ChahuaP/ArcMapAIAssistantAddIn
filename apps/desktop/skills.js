@@ -27,7 +27,7 @@
         const [query, setQuery] = useState('');
         const [error, setError] = useState('');
         const [operations, setOperations] = useState({});
-        const fail = issue => setError(String(issue.message || issue).replace(/^Error invoking remote method '[^']+': Error: /, ''));
+        const fail = issue => setError(window.GuizhiErrorText(issue));
         function page(value) {
             setEditor(null);
             setSection(value);
@@ -57,7 +57,7 @@
                         h('dl', { className: 'skill-facts' },
                             h('dt', null, '材料'), h('dd', null, item.materials.filter(role => !role.resource)
                                 .map(role => role.label).join('、') || '无需附件'),
-                            h('dt', null, '成果'), h('dd', null, item.outputs.map(kind => deliverables[kind] || kind).join('、') || '办理留痕')),
+                            h('dt', null, '成果'), h('dd', null, [...new Set(item.outputs.map(kind => deliverables[kind] || '业务成果'))].join('、') || '办理留痕')),
                         section === 'manage' ? button('layers', '编辑', { onClick: () =>
                             api.skillShow(reference(item)).then(result => setEditor({ markdown: result.markdown })).catch(fail) }) :
                             button('plus', '开始办理', { type: 'primary', onClick: () => choose(item) }))))

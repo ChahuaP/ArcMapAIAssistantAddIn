@@ -8,7 +8,7 @@
         ['openai', 'OpenAI'], ['anthropic', 'Anthropic']];
     const protocols = [['openai-completions', 'OpenAI Chat Completions'], ['anthropic-messages', 'Anthropic Messages']];
     const field = (label, control) => h('label', null, label, control);
-    const errorText = error => String(error.message || error).replace(/^Error invoking remote method '[^']+': Error: /, '');
+    const errorText = window.GuizhiErrorText;
     const scope = config => JSON.stringify([config?.mode, config?.provider, ...(config?.provider === 'custom'
         ? [config.api, config.baseUrl?.trim().replace(/\/+$/, '')] : [])]);
     const initial = () => ({ mode: 'online', provider: 'custom', api: 'openai-completions', baseUrl: '', model: '' });

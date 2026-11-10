@@ -96,7 +96,9 @@ export class VoiceAudio {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: {
             deviceId: microphone ? { exact: microphone } : undefined,
             echoCancellation: true, noiseSuppression: true, channelCount: 1,
-        } });
+        } }).catch(error => {
+            throw new Error(window.GuizhiErrorText(error, 'microphone'));
+        });
         if (token !== this.generation) {
             stream.getTracks().forEach(track => track.stop());
             return false;
@@ -169,7 +171,9 @@ export class VoiceAudio {
         this.context ??= new AudioContext();
         if (speaker) {
             if (!this.context.setSinkId) throw new Error('当前系统无法选择播放设备');
-            await this.context.setSinkId(speaker);
+            await this.context.setSinkId(speaker).catch(error => {
+                throw new Error(window.GuizhiErrorText(error, 'speaker'));
+            });
         } else if (this.context.setSinkId && this.context.sinkId) {
             await this.context.setSinkId('');
         }

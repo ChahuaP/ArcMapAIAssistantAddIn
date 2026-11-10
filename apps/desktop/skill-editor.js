@@ -5,8 +5,9 @@
     const { button } = window.GuizhiShell;
     const { RoleMaterials, roleReady, kinds } = window.GuizhiMaterials;
     const deliverables = { export: '成果数据', report: '办理报告', map: '成果地图', table: '统计表',
-        workflow: '办理留痕', package: '交付包', boundaries: '边界图层', classification: '分类记录' };
-    const errorText = error => String(error.message || error).replace(/^Error invoking remote method '[^']+': Error: /, '');
+        workflow: '办理留痕', package: '交付包', boundaries: '边界图层', classification: '地类识别结果',
+        balance: '占补平衡核算结果', permit_history: '用地手续与历年地类核查结果' };
+    const errorText = window.GuizhiErrorText;
     const idFor = prefix => prefix + '-' + crypto.randomUUID().slice(0, 8);
     const blank = () => ({ id: idFor('business'), title: '', aliases: [], materials: [], parameters: {}, steps: [],
         rules: [], evidence: [] });

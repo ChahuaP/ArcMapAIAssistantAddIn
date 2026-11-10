@@ -21,7 +21,7 @@
             return geometry.geometries.map((part, i) => draw({ ...item, geometry: part }, radius, choose, key + '-' + i, selected));
         }
         const style = { key, className: item.role + (item.id && item.id === selected ? ' focused-parcel' : ''),
-            onClick: item.layer || item.id ? () => choose(item) : undefined };
+            onClick: item.id ? () => choose(item) : undefined };
         if (geometry.type === 'Point' || geometry.type === 'MultiPoint') {
             const points = geometry.type === 'Point' ? [geometry.coordinates] : geometry.coordinates;
             return points.map(([x, y], i) => h('circle', { ...style, key: key + '-' + i, cx: x, cy: -y,
@@ -29,29 +29,28 @@
         }
         return h('path', { ...style, d: geometryPath(geometry), vectorEffect: 'non-scaling-stroke',
             fillRule: 'evenodd', fill: geometry.type.includes('Line') ? 'none' : item.color,
-            stroke: item.color, strokeWidth: item.layer ? 1.5 : undefined,
-            fillOpacity: item.layer ? 0.4 : undefined });
+            stroke: item.color });
     }
 
-    function MapPanel({ map, choose, selected, editing }) {
+    window.GuizhiMap = function ResultMap({ map, choose, selected }) {
         const [zoom, change] = useState(1);
         const [coverage, showCoverage] = useState(true);
-        if (!map) return h('section', { className: 'map-panel map-empty', 'aria-label': '地图' },
+        if (!map?.bounds) return h('section', { className: 'map-panel map-empty', 'aria-label': '成果地图' },
             h('div', { className: 'contours', 'aria-hidden': true },
                 h('svg', { viewBox: '0 0 350 490' }, ...Array.from({ length: 12 }, (_, i) =>
                     h('ellipse', { key: i, cx: 195, cy: 230, rx: 18 + i * 12, ry: 12 + i * 15,
                         transform: 'rotate(32 195 230)' })))),
             h('div', { className: 'map-caption' }, h('span', { className: 'locator' }, window.GuizhiShell.icon('map')),
-                h('h2', null, editing ? '暂无自选图层' : '暂无空间成果')));
+                h('h2', null, '暂无空间成果')));
         const [left, bottom, right, top] = map.bounds;
         const span = Math.max(right - left, top - bottom) || 1;
         const width = Math.max(right - left, span * 0.06) * 1.18 / zoom;
         const height = Math.max(top - bottom, span * 0.06) * 1.18 / zoom;
         const box = [(left + right - width) / 2, (-top - bottom - height) / 2, width, height].join(' ');
-        return h('section', { className: 'map-panel', 'aria-label': '核查成果地图' },
-            h('div', { className: 'map-head' }, h('h2', null, map.mode ? '工作区地图' : '核查地图'),
+        return h('section', { className: 'map-panel', 'aria-label': '成果地图' },
+            h('div', { className: 'map-head' }, h('h2', null, '成果地图'),
                 h('span', null, map.crs)),
-            h('svg', { className: 'geo-map', viewBox: box, role: 'img', 'aria-label': '项目范围与重叠区域' },
+            h('svg', { className: 'geo-map', viewBox: box, role: 'img', 'aria-label': '空间成果图形' },
                 ...map.features.filter(item => item.role !== 'coverage' || coverage).map((item, index) =>
                     draw(item, Math.max(width, height) * 0.008, choose, index, selected))),
             h('div', { className: 'map-controls' },
@@ -60,55 +59,5 @@
                 h('button', { 'aria-label': '缩小', onClick: () => change(Math.max(0.6, zoom / 1.3)) }, '−'),
                 h('button', { 'aria-label': '放大', onClick: () => change(Math.min(8, zoom * 1.3)) }, '+'),
                 h('button', { onClick: () => change(1) }, '复位')));
-    }
-
-    window.GuizhiMap = function MapWorkspace({ map, view, onState, fail, enabled, parcel, onParcel }) {
-        const [editing, edit] = useState(false);
-        const [busy, setBusy] = useState(false);
-        const [picked, pick] = useState(null);
-        const [pending, chooseMaterial] = useState(null);
-        async function action(name, params, material) {
-            setBusy(true);
-            try { onState(await window.guizhi.mapAction(name, params, material)); }
-            catch (error) { fail(error); }
-            finally { setBusy(false); }
-        }
-        async function add() {
-            try {
-                const { items, issues } = await window.guizhi.material('vector');
-                if (issues.length) fail(issues.map(item => item.name + ' · ' + item.message).join('\n'));
-                if (items.length > 1) throw new Error('请选择一份矢量材料以添加图层');
-                const material = items[0];
-                if (material?.layer) await action('add_layer', {}, material);
-                else if (material) chooseMaterial(material);
-            } catch (error) { fail(error); }
-        }
-        const layers = view?.layers || [];
-        const chosen = layers.find(item => item.id === picked?.layer);
-        const button = (label, click) => h('button', { type: 'button', disabled: busy, onClick: click }, label);
-        return h('div', { className: 'map-workspace' },
-            enabled && h(antd.Tabs, { size: 'small', className: 'map-tabs', animated: false,
-                activeKey: editing ? 'layers' : 'result', onChange: value => edit(value === 'layers'),
-                items: [{ key: 'result', label: '成果地图' }, { key: 'layers', label: '自选图层' }] }),
-            h(MapPanel, { key: editing ? view?.id || 'new' : 'result', map: editing ? view?.data : map, editing,
-                choose: editing ? pick : item => onParcel(item.id || null), selected: editing ? null : parcel }),
-            editing && h('div', { className: 'map-toolbar' },
-                window.GuizhiShell.button('plus', '添加图层', { size: 'small', disabled: busy, onClick: add }),
-                layers.length > 0 && button('清空', () => action('clear_layers'))),
-            editing && pending && h('label', { className: 'map-toolbar' }, '图层',
-                h('select', { value: '', onChange: event => {
-                    void action('add_layer', {}, { ...pending, layer: event.target.value });
-                    chooseMaterial(null);
-                } }, h('option', { value: '' }, '选择图层'),
-                ...pending.layers.map(name => h('option', { key: name }, name)))),
-            editing && layers.length > 0 && h('ul', { className: 'map-layers' },
-                ...layers.map((item, index) => h('li', { key: item.id },
-                    h('label', null, h('input', { type: 'checkbox', checked: item.visible, disabled: busy,
-                        onChange: event => action('set_visibility', { layer_id: item.id, visible: event.target.checked }) }), item.title),
-                    button('缩放', () => action('zoom_to_dataset', { layer_id: item.id })),
-                    index > 0 && button('置顶', () => action('reorder_layers', { layer_id: item.id, position: 'top' })),
-                    button('移除', () => action('remove_layer', { layer_id: item.id })))),
-                chosen && h('li', null, button('缩放至选中要素', () => action('zoom_to_selection',
-                    { layer_id: chosen.id, selection: { layer: chosen.layer, revision: chosen.dataset_revision, fids: [picked.fid] } })))));
     };
 })();

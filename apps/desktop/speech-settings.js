@@ -7,7 +7,7 @@
         aliyun: '阿里云百炼 CosyVoice', custom: '自定义兼容接口' };
     window.GuizhiSpeechNames = names;
     const format = entries => entries.map(entry => entry.heard + '=' + entry.correct).join('\n');
-    const errorText = error => String(error.message || error).replace(/^Error invoking remote method '[^']+': Error: /, '');
+    const errorText = window.GuizhiErrorText;
 
     function SpeechForm({ value, change, current, busy = () => {} }) {
         const [devices, setDevices] = useState([]);
@@ -56,7 +56,9 @@
             try {
                 const context = playback.current ??= new AudioContext();
                 if (value.speaker && !context.setSinkId) throw new Error('当前系统无法选择播放设备');
-                if (context.setSinkId) await context.setSinkId(value.speaker || '');
+                if (context.setSinkId) await context.setSinkId(value.speaker || '').catch(error => {
+                    throw new Error(errorText(error, 'speaker'));
+                });
                 await context.resume();
                 const wav = await api.speechTest('tts', value);
                 const source = context.createBufferSource();
@@ -67,7 +69,8 @@
             } catch (issue) { fail(issue); }
             finally { testState(''); }
         }
-        const byKind = kind => [['', '系统默认'], ...devices
+        const byKind = (kind, selected) => [['', '系统默认'], ...(selected && !devices.some(device => device.kind === kind && device.deviceId === selected)
+            ? [[selected, '原设备不可用']] : []), ...devices
             .filter(device => device.kind === kind && device.deviceId && device.deviceId !== 'default')
             .map((device, index) => [device.deviceId, device.label || '设备 ' + (index + 1)])];
         const select = (label, selected, options, onChange) => h('label', null, label,
@@ -98,7 +101,7 @@
                     select(title + '服务', provider, choices, next => change({ ...value, [kind]: next,
                         [name]: next === current[kind] ? current[name] : {},
                         ...(asr ? {} : { voice: next === current.tts ? current.voice : '' }) })),
-                    select(asr ? '麦克风' : '播放设备', value[device], byKind(asr ? 'audioinput' : 'audiooutput'),
+                    select(asr ? '麦克风' : '播放设备', value[device], byKind(asr ? 'audioinput' : 'audiooutput', value[device]),
                         next => update(device, next)),
                     provider === 'custom' && field(title + '地址', profile.baseUrl, next => updateProfile('baseUrl', next),
                         { placeholder: 'https://speech.example.org/v1' }),

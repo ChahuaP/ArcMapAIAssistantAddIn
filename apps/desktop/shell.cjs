@@ -3,6 +3,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 
+const launcherBaseHeight = 560;
+const launcherBusinessHeight = 680;
 const themes = ['system', 'light', 'dark'];
 const shortcutPattern = /^(?:Ctrl(?:\+Alt)?|Alt)(?:\+Shift)?\+(?:[A-Z0-9]|F(?:[1-9]|1[0-2]))$/;
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
@@ -32,7 +34,7 @@ function createShell({ userData, icon, verifyStartup }) {
     const workbench = new BrowserWindow({ width: 1376, height: 824, minWidth: 790, minHeight: 530,
         show: false, title: '规智', titleBarStyle: 'hidden', titleBarOverlay: overlay(), autoHideMenuBar: true,
         backgroundColor: overlay().color, icon, webPreferences });
-    const launcher = new BrowserWindow({ width: 944, height: 560, frame: false, resizable: false,
+    const launcher = new BrowserWindow({ width: 944, height: launcherBaseHeight, frame: false,
         show: false, title: '规智快捷面板', skipTaskbar: true, alwaysOnTop: true,
         backgroundColor: overlay().color, icon, webPreferences });
     const portrait = new BrowserWindow({ width: 312, height: 244, frame: false, transparent: true,
@@ -44,6 +46,7 @@ function createShell({ userData, icon, verifyStartup }) {
     let displayId = settings.displayId ?? screen.getPrimaryDisplay().id;
     let movingPortrait = false;
     let portraitDrag;
+    let launcherContentHeight = 0;
 
     function save() {
         const pending = file + '.' + randomUUID() + '.pending';
@@ -147,10 +150,26 @@ function createShell({ userData, icon, verifyStartup }) {
         if (drag.moved) recordPortrait();
     }
 
+    function launcherHeight(area) {
+        const minimum = launcherContentHeight ? launcherBusinessHeight : launcherBaseHeight;
+        return Math.min(Math.max(minimum, launcherContentHeight), area.height - 32);
+    }
+
+    function fitLauncher(height) {
+        launcherContentHeight = height;
+        if (!launcher.isVisible()) return;
+        const bounds = launcher.getBounds();
+        const area = screen.getDisplayMatching(bounds).workArea;
+        const next = launcherHeight(area);
+        if (bounds.height === next) return;
+        launcher.setBounds({ ...bounds, height: next,
+            y: clamp(bounds.y, area.y, area.y + area.height - next) });
+    }
+
     function openLauncher() {
         const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
         const width = Math.min(944, area.width - 32);
-        const height = Math.min(560, area.height - 32);
+        const height = launcherHeight(area);
         launcher.setBounds({ width, height, x: area.x + Math.round((area.width - width) / 2),
             y: area.y + Math.round(Math.min(area.height * 0.13, (area.height - height) / 2)) });
         launcher.show();
@@ -225,7 +244,7 @@ function createShell({ userData, icon, verifyStartup }) {
     }
 
     return { window: workbench, launcher, portrait, windows, appearance, configureAppearance,
-        openLauncher, reveal, showPortrait, voice, portraitHit, dragPortrait, registerShortcut, captureShortcut, notify, close };
+        openLauncher, fitLauncher, reveal, showPortrait, voice, portraitHit, dragPortrait, registerShortcut, captureShortcut, notify, close };
 }
 
 module.exports = { createShell };

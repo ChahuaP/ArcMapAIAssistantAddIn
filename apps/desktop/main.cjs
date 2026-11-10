@@ -35,7 +35,7 @@ async function startDesktop(options) {
         'materials-ui.js', 'skill-editor.js',
         'style.css', 'theme.css', 'mark.svg', 'luhe-banner.png', 'model-form.js', 'onboarding.js',
         'portrait.html', 'portrait.css', 'portrait.js', 'task-commands.js', 'speech-settings.js',
-        'speech-audio.js', 'voice-input.js', 'visual.html', 'visual.css', 'visual.js', 'arcgis-extension.js', 'markdown.js'];
+        'speech-audio.js', 'voice-input.js', 'visual.html', 'visual.css', 'visual.js', 'arcgis-extension.js', 'markdown.js', 'messages.js'];
     const files = new Map(localFiles.map(name => ['/' + name, path.join(__dirname, name)]));
     files.set('/react.js', path.join(vendor, 'react', 'umd', 'react.production.min.js'));
     files.set('/react-dom.js', path.join(vendor, 'react-dom', 'umd', 'react-dom.production.min.js'));
@@ -164,6 +164,10 @@ async function startDesktop(options) {
         }
     }, true);
     bind('openLauncher', desktop.openLauncher);
+    bind('fitLauncher', (surface, height) => {
+        if (surface !== launcher || !Number.isSafeInteger(height) || height < 0) throw new Error('快捷面板尺寸无效');
+        desktop.fitLauncher(height);
+    }, true);
     bind('hideLauncher', () => launcher.hide());
     bind('portraitVoice', desktop.voice);
     bind('voiceTurn', (surface, text) => {
@@ -172,7 +176,7 @@ async function startDesktop(options) {
         }
         const command = action(text);
         if (command === 'workbench') { reveal(); return { reply: '好，工作台已经打开。' }; }
-        if (command === 'reset') { submitTask({ prompt: text }); return { reply: '好，我们开始新的任务。' }; }
+        if (command === 'reset') { submitTask({ prompt: text }); return { reply: '好，我们开始一段新对话。' }; }
         const prompt = command === 'send' ? draft.prompt : text;
         if (!prompt?.trim()) return { reply: '你可以直接告诉我想办理什么。' };
         if (draft.unassigned?.length) return { reply: '请先在工作台为材料选择用途。' };
@@ -180,12 +184,14 @@ async function startDesktop(options) {
         const values = draft.parameterText || {};
         const skillParameters = draft.skill && Object.keys(fields).length && parametersReady(fields, values)
             ? parameterValues(fields, values) : undefined;
-        const state = submitTask({ ...draft, prompt, previousTask: draft.previousTask || controller.focusTask,
+        const state = submitTask({ ...draft, prompt,
             skillParameters, dialogue: true });
         return { task: state.focusTask };
     }, true);
     bind('configure', input => {
+        const workspace = controller.settings.workspace;
         const state = controller.configure(input);
+        if (state.settings.workspace !== workspace) clearDraft();
         modelCheck = undefined;
         sync.refresh();
         broadcast(state);
@@ -243,11 +249,13 @@ async function startDesktop(options) {
         }
         desktop.dragPortrait(phase, point);
     }, true);
-    bind('workbench', id => {
-        reveal();
-        if (typeof id === 'string' && controller.tasks.some(item => item.id === id)) {
-            window.webContents.send('guizhi:openTask', id);
-        }
+    bind('workbench', reveal);
+    bind('conversationAction', (action, id) => {
+        const before = controller.focusTask;
+        const state = controller.manageConversation(action, id);
+        if (state.focusTask !== before) clearDraft();
+        broadcast(state);
+        return withSpeech(state);
     });
     bind('workspace', async () => {
         const pick = await dialog.showOpenDialog(window, { properties: ['openDirectory', 'createDirectory'] });
@@ -290,11 +298,13 @@ async function startDesktop(options) {
         else fs.copyFileSync(source, output);
         shell.showItemInFolder(output);
     });
-    bind('mapAction', async (...args) => withSpeech(await controller.mapAction(...args)));
-    function submitTask(task) {
-        const state = controller.command(task);
+    function clearDraft() {
         draft = {};
         desktop.notify('draft', draft);
+    }
+    function submitTask(task) {
+        const state = controller.command(task);
+        clearDraft();
         broadcast(state);
         return withSpeech(state);
     }

@@ -14,6 +14,8 @@
     const number = value => value.toLocaleString('zh-CN', { maximumFractionDigits: 2 });
     const { Material, RoleMaterials, materialReady, roleReady, mergeMaterials, intake } = window.GuizhiMaterials;
     const { render, open } = window.GuizhiMarkdown;
+    const errorText = window.GuizhiErrorText;
+    const { deliverables } = window.GuizhiSkillEditor;
     const markdown = text => h('div', { className: 'answer-markdown', onClick: open,
         dangerouslySetInnerHTML: { __html: render(text) } });
 
@@ -53,7 +55,7 @@
                         : h('small', { key: index }, locator(ref)))))));
     }
 
-    function Result({ task, retry, fail, editSkill, parcel, selectParcel }) {
+    function Result({ task, retry, fail, editSkill, parcel, selectParcel, showMap }) {
         if (active(task)) return h('article', { className: 'bubble assistant working', role: 'status' },
             h('i', { className: 'pulse' }), task.status === 'cancelling' ? '正在结束任务' : task.step || '正在理解任务');
         if (task.status === 'succeeded' || task.status === 'answered') {
@@ -68,19 +70,40 @@
                     h('div', null, h('dt', null, '覆盖率'), h('dd', null, (stats.coverage_ratio * 100).toFixed(2), h('small', null, '%')))),
                 task.approval && h(Approval, { task, parcel, selectParcel, fail }),
                 h('div', { className: 'delivery-actions' },
+                    showMap && h('button', { className: 'report', onClick: showMap }, '查看成果地图'),
                     task.candidate && h('button', { className: 'report', onClick: () => editSkill(task.candidate) }, '编辑技能草稿 ↗'),
                     task.hasReport && h('button', { className: 'report', onClick: () => api.report(task.id).catch(fail) }, '查看报告 ↗'),
                     ...(task.deliveries || []).map(kind => h('button', { key: kind, className: 'report',
                         onClick: () => api.delivery(task.id, kind).catch(fail) },
-                        { export: '成果数据 ↗', table: '属性表 ↗', workflow: '办理留痕 ↗',
-                            package: '共享数据包 ↗', boundaries: '边界图层 ↗' }[kind]))));
+                        (deliverables[kind] || '业务成果') + ' ↗'))));
         }
         const detail = { missing_materials: '请按业务要求补齐材料。',
             invalid_materials: '请确认材料、图层和办理参数。', no_result: '请补充办理要求或从业务能力中选择。',
             timed_out: '办理超时。请检查模型服务或输入文件是否正被占用。' }[task.status];
         return h('article', { className: 'bubble assistant' }, h('strong', null, labels[task.status] || '未完成'),
-            markdown(task.response || detail || '请检查材料、坐标和模型设置后继续。'),
+            markdown(task.response ? errorText(task.response) : detail || '请检查材料、坐标和模型设置后继续。'),
             h('button', { className: 'report', onClick: () => retry(task) }, '继续处理'));
+    }
+
+    function ArchivePanel({ groups, manage, close, error }) {
+        const dialog = useRef(null);
+        const [deleting, confirm] = useState(null);
+        useEffect(() => { dialog.current.showModal(); }, []);
+        const target = groups.find(group => group.id === deleting);
+        return h('dialog', { ref: dialog, className: 'business-dialog archive-dialog', 'aria-labelledby': 'archive-title',
+            onCancel: event => { event.preventDefault(); close(); } },
+            h('div', { className: 'dialog-head' }, h('h2', { id: 'archive-title' }, '已归档对话'),
+                iconButton('close', '关闭归档', { onClick: close })),
+            error && h('p', { className: 'error', role: 'alert' }, error),
+            groups.length ? h('ul', { className: 'archived-list' }, ...groups.map(group =>
+                h('li', { key: group.id }, h('span', { title: group.title }, group.title),
+                    h(antd.Button, { onClick: () => manage('restore', group.id) }, '恢复'),
+                    h(antd.Button, { danger: true, type: 'text', onClick: () => confirm(group.id) }, '删除'))))
+                : h('p', { className: 'muted' }, '暂无已归档对话'),
+            target && h('div', { className: 'archive-confirm' },
+                h('p', { role: 'status' }, '删除「' + target.title + '」的对话记录？已保存的成果文件会保留。'),
+                h(antd.Button, { onClick: () => confirm(null) }, '取消'),
+                h(antd.Button, { type: 'primary', danger: true, onClick: () => manage('delete', target.id) }, '确认删除')));
     }
 
     function App() {
@@ -91,7 +114,8 @@
             theme: 'system', dark: matchMedia('(prefers-color-scheme: dark)').matches, panels: [222, 362],
             shortcut: 'Ctrl+G',
         });
-        const [selected, select] = useState(null);
+        const [archives, showArchives] = useState(false);
+        const [viewed, viewResult] = useState(null);
         const [parcel, selectParcel] = useState(null);
         const [settings, showSettings] = useState(false);
         const [error, setError] = useState('');
@@ -104,7 +128,7 @@
         const [adding, setAdding] = useState(false);
         const { Business, reference, matchBusiness } = window.GuizhiBusiness;
         const { ParameterFields, parametersReady, parameterValues } = window.GuizhiSkillEditor;
-        const fail = error => setError(String(error.message || error).replace(/^Error invoking remote method '[^']+': Error: /, ''));
+        const fail = error => setError(errorText(error));
         function receiveDraft(value) {
             shared.current = { ...emptyDraft(), ...value };
             renderDraft(shared.current);
@@ -120,18 +144,12 @@
             api.state().then(value => {
                 setState(value);
                 setAppearance(value.appearance);
-                select(value.focusTask);
             }).catch(fail);
             api.readDraft().then(receiveDraft).catch(fail);
             const callbacks = [
-                api.onState(value => {
-                    setState(value);
-                    if (value.focusTask !== focusTask.current) select(value.focusTask);
-                    focusTask.current = value.focusTask;
-                }),
+                api.onState(setState),
                 api.onSettings(() => showSettings(true)), api.onAppearance(setAppearance), api.onDraft(receiveDraft),
                 api.onLauncherFocus(() => document.querySelector('.launcher textarea')?.focus()),
-                api.onOpenTask(id => { showSettings(false); select(id); }),
             ];
             const dismiss = event => {
                 if (launcher && event.key === 'Escape' && !event.isComposing && !document.querySelector('dialog[open]')) {
@@ -141,8 +159,8 @@
             addEventListener('keydown', dismiss);
             return () => { callbacks.forEach(unsubscribe => unsubscribe()); removeEventListener('keydown', dismiss); };
         }, []);
-        const focusTask = useRef(null);
         const messages = useRef(null);
+        const launcherContent = useRef(null);
         useEffect(() => {
             if (state?.settings.workspace) {
                 api.coordinates().then(setCoordinates).catch(fail);
@@ -150,13 +168,32 @@
             }
         }, [state?.settings.workspace]);
         const plans = coordinates.filter(entry => entry.kind === 'plan');
-        const task = state?.tasks.find(item => item.id === selected);
-        useEffect(() => { selectParcel(null); }, [selected]);
+        const byId = new Map(state?.tasks.map(item => [item.id, item]));
+        const task = byId.get(state?.focusTask);
+        const groups = state?.conversations || [];
+        const current = groups.find(group => group.turnIds.at(-1) === task?.id);
+        const turns = current?.turnIds.map(id => byId.get(id)) || [];
+        const resultTask = turns.find(item => item.id === viewed) ||
+            turns.findLast(item => item.map || item.hasReport || item.deliveries?.length) || task;
+        useEffect(() => { viewResult(null); selectParcel(null); }, [task?.id]);
         useEffect(() => {
             if (messages.current) messages.current.scrollTop = messages.current.scrollHeight;
         }, [task?.id, task?.status]);
         const busy = state?.tasks.some(active) || sending;
         const skill = draft.skillDefinition;
+        useEffect(() => {
+            if (!launcher) return;
+            if (!skill) { void api.fitLauncher(0).catch(fail); return; }
+            const node = launcherContent.current;
+            node.parentElement.scrollTop = 0;
+            const resize = new ResizeObserver(() => {
+                const chrome = document.querySelector('.launcher-head').offsetHeight +
+                    document.querySelector('.launcher-footer').offsetHeight;
+                void api.fitLauncher(Math.ceil(node.getBoundingClientRect().height) + chrome).catch(fail);
+            });
+            resize.observe(node);
+            return () => resize.disconnect();
+        }, [skill?.id]);
         const freeInputs = skill ? draft.unassigned : draft.materials.inputs || [];
         const materialsReady = skill ? draft.unassigned.length === 0 && skill.materials.every(role => roleReady(role, draft.materials[role.id]))
             : [draft.project, draft.control, ...freeInputs].filter(Boolean).every(materialReady);
@@ -179,33 +216,34 @@
             setError('');
             setSending(true);
             try {
-                const next = await api.submit({ ...draft, previousTask: draft.previousTask || (launcher ? state.focusTask : task?.id),
+                const next = await api.submit({ ...draft,
                     skillParameters: skill ? parameterValues(fields, draft.parameterText) : undefined });
                 setState(next);
-                select(next.tasks[0].id);
-                if (launcher) await api.workbench(next.focusTask);
+                if (launcher) await api.workbench();
             } catch (error) { fail(error); } finally { setSending(false); }
         }
         function retry(item) {
-            const restored = catalog.find(entry => reference(entry) === item.skill);
-            if (item.skill && !restored) {
-                api.skillShow(item.skill).then(skillDefinition => setDraft({ ...emptyDraft(), ...item, skillDefinition })).catch(fail);
-            } else setDraft({ ...emptyDraft(), ...item, skillDefinition: restored });
-            select(null);
+            const { prompt, project, control, skill, materials, parameterText } = item;
+            const next = { ...emptyDraft(), prompt, project, control, skill, materials, parameterText: parameterText || {} };
+            const restored = catalog.find(entry => reference(entry) === skill);
+            if (skill && !restored) {
+                api.skillShow(skill).then(skillDefinition => setDraft({ ...next, skillDefinition })).catch(fail);
+            } else setDraft({ ...next, skillDefinition: restored });
         }
         function choose(item, preservePrompt = false) {
             setDraft(old => ({ ...emptyDraft(), skill: reference(item), skillDefinition: item,
                 prompt: preservePrompt ? old.prompt : '请办理' + item.title,
                 unassigned: [...old.unassigned, ...Object.values(old.materials).flat(), ...[old.project, old.control].filter(Boolean)] }));
             setError('');
-            select(null);
             showBusiness('');
         }
         function startNew() {
             setError('');
-            setDraft(emptyDraft());
-            select(null);
-            void api.submit({ prompt: '开始新任务' }).then(setState).catch(fail);
+            void api.submit({ prompt: '开始新对话' }).then(setState).catch(fail);
+        }
+        function conversationAction(action, id) {
+            setError('');
+            void api.conversationAction(action, id).then(setState).catch(fail);
         }
         const ready = Boolean(state?.settings.workspace && state?.settings.modelConfig);
         const picked = [draft.project, draft.control, ...draft.unassigned, ...Object.values(draft.materials).flat()].filter(Boolean);
@@ -252,7 +290,7 @@
                     onChange: event => change(item, event.target.value) }, h('option', { value: '' }, '分配到材料角色'),
                     ...roles.map(role => h('option', { key: role.id, value: role.id }, role.label))));
         }
-        const composer = h('form', { className: 'composer', onSubmit: submit,
+        const composer = h('form', { className: 'composer' + (skill ? ' composer-skill' : ''), onSubmit: submit,
             onDragOver: event => event.preventDefault(), onDrop: drop },
             error && h('p', { role: 'alert', className: 'error' }, error),
             h('textarea', { 'aria-label': '办理事项', placeholder: launcher
@@ -296,14 +334,14 @@
                 busy ? h(antd.Button, { onClick: () => api.cancel().then(setState).catch(fail) }, '停止')
                     : button('send', '发送', { type: 'primary', htmlType: 'submit',
                         disabled: adding || !draft.prompt.trim() || (!suggestion.exact && !canSubmit) })));
-        const recent = state?.tasks || [];
-        const taskButton = item => h('button', { key: item.id, className: 'history' + (item.id === selected ? ' selected' : ''),
-            onClick: () => {
-                if (launcher) return api.workbench(item.id).catch(fail);
-                select(item.id);
-                setError('');
-            } }, h('span', { className: 'history-title' }, item.title),
-            h('small', null, labels[item.status] || '未完成'));
+        const archived = groups.filter(group => group.archived);
+        const threadRow = group => h('div', { key: group.id,
+            className: 'thread-row' + (group.id === current?.id ? ' selected' : '') },
+            h('button', { className: 'history', title: group.title, 'aria-current': group.id === current?.id,
+                onClick: () => conversationAction('open', group.id) },
+                h('span', { className: 'history-title' }, group.title)),
+            iconButton('archive', '归档对话', { disabled: group.turnIds.some(id => active(byId.get(id))),
+                onClick: () => conversationAction('archive', group.id) }));
         const tiles = h('div', { className: 'business-tiles' }, ...catalog.slice(0, 3).map(item =>
             h('button', { key: reference(item), className: 'business-tile', title: item.title, onClick: () => choose(item) },
                 h('span', { className: 'tile-icon' }, icon(['layers', 'globe', 'folder'][catalog.indexOf(item)])),
@@ -313,78 +351,64 @@
                 appearance.shortcutRegistered && h('kbd', null, appearance.shortcut.replaceAll('+', ' + ')),
                 button('app', '打开工作台', { type: 'text', onClick: () => api.workbench().catch(fail) }),
                 iconButton('close', '收起快捷面板', { onClick: () => api.hideLauncher().catch(fail) }))),
-            h('div', { className: 'launcher-body' }, composer,
-                recent.length > 0 && h('section', { className: 'quick-section' }, h('h2', null, '最近使用'),
-                    h('div', { className: 'recent-tasks' }, ...recent.slice(0, 2).map(taskButton))),
-                ready && h('section', { className: 'quick-section' }, h('div', { className: 'section-head' },
-                    h('h2', null, '常用业务'), h(antd.Button, { type: 'link', onClick: () => showBusiness('browse') }, '全部业务')), tiles)),
+            h('div', { className: 'launcher-body' }, h('div', { className: 'launcher-content', ref: launcherContent }, composer,
+                !skill && ready && h('section', { className: 'quick-section' }, h('div', { className: 'section-head' },
+                    h('h2', null, '常用业务'), h(antd.Button, { type: 'link', onClick: () => showBusiness('browse') }, '全部业务')), tiles))),
             h('footer', { className: 'launcher-footer' },
                 h('span', { className: 'muted' }, ready ? (state.settings.modelConfig.mode === 'local' ? '本地服务' : '在线服务')
                     : '请在工作台完成首次设置'),
                 h('span', null, h('kbd', null, 'Enter'), ' 发送　', h('kbd', null, 'Esc'), ' 收起')));
         const sidebar = h('aside', { className: 'sidebar' },
-            button('plus', '新建任务', { type: 'primary', className: 'new-task', onClick: startNew }),
+            button('plus', '新建对话', { type: 'primary', className: 'new-task', onClick: startNew }),
             h('div', { className: 'nav-item selected' }, icon('app'), '工作台'),
             h('button', { className: 'nav-item', disabled: !ready, onClick: () => showBusiness('browse') }, icon('grid'), '业务中心'),
-            h('div', { className: 'history-label' }, '最近任务'),
-            h('nav', { 'aria-label': '最近任务' }, ...recent.map(taskButton)),
+            h('div', { className: 'history-label' }, '对话'),
+            h('nav', { 'aria-label': '对话列表' }, ...groups.filter(group => !group.archived).map(threadRow)),
+            h('button', { className: 'nav-item', onClick: () => { setError(''); showArchives(true); } }, icon('archive'), '已归档'),
             h('button', { className: 'nav-item', onClick: () => showSettings(true) }, icon('settings'), '设置'));
-        const history = [];
-        let prior = recent.find(item => item.id === task?.previousTask);
-        for (let depth = 0; prior && depth < 12; depth++) {
-            history.unshift(prior);
-            const id = prior.previousTask;
-            prior = recent.find(item => item.id === id);
-        }
-        const conversation = h('section', { className: 'conversation' + (task ? '' : ' conversation-empty'), 'aria-label': '任务对话' },
-            task && h('div', { className: 'task-head' }, h('h1', null, task.title),
+        const conversation = h('section', { className: 'conversation' + (task ? '' : ' conversation-empty'), 'aria-label': '办理对话' },
+            task && h('div', { className: 'task-head' }, h('h1', null, current?.title || task.title),
                 h('span', { className: 'status-tag' }, labels[task.status] || '未完成')),
-            h('div', { className: 'messages', ref: messages }, task ? [
-                ...history.flatMap(item => [
-                    h('article', { key: item.id + '-question', className: 'bubble user' }, item.prompt),
-                    item.response && h('article', { key: item.id + '-answer', className: 'bubble assistant' }, markdown(item.response)),
-                ]),
-                h('article', { key: 'user', className: 'bubble user' }, task.prompt),
-                h(Result, { key: 'result', task, retry, fail, parcel, selectParcel, editSkill: text => {
-                    setInitialMarkdown(text);
-                    showSettings('skills');
-                } }),
-            ] : h('div', { className: 'welcome' }, h('img', { src: '/mark.svg', alt: '', width: 50 }),
+            h('div', { className: 'messages', ref: messages }, task ? turns.flatMap(item => [
+                h('article', { key: item.id + '-question', className: 'bubble user' }, item.prompt),
+                h(Result, { key: item.id + '-answer', task: item, retry, fail,
+                    parcel: resultTask?.id === item.id ? parcel : null, selectParcel: id => { viewResult(item.id); selectParcel(id); },
+                    showMap: item.map && item.id !== resultTask?.id ? () => { viewResult(item.id); selectParcel(null); setTab('成果'); } : undefined,
+                    editSkill: text => { setInitialMarkdown(text); showSettings('skills'); } }),
+            ]) : h('div', { className: 'welcome' }, h('img', { src: '/mark.svg', alt: '', width: 50 }),
                 h('h2', null, '今天要办理什么？'), h('p', null, '输入办理要求，或选择已有业务。'), tiles)),
             h('div', { className: 'compose-wrap' }, composer));
         const materials = task ? [task.project, task.control, ...Object.values(task.materials || {}).flat()].filter(Boolean) : picked;
-        const deliveries = { export: '成果数据', table: '属性表', workflow: '办理留痕', package: '共享数据包', boundaries: '边界图层' };
         const inspector = h('aside', { className: 'inspector', 'aria-label': '材料与成果' },
             h('div', { className: 'inspector-tabs' }, ...['材料', '成果'].map(name =>
                 h('button', { key: name, className: 'inspector-tab' + (tab === name ? ' selected' : ''),
                     'aria-pressed': tab === name, onClick: () => setTab(name) }, name,
-                    h('small', null, name === '材料' ? materials.length : (task?.deliveries?.length || 0) + Number(Boolean(task?.hasReport)))))),
+                    h('small', null, name === '材料' ? materials.length : (resultTask?.deliveries?.length || 0) + Number(Boolean(resultTask?.hasReport)))))),
             h('div', { className: 'inspector-body' }, tab === '材料'
                 ? materials.length ? materials.map((item, index) => h('div', { key: index, className: 'artifact-row' },
                     icon('file'), h('span', null, item.name || item.file?.split(/[\\/]/).at(-1)),
                     item.layer && h('small', null, item.layer))) : h('p', { className: 'muted' }, '暂无材料')
                 : h(React.Fragment, null,
-                    h(window.GuizhiMap, { key: task?.id || 'empty', map: task?.map, view: state?.mapView, parcel, onParcel: selectParcel,
-                        enabled: ready, onState: setState, fail }),
-                    (task?.hasReport || task?.deliveries?.length > 0) && h('section', { className: 'artifact-list' },
+                    h(window.GuizhiMap, { key: resultTask?.id || 'empty', map: resultTask?.map, selected: parcel,
+                        choose: item => selectParcel(item.id) }),
+                    (resultTask?.hasReport || resultTask?.deliveries?.length > 0) && h('section', { className: 'artifact-list' },
                         h('h2', null, '成果文件'),
-                        task.hasReport && h('div', { className: 'delivery-row' },
-                            button('file', '办理报告', { onClick: () => api.report(task.id).catch(fail) }),
-                            button('file', '导出 PDF', { onClick: () => api.exportDelivery(task.id, 'report', 'pdf').catch(fail) })),
-                        ...(task.deliveries || []).map(kind => {
-                            const extension = task.deliveryFormats?.[kind];
+                        resultTask.hasReport && h('div', { className: 'delivery-row' },
+                            button('file', '办理报告', { onClick: () => api.report(resultTask.id).catch(fail) }),
+                            button('file', '导出 PDF', { onClick: () => api.exportDelivery(resultTask.id, 'report', 'pdf').catch(fail) })),
+                        ...(resultTask.deliveries || []).map(kind => {
+                            const extension = resultTask.deliveryFormats?.[kind];
                             const name = extension === '.tif' ? 'GeoTIFF' : extension === '.xlsx' ? 'Excel' : null;
                             return h('div', { key: kind, className: 'delivery-row' },
-                                button('file', deliveries[kind] || kind, { onClick: () => api.delivery(task.id, kind).catch(fail) }),
+                                button('file', deliverables[kind] || '业务成果', { onClick: () => api.delivery(resultTask.id, kind).catch(fail) }),
                                 extension && button('folder', name ? '导出 ' + name : '另存为', {
-                                    onClick: () => api.exportDelivery(task.id, kind, 'original').catch(fail) }),
+                                    onClick: () => api.exportDelivery(resultTask.id, kind, 'original').catch(fail) }),
                                 extension === '.gpkg' && button('file', '导出 SHP', {
-                                    onClick: () => api.exportDelivery(task.id, kind, 'shp').catch(fail) }));
+                                    onClick: () => api.exportDelivery(resultTask.id, kind, 'shp').catch(fail) }));
                         })))));
         async function configure(value) {
             const next = await api.configure(value);
             setState(next);
-            if (value.workspace !== state.settings.workspace || !ready) select(next.focusTask);
             showSettings(false);
         }
         const layout = launcher ? quick : !state ? null : !ready ? h(window.GuizhiOnboarding, { state, save: configure })
@@ -396,7 +420,9 @@
         }) : h(Workbench, { appearance, saveAppearance, sidebar, conversation, inspector, fail,
             arcgis: () => showSettings('extensions'),
             connected: Boolean(state?.arcgis?.host) });
-        return h(Theme, { appearance }, layout,
+        return h(Theme, { appearance }, layout, !launcher && archives && h(ArchivePanel, {
+            groups: archived, manage: conversationAction, error, close: () => { setError(''); showArchives(false); },
+        }),
             business && h(Business, { catalog, choose, close: () => showBusiness('') }));
     }
     ReactDOM.createRoot(document.getElementById('app')).render(h(App));

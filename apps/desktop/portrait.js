@@ -34,7 +34,7 @@ function tell(text, error = false) {
 }
 
 function fail(error) {
-    tell(String(error.message || error).replace(/^Error invoking remote method '[^']+': Error: /, ''), true);
+    tell(window.GuizhiErrorText(error), true);
 }
 
 function animateMouth() {

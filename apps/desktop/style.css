@@ -46,11 +46,14 @@ svg { flex: none; vertical-align: middle; }
 .sidebar nav { flex: 1; min-height: 0; overflow: auto; }
 .new-task { width: 100%; margin-bottom: 7px; }
 .nav-item { display: flex; align-items: center; gap: 9px; min-height: 40px; padding: 8px 10px; text-align: left; border-radius: 8px; border-color: transparent; background: transparent; }
-.nav-item.selected, .history.selected { background: var(--soft); color: var(--accent); font-weight: 650; }
+.nav-item.selected, .thread-row.selected { background: var(--soft); color: var(--accent); font-weight: 650; }
 .history-label { color: var(--muted); padding: 12px 10px 4px; font-size: 12px; }
-.history { display: block; width: 100%; text-align: left; border-color: transparent; background: transparent; margin-bottom: 4px; padding: 8px 9px; }
+.thread-row { display: flex; align-items: center; gap: 2px; border-radius: 8px; padding-right: 3px; margin-bottom: 4px; }
+.history { flex: 1; min-width: 0; text-align: left; border-color: transparent; background: transparent; padding: 8px 9px; }
 .history-title { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
-.history small { display: block; margin-top: 3px; font-size: 12px; }
+.archived-list { list-style: none; padding: 0; max-height: 55vh; overflow: auto; }
+.archived-list li { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.archived-list li > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .conversation { display: flex; flex-direction: column; height: 100%; min-width: 0;
     background: linear-gradient(180deg, var(--photo-wash) 0 180px, var(--panel) 340px),
         url('/luhe-banner.png') center 50px / max(1500px, 100%) auto no-repeat; }
@@ -104,6 +107,8 @@ svg { flex: none; vertical-align: middle; }
 .material-file span:not(.ant-btn-icon) { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .material-row small { overflow-wrap: anywhere; }
 .skill-materials, .unassigned { display: grid; gap: 8px; }
+.composer .skill-materials { max-height: none; overflow: visible; }
+.compose-wrap .composer-skill { max-height: min(54vh, 520px); overflow: auto; }
 .unassigned-material { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .business-suggestion { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 8px 10px; }
 .composer .error { white-space: pre-line; }
@@ -118,11 +123,10 @@ svg { flex: none; vertical-align: middle; }
 .artifact-list .ant-btn { width: 100%; justify-content: flex-start; }
 .artifact-row { display: flex; align-items: center; gap: 9px; padding: 9px; margin-bottom: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); overflow-wrap: anywhere; }
 .artifact-row small { margin-left: auto; }
-.map-workspace { display: flex; flex-direction: column; gap: 8px; }
 .map-panel { display: flex; flex-direction: column; position: relative; height: 294px; background: var(--map); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
 .map-empty { align-items: center; justify-content: center; }
-.map-tabs .ant-tabs-nav, .coordinate-tabs .ant-tabs-nav { margin: 0; }
-.map-tabs .ant-tabs-content-holder, .coordinate-tabs .ant-tabs-content-holder { display: none; }
+.coordinate-tabs .ant-tabs-nav { margin: 0; }
+.coordinate-tabs .ant-tabs-content-holder { display: none; }
 .contours { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
 .contours svg { width: 100%; height: 100%; opacity: .6; stroke: var(--contour); fill: none; }
 .map-caption { z-index: 1; max-width: 225px; padding: 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 11px; text-align: center; }
@@ -133,28 +137,22 @@ svg { flex: none; vertical-align: middle; }
 .geo-map { flex: 1; min-height: 0; width: 100%; background: var(--map); }
 .geo-map .project { fill: var(--parcel-fill); stroke: var(--parcel); stroke-width: 1.6; }
 .geo-map .coverage { fill: var(--overlap-fill); fill-opacity: .68; stroke: var(--overlap); stroke-width: 1.3; }
-.geo-map .layer { cursor: pointer; }
 .geo-map .focused-parcel { stroke: var(--selected-map); fill: var(--selected-fill); stroke-width: 3; }
-.map-toolbar, .map-layers li { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
-.map-toolbar input { min-width: 70px; max-width: 145px; }
-.map-toolbar button, .map-layers button, .map-controls button { padding: 4px 7px; font-size: 12px; }
-.map-layers { list-style: none; margin: 0; padding: 6px 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; max-height: 132px; overflow: auto; }
-.map-layers li { margin: 4px 0; }
-.map-layers label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.map-controls button { padding: 4px 7px; font-size: 12px; }
 .map-controls { justify-content: flex-end; }
 .map-controls label { margin-right: auto; font-size: 12px; }
 .launcher { height: 100vh; display: grid; grid-template-rows: auto minmax(0,1fr) auto; background: var(--panel); }
-.launcher-head { padding: 14px 20px; border-bottom: 1px solid var(--line); }
-.launcher-body { padding: 20px 22px; overflow: auto;
+.launcher-head { padding: 14px 20px; border-bottom: 1px solid var(--line); app-region: drag; -webkit-app-region: drag; }
+.launcher-head button { app-region: no-drag; -webkit-app-region: no-drag; }
+.launcher-body { overflow: auto;
     background: linear-gradient(180deg, var(--photo-wash) 0 190px, var(--photo-edge) 310px),
         url('/luhe-banner.png') center top / max(1550px, 100%) auto no-repeat; }
+.launcher-content { padding: 20px 22px; }
 .launcher .composer textarea { min-height: 84px; font-size: 21px; padding: 15px; }
 .launcher .composer { background: var(--photo-composer); }
+.launcher .materials { max-height: none; overflow: visible; }
 .quick-section { margin-top: 17px; }
 .section-head, .launcher-footer, .setting-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.recent-tasks { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 7px; }
-.recent-tasks .history { width: auto; background: var(--sub); border-color: var(--line); }
-.recent-tasks small { display: none; }
 .business-tiles { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%, 200px),1fr)); gap: 10px; margin-top: 12px; }
 .business-tile { display: flex; align-items: center; min-width: 0; min-height: 56px; text-align: left;
     gap: 10px; padding: 10px 12px; background: var(--panel); }
@@ -226,6 +224,9 @@ dialog label { display: grid; gap: 5px; }
 .coordinate-actions, .business-actions, .delivery-actions { display: flex; flex-wrap: wrap; gap: 7px; }
 .business-dialog { display: grid; gap: 14px; width: min(860px, 94vw); }
 .business-dialog:not([open]) { display: none; }
+.archive-dialog { width: min(560px, 94vw); }
+.archive-confirm { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.archive-confirm p { width: 100%; }
 .skill-cards, .skill-editor, .voice-fields { display: grid; gap: 12px; }
 .skill-cards { grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); }
 .skill-card, .skill-section, .role-material { display: grid; gap: 8px; min-width: 0;
