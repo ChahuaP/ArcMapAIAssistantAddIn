@@ -1,65 +1,158 @@
 (() => {
     const h = React.createElement;
-    const { useState, useEffect } = React;
+    const { useState, useEffect, useRef } = React;
     const api = window.guizhi;
+    const { button } = window.GuizhiShell;
+    const names = { local: '本机语音', minimax: 'MiniMax 在线', custom: 'OpenAI 兼容语音' };
+    const format = entries => entries.map(entry => entry.heard + '=' + entry.correct).join('\n');
+    const errorText = error => String(error.message || error).replace(/^Error invoking remote method '[^']+': Error: /, '');
 
-    window.GuizhiSpeechSettings = function SpeechSettings({ current }) {
-        const [value, setValue] = useState({ ...current, key: '' });
+    function SpeechForm({ value, change, current, busy = () => {} }) {
         const [devices, setDevices] = useState([]);
+        const [testing, setTesting] = useState('');
         const [message, setMessage] = useState('');
-        const format = entries => entries.map(entry => entry.heard + '=' + entry.correct).join('\n');
+        const [error, setError] = useState('');
+        const recorder = useRef(null);
+        const playback = useRef(null);
+        const reload = () => navigator.mediaDevices.enumerateDevices().then(setDevices).catch(fail);
+        const update = (field, next) => change({ ...value, [field]: next });
+        const fail = issue => setError(errorText(issue));
+        useEffect(() => {
+            void reload();
+            return () => {
+                recorder.current?.releaseCapture();
+                if (playback.current && playback.current.state !== 'closed') void playback.current.close();
+            };
+        }, []);
+        function testState(next) { setTesting(next); busy(Boolean(next)); }
+        async function finish(voice) {
+            testState('asr');
+            try {
+                const result = await voice.finish(() => {});
+                if (result) setMessage('识别结果 · ' + result);
+            } catch (issue) { fail(issue); }
+            finally { testState(''); }
+        }
+        async function record() {
+            setError('');
+            setMessage('');
+            if (testing === 'recording') return finish(recorder.current);
+            testState('opening');
+            try {
+                const { VoiceAudio } = await import('/speech-audio.js');
+                const voice = new VoiceAudio({ speechCancel: api.speechCancel, onSpeechPartial: api.onSpeechPartial,
+                    speechRecognize: audio => api.speechTest('asr', value, audio) }, () => {});
+                recorder.current = voice;
+                const active = await voice.listen(value.microphone, () => finish(voice));
+                testState(active ? 'recording' : '');
+            } catch (issue) { fail(issue); testState(''); }
+        }
+        async function listen() {
+            setMessage('');
+            setError('');
+            testState('tts');
+            try {
+                const context = playback.current ??= new AudioContext();
+                if (value.speaker && !context.setSinkId) throw new Error('当前系统无法选择播放设备');
+                if (context.setSinkId) await context.setSinkId(value.speaker || '');
+                await context.resume();
+                const wav = await api.speechTest('tts', value);
+                const source = context.createBufferSource();
+                source.buffer = await context.decodeAudioData(wav);
+                source.connect(context.destination);
+                await new Promise(resolve => { source.onended = resolve; source.start(); });
+                setMessage('播报试听完成');
+            } catch (issue) { fail(issue); }
+            finally { testState(''); }
+        }
+        const choices = [['off', '关闭'], ...current.providers.map(id => [id, names[id]])];
+        const byKind = kind => [['', '系统默认'], ...devices
+            .filter(device => device.kind === kind && device.deviceId && device.deviceId !== 'default')
+            .map((device, index) => [device.deviceId, device.label || '设备 ' + (index + 1)])];
+        const select = (label, selected, options, onChange) => h('label', null, label,
+            h('select', { disabled: Boolean(testing), value: selected, onChange: event => onChange(event.target.value) },
+                ...options.map(([id, title]) => h('option', { key: id, value: id }, title))));
+        const field = (label, selected, onChange, props = {}) => h('label', null, label,
+            h('input', { ...props, disabled: Boolean(testing), value: selected || '',
+                onChange: event => onChange(event.target.value) }));
+        function section(kind) {
+            const asr = kind === 'asr';
+            const title = asr ? '语音识别' : '语音播报';
+            const device = asr ? 'microphone' : 'speaker';
+            const name = kind + 'Profile';
+            const profile = value[name] || {};
+            const provider = value[kind];
+            const remote = provider === 'minimax' || provider === 'custom';
+            const saved = current[name];
+            const configured = provider === current[kind] && (provider !== 'custom' || saved?.baseUrl === profile.baseUrl) &&
+                saved?.keyConfigured;
+            const updateProfile = (key, next) => update(name, { ...profile, [key]: next,
+                ...(key === 'baseUrl' ? { key: '' } : {}) });
+            return h('section', { className: 'settings-card speech-channel' },
+                h('h2', null, title),
+                h('div', { className: 'setting-fields' },
+                    select(title + '服务', provider, choices, next => change({ ...value, [kind]: next,
+                        [name]: next === current[kind] ? current[name] : {},
+                        ...(asr ? {} : { voice: next === current.tts ? current.voice : '' }) })),
+                    select(asr ? '麦克风' : '播放设备', value[device], byKind(asr ? 'audioinput' : 'audiooutput'),
+                        next => update(device, next)),
+                    provider === 'custom' && field(title + '地址', profile.baseUrl, next => updateProfile('baseUrl', next),
+                        { placeholder: 'https://speech.example.org/v1' }),
+                    provider === 'custom' && field(title + '模型', profile.model, next => updateProfile('model', next)),
+                    remote && field(title + '密钥', profile.key, next => updateProfile('key', next),
+                        { type: 'password', autoComplete: 'off', placeholder: configured ? '已配置' : '输入 API 密钥' }),
+                    !asr && remote && field('播报音色', value.voice, next => update('voice', next),
+                        { placeholder: provider === 'custom' ? 'alloy' : 'female-shaonv' })),
+                asr ? button('mic', testing === 'recording' ? '结束并识别' : '试录音',
+                    { disabled: provider === 'off' || Boolean(testing && testing !== 'recording'), onClick: record })
+                    : button('mic', '试听播报', { disabled: provider === 'off' || Boolean(testing),
+                        loading: testing === 'tts', onClick: listen }));
+        }
+        return h('div', { className: 'speech-form' }, section('asr'), section('tts'),
+            h('label', { className: 'voice-toggle' }, h('input', { type: 'checkbox', checked: value.autoSpeak,
+                disabled: value.tts === 'off' || Boolean(testing), onChange: event => update('autoSpeak', event.target.checked) }),
+                '任务完成后自动播报'),
+            testing === 'recording' && h('p', { role: 'status', className: 'muted' }, '正在录音'),
+            testing === 'asr' && h('p', { role: 'status', className: 'muted' }, '正在识别'),
+            message && h('p', { role: 'status', className: 'muted' }, message),
+            error && h('p', { role: 'alert', className: 'error' }, error));
+    }
+
+    window.GuizhiSpeechForm = SpeechForm;
+    window.GuizhiSpeechSettings = function SpeechSettings({ current }) {
+        const [value, setValue] = useState(current);
         const [words, setWords] = useState(() => format(current.dictionary));
         const [pronunciation, setPronunciation] = useState(() => format(current.pronunciation));
-        const update = (field, next) => setValue(old => ({ ...old, [field]: next }));
-        const reload = () => navigator.mediaDevices.enumerateDevices().then(setDevices).catch(() => setDevices([]));
-        useEffect(() => { void reload(); }, []);
-        const input = (field, attrs = {}) => h('input', { ...attrs, value: value[field] ?? '',
-            onChange: event => update(field, event.target.value) });
-        const pick = (field, label, options) => h('label', null, label,
-            h('select', { value: value[field] ?? '', onChange: event => update(field, event.target.value) },
-                ...options.map(([id, title]) => h('option', { key: id, value: id }, title))));
-        const source = [['off', '关闭'], ...current.providers.map(provider => [provider,
-            { minimax: 'MiniMax 在线', local: '本地语音' }[provider]])];
-        const byKind = kind => [['', '系统默认'], ...devices.filter(device => device.kind === kind && device.deviceId && device.deviceId !== 'default')
-            .map((device, index) => [device.deviceId, device.label || '设备 ' + (index + 1)])];
-        const fail = error => setMessage(String(error.message || error)
-            .replace(/^Error invoking remote method '[^']+': Error: /, ''));
-        const parse = text => text.split('\n').filter(line => line.trim()).map(line => {
-            const split = line.indexOf('=');
-            if (split < 1) throw new Error('词表每行使用“原词=替换词”');
-            return { heard: line.slice(0, split), correct: line.slice(split + 1) };
-        });
-        async function save() {
-            try {
-                const settings = await api.speechConfigure({ ...value, dictionary: parse(words),
-                    pronunciation: parse(pronunciation) });
-                setValue({ ...settings, key: '' });
-                setMessage('语音设置已保存');
-            } catch (error) { fail(error); }
+        const [testing, setTesting] = useState(false);
+        const [saving, setSaving] = useState(false);
+        const [message, setMessage] = useState('');
+        const [error, setError] = useState('');
+        function parse(text) {
+            return text.split('\n').filter(line => line.trim()).map(line => {
+                const split = line.indexOf('=');
+                if (split < 1) throw new Error('词表每行使用“原词=替换词”');
+                return { heard: line.slice(0, split), correct: line.slice(split + 1) };
+            });
         }
-        return h('details', { className: 'voice-settings' },
-            h('summary', null, '语音'),
-            h('div', { className: 'voice-fields' },
-                pick('asr', '语音识别', source), pick('tts', '语音播报', source),
-                pick('microphone', '麦克风', byKind('audioinput')),
-                pick('speaker', '播放设备', byKind('audiooutput')),
-                h('button', { type: 'button', onClick: reload }, '刷新设备'),
-                value.tts === 'minimax' && h('label', null, '播报音色', input('voice')),
-                (value.asr === 'local' || value.tts === 'local') && h('label', null, '本地语音目录',
-                    h('div', { className: 'field-row' }, input('localRoot', {
-                        readOnly: true, placeholder: value.bundledLocal ? '随应用安装' : undefined }),
-                        h('button', { type: 'button', onClick: () => api.speechFolder().then(folder => {
-                            if (folder) update('localRoot', folder);
-                        }).catch(fail) }, '选择'))),
-                (value.asr === 'minimax' || value.tts === 'minimax') && h('label', null, 'MiniMax 语音密钥',
-                    input('key', { type: 'password', autoComplete: 'off', placeholder: current.onlineReady ? '已配置' : '输入语音密钥' })),
-                h('label', null, '术语纠错', h('textarea', { rows: 2, placeholder: '原词=正确词', value: words,
-                    onChange: event => setWords(event.target.value) })),
-                h('label', null, '发音词表', h('textarea', { rows: 2, placeholder: '原词=播报读法', value: pronunciation,
-                    onChange: event => setPronunciation(event.target.value) })),
-                h('label', { className: 'voice-toggle' }, h('input', { type: 'checkbox', checked: value.autoSpeak,
-                    onChange: event => update('autoSpeak', event.target.checked) }), '完成后自动播报'),
-                h('button', { type: 'button', onClick: save }, '保存语音设置'),
-                message && h('span', { role: 'status' }, message)));
+        async function save() {
+            setMessage('');
+            setError('');
+            setSaving(true);
+            try {
+                setValue(await api.speechConfigure({ ...value, dictionary: parse(words), pronunciation: parse(pronunciation) }));
+                setMessage('语音设置已保存');
+            } catch (issue) { setError(errorText(issue)); }
+            finally { setSaving(false); }
+        }
+        return h(React.Fragment, null, h(SpeechForm, { current, value, change: setValue, busy: setTesting }),
+            h('details', { className: 'voice-settings' }, h('summary', null, '专业词汇'),
+                h('div', { className: 'voice-fields' },
+                    h('label', null, '术语纠错', h('textarea', { rows: 2, placeholder: '原词=正确词', value: words,
+                        onChange: event => setWords(event.target.value) })),
+                    h('label', null, '发音词表', h('textarea', { rows: 2, placeholder: '原词=播报读法', value: pronunciation,
+                        onChange: event => setPronunciation(event.target.value) })))),
+            h(antd.Button, { type: 'primary', disabled: testing, loading: saving, onClick: save }, '保存语音设置'),
+            message && h('p', { role: 'status' }, message),
+            error && h('p', { role: 'alert', className: 'error' }, error));
     };
 })();

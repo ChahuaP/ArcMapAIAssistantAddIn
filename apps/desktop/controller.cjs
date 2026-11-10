@@ -1,10 +1,12 @@
-const { execFile, fork } = require('node:child_process');
+const { execFile } = require('node:child_process');
 const { createHash, randomUUID } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { promisify } = require('node:util');
 const { action } = require('./task-commands.js');
+const { startAgent } = require('./agent-process.cjs');
 const { visualRecipe } = require('./visual-recipes.cjs');
+const { modelConfig, modelKey, credentialScope, normalizeKey } = require('../../src/guizhi/infrastructure/dsh/model-config.cjs');
 
 const exec = promisify(execFile);
 const cli = path.join(__dirname, '../../src/guizhi/__main__.py');
@@ -38,7 +40,7 @@ class DesktopController {
     constructor({ userData, runtime, dsh, safeStorage, externalPath, onChange, bundledArcmap, installationRoot }) {
         this.file = path.join(userData, 'settings.json');
         fs.mkdirSync(userData, { recursive: true });
-        this.settings = load(this.file, { workspace: '', model: 'MiniMax-M3' });
+        this.settings = load(this.file, { workspace: '' });
         this.runtime = { python: path.join(runtime, 'python', 'python.exe'),
             node: path.join(runtime, 'node', 'node.exe'), runtime: dsh || path.join(runtime, 'dsh') };
         this.storage = safeStorage;
@@ -95,27 +97,43 @@ class DesktopController {
     }
 
     state() {
-        const { encryptedKey, ...settings } = this.settings;
-        return { settings: { ...settings, arcmapBridge: settings.arcmapBridge || this.bundledArcmap,
-            keyConfigured: Boolean(encryptedKey || process.env.MINIMAX_API_KEY) },
+        const { workspace, modelConfig, showOperation, screenHighlight, arcmapBridge, encryptedKey } = this.settings;
+        return { settings: { workspace, modelConfig, showOperation, screenHighlight,
+            arcmapBridge: arcmapBridge || this.bundledArcmap, keyConfigured: Boolean(modelConfig && encryptedKey) },
             tasks: this.tasks, mapView: this.mapView, focusTask: this.focusTask, conversation: this.conversation };
+    }
+
+    workspaceReady(value) {
+        const workspace = this.workspacePath(value);
+        fs.mkdirSync(workspace, { recursive: true });
+        const probe = path.join(workspace, '.guizhi-write-' + randomUUID());
+        fs.writeFileSync(probe, '', { flag: 'wx' });
+        fs.unlinkSync(probe);
+        return workspace;
+    }
+
+    selectModel(input, requireModel = true) {
+        const config = modelConfig(input.modelConfig, requireModel);
+        const same = this.settings.modelConfig && credentialScope(config) === credentialScope(this.settings.modelConfig);
+        const encrypted = same ? this.settings.encryptedKey : undefined;
+        const key = normalizeKey(input.key) || (encrypted
+            ? this.storage.decryptString(Buffer.from(encrypted, 'base64')) : '');
+        return { config, key: modelKey(config, key), encrypted };
     }
 
     configure(input) {
         if (this.active || this.mapBusy || this.skillBusy || this.hostBusy) throw new Error('请先结束当前任务');
-        const workspace = this.workspacePath(input.workspace);
-        if (!/^MiniMax-[A-Za-z0-9.-]+$/.test(input.model?.trim() ?? '')) {
-            throw new Error('请选择 MiniMax 在线模型');
-        }
-        let encryptedKey = this.settings.encryptedKey;
-        if (input.key?.trim()) {
+        const { config, key, encrypted } = this.selectModel(input);
+        const workspace = this.workspaceReady(input.workspace);
+        let encryptedKey = encrypted;
+        if (normalizeKey(input.key)) {
             if (!this.storage.isEncryptionAvailable()) throw new Error('系统凭据加密不可用');
-            encryptedKey = this.storage.encryptString(input.key.trim()).toString('base64');
+            encryptedKey = this.storage.encryptString(key).toString('base64');
         }
-        fs.mkdirSync(workspace, { recursive: true });
-        this.settings = { workspace, model: input.model.trim(), showOperation: input.showOperation !== false,
+        const settings = { workspace, modelConfig: config, showOperation: input.showOperation !== false,
             screenHighlight: input.screenHighlight !== false, arcmapBridge: this.settings.arcmapBridge, encryptedKey };
-        save(this.file, this.settings);
+        save(this.file, settings);
+        this.settings = settings;
         this.tasks = [];
         this.restore();
         return this.state();
@@ -181,19 +199,13 @@ class DesktopController {
         materialBindings({ project: project ? [project] : [], control: control ? [control] : [] });
         if (skill && !/^[a-z][a-z0-9_-]{0,39}@[1-9]\d*$/.test(skill)) throw new Error('请选择已发布的技能');
         if (skillParameters && Buffer.byteLength(JSON.stringify(skillParameters)) > 65536) throw new Error('办理参数最多 64 KB');
-        const env = { ...process.env };
-        if (this.settings.encryptedKey) {
-            env.MINIMAX_API_KEY = this.storage.decryptString(Buffer.from(this.settings.encryptedKey, 'base64'));
-        }
+        const { config, key } = this.selectModel({ modelConfig: this.settings.modelConfig });
         const task = { id: randomUUID(), title: [...prompt.trim()].slice(0, 32).join(''), prompt: prompt.trim(),
             project, control, skill, materials, previousTask, parameterText, status: 'running', createdAt: new Date().toISOString() };
         this.focusTask = task.id;
         this.tasks.unshift(task);
         this.persist();
-        const child = fork(path.join(__dirname, 'agent.mjs'), {
-            execPath: this.runtime.node, cwd: this.settings.workspace, env,
-            windowsHide: true, stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
-        });
+        const child = startAgent(this.runtime, this.settings.workspace);
         this.active = { child, task };
         child.on('message', message => {
             if (message.type === 'event') {
@@ -215,7 +227,7 @@ class DesktopController {
             }
         });
         child.send({ type: 'start', options: { ...this.runtime, workspace: this.settings.workspace,
-            provider: 'minimax-cn', model: this.settings.model,
+            modelConfig: config, apiKey: key,
             prompt: task.prompt, input: project?.file, layer: project?.layer,
             control: control?.file, controlLayer: control?.layer, skill, skillParameters, materials: bindings, previousRun,
             projectPlan: project?.plan || materials.project?.[0]?.plan,
@@ -288,14 +300,14 @@ class DesktopController {
     async complete(task, receipt) {
         if (this.active?.task !== task || this.active.settling) return;
         this.active.settling = true;
+        let status = receipt.status;
         try {
-            task.status = receipt.status;
             task.runId = receipt.operation?.run_id;
-            task.response = ['succeeded', 'answered'].includes(task.status) ? receipt.response
+            task.response = ['succeeded', 'answered'].includes(status) ? receipt.response
                 : receipt.operation?.error || receipt.error || receipt.response;
             task.statistics = receipt.operation?.statistics;
             task.candidate = receipt.candidate?.markdown;
-            if (task.status === 'succeeded') {
+            if (status === 'succeeded') {
                 const record = await this.python('inspect', task.runId);
                 if (record.status !== 'succeeded') throw new Error('成果未发布');
                 const map = checkedArtifact(record, 'map');
@@ -307,8 +319,9 @@ class DesktopController {
                     .map(item => item.step);
             }
         } catch {
-            task.status = 'failed';
+            status = 'failed';
         } finally {
+            task.status = status;
             delete task.visual;
             this.active = null;
             this.persist();

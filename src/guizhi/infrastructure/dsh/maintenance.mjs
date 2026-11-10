@@ -5,7 +5,8 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs, promisify } from 'node:util';
-import { externalPath, loadHarness, runtimeEnv } from './sdk.mjs';
+import { externalPath, loadHarness, modelArguments, modelFromArguments, redact, runtimeEnv } from './sdk.mjs';
+import models from './model-config.cjs';
 
 const cli = fileURLToPath(new URL('../../__main__.py', import.meta.url));
 const profile = fileURLToPath(new URL('./maintenance.yml', import.meta.url));
@@ -19,10 +20,12 @@ async function local(options, command, ...args) {
 }
 
 export async function improve(options) {
-    if (!isAbsolute(options.request ?? '') || !/^MiniMax-[A-Za-z0-9.-]+$/.test(options.model ?? '')) {
-        throw new Error('Use an absolute improvement request path and a MiniMax model');
-    }
-    options = { ...options, workspace: externalPath(options.workspace) };
+    if (!isAbsolute(options.request ?? '')) throw new Error('Use an absolute improvement request path');
+    const modelConfig = models.modelConfig(options.modelConfig);
+    const apiKey = models.modelKey(modelConfig, options.apiKey);
+    const { id: provider } = models.route(modelConfig);
+    const { model } = modelConfig;
+    options = { ...options, modelConfig, apiKey, workspace: externalPath(options.workspace) };
     const mode = options.mode ?? 'skill';
     if (!['skill', 'tool'].includes(mode)) throw new Error('Unknown maintenance mode');
     const operation = mode === 'tool' ? 'tool' : 'improvement';
@@ -33,7 +36,7 @@ export async function improve(options) {
     const proposal = join(plan.directory, 'proposal.json');
     const harness = new DeepSeekHarness({
         profile: 'sdk-minimal', patches: [profile], dshHome: join(plan.directory, 'maintenance-home'),
-        cwd: plan.directory, processCwd: plan.directory, provider: 'minimax-cn', model: options.model,
+        cwd: plan.directory, processCwd: plan.directory, provider, model,
         maxTokens: 2048, initializeTimeoutMs: 35000,
         env: { ...env, GUIZHI_BUDGET_CONFIG: JSON.stringify({ tokens: 50000, calls: 1, checkpoint: budget, operation: proposal }) },
     });
@@ -54,13 +57,12 @@ export async function improve(options) {
         }
         const content = result.finalResponse.trim().replace(/^\x60\x60\x60(?:json)?\s*([\s\S]*?)\s*\x60\x60\x60$/i, '$1');
         answer = JSON.parse(content);
-        writeFileSync(join(plan.directory, 'model.json'), JSON.stringify({ provider: 'minimax-cn', model: options.model,
+        writeFileSync(join(plan.directory, 'model.json'), JSON.stringify({ provider, model, mode: modelConfig.mode,
             profile_sha256: createHash('sha256').update(readFileSync(profile)).digest('hex'),
             sdk_version: versions['@deepseek-ai/dsh-sdk-client'], budget: charge }), { flag: 'wx' });
         writeFileSync(proposal, JSON.stringify(answer), { flag: 'wx' });
     } catch (error) {
-        const secret = process.env.MINIMAX_API_KEY;
-        const message = String(error.message).replaceAll(secret, '[密钥]');
+        const message = redact(error.message, apiKey);
         writeFileSync(join(plan.directory, 'model-failure.json'), JSON.stringify({ status: 'failed', message }), { flag: 'wx' });
         throw new Error(message);
     } finally {
@@ -72,14 +74,13 @@ export async function improve(options) {
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
     const { values } = parseArgs({ options: {
         workspace: { type: 'string' }, runtime: { type: 'string' }, python: { type: 'string' },
-        request: { type: 'string' }, model: { type: 'string', default: 'MiniMax-M3' }, mode: { type: 'string', default: 'skill' },
+        ...modelArguments, request: { type: 'string' }, 'improvement-mode': { type: 'string', default: 'skill' },
     } });
-    improve(values).then(result => {
+    Promise.resolve().then(() => improve({ ...values, ...modelFromArguments(values), mode: values['improvement-mode'] })).then(result => {
         console.log(JSON.stringify(result));
         if (result.status !== 'published') process.exitCode = 1;
     }).catch(error => {
-        const secret = process.env.MINIMAX_API_KEY;
-        const message = secret ? String(error.message).replaceAll(secret, '[密钥]') : error.message;
+        const message = redact(error.message, process.env.GUIZHI_MODEL_KEY);
         console.error(JSON.stringify({ status: 'failed', error: message }));
         process.exitCode = 1;
     });

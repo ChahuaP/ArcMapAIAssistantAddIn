@@ -8,6 +8,7 @@ const { SpeechController } = require('./speech.cjs');
 const { LocalSpeechRuntime } = require('./local-speech.cjs');
 const { VisualSession } = require('./visual.cjs');
 const { createShell } = require('./shell.cjs');
+const { listModels, testModel } = require('./model-service.cjs');
 
 const origin = 'guizhi://app';
 protocol.registerSchemesAsPrivileged([{ scheme: 'guizhi', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
@@ -27,7 +28,7 @@ async function startDesktop(options) {
     }
     const vendor = path.join(rendererRuntime, 'node_modules');
     const localFiles = ['index.html', 'app.js', 'shell-ui.js', 'settings.js', 'map.js', 'coordinates.js', 'skills.js',
-        'style.css', 'theme.css', 'mark.svg',
+        'style.css', 'theme.css', 'mark.svg', 'model-form.js', 'onboarding.js',
         'portrait.html', 'portrait.css', 'portrait.js', 'task-commands.js', 'speech-settings.js',
         'speech-audio.js', 'voice-input.js', 'visual.html', 'visual.css', 'visual.js', 'arcmap.js'];
     const files = new Map(localFiles.map(name => ['/' + name, path.join(__dirname, name)]));
@@ -75,7 +76,8 @@ async function startDesktop(options) {
         cancel: () => broadcast(controller.cancel()) });
     const partition = portrait.webContents.session;
     partition.setPermissionRequestHandler((source, permission, callback, details) => callback(
-        source === portrait.webContents && source.getURL() === portraitUrl &&
+        ((source === portrait.webContents && source.getURL() === portraitUrl) ||
+            (source === window.webContents && source.getURL() === workbenchUrl)) &&
         (permission === 'speaker-selection' || (permission === 'media' &&
             details.mediaTypes?.length === 1 && details.mediaTypes[0] === 'audio'))));
     partition.setPermissionCheckHandler((source, permission, requestingOrigin, details) =>
@@ -156,6 +158,15 @@ async function startDesktop(options) {
         broadcast(state);
         return withSpeech(state);
     });
+    bind('workspaceReady', input => controller.workspaceReady(input));
+    bind('modelList', input => {
+        const { config, key } = controller.selectModel(input, false);
+        return listModels(config, key);
+    });
+    bind('modelTest', input => {
+        const { config, key } = controller.selectModel(input);
+        return testModel(controller.runtime, config, key);
+    });
     bind('speechConfigure', input => {
         const settings = speech.configure(input);
         broadcast(controller.state());
@@ -165,11 +176,8 @@ async function startDesktop(options) {
         if (!portrait.isDestroyed()) portrait.webContents.send('guizhi:speechPartial', text);
     }));
     bind('speechSynthesize', text => speech.synthesize(text));
+    bind('speechTest', (kind, input, audio) => speech.test(kind, input, audio));
     bind('speechCancel', () => speech.cancel());
-    bind('speechFolder', async () => {
-        const pick = await dialog.showOpenDialog(window, { properties: ['openDirectory'] });
-        return pick.canceled ? null : externalPath(pick.filePaths[0]);
-    });
     bind('portraitHit', active => portrait.setIgnoreMouseEvents(!active, active ? {} : { forward: true }));
     bind('workbench', id => {
         reveal();
@@ -270,7 +278,7 @@ async function startDesktop(options) {
     await Promise.all([...pages].map(([surface, url]) => surface.loadURL(url)));
     desktop.registerShortcut();
     if (!options.verifyStartup) {
-        if (!controller.settings.workspace) reveal();
+        if (!controller.settings.workspace || !controller.settings.modelConfig) reveal();
         desktop.showPortrait();
     }
     return { window, launcher, portrait, tray, controller, speech, visual };

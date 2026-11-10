@@ -8,6 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { promisify } from 'node:util';
 import { watchRun } from './progress.mjs';
+import models from './model-config.cjs';
 
 const source = realpathSync(fileURLToPath(new URL('../../../../', import.meta.url)));
 const readJson = path => JSON.parse(readFileSync(path, 'utf8'));
@@ -61,10 +62,10 @@ export function runtimeEnv(options, mcpArgs = []) {
     for (const [name, value] of Object.entries(process.env)) {
         if (allowed.test(name)) env[name] = value;
     }
-    if (!process.env.MINIMAX_API_KEY?.trim()) throw new Error('请配置 MiniMax 在线模型密钥');
-    env.MINIMAX_API_KEY = process.env.MINIMAX_API_KEY;
-    const providers = { 'minimax-cn': { apiKeyEnv: 'MINIMAX_API_KEY' } };
-    return { ...env, GUIZHI_MODEL_PROVIDERS: JSON.stringify(providers),
+    const key = models.modelKey(options.modelConfig, options.apiKey);
+    // pi-ai requires a credential value even when a loopback service permits anonymous requests.
+    env.GUIZHI_MODEL_KEY = key || 'local';
+    return { ...env, GUIZHI_MODEL_PROVIDERS: JSON.stringify(models.route(options.modelConfig).providers),
         GUIZHI_PYTHON: options.python, GUIZHI_MCP_ARGS: JSON.stringify(mcpArgs) };
 }
 
@@ -84,20 +85,18 @@ export async function loadHarness(python, runtime) {
 }
 
 export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
-    if (options.provider !== 'minimax-cn' || options.modelUrl ||
-            !/^MiniMax-[A-Za-z0-9.-]+$/.test(options.model ?? '')) {
-        throw new Error('请选择 MiniMax 在线模型');
-    }
+    const modelConfig = models.modelConfig(options.modelConfig);
+    const apiKey = models.modelKey(modelConfig, options.apiKey);
+    const { id: provider } = models.route(modelConfig);
+    const { model } = modelConfig;
+    options = { ...options, modelConfig, apiKey };
     if (!options.prompt?.trim()) throw new Error('Prompt is required');
     if (options.skillParameters !== undefined && (!options.skill || !options.skillParameters ||
             typeof options.skillParameters !== 'object' || Array.isArray(options.skillParameters))) {
         throw new Error('请选择办理参数对应的技能');
     }
     const started = performance.now();
-    const safeError = value => {
-        const secret = process.env.MINIMAX_API_KEY?.trim();
-        return secret ? String(value).replaceAll(secret, '[密钥]') : String(value);
-    };
+    const safeError = value => redact(value, apiKey);
     const timeoutMs = options.timeoutMs ?? 180000;
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 900000) {
         throw new Error('Timeout must be between 1 and 900000 ms');
@@ -119,7 +118,7 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
     const profile = fileURLToPath(new URL('./profile.yml', import.meta.url));
     const schema = ['capabilities', 'skills', 'semantics', 'knowledge']
         .map(name => readFileSync(join(source, 'src', 'guizhi', 'domain', name + '.py')));
-    const provenance = { provider: options.provider, model: options.model,
+    const provenance = { provider, model, route_sha256: hash(JSON.stringify(modelConfig)),
         profile_sha256: hash(readFileSync(profile)), request_sha256: hash(options.prompt),
         schema_sha256: hash(Buffer.concat(schema)), retrieval_version: '1.0.0' };
     const mcpArgs = ['-I', '-B', fileURLToPath(new URL('./mcp.py', import.meta.url)),
@@ -155,7 +154,7 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
     let result;
     let attempted = false;
     try {
-        event({ kind: 'dispatch', id, provider: options.provider, model: options.model });
+        event({ kind: 'dispatch', id, provider, model });
         const aborted = new Promise(resolveAbort => {
             stopListener = addAbortListener(stop, () => {
                 writeFileSync(join(directory, 'cancelled'), '');
@@ -181,7 +180,7 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
                 GUIZHI_BUDGET_CONFIG: JSON.stringify({ tokens, calls, checkpoint: budgetPath, operation: operationPath }) };
             harness = new DeepSeekHarness({
                 profile: 'sdk-minimal', patches: [profile], dshHome: join(directory, 'dsh-home'),
-                cwd: directory, processCwd: directory, provider: options.provider, model: options.model, maxTokens: 1024,
+                cwd: directory, processCwd: directory, provider, model, maxTokens: 1024,
                 initializeTimeoutMs: 45000, env,
             });
             await harness.start();
@@ -254,18 +253,33 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
         accounting.total_tokens = tokens.totalTokens === undefined || accounting.total_tokens === null
             ? null : accounting.total_tokens + tokens.totalTokens;
     }
-    const receipt = { ...result, id, directory, provider: options.provider, model: options.model,
-        elapsed_ms: Math.round(performance.now() - started), execution: { gis: 'local', model: 'online' },
+    if (typeof result.response === 'string') result.response = safeError(result.response);
+    const receipt = { ...result, id, directory, provider, model,
+        elapsed_ms: Math.round(performance.now() - started), execution: { gis: 'local', model: modelConfig.mode },
         budget: existsSync(budgetPath) ? readJson(budgetPath) : null,
         sdk_version: versions['@deepseek-ai/dsh-sdk-client'], usage: usage.size ? accounting : null };
     writeFileSync(join(directory, 'result.json'), JSON.stringify(receipt, null, 2) + '\n');
     return receipt;
 }
 
+export function redact(value, secret) {
+    return secret ? String(value).replaceAll(secret, '[密钥]') : String(value);
+}
+
+export const modelArguments = {
+    mode: { type: 'string', default: 'online' }, provider: { type: 'string' },
+    model: { type: 'string' }, api: { type: 'string' }, 'base-url': { type: 'string' },
+};
+
+export function modelFromArguments(values) {
+    return { modelConfig: models.modelConfig({ ...values, baseUrl: values['base-url'] }),
+        apiKey: process.env.GUIZHI_MODEL_KEY };
+}
+
 async function main() {
     const { values } = parseArgs({ options: {
         workspace: { type: 'string' }, runtime: { type: 'string' }, python: { type: 'string' },
-        provider: { type: 'string', default: 'minimax-cn' }, model: { type: 'string' },
+        ...modelArguments,
         prompt: { type: 'string' }, input: { type: 'string' }, layer: { type: 'string' },
         control: { type: 'string' }, 'control-layer': { type: 'string' },
         'project-plan': { type: 'string' }, 'control-plan': { type: 'string' },
@@ -277,7 +291,7 @@ async function main() {
     process.once('SIGINT', cancel);
     process.once('SIGTERM', cancel);
     try {
-        const result = await dispatch({ ...values, controlLayer: values['control-layer'],
+        const result = await dispatch({ ...values, ...modelFromArguments(values), controlLayer: values['control-layer'],
             materials: values.materials ? JSON.parse(values.materials) : undefined,
             previousRun: values['previous-run'],
             projectPlan: values['project-plan'], controlPlan: values['control-plan'],
@@ -295,7 +309,7 @@ async function main() {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
     main().catch(error => {
-        console.error(JSON.stringify({ status: 'failed', error: error.message }));
+        console.error(JSON.stringify({ status: 'failed', error: redact(error.message, process.env.GUIZHI_MODEL_KEY) }));
         process.exitCode = 1;
     });
 }

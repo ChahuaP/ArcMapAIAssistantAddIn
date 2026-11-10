@@ -1,11 +1,12 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
+const { endpoint, normalizeKey } = require('../../src/guizhi/infrastructure/dsh/model-config.cjs');
 
 const onlineHost = 'https://api.minimaxi.com';
 const voiceDefault = 'female-shaonv';
-const defaults = { asr: 'minimax', tts: 'minimax', voice: voiceDefault, autoSpeak: true,
-    microphone: '', speaker: '', localRoot: '', dictionary: [], pronunciation: [] };
+const defaults = { asr: 'off', tts: 'off', voice: voiceDefault, autoSpeak: false,
+    microphone: '', speaker: '', dictionary: [], pronunciation: [] };
 const audioLimit = 16_000 * 2 * 30 + 44;
 
 function readPcmWav(data) {
@@ -67,15 +68,22 @@ async function* sse(response) {
     }
 }
 
-class MiniMaxSpeech {
+class HttpSpeech {
+    constructor(key, baseUrl) {
+        this.authorization = 'Bearer ' + key;
+        this.baseUrl = baseUrl;
+    }
+}
+
+class MiniMaxSpeech extends HttpSpeech {
     constructor(key) {
         if (!key) throw new Error('请在设置中配置 MiniMax 语音密钥');
-        this.authorization = 'Bearer ' + key;
+        super(key, onlineHost);
     }
 
     async request(endpoint, options, signal) {
         try {
-            const response = await fetch(onlineHost + endpoint, { ...options, method: 'POST', redirect: 'error',
+            const response = await fetch(this.baseUrl + endpoint, { ...options, method: 'POST', redirect: 'error',
                 signal: AbortSignal.any([signal, AbortSignal.timeout(40_000)]),
                 headers: { ...options.headers, authorization: this.authorization } });
             if (!response.ok) throw new Error('在线语音服务响应异常（HTTP ' + response.status + '）');
@@ -129,6 +137,48 @@ class MiniMaxSpeech {
     }
 }
 
+class CompatibleSpeech extends HttpSpeech {
+    constructor(profile) {
+        super(profile.key, profile.baseUrl);
+        this.model = profile.model;
+    }
+
+    async recognize(wav, signal, partial) {
+        const form = new FormData();
+        form.set('model', this.model);
+        form.set('file', new Blob([wav], { type: 'audio/wav' }), 'utterance.wav');
+        const response = await this.request('/audio/transcriptions', { body: form }, signal);
+        const { text } = await response.json();
+        if (typeof text !== 'string') throw new Error('在线识别未返回文字');
+        partial(text);
+        return text;
+    }
+
+    async synthesize(text, voice, signal) {
+        const response = await this.request('/audio/speech', { headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ model: this.model, input: text, voice, response_format: 'wav' }) }, signal);
+        const chunks = [];
+        let size = 0;
+        for await (const chunk of response.body) {
+            size += chunk.length;
+            if (size > 4 << 20) throw new Error('在线合成音频过长');
+            chunks.push(chunk);
+        }
+        return Buffer.concat(chunks);
+    }
+}
+
+function wavBuffer(bytes) {
+    if (bytes.length < 44 || bytes.toString('ascii', 0, 4) !== 'RIFF') throw new Error('合成音频格式无效');
+    return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+}
+
+function selectedVoice(input) {
+    const voice = input.voice?.trim() || (input.tts === 'custom' ? 'alloy' : voiceDefault);
+    if (voice.length > 100 || /[\r\n]/.test(voice)) throw new Error('音色标识无效');
+    return voice;
+}
+
 class SpeechController {
     constructor({ userData, storage, local, bundledLocalRoot }) {
         this.storage = storage;
@@ -137,46 +187,69 @@ class SpeechController {
         this.settings = { ...defaults, ...(fs.existsSync(this.file) ? JSON.parse(fs.readFileSync(this.file, 'utf8')) : {}) };
         this.local = local;
         this.bundledLocalRoot = bundledLocalRoot;
-        this.backends = { minimax: () => new MiniMaxSpeech(this.key()) };
-        if (local) this.backends.local = () => local.provider({ ...this.settings,
-            localRoot: this.settings.localRoot || this.bundledLocalRoot });
         this.usage = fs.existsSync(this.usageFile) ? JSON.parse(fs.readFileSync(this.usageFile, 'utf8')) : [];
         this.clips = new Map();
         this.clipBytes = 0;
         this.active = null;
     }
 
-    key() {
-        const encrypted = this.settings.encryptedKey;
-        return encrypted ? this.storage.decryptString(Buffer.from(encrypted, 'base64')) : process.env.MINIMAX_SPEECH_KEY?.trim();
+    state() {
+        const publicProfile = kind => {
+            const { baseUrl, model, encryptedKey } = this.settings[kind + 'Profile'] || {};
+            return { baseUrl, model, keyConfigured: Boolean(encryptedKey) };
+        };
+        const { asr, tts, voice, autoSpeak, microphone, speaker, dictionary, pronunciation } = this.settings;
+        return { asr, tts, voice, autoSpeak, microphone, speaker, dictionary, pronunciation,
+            asrProfile: publicProfile('asr'), ttsProfile: publicProfile('tts'),
+            providers: ['minimax', 'custom', ...(this.bundledLocalRoot ? ['local'] : [])] };
     }
 
-    state() {
-        const { encryptedKey, ...settings } = this.settings;
-        return { ...settings, onlineReady: Boolean(encryptedKey || process.env.MINIMAX_SPEECH_KEY),
-            providers: Object.keys(this.backends), bundledLocal: Boolean(this.bundledLocalRoot) };
+    profile(kind, input) {
+        const provider = input[kind];
+        if (provider === 'off') return { provider };
+        if (provider === 'local') {
+            if (!this.bundledLocalRoot) throw new Error('本机语音组件未安装');
+            return { provider };
+        }
+        if (!['minimax', 'custom'].includes(provider)) throw new Error('语音服务不可用');
+        const form = input[kind + 'Profile'] || {};
+        const baseUrl = provider === 'custom' ? endpoint(form.baseUrl) : onlineHost;
+        const model = provider === 'custom' ? form.model?.trim() : undefined;
+        if (provider === 'custom' && (!model || model.length > 160 || /[\x00-\x20]/.test(model))) {
+            throw new Error('请输入有效的语音模型名称');
+        }
+        const saved = this.settings[kind + 'Profile'];
+        const encryptedKey = saved?.provider === provider && saved.baseUrl === baseUrl ? saved.encryptedKey : undefined;
+        const key = normalizeKey(form.key) || (encryptedKey
+            ? this.storage.decryptString(Buffer.from(encryptedKey, 'base64')) : '');
+        if (!key) throw new Error(kind === 'asr' ? '请配置识别服务的 API 密钥' : '请配置播报服务的 API 密钥');
+        return { provider, baseUrl, model, encryptedKey, key };
+    }
+
+    saveProfile(kind, input) {
+        const { key, ...profile } = this.profile(kind, input);
+        if (profile.provider === 'local') this.local.verify(this.bundledLocalRoot, kind);
+        if (key && normalizeKey(input[kind + 'Profile']?.key)) {
+            if (!this.storage.isEncryptionAvailable()) throw new Error('系统凭据加密不可用');
+            profile.encryptedKey = this.storage.encryptString(key).toString('base64');
+        }
+        return profile;
+    }
+
+    adapter(profile) {
+        if (profile.provider === 'local') return this.local.provider({ localRoot: this.bundledLocalRoot });
+        if (profile.provider === 'custom') return new CompatibleSpeech(profile);
+        if (profile.provider === 'minimax') return new MiniMaxSpeech(profile.key);
+        throw new Error('此语音功能已关闭');
     }
 
     configure(input) {
-        for (const mode of [input.asr, input.tts]) {
-            if (mode !== 'off' && !Object.hasOwn(this.backends, mode)) throw new Error('语音服务不可用');
-        }
-        let encryptedKey = this.settings.encryptedKey;
-        if (input.key?.trim()) {
-            if (!this.storage.isEncryptionAvailable()) throw new Error('系统凭据加密不可用');
-            encryptedKey = this.storage.encryptString(input.key.trim()).toString('base64');
-        }
-        const voice = input.voice?.trim() || voiceDefault;
-        if (voice.length > 100 || /[\r\n]/.test(voice)) throw new Error('音色标识无效');
-        const localRoot = input.localRoot?.trim() || '';
-        for (const kind of ['asr', 'tts']) {
-            if (input[kind] === 'local') this.local.verify(localRoot || this.bundledLocalRoot, kind);
-        }
+        const voice = selectedVoice(input);
         const device = id => typeof id === 'string' && id.length <= 200 ? id : '';
         const settings = { asr: input.asr, tts: input.tts, voice, autoSpeak: Boolean(input.autoSpeak),
             microphone: device(input.microphone), speaker: device(input.speaker),
             dictionary: dictionary(input.dictionary ?? []), pronunciation: dictionary(input.pronunciation ?? []),
-            localRoot, encryptedKey };
+            asrProfile: this.saveProfile('asr', input), ttsProfile: this.saveProfile('tts', input) };
         writeRecord(this.file, settings);
         this.cancel();
         this.clips.clear();
@@ -192,23 +265,22 @@ class SpeechController {
 
     async perform(kind, units, execute) {
         this.cancel();
-        const mode = this.settings[kind];
-        if (mode === 'off') throw new Error('此语音功能已关闭');
-        const provider = this.backends[mode]();
+        const profile = this.profile(kind, this.settings);
+        const provider = this.adapter(profile);
         const controller = new AbortController();
         this.active = controller;
         const started = performance.now();
         try {
             const { result, cached = false } = await execute(provider, controller.signal);
             controller.signal.throwIfAborted();
-            const records = [...this.usage.slice(-199), { kind, provider: mode, units, cached,
+            const records = [...this.usage.slice(-199), { kind, provider: profile.provider, units, cached,
                 elapsedMs: Math.round(performance.now() - started), at: new Date().toISOString() }];
             writeRecord(this.usageFile, records);
             this.usage = records;
             return result;
         } catch (error) {
             if (controller.signal.aborted) return null;
-            throw error;
+            throw new Error(profile.key ? String(error.message).replaceAll(profile.key, '[密钥]') : error.message);
         } finally {
             if (this.active === controller) this.active = null;
         }
@@ -230,10 +302,9 @@ class SpeechController {
         const spoken = correctTerms(text.trim(), this.settings.pronunciation);
         if (spoken.length > 360) throw new Error('应用发音词表后播报片段过长');
         return this.perform('tts', { characters: [...spoken].length }, async (provider, signal) => {
-            if (this.settings.tts === 'local') this.local.verify(this.settings.localRoot || this.bundledLocalRoot, 'tts');
             const cached = this.clips.has(spoken);
             const bytes = this.clips.get(spoken) ?? await provider.synthesize(spoken, this.settings.voice, signal);
-            if (bytes.length < 44 || bytes.toString('ascii', 0, 4) !== 'RIFF') throw new Error('合成音频格式无效');
+            const result = wavBuffer(bytes);
             signal.throwIfAborted();
             if (!cached) {
                 while (this.clips.size >= 64 || this.clipBytes + bytes.length > 16 * 1024 * 1024) {
@@ -244,8 +315,25 @@ class SpeechController {
                 this.clips.set(spoken, bytes);
                 this.clipBytes += bytes.length;
             }
-            return { result: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), cached };
+            return { result, cached };
         });
+    }
+
+    async test(kind, input, audio) {
+        if (!['asr', 'tts'].includes(kind)) throw new Error('语音测试类型无效');
+        const profile = this.profile(kind, input);
+        const adapter = this.adapter(profile);
+        const signal = AbortSignal.timeout(55_000);
+        try {
+            if (kind === 'asr') {
+                const result = await adapter.recognize(readPcmWav(audio), signal, () => {});
+                if (!result.trim() || result.length > 4000) throw new Error('没有识别到可用的文字');
+                return result;
+            }
+            return wavBuffer(await adapter.synthesize('你好，我是规智。语音播报已就绪。', selectedVoice(input), signal));
+        } catch (error) {
+            throw new Error(profile.key ? String(error.message).replaceAll(profile.key, '[密钥]') : error.message);
+        }
     }
 }
 

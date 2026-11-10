@@ -12,7 +12,7 @@ class LocalSpeechRuntime {
     }
 
     verify(location, kind) {
-        if (!location) throw new Error('请选择已准备的本地语音目录');
+        if (!location) throw new Error('本机语音组件未安装');
         const root = this.externalPath(location);
         const identity = path.join(root, 'identity.json');
         if (!fs.existsSync(identity) || !fs.existsSync(path.join(root, 'engine', 'sherpa_onnx'))) {

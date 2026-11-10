@@ -41,13 +41,13 @@
                     colorBgContainer: dark ? '#142b23' : '#ffffff', borderRadius: 8, controlHeight: 36,
                     fontFamily: '"Segoe UI","Microsoft YaHei UI",sans-serif' } } }, children);
     }
-    function Titlebar({ settings, back, left, right, arcgis, connected, resize }) {
+    function Titlebar({ settings, onboarding, back, left, right, arcgis, connected, resize }) {
         return h('header', { className: 'titlebar' },
             h('div', { className: 'title-group' },
-                settings ? iconButton('back', '返回工作台', { onClick: back })
-                    : iconButton('left', '折叠或展开导航栏', { onClick: left, onKeyDown: resize(0) }),
-                brand(), h('span', { className: 'title-path' }, settings ? '设置' : '工作台')),
-            !settings && h('div', { className: 'title-group' },
+                !onboarding && (settings ? iconButton('back', '返回工作台', { onClick: back })
+                    : iconButton('left', '折叠或展开导航栏', { onClick: left, onKeyDown: resize(0) })),
+                brand(), !onboarding && h('span', { className: 'title-path' }, settings ? '设置' : '工作台')),
+            !settings && !onboarding && h('div', { className: 'title-group' },
                 button('map', 'ArcGIS 扩展', { type: 'text', onClick: arcgis,
                     title: connected ? '已配置 ArcGIS 扩展' : '配置 ArcGIS 扩展' }),
                 iconButton('right', '折叠或展开材料与成果', { onClick: right, onKeyDown: resize(1) })));

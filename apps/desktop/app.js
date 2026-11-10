@@ -133,7 +133,6 @@
                 setState(value);
                 setAppearance(value.appearance);
                 select(value.focusTask);
-                if (!launcher && !value.settings.workspace) showSettings(true);
             }).catch(fail);
             api.readDraft().then(receiveDraft).catch(fail);
             const callbacks = [
@@ -182,7 +181,7 @@
                 return;
             }
             if (busy || !draft.prompt.trim() || !canSubmit) return;
-            if (!state?.settings.workspace) return api.workbench().catch(fail);
+            if (!ready) return api.workbench().catch(fail);
             setError('');
             setSending(true);
             try {
@@ -211,7 +210,7 @@
             select(null);
             void api.submit({ prompt: '开始新任务' }).then(setState).catch(fail);
         }
-        const ready = Boolean(state?.settings.workspace);
+        const ready = Boolean(state?.settings.workspace && state?.settings.modelConfig);
         const freeInputs = draft.materials.inputs || [];
         const picked = [draft.project, draft.control, ...Object.values(draft.materials).flat()].filter(Boolean);
         function appendMaterials(items) {
@@ -298,7 +297,8 @@
                 ready && h('section', { className: 'quick-section' }, h('div', { className: 'section-head' },
                     h('h2', null, '常用业务'), h(antd.Button, { type: 'link', onClick: () => showBusiness('browse') }, '全部业务')), tiles)),
             h('footer', { className: 'launcher-footer' },
-                h('span', { className: 'muted' }, ready ? '在线服务' : '请在工作台选择成果保存位置'),
+                h('span', { className: 'muted' }, ready ? (state.settings.modelConfig.mode === 'local' ? '本地服务' : '在线服务')
+                    : '请在工作台完成首次设置'),
                 h('span', null, h('kbd', null, 'Enter'), ' 发送　', h('kbd', null, 'Esc'), ' 收起')));
         const sidebar = h('aside', { className: 'sidebar' },
             button('plus', '新建任务', { type: 'primary', className: 'new-task', onClick: startNew }),
@@ -338,15 +338,18 @@
                         task.hasReport && button('file', '办理报告', { onClick: () => api.report(task.id).catch(fail) }),
                         ...(task.deliveries || []).map(kind => h('div', { key: kind },
                             button('file', deliveries[kind] || kind, { onClick: () => api.delivery(task.id, kind).catch(fail) })))))));
-        const layout = launcher ? quick : settings && state ? h(window.GuizhiSettings, {
+        async function configure(value) {
+            const next = await api.configure(value);
+            setState(next);
+            if (value.workspace !== state.settings.workspace || !ready) select(next.focusTask);
+            showSettings(false);
+        }
+        const layout = launcher ? quick : !state ? null : !ready ? h(window.GuizhiOnboarding, { state, save: configure })
+            : settings ? h(window.GuizhiSettings, {
             state, appearance, saveAppearance, entries: coordinates, setEntries: setCoordinates,
             close: () => showSettings(false),
             manage: () => showBusiness('manage'), openArcgis: () => showArcmap(true),
-            save: async value => {
-                const next = await api.configure(value);
-                setState(next);
-                if (value.workspace !== state.settings.workspace) select(next.focusTask);
-            },
+            save: configure,
         }) : h(Workbench, { appearance, saveAppearance, sidebar, conversation, inspector, fail,
             arcgis: () => { if (ready && !busy) showArcmap(true); else if (!ready) showSettings(true); },
             connected: Boolean(state?.settings.arcmapBridge) });

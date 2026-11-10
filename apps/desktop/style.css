@@ -130,6 +130,24 @@ kbd { display: inline-block; color: var(--muted); font: 12px "Segoe UI",sans-ser
 .setting-fields { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); width: 100%; gap: 12px; }
 .setting-fields label, .voice-fields label:not(.voice-toggle) { display: grid; gap: 5px; min-width: 0; }
 .settings-footer { padding: 10px 32px; border-top: 1px solid var(--line); background: var(--panel); }
+.onboarding-frame { min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; background: var(--sub); }
+.onboarding-header { padding: 24px 32px 18px; background: var(--panel); border-bottom: 1px solid var(--line); }
+.onboarding-header h1 { margin: 0 0 18px; font-size: 25px; }
+.onboarding-content { width: min(100%, 800px); margin-inline: auto; }
+.onboarding-scroll { overflow: auto; padding: 4px 32px 24px; }
+.onboarding-footer { padding: 12px 32px; background: var(--panel); border-top: 1px solid var(--line); }
+.onboarding-footer .business-actions { flex-wrap: wrap; }
+.onboarding-summary { justify-items: stretch; }
+.onboarding-summary div { display: grid; grid-template-columns: minmax(100px, 1fr) 3fr; gap: 12px; padding: 6px 0; }
+.onboarding-summary dt { color: var(--muted); }
+.onboarding-summary dd { margin: 0; overflow-wrap: anywhere; }
+.mode-choices { width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.mode-choice { display: flex; align-items: center; gap: 12px; min-height: 72px; text-align: left; padding: 11px; }
+.mode-choice.selected { border-color: var(--accent); background: var(--soft); }
+.mode-choice b, .mode-choice small { display: block; }
+.service-actions, .service-actions .business-actions { flex-wrap: wrap; }
+.speech-form { width: 100%; }
+.speech-form > .voice-toggle { margin-top: 14px; }
 .field-row input { flex: 1; min-width: 0; }
 dialog { color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 16px; width: min(680px,92vw); max-height: 90vh; padding: 20px; box-shadow: 0 16px 60px var(--shadow); }
 dialog::backdrop { background: #0d1c1668; }

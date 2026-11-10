@@ -5,7 +5,8 @@ for (const name of ['state', 'configure', 'workspace', 'material', 'submit', 'ca
     'skills', 'capabilities', 'capability', 'skillShow', 'skillPreview', 'skillPublish', 'skillOpen', 'skillTemplate', 'delivery',
     'coordinates', 'importCoordinate', 'mapAction', 'layoutReport', 'approvalSource', 'workbench',
     'appearance', 'readDraft', 'saveDraft', 'openLauncher', 'hideLauncher', 'portraitVoice', 'voiceDraft', 'voiceSubmit',
-    'portraitHit', 'speechConfigure', 'speechRecognize', 'speechSynthesize', 'speechCancel', 'speechFolder',
+    'workspaceReady', 'modelList', 'modelTest',
+    'portraitHit', 'speechConfigure', 'speechRecognize', 'speechSynthesize', 'speechCancel', 'speechTest',
     'arcmapBridge', 'arcmapFile', 'arcmapExchange']) {
     api[name] = (...args) => ipcRenderer.invoke('guizhi:' + name, ...args);
 }
