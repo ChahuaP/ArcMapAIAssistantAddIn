@@ -35,13 +35,7 @@
     window.GuizhiMap = function ResultMap({ map, choose, selected }) {
         const [zoom, change] = useState(1);
         const [coverage, showCoverage] = useState(true);
-        if (!map?.bounds) return h('section', { className: 'map-panel map-empty', 'aria-label': '成果地图' },
-            h('div', { className: 'contours', 'aria-hidden': true },
-                h('svg', { viewBox: '0 0 350 490' }, ...Array.from({ length: 12 }, (_, i) =>
-                    h('ellipse', { key: i, cx: 195, cy: 230, rx: 18 + i * 12, ry: 12 + i * 15,
-                        transform: 'rotate(32 195 230)' })))),
-            h('div', { className: 'map-caption' }, h('span', { className: 'locator' }, window.GuizhiShell.icon('map')),
-                h('h2', null, '暂无空间成果')));
+        if (!map?.bounds) return null;
         const [left, bottom, right, top] = map.bounds;
         const span = Math.max(right - left, top - bottom) || 1;
         const width = Math.max(right - left, span * 0.06) * 1.18 / zoom;
