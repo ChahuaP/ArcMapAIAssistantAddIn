@@ -1,4 +1,5 @@
 const { BrowserWindow, globalShortcut, ipcMain, screen } = require('electron');
+const { release } = require('node:os');
 const path = require('node:path');
 const { setTimeout: delay } = require('node:timers/promises');
 const { ScreenTarget, maxAge } = require('./screen-target.cjs');
@@ -7,6 +8,8 @@ const shortcut = 'CommandOrControl+Alt+Escape';
 const base = 'guizhi://app/visual.html?view=';
 const thinking = { kind: 'think', label: '规智正在分析任务' };
 const wait = { kind: 'stop', label: '规智正在安全停止' };
+// Older Windows releases replace a capture-excluded window with a black rectangle.
+const supportsCaptureExclusion = process.platform === 'win32' && Number(release().split('.')[2]) >= 19041;
 
 class VisualSession {
     constructor({ python, masks, cancel }) {
@@ -39,13 +42,15 @@ class VisualSession {
                 contextIsolation: true, sandbox: true, backgroundThrottling: false } });
         window.setAlwaysOnTop(true, 'screen-saver');
         window.setIgnoreMouseEvents(!pointer);
+        const fullFlow = name === 'edge' && supportsCaptureExclusion;
+        if (fullFlow) window.setContentProtection(true);
         window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
         window.webContents.on('will-navigate', event => event.preventDefault());
         window.webContents.on('render-process-gone', () => {
             this.dismissed = this.task;
             this.hide();
         });
-        return { window, ready: window.loadURL(base + name) };
+        return { window, ready: window.loadURL(base + name + (fullFlow ? '&full-flow' : '')) };
     }
 
     ensureChrome() {

@@ -1,13 +1,52 @@
 *{box-sizing:border-box}
 html,body{height:100%;margin:0;overflow:hidden;background:transparent;color:#ebf8ff;font:14px "Segoe UI","Microsoft YaHei",sans-serif}
 #edge,#outline,#status{display:none}
-body[data-view=edge] #edge{display:block;position:absolute;inset:0;border:2px solid transparent;
-    border-image:linear-gradient(124deg,#82deff,#276de9 24%,#6b8efa55 51%,#5cc7ff 79%,#99e5ff) 1;
-    box-shadow:inset 0 0 14px #297afa7d}
-#edge i{position:absolute;width:6px;height:6px;background:#b1ecff;border-radius:50%;box-shadow:0 0 8px #78d7ff;
-    animation:breathe 2.6s ease-in-out infinite}
-#edge i:nth-child(1){top:4px;left:4px}#edge i:nth-child(2){top:4px;right:4px}
-#edge i:nth-child(3){bottom:4px;left:4px}#edge i:nth-child(4){bottom:4px;right:4px}
+body[data-view=edge] #edge {
+    display: block;
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    --glow-depth: clamp(64px, 12vh, 136px);
+    background:
+        linear-gradient(#1689eeae, #1767af42 54%, transparent) top / 100% var(--glow-depth) no-repeat,
+        linear-gradient(to top, #1689eec4, #1767af42 54%, transparent) bottom / 100% var(--glow-depth) no-repeat,
+        linear-gradient(to right, #1689eeae, #1767af42 54%, transparent) left / var(--glow-depth) 100% no-repeat,
+        linear-gradient(to left, #1689eeae, #1767af42 54%, transparent) right / var(--glow-depth) 100% no-repeat;
+}
+.edge-dots {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    background: #ffffff10;
+    mask: radial-gradient(circle, #000 0.55px, transparent 1.2px) 0 0 / 8px 8px repeat;
+}
+.edge-current {
+    /* Where capture exclusion is unavailable, keep moving pixels outside the comparison inset. */
+    --flow-depth: 30px;
+    position: absolute;
+    inset: 0;
+    mask:
+        linear-gradient(#000, transparent) top / 100% var(--flow-depth) no-repeat,
+        linear-gradient(to top, #000, transparent) bottom / 100% var(--flow-depth) no-repeat,
+        linear-gradient(to right, #000, transparent) left / var(--flow-depth) 100% no-repeat,
+        linear-gradient(to left, #000, transparent) right / var(--flow-depth) 100% no-repeat;
+}
+body[data-full-flow] .edge-current { mask: none; }
+.edge-current::before {
+    content: '';
+    position: absolute;
+    inset: -24%;
+    background:
+        radial-gradient(ellipse 19% 14% at 23% 61%, #fffffff2, #ffffff54 51%, transparent),
+        radial-gradient(ellipse 14% 15% at 46% 38%, #ffffffcc, #ffffff30 54%, transparent),
+        radial-gradient(ellipse 21% 12% at 73% 66%, #ffffffe8, #ffffff4a 50%, transparent),
+        radial-gradient(ellipse 14% 12% at 75% 29%, #ffffffac, #ffffff2a 56%, transparent);
+    animation: edge-current 8s ease-in-out infinite alternate;
+}
+@keyframes edge-current {
+    from { transform: translate3d(-18%, 11%, 0) rotate(-8deg); }
+    to { transform: translate3d(17%, -10%, 0) rotate(8deg); }
+}
 body[data-view=outline] #outline{display:block;position:absolute;inset:2px;border:2px solid #72c9ff;
     border-radius:8px;box-shadow:0 0 8px #0c5cceea;animation:breathe 1.4s ease-in-out infinite}
 body[data-view=status] #status{display:flex;position:absolute;align-items:center;gap:12px;inset:6px 8px 8px;padding:0 10px 0 15px;
