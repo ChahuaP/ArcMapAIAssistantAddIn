@@ -134,7 +134,6 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
         '--workspace', workspace, '--dispatch', directory, '--model-provenance', JSON.stringify(provenance)];
     if (options.projectPlan) mcpArgs.push('--project-plan', options.projectPlan);
     if (options.controlPlan) mcpArgs.push('--control-plan', options.controlPlan);
-    if (options.skill) mcpArgs.push('--skill', options.skill);
     if (options.previousRun) mcpArgs.push('--previous-run', options.previousRun);
     const deadline = AbortSignal.timeout(timeoutMs);
     const stop = signal ? AbortSignal.any([signal, deadline]) : deadline;
@@ -184,6 +183,7 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
         } else {
             stopProgress = watchRun(workspace, id, event);
             mcpArgs.push('--materials', JSON.stringify(prepared.materials));
+            if (prepared.selected) mcpArgs.push('--skill', prepared.selected.reference);
             if (prepared.key) mcpArgs.push('--plan-key', prepared.key);
             const env = { ...runtimeEnv(options, mcpArgs),
                 GUIZHI_BUDGET_CONFIG: JSON.stringify({ tokens, calls, checkpoint: budgetPath, operation: operationPath }) };
@@ -196,7 +196,9 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
             if (!existsSync(budgetPath)) throw new Error('Model budget guard did not initialize');
             const roles = Object.fromEntries(Object.entries(materials).map(([role, items]) => [role, items.length]));
             const bound = options.skillParameters !== undefined ? '办理参数已在本机绑定，执行技能时省略 skill_parameters。' : '';
-            const context = `已绑定材料数量 ${JSON.stringify(roles)}。已选技能 ${options.skill || '无'}。${bound}有已选历史成果：${Boolean(options.previousRun)}。\n`;
+            const selection = prepared.selected ? `已选技能和本轮材料摘要：${JSON.stringify(prepared.selected)}。`
+                : `已绑定材料数量 ${JSON.stringify(roles)}。已选技能无。`;
+            const context = `${selection}${bound}有已选历史成果：${Boolean(options.previousRun)}。\n`;
             const conversation = history.length ? '最近对话记录（每项为用户提问与规智答复）：' + JSON.stringify(history) + '\n' : '';
             const speech = options.dialogue ? '本轮使用语音输入。先实际办理，再用简洁口语回答，不用 Markdown。\n' : '';
             const run = prompt => Promise.race([harness.run(prompt, {

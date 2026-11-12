@@ -18,6 +18,7 @@ from guizhi.application.tasks import run_operation
 from guizhi.domain.semantics import Fact
 from guizhi.domain.skills import Step
 from guizhi.infrastructure.cache import reuse_job, verified_run
+from guizhi.infrastructure.materials import bound_layer_metadata
 from guizhi.infrastructure.operations.evidence import read_artifact
 # Load the native GIS dependencies before the stdio server starts its tool threads.
 from guizhi.infrastructure.operations.runner import capability
@@ -148,25 +149,10 @@ def main():
     @server.tool
     def describe_bound_layers() -> dict:
         """查看已绑定材料类型、矢量字段或栅格的坐标系、波段与分辨率。"""
-        import pyogrio
-        from guizhi.domain.capabilities import material_kind
-        from guizhi.infrastructure.operations.raster import metadata
-
-        result = {}
-        for role, group in materials.items():
-            for item in group:
-                kind = material_kind(item["file"])
-                description = {}
-                try:
-                    if kind == "vector":
-                        info = pyogrio.read_info(item["file"], layer=item["layer"])
-                        description = {"fields": info["fields"].tolist(), "geometry": info["geometry_type"], "crs": info["crs"]}
-                    elif kind == "raster":
-                        info = metadata(item["file"])
-                        description = {key: info[key] for key in ("crs", "bands", "width", "height", "resolution")}
-                except (ValueError, OSError) as exc:
-                    return input_issue("invalid_materials", str(exc))
-                result.setdefault(role, []).append({"kind": kind, **description})
+        try:
+            result = bound_layer_metadata(materials)
+        except (ValueError, OSError) as exc:
+            return input_issue("invalid_materials", str(exc))
         (dispatch / "discovery").touch()
         return result
 

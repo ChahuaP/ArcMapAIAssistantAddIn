@@ -6,6 +6,7 @@ import json
 from guizhi.application import skills
 from guizhi.infrastructure.cache import (READ_OPERATIONS, fingerprint, implementation, input_signature,
                                          read_entry, verified_run, write_entry)
+from guizhi.infrastructure.materials import bound_layer_metadata
 from guizhi.infrastructure.workspace import Workspace
 
 
@@ -54,6 +55,23 @@ def remember_plan(workspace, key, record):
         write_entry(workspace, "plan", key, {"run_id": record["id"]})
 
 
+def selected_context(workspace, reference, materials):
+    skill = skills.get_skill(workspace, reference)
+    layers = bound_layer_metadata(materials)
+    for group in layers.values():
+        for item in group:
+            if "fields" in item:
+                item["field_count"] = len(item.pop("fields"))
+            if item.get("crs") and len(item["crs"]) > 160:
+                item["crs"] = "已定义的自定义坐标系"
+    return {"reference": f"{skill['id']}@{skill['revision']}", "title": skill["title"],
+            "roles": [{key: role[key] for key in ("id", "label", "kind", "geometry", "coordinate", "minimum", "maximum", "resource")}
+                      for role in skill["materials"]],
+            "parameters": skill.get("parameters", {}),
+            "steps": [{"id": step["id"], "operation": step["operation"]} for step in skill["steps"]],
+            "layers": layers}
+
+
 def replay(root, request_path):
     workspace = Workspace(root, create=True)
     request_path = request_path.resolve(strict=True)
@@ -64,7 +82,10 @@ def replay(root, request_path):
     key, materials = plan_fingerprint(workspace, request)
     entry = read_entry(workspace, "plan", key) if key else None
     if not entry or not verified_run(workspace, entry["run_id"]):
-        return {"key": key, "operation": None, "materials": materials}
+        result = {"key": key, "operation": None, "materials": materials}
+        if request["skill"]:
+            result["selected"] = selected_context(workspace, request["skill"], materials)
+        return result
     previous = workspace.read(entry["run_id"])
     plan = previous["task"]["request"]["parameters"]["specification"]
     if key != plan_fingerprint(workspace, request)[0]:

@@ -55,6 +55,25 @@ def describe(file):
             "layerInfo": layers, "metadata": metadata}
 
 
+def bound_layer_metadata(materials):
+    """Describe selected layers by role, without opening feature rows or returning paths."""
+    result = {}
+    for role, group in materials.items():
+        for item in group:
+            kind = material_kind(item["file"])
+            description = {"kind": kind}
+            if kind == "vector":
+                info = pyogrio.read_info(item["file"], layer=item["layer"], force_feature_count=False)
+                description.update(fields=info["fields"].tolist(), geometry=info["geometry_type"], crs=info["crs"])
+            elif kind == "raster":
+                from guizhi.infrastructure.operations.raster import metadata
+
+                info = metadata(item["file"])
+                description.update({key: info[key] for key in ("crs", "bands", "width", "height", "resolution")})
+            result.setdefault(role, []).append(description)
+    return result
+
+
 def directory_files(folder):
     count = 0
     for root, folders, files in os.walk(folder, followlinks=False):
