@@ -8,7 +8,7 @@ const { SpeechController } = require('./speech.cjs');
 const { LocalSpeechRuntime } = require('./local-speech.cjs');
 const { VisualSession } = require('./visual.cjs');
 const { createShell } = require('./shell.cjs');
-const { listModels, testModel } = require('./model-service.cjs');
+const { listModels, checkModelConnection, testModel } = require('./model-service.cjs');
 const { formats, materialBindings } = require('./materials.cjs');
 const { printReport } = require('./report-export.cjs');
 const { ArcGisSync } = require('./arcgis-sync.cjs');
@@ -235,7 +235,7 @@ async function startDesktop(options) {
     });
     bind('modelTest', input => {
         const { config, key } = controller.selectModel(input);
-        return testModel(controller.runtime, config, key);
+        return checkModelConnection(controller.runtime, config, key);
     });
     bind('diagnostics', async (surface, check) => {
         if (surface !== window || typeof check !== 'boolean') throw new Error('诊断请求无效');

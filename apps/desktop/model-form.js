@@ -40,7 +40,7 @@
             verified(false);
         }
         async function run(kind) {
-            setStatus('');
+            setStatus(kind === 'test' ? '正在检查模型服务…' : '');
             setError('');
             setLoading(kind);
             busy(true);
@@ -51,11 +51,11 @@
                     setListed(models);
                     setStatus(models.length ? '请选择模型，也可手动输入名称' : '服务未列出模型，请手动输入名称');
                 } else {
-                    await api.modelTest(value);
-                    setStatus('连接正常，模型已完成工具调用');
+                    const result = await api.modelTest(value);
+                    setStatus(result.check === 'catalog' ? '连接正常，已找到所选模型' : '连接正常，模型已响应');
                     verified(true);
                 }
-            } catch (error) { setError(errorText(error)); }
+            } catch (error) { setStatus(''); setError(errorText(error)); }
             finally { setLoading(''); busy(false); }
         }
         const input = (name, props = {}) => h('input', { ...props, disabled: Boolean(loading),
