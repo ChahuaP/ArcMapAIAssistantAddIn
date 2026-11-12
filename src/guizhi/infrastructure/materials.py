@@ -1,5 +1,6 @@
 """Inspect file inputs and unpack material bundles into the task workspace."""
 from itertools import islice
+import json
 import os
 from pathlib import Path, PurePosixPath, PureWindowsPath
 import shutil
@@ -143,3 +144,16 @@ def intake(workspace, paths, kind="any"):
             if extracted and extracted.exists() and len(items) == accepted:
                 shutil.rmtree(extracted)
     return {"items": items, "issues": list(islice(issues, 32))}
+
+
+def serve(requests, output):
+    from guizhi.infrastructure.workspace import Workspace
+
+    for line in requests:
+        request = json.loads(line)
+        try:
+            workspace = Workspace(Path(request["workspace"]), create=True)
+            result = {"result": intake(workspace, request["paths"], request["kind"])}
+        except Exception as error:
+            result = {"error": str(error)}
+        print(json.dumps({"id": request["id"], **result}), file=output, flush=True)

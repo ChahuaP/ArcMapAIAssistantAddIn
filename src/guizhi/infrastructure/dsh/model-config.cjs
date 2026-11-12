@@ -70,20 +70,29 @@ function route(config) {
     return { id, providers: { [id]: settings } };
 }
 
-function modelFailure(reason = '') {
+function modelFailureCode(reason = '') {
     if (/\b(401|403)\b|unauthorized|authentication_error|invalid api.?key/i.test(reason)) {
-        return '模型服务认证失败，请检查 API 密钥和模型权限。';
+        return 'model_auth';
     }
     if (/\b429\b|rate.?limit|quota|insufficient balance/i.test(reason)) {
-        return '模型服务限流或额度不足，请稍后重试或检查服务额度。';
+        return 'model_limit';
     }
     if (/\b404\b|unknown model|model.+(?:not found|not available|not supported)/i.test(reason)) {
-        return '模型服务未找到所选模型，请在设置中重新查询并选择。';
+        return 'model_missing';
     }
     if (/connection|ECONN|ENOTFOUND|ETIMEDOUT|fetch|network|timeout/i.test(reason)) {
-        return '无法连接模型服务或响应超时，请检查服务地址和网络。';
+        return 'model_network';
     }
     return '';
 }
 
-module.exports = { presets, endpoint, validModel, modelConfig, modelKey, credentialScope, normalizeKey, route, modelFailure };
+function modelFailure(reason) {
+    return {
+        model_auth: '模型服务认证失败，请检查 API 密钥和模型权限。',
+        model_limit: '模型服务限流或额度不足，请稍后重试或检查服务额度。',
+        model_missing: '模型服务未找到所选模型，请在设置中重新查询并选择。',
+        model_network: '无法连接模型服务或响应超时，请检查服务地址和网络。',
+    }[modelFailureCode(reason)] || '';
+}
+
+module.exports = { presets, endpoint, validModel, modelConfig, modelKey, credentialScope, normalizeKey, route, modelFailure, modelFailureCode };

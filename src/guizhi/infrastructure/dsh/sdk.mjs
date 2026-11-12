@@ -245,6 +245,7 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
                         (!Object.keys(roles).length && !options.skill && answer) ? 'answered'
                         : Object.keys(roles).length ? 'no_result' : 'missing_materials'));
                 const terminal = response.events.findLast(fact => fact.type === 'turn/end');
+                const failure = terminal?.data.reason.error;
                 const candidatePath = join(directory, 'candidate.json');
                 result = { status, finish_reason: response.finishReason,
                     response: status === 'succeeded' ? verifiedResponse(receipt, options.dialogue)
@@ -252,7 +253,7 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
                             : status === 'no_result' ? '本轮没有生成可核验的成果。可以继续让我重新办理。' : answer),
                     operation: receipt, ...(issue && !receipt ? { input_issue: issue } : {}),
                     ...(status === 'answered' && existsSync(candidatePath) ? { candidate: readJson(candidatePath) } : {}),
-                    ...(terminal?.data.reason.error ? { error: safeError(terminal.data.reason.error) } : {}) };
+                    ...(failure ? { error: safeError(failure.message), error_code: failure.code } : {}) };
             }
         }
     } catch (error) {
@@ -278,7 +279,7 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
             ? null : accounting.total_tokens + tokens.totalTokens;
     }
     if (typeof result.response === 'string') result.response = safeError(result.response);
-    const receipt = { ...result, id, directory, provider, model,
+    const receipt = { ...result, id, directory, provider, model, workflow_attempted: attempted,
         elapsed_ms: Math.round(performance.now() - started), execution: { gis: 'local', model: modelConfig.mode },
         budget: existsSync(budgetPath) ? readJson(budgetPath) : null,
         sdk_version: versions['@deepseek-ai/dsh-sdk-client'], usage: usage.size ? accounting : null };

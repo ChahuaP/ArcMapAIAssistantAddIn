@@ -15,7 +15,7 @@ from guizhi.infrastructure.workspace import Workspace
 def main() -> int:
     parser = argparse.ArgumentParser(prog="guizhi")
     parser.add_argument("--version", action="version", version=product_version())
-    parser.add_argument("--workspace", type=Path, required=True)
+    parser.add_argument("--workspace", type=Path)
     commands = parser.add_subparsers(dest="command", required=True)
     run = commands.add_parser("run", help="Import, count and export a GeoPackage layer")
     run.add_argument("--input", required=True, type=Path)
@@ -34,6 +34,7 @@ def main() -> int:
     commands.add_parser("layers").add_argument("file", type=Path)
     commands.add_parser("material-describe").add_argument("file", type=Path)
     commands.add_parser("material-intake").add_argument("request", type=Path)
+    commands.add_parser("_material-reader")
     shapefile = commands.add_parser("export-shp")
     shapefile.add_argument("run_id")
     shapefile.add_argument("kind")
@@ -98,7 +99,14 @@ def main() -> int:
     commands.add_parser("arcgis-view").add_argument("bridge", type=Path)
     commands.add_parser("_dispatch-replay").add_argument("request", type=Path)
     args = parser.parse_args()
+    if args.workspace is None and args.command != "_material-reader":
+        parser.error("the following arguments are required: --workspace")
     try:
+        if args.command == "_material-reader":
+            from guizhi.infrastructure.materials import serve
+
+            serve(sys.stdin.buffer, sys.stdout)
+            return 0
         if args.command in {"release-seed", "release-active", "tool-plan", "tool-apply"}:
             from guizhi.application import tool_repair
             from guizhi.infrastructure import releases

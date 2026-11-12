@@ -72,6 +72,15 @@
             catch (issue) { setError(errorText(issue)); }
             finally { setBusy(false); }
         }
+        async function toggleUpload(enabled) {
+            setBusy(true);
+            setError('');
+            try {
+                const upload = await api.diagnosticsUpload(enabled);
+                setReport(current => ({ ...current, upload }));
+            } catch (issue) { setError(errorText(issue)); }
+            finally { setBusy(false); }
+        }
         useEffect(() => { void refresh(); }, []);
         const statuses = { off: '关闭', verified: '可用', failed: '检查失败', ready: '组件就绪',
             configured: '已配置 · 待测试', missing: '未配置' };
@@ -101,7 +110,14 @@
                     host ? 'success' : 'default'),
                 row('全局快捷键', report.shortcut.registered ? '已注册' : '未注册', report.shortcut.value),
                 row('成果位置', state.settings.workspace ? '已配置' : '未配置', state.settings.workspace)),
-            error && h('p', { role: 'alert', className: 'error' }, error))];
+            error && h('p', { role: 'alert', className: 'error' }, error)),
+        report?.upload && card('故障上报', h('div', { className: 'setting-row' },
+            h('span', null, '自动上报故障摘要'), h(antd.Switch, { checked: report.upload.enabled, disabled: busy,
+                'aria-label': '自动上报故障摘要', onChange: enabled => void toggleUpload(enabled) })),
+        h('small', { className: 'muted' }, '摘要包含版本、故障类型和编号。材料、对话和密钥保留在本机。'),
+        report.upload.latest && h('p', { className: 'muted' },
+            { pending: '待上传', sent: '已上传', local_error: '无法保存上报记录' }[report.upload.latest.state],
+            ' · ', report.upload.latest.id))];
     }
 
     window.GuizhiSettings = function Settings({ state, appearance, saveAppearance, save, close, entries, setEntries,

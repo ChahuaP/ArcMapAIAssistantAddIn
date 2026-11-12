@@ -5,8 +5,9 @@ const path = require('node:path');
 const { promisify } = require('node:util');
 const { startAgent } = require('./agent-process.cjs');
 const { materialBindings } = require('./materials.cjs');
+const { MaterialReader } = require('./material-reader.cjs');
 const { visualRecipe } = require('./visual-recipes.cjs');
-const { modelConfig, modelKey, credentialScope, normalizeKey, modelFailure } = require('../../src/guizhi/infrastructure/dsh/model-config.cjs');
+const { modelConfig, modelKey, credentialScope, normalizeKey, modelFailure, modelFailureCode } = require('../../src/guizhi/infrastructure/dsh/model-config.cjs');
 
 const exec = promisify(execFile);
 const cli = path.join(__dirname, '../../src/guizhi/__main__.py');
@@ -35,13 +36,15 @@ function checkedArtifact(record, step) {
 }
 
 class DesktopController {
-    constructor({ userData, runtime, dsh, safeStorage, externalPath, onChange, bundledArcmap, installationRoot }) {
+    constructor({ userData, runtime, dsh, safeStorage, externalPath, onChange, bundledArcmap, installationRoot, diagnostics }) {
         this.file = path.join(userData, 'settings.json');
         this.historyFile = path.join(userData, 'desktop-conversation.json');
         fs.mkdirSync(userData, { recursive: true });
         this.settings = load(this.file, { workspace: '' });
         this.runtime = { python: path.join(runtime, 'python', 'python.exe'),
             node: path.join(runtime, 'node', 'node.exe'), runtime: dsh || path.join(runtime, 'dsh') };
+        this.reader = new MaterialReader(this.runtime.python, cli);
+        this.diagnostics = diagnostics;
         this.storage = safeStorage;
         this.bundledArcmap = bundledArcmap;
         this.installationRoot = installationRoot;
@@ -168,9 +171,17 @@ class DesktopController {
         } finally { fs.rmSync(file, { force: true }); }
     }
 
-    intake(paths, kind) {
+    async intake(paths, kind) {
+        if (!this.settings.workspace) throw new Error('请先选择成果保存位置');
         if (!Array.isArray(paths) || !paths.length || paths.length > 32) throw new Error('一次请选择 1 至 32 份材料');
-        return this.request('material-intake', { paths: paths.map(this.externalPath), kind });
+        const files = paths.map(this.externalPath);
+        const at = performance.now();
+        try { return await this.reader.read(this.settings.workspace, files, kind); }
+        catch (error) {
+            if (error.message !== '已停止读取材料') this.diagnostics?.record({ stage: 'material_read', status: 'failed',
+                code: error.message.includes('超时') ? 'timeout' : 'reader_failure', files, elapsedMs: performance.now() - at });
+            throw error;
+        }
     }
 
     selectCarrier(carrier) {
@@ -212,7 +223,7 @@ class DesktopController {
         this.persist(next);
         this.tasks = next;
         const child = startAgent(this.runtime, this.settings.workspace);
-        this.active = { child, task };
+        this.active = { child, task, config, files: Object.values(bindings).flat().map(item => item.file) };
         child.on('message', message => {
             if (message.type === 'event') {
                 if (task.status !== 'running') return;
@@ -276,8 +287,10 @@ class DesktopController {
 
     async complete(task, receipt) {
         if (this.active?.task !== task || this.active.settling) return;
-        this.active.settling = true;
+        const active = this.active;
+        active.settling = true;
         let status = receipt.status;
+        let stage = 'dispatch';
         try {
             task.runId = receipt.operation?.run_id;
             task.response = ['succeeded', 'answered'].includes(status) ? receipt.response
@@ -299,8 +312,17 @@ class DesktopController {
             }
         } catch {
             status = 'failed';
+            stage = 'publish';
             task.response = '办理成果已生成，但工作台读取失败。请到成果保存位置查看本轮作业记录。';
         } finally {
+            const code = stage === 'publish' ? 'result_read_failed' : {
+                failed: receipt.operation ? 'operation_failed' : modelFailureCode(receipt.error || receipt.response) || 'agent_failure',
+                interrupted: 'interrupted', timed_out: 'timeout', budget_exhausted: 'budget_exhausted',
+                no_result: receipt.workflow_attempted === false ? 'tool_not_called' : 'no_result',
+            }[status];
+            if (code && task.status !== 'cancelling') task.diagnosticId = this.diagnostics?.record({ stage, status, code,
+                taskId: task.id, dispatchId: receipt.id, runId: task.runId, elapsedMs: receipt.elapsed_ms,
+                config: active.config, skill: task.skill, files: active.files });
             task.status = status;
             delete task.visual;
             this.active = null;
@@ -353,6 +375,7 @@ class DesktopController {
     }
 
     async close() {
+        this.reader.close();
         const child = this.active?.child;
         if (!child) return;
         this.cancel();

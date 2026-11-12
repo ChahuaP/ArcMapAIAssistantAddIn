@@ -95,7 +95,7 @@
                         else group.splice(index, 1);
                         change({ ...materials, [role.id]: group });
                     } })),
-                items.length < role.maximum && button('paperclip', '添加' + role.label, {
+                items.length < role.maximum && button('paperclip', pending === role.id ? '正在读取本地材料…' : '添加' + role.label, {
                     disabled: disabled || Boolean(pending), loading: pending === role.id, onClick: () => add(() => api.material(role.kind)),
                 }));
         });

@@ -12,6 +12,7 @@ const { listModels, checkModelConnection, testModel } = require('./model-service
 const { formats, materialBindings } = require('./materials.cjs');
 const { printReport } = require('./report-export.cjs');
 const { ArcGisSync } = require('./arcgis-sync.cjs');
+const { DiagnosticsUpload } = require('./diagnostics-upload.cjs');
 const { action, parameterValues, parametersReady, isBusinessRequest, matchBusiness, reference } = require('./task-commands.js');
 
 const origin = 'guizhi://app';
@@ -61,6 +62,7 @@ async function startDesktop(options) {
         icon: path.join(__dirname, 'mark.png') });
     const { window, portrait, launcher, reveal } = desktop;
     const version = fs.readFileSync(path.join(__dirname, '../../VERSION'), 'utf8').trim();
+    const diagnostics = new DiagnosticsUpload(app.getPath('userData'), version);
     const workbenchUrl = origin + '/index.html';
     const launcherUrl = workbenchUrl + '?surface=launcher';
     const portraitUrl = origin + '/portrait.html';
@@ -86,7 +88,8 @@ async function startDesktop(options) {
     }
     const controller = new DesktopController({ userData: app.getPath('userData'), runtime, dsh,
         safeStorage, externalPath, onChange: broadcast, bundledArcmap: options.bundledArcmap,
-        installationRoot: options.installationRoot });
+        installationRoot: options.installationRoot, diagnostics });
+    if (!options.verifyStartup) controller.reader.start();
     const hostRoot = process.env.GUIZHI_ARCGIS_HOSTS || path.join(process.env.LOCALAPPDATA, 'Guizhi', 'ArcGIS', 'hosts');
     sync = new ArcGisSync(controller, hostRoot, app.getPath('documents'), () => broadcast(controller.state()));
     controller.onStarted = task => sync.started(task);
@@ -134,12 +137,18 @@ async function startDesktop(options) {
         sync.close();
         visual.close();
         speech.cancel();
+        diagnostics.close();
         void controller.close().finally(() => { quitting = true; tray.destroy(); app.quit(); });
     });
     const pages = new Map([[window, workbenchUrl], [launcher, launcherUrl], [portrait, portraitUrl]]);
     for (const [surface, url] of pages) {
         surface.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
         surface.webContents.on('will-navigate', (event, target) => { if (target !== url) event.preventDefault(); });
+        surface.webContents.on('render-process-gone', (_, details) => {
+            if (!closing && !['clean-exit', 'killed'].includes(details.reason)) {
+                diagnostics.record({ stage: 'desktop', status: 'failed', code: 'renderer_gone' });
+            }
+        });
     }
 
     function bind(method, handler, withSurface = false) {
@@ -254,9 +263,14 @@ async function startDesktop(options) {
         }
         const appearance = desktop.appearance();
         return { model: { mode: config?.mode, name: config?.model, state: config ? 'configured' : 'missing', ...modelCheck },
+            upload: diagnostics.state(),
             voice: { asr: speech.diagnostic('asr'), tts: speech.diagnostic('tts') },
             bridge: Boolean(sync.bridge && fs.existsSync(sync.bridge)),
             shortcut: { registered: appearance.shortcutRegistered, value: appearance.shortcut } };
+    }, true);
+    bind('diagnosticsUpload', (surface, enabled) => {
+        if (surface !== window) throw new Error('请在工作台修改故障上报设置');
+        return diagnostics.enable(enabled);
     }, true);
     bind('speechConfigure', input => {
         const settings = speech.configure(input);

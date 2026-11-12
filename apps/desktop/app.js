@@ -85,6 +85,7 @@
             timed_out: '办理超时。请检查模型服务或输入文件是否正被占用。' }[task.status];
         return h('article', { className: 'bubble assistant' }, h('strong', null, labels[task.status] || '未完成'),
             markdown(task.response ? errorText(task.response) : detail || '请检查材料、坐标和模型设置后继续。'),
+            task.diagnosticId && h('p', { className: 'muted' }, '故障编号 ', h('code', null, task.diagnosticId)),
             h('button', { className: 'report', onClick: () => retry(task) }, '继续处理'));
     }
 
@@ -316,7 +317,7 @@
                 })),
                 ...freeInputs.map(freeMaterial)),
             h('div', { className: 'compose-actions' },
-                !skill && button('paperclip', '添加材料', { type: 'text', loading: adding, onClick: () => addMaterials(() => api.material()) }),
+                !skill && button('paperclip', adding ? '正在读取本地材料…' : '添加材料', { type: 'text', loading: adding, onClick: () => addMaterials(() => api.material()) }),
                 !skill && iconButton('folder', '添加材料目录', { disabled: adding, onClick: () => addMaterials(() => api.material('any', true)) }),
                 h(window.GuizhiArcgisMaterials, { host: state?.arcgis.host, disabled: adding || busy, attach: attachArcgis, fail }),
                 h('span', { className: 'spacer' }),
