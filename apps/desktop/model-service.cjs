@@ -3,47 +3,53 @@ const os = require('node:os');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { startAgent } = require('./agent-process.cjs');
-const { route } = require('../../src/guizhi/infrastructure/dsh/model-config.cjs');
+const { presets, route, validModel, modelFailure } = require('../../src/guizhi/infrastructure/dsh/model-config.cjs');
 
 const connectionTimeout = 12_000;
 const timeoutError = () => new Error('12 秒内未收到模型服务响应，请检查服务和网络后重试');
 
 async function readModels(config, key, signal, allowUnsupported = false) {
-    if (config.api !== 'openai-completions') throw new Error('请手动填写此服务的模型名称');
+    const { api, baseUrl } = presets[config.provider] || config;
+    const anthropic = api === 'anthropic-messages';
+    const address = new URL(config.modelsUrl || baseUrl + (anthropic ? '/v1/models' : '/models'));
+    if (config.provider === 'anthropic') address.searchParams.set('limit', '1000');
+    const sameOrigin = address.origin === new URL(baseUrl).origin;
+    const headers = anthropic ? { 'anthropic-version': '2023-06-01' } : {};
+    if (key && sameOrigin) {
+        if (anthropic) headers['x-api-key'] = key;
+        else headers.authorization = 'Bearer ' + key;
+    }
     let response;
     try {
-        response = await fetch(config.baseUrl + '/models', { redirect: 'error',
-            headers: key ? { authorization: 'Bearer ' + key } : {},
-            signal });
+        response = await fetch(address, { redirect: 'error', headers, signal });
     } catch { throw signal.aborted ? timeoutError() : new Error('无法连接模型服务，请检查地址和网络'); }
-    if (response.status === 401 || response.status === 403) throw new Error('模型服务认证失败，请检查 API 密钥');
+    if ([401, 403, 429].includes(response.status)) throw new Error(modelFailure(String(response.status)));
     if (allowUnsupported && [404, 405, 501].includes(response.status)) return null;
-    if (!response.ok) throw new Error('模型列表读取失败，请手动填写模型名称');
+    if (!response.ok) throw new Error(`模型列表读取失败（HTTP ${response.status}），请检查查询地址或稍后重试。`);
     let result;
     try { result = await response.json(); }
-    catch { throw signal.aborted ? timeoutError() : new Error('模型列表格式不受支持，请手动填写模型名称'); }
-    if (!Array.isArray(result.data)) throw new Error('模型列表格式不受支持，请手动填写模型名称');
-    return [...new Set(result.data.map(entry => entry?.id)
-        .filter(id => typeof id === 'string' && id && id.length <= 160))];
+    catch { throw signal.aborted ? timeoutError() : new Error('模型查询地址没有返回有效的 JSON 列表'); }
+    const entries = result?.data ?? result?.models ?? result;
+    if (!Array.isArray(entries)) throw new Error('模型列表格式不受支持');
+    return [...new Set(entries.map(entry => typeof entry === 'string' ? entry : entry?.id ?? entry?.model ?? entry?.name)
+        .filter(validModel))];
 }
 
 async function listModels(config, key) {
-    return (await readModels(config, key, AbortSignal.timeout(connectionTimeout))).slice(0, 200);
+    const ids = await readModels(config, key, AbortSignal.timeout(connectionTimeout));
+    // OpenAI's list also includes voice, embedding, image and moderation models.
+    return config.provider === 'openai' ? ids.filter(id => /^(?:gpt-|chatgpt-|o\d|ft:)/i.test(id) &&
+        !/(?:audio|realtime|transcrib|tts|image|moderation|embedding|search)/i.test(id)) : ids;
 }
 
 function responseError(reason = '') {
-    if (/\b(401|403)\b|unauthorized|invalid api key/i.test(reason)) {
-        return new Error('模型服务认证失败，请检查 API 密钥');
-    }
-    if (/\b404\b|unknown model|model.+not found/i.test(reason)) return new Error('请检查服务地址和模型名称');
-    if (/\b429\b|rate.limit|quota/i.test(reason)) return new Error('模型服务限流或额度不足，请稍后重试或检查服务额度');
-    return new Error('模型服务未能响应，请检查地址、模型名称和网络');
+    return new Error(modelFailure(reason) || '模型服务未能响应，请检查地址、模型名称和网络');
 }
 
 async function checkModelConnection(runtime, config, key) {
     const deadline = AbortSignal.timeout(connectionTimeout);
     if (config.mode === 'local' && config.api === 'openai-completions') {
-        const ids = await readModels(config, key, deadline, true);
+        const ids = await readModels({ ...config, modelsUrl: undefined }, key, deadline, true);
         if (ids) {
             if (!ids.includes(config.model)) throw new Error('模型服务已连接，但未找到所选模型');
             return { model: config.model, check: 'catalog' };
@@ -54,6 +60,11 @@ async function checkModelConnection(runtime, config, key) {
     const pi = path.join(runtime.runtime, 'node_modules', '@earendil-works', 'pi-ai', 'dist');
     const load = file => import(pathToFileURL(path.join(pi, file)).href);
     const { id, providers } = route(config);
+    const settings = providers[id];
+    const model = { id: config.model, name: config.model, provider: id, api: settings.api,
+        baseUrl: settings.baseURL, input: ['text'], reasoning: false, compat: settings.compat,
+        contextWindow: settings.defaultContextWindow ?? 1_000_000, maxTokens: settings.defaultMaxTokens ?? 128_000,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } };
     const stop = new AbortController();
     const signal = AbortSignal.any([deadline, stop.signal]);
     const context = { messages: [{ role: 'user', content: 'Reply with OK.', timestamp: Date.now() }] };
@@ -62,21 +73,16 @@ async function checkModelConnection(runtime, config, key) {
     try {
         let stream;
         if (config.provider === 'custom') {
-            const settings = providers[id];
-            const { openAICompletionsApi, anthropicMessagesApi } = await load(`api/${config.api}.lazy.js`);
-            const client = openAICompletionsApi ? openAICompletionsApi() : anthropicMessagesApi();
+            const { openAICompletionsApi, openAIResponsesApi, anthropicMessagesApi } = await load(`api/${config.api}.lazy.js`);
+            const client = (openAICompletionsApi || openAIResponsesApi || anthropicMessagesApi)();
             signal.throwIfAborted();
-            stream = client.streamSimple({ id: config.model, name: config.model, provider: id, api: config.api,
-                baseUrl: settings.baseURL, input: ['text'], reasoning: false, compat: settings.compat,
-                contextWindow: settings.defaultContextWindow, maxTokens: settings.defaultMaxTokens,
-                cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }, context, options);
+            stream = client.streamSimple(model, context, options);
         } else {
             const { builtinModels } = await load('providers/all.js');
             const models = builtinModels();
-            const model = models.getModel(id, config.model);
-            if (!model) throw new Error('请检查所选服务商和模型名称');
+            const known = models.getModel(id, config.model);
             signal.throwIfAborted();
-            stream = models.streamSimple(model, context, options);
+            stream = models.streamSimple(known || model, context, options);
         }
         for await (const event of stream) {
             if (event.type === 'error') throw responseError(event.error.errorMessage);

@@ -6,7 +6,7 @@ const { promisify } = require('node:util');
 const { startAgent } = require('./agent-process.cjs');
 const { materialBindings } = require('./materials.cjs');
 const { visualRecipe } = require('./visual-recipes.cjs');
-const { modelConfig, modelKey, credentialScope, normalizeKey } = require('../../src/guizhi/infrastructure/dsh/model-config.cjs');
+const { modelConfig, modelKey, credentialScope, normalizeKey, modelFailure } = require('../../src/guizhi/infrastructure/dsh/model-config.cjs');
 
 const exec = promisify(execFile);
 const cli = path.join(__dirname, '../../src/guizhi/__main__.py');
@@ -112,7 +112,7 @@ class DesktopController {
         const encrypted = same ? this.settings.encryptedKey : undefined;
         const key = normalizeKey(input.key) || (encrypted
             ? this.storage.decryptString(Buffer.from(encrypted, 'base64')) : '');
-        return { config, key: modelKey(config, key), encrypted };
+        return { config, key: requireModel || config.provider !== 'custom' ? modelKey(config, key) : key, encrypted };
     }
 
     configure(input) {
@@ -281,7 +281,8 @@ class DesktopController {
         try {
             task.runId = receipt.operation?.run_id;
             task.response = ['succeeded', 'answered'].includes(status) ? receipt.response
-                : receipt.operation?.error || receipt.error || receipt.response;
+                : receipt.operation?.error || (status === 'failed' && modelFailure(receipt.error || receipt.response)) ||
+                    receipt.error || receipt.response;
             task.statistics = receipt.operation?.statistics;
             task.candidate = receipt.candidate?.markdown;
             if (status === 'succeeded' && this.tasks.includes(task)) {
@@ -298,6 +299,7 @@ class DesktopController {
             }
         } catch {
             status = 'failed';
+            task.response = '办理成果已生成，但工作台读取失败。请到成果保存位置查看本轮作业记录。';
         } finally {
             task.status = status;
             delete task.visual;

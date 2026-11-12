@@ -221,13 +221,15 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
                 },
             }), aborted]);
             let response = await run(context + conversation + speech + '用户请求：' + options.prompt);
+            const needsSelectedWorkflow = options.skill && Object.keys(roles).length > 0 && /^请办理/u.test(options.prompt.trim());
             const needsMeasurement = options.dialogue && Object.keys(roles).length > 0 &&
                 /统计|计算|清点|多少|数量|覆盖率|重叠面积/u.test(options.prompt);
-            if (needsMeasurement && response?.finishReason === 'completed' && !attempted && !stop.aborted &&
-                    !existsSync(operationPath) && !existsSync(join(directory, 'discovery'))) {
-                event({ kind: 'workflow_retry', reason: 'voice_measurement_without_tool' });
-                response = await run('请调用 execute_workflow，使用本轮已绑定的图层实际计算，取得作业回执再回答。' +
-                    '用户请求：' + options.prompt);
+            if ((needsSelectedWorkflow || needsMeasurement) && response?.finishReason === 'completed' &&
+                    !attempted && !stop.aborted && !existsSync(operationPath) &&
+                    !existsSync(join(directory, 'discovery')) && !existsSync(join(directory, 'input-issue.json'))) {
+                event({ kind: 'workflow_retry', reason: needsSelectedWorkflow ? 'selected_workflow_without_tool' : 'voice_measurement_without_tool' });
+                response = await run('请调用 execute_workflow，按本轮已选业务和已绑定的材料实际办理，取得作业回执后再回答。' +
+                    context + '用户请求：' + options.prompt);
             }
             if (response === null) {
                 writeFileSync(join(directory, 'cancelled'), '');

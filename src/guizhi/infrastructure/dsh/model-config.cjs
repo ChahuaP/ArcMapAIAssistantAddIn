@@ -1,27 +1,30 @@
 const presets = Object.freeze({
-    'minimax-cn': 'MiniMax',
-    deepseek: 'DeepSeek',
-    openai: 'OpenAI',
-    anthropic: 'Anthropic',
+    'minimax-cn': { api: 'anthropic-messages', baseUrl: 'https://api.minimaxi.com/anthropic' },
+    deepseek: { api: 'openai-completions', baseUrl: 'https://api.deepseek.com' },
+    openai: { api: 'openai-responses', baseUrl: 'https://api.openai.com/v1' },
+    anthropic: { api: 'anthropic-messages', baseUrl: 'https://api.anthropic.com' },
 });
-const protocols = ['openai-completions', 'anthropic-messages'];
+const protocols = ['openai-completions', 'openai-responses', 'anthropic-messages'];
 const loopback = hostname => ['127.0.0.1', 'localhost', '[::1]'].includes(hostname);
 
-function endpoint(value) {
+function endpoint(value, catalog = false) {
     let url;
     try { url = new URL(value?.trim()); }
-    catch { throw new Error('请输入完整的服务地址'); }
+    catch { throw new Error(catalog ? '请输入完整的模型查询地址' : '请输入完整的服务地址'); }
     if ((url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback(url.hostname))) ||
-            url.username || url.password || url.search || url.hash) {
-        throw new Error('服务地址须使用 HTTPS 或本机 HTTP，且不含账号、查询参数或片段');
+            url.username || url.password || (!catalog && url.search) || url.hash) {
+        throw new Error(catalog ? '模型查询地址须使用 HTTPS 或本机 HTTP，且不含账号或片段'
+            : '服务地址须使用 HTTPS 或本机 HTTP，且不含账号、查询参数或片段');
     }
-    return url.href.replace(/\/+$/, '');
+    return catalog ? url.href : url.href.replace(/\/+$/, '');
 }
+
+const validModel = value => typeof value === 'string' && value.length > 0 && value.length <= 160 && !/[\x00-\x20]/.test(value);
 
 function modelConfig(input, requireModel = true) {
     const { mode, provider } = input || {};
     const model = typeof input?.model === 'string' ? input.model.trim() : '';
-    if ((requireModel && !model) || model.length > 160 || /[\x00-\x20]/.test(model)) {
+    if ((requireModel || model) && !validModel(model)) {
         throw new Error('请输入有效的模型名称');
     }
     if (mode === 'online' && Object.hasOwn(presets, provider)) return { mode, provider, model };
@@ -29,7 +32,8 @@ function modelConfig(input, requireModel = true) {
         throw new Error('请选择模型模式、服务商和接口协议');
     }
     const baseUrl = endpoint(input.baseUrl);
-    return { mode, provider, api: input.api, baseUrl, model };
+    const modelsUrl = typeof input.modelsUrl === 'string' && input.modelsUrl.trim() ? endpoint(input.modelsUrl, true) : undefined;
+    return { mode, provider, api: input.api, baseUrl, model, ...(modelsUrl ? { modelsUrl } : {}) };
 }
 
 function credentialScope(config) {
@@ -54,13 +58,32 @@ function modelKey(config, value) {
 
 function route(config) {
     const id = config.provider !== 'custom' ? config.provider : 'guizhi-' + config.mode;
-    const settings = { apiKeyEnv: 'GUIZHI_MODEL_KEY' };
+    const settings = { apiKeyEnv: 'GUIZHI_MODEL_KEY', models: [{ id: config.model }] };
     if (config.provider === 'custom') {
-        Object.assign(settings, { api: config.api, baseURL: config.baseUrl, models: [{ id: config.model }],
+        Object.assign(settings, { api: config.api, baseURL: config.baseUrl,
             defaultContextWindow: config.mode === 'local' ? 8192 : 32768, defaultMaxTokens: 2048 });
         if (config.api === 'openai-completions') settings.compat = { supportsDeveloperRole: false };
+    } else {
+        const preset = presets[id];
+        Object.assign(settings, { api: preset.api, baseURL: preset.baseUrl });
     }
     return { id, providers: { [id]: settings } };
 }
 
-module.exports = { presets, endpoint, modelConfig, modelKey, credentialScope, normalizeKey, route };
+function modelFailure(reason = '') {
+    if (/\b(401|403)\b|unauthorized|authentication_error|invalid api.?key/i.test(reason)) {
+        return '模型服务认证失败，请检查 API 密钥和模型权限。';
+    }
+    if (/\b429\b|rate.?limit|quota|insufficient balance/i.test(reason)) {
+        return '模型服务限流或额度不足，请稍后重试或检查服务额度。';
+    }
+    if (/\b404\b|unknown model|model.+(?:not found|not available|not supported)/i.test(reason)) {
+        return '模型服务未找到所选模型，请在设置中重新查询并选择。';
+    }
+    if (/connection|ECONN|ENOTFOUND|ETIMEDOUT|fetch|network|timeout/i.test(reason)) {
+        return '无法连接模型服务或响应超时，请检查服务地址和网络。';
+    }
+    return '';
+}
+
+module.exports = { presets, endpoint, validModel, modelConfig, modelKey, credentialScope, normalizeKey, route, modelFailure };
