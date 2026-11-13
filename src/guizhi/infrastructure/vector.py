@@ -12,6 +12,8 @@ import warnings
 import geopandas
 from pandas.testing import assert_frame_equal
 import pyogrio
+from pyproj import CRS
+from pyproj.exceptions import CRSError
 import shapely
 
 from guizhi.domain.contracts import ClaimRevision, DatasetRevision, EvidenceRef, ObjectRevision
@@ -88,6 +90,26 @@ def source_files(path):
     return [parts[suffix] for suffix in sorted(parts)]
 
 
+def projection_text(path, data):
+    try:
+        try:
+            return data.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            return data.decode("gb18030")
+    except UnicodeDecodeError as error:
+        raise ValueError(f"{path.name} 的坐标系定义无法读取，请检查配套 .prj 文件") from error
+
+
+def shapefile_projection(files):
+    path = next((item for item in files if item.suffix.lower() == ".prj"), None)
+    if path is None:
+        return None
+    try:
+        return CRS.from_wkt(projection_text(path, path.read_bytes()))
+    except CRSError as error:
+        raise ValueError(f"{path.name} 的坐标系定义无法读取，请检查配套 .prj 文件") from error
+
+
 def source_revision(files):
     if len(files) == 1:
         return digest(files[0])
@@ -111,6 +133,26 @@ def snapshot_external(source, snapshot, layer, ensure_supervised, allow_undefine
     if source_revision(copies) != initial or source_revision(source_files(source)) != initial:
         raise ValueError("复制期间矢量材料或配套文件已变化")
     copied = original / (source.stem + source.suffix.lower())
+    if source.suffix.lower() == ".shp" and shapefile_projection(copies) is not None:
+        # Preserve original .prj bytes as evidence. GDAL expects UTF-8 when returning the CRS name.
+        staging = original.parent / (original.name + "-gdal")
+        staging.mkdir()
+        try:
+            for file in copies:
+                target = staging / file.name
+                if file.suffix == ".prj":
+                    target.write_text(projection_text(file, file.read_bytes()), encoding="utf-8")
+                else:
+                    target.hardlink_to(file)
+            defined = convert_external(staging / copied.name, snapshot, layer, allow_undefined, ensure_supervised)
+        finally:
+            shutil.rmtree(staging)
+    else:
+        defined = convert_external(copied, snapshot, layer, allow_undefined, ensure_supervised)
+    return defined, copies
+
+
+def convert_external(copied, snapshot, layer, allow_undefined, check):
     info = pyogrio.read_info(copied, layer=layer)
     with warnings.catch_warnings():
         warnings.simplefilter("error", RuntimeWarning)
@@ -118,7 +160,7 @@ def snapshot_external(source, snapshot, layer, ensure_supervised, allow_undefine
         if not isinstance(frame, geopandas.GeoDataFrame):
             raise ValueError("请选择含空间要素的矢量图层")
         if frame.crs is None and not allow_undefined:
-            raise ValueError(f"{source.name} 缺少坐标定义，请补齐同名 .prj 或先定义已知坐标系")
+            raise ValueError(f"{copied.name} 缺少坐标定义，请补齐同名 .prj 或先定义已知坐标系")
         names = {name.casefold() for name in frame.columns}
         fid, geometry = "fid", "geom"
         while fid in names:
@@ -137,7 +179,8 @@ def snapshot_external(source, snapshot, layer, ensure_supervised, allow_undefine
         raise ValueError("矢量快照未通过坐标系、要素编号或几何校验")
     assert_frame_equal(frame.drop(columns=frame.geometry.name), reopened.drop(columns=reopened.geometry.name),
                        check_dtype=False, check_exact=True)
-    return defined, copies
+    check()
+    return defined
 
 
 def import_layer(source_path, layer, directory, filename, job_id, ensure_supervised, *, allow_undefined=False,
@@ -158,6 +201,9 @@ def import_layer(source_path, layer, directory, filename, job_id, ensure_supervi
         raise ValueError(f"Layer must contain spatial features with a defined CRS: {layer}")
     if not defined and frame.crs is not None:
         frame = frame.set_crs(None, allow_override=True)
+    original_crs = shapefile_projection(originals) if defined and source.suffix.lower() == ".shp" else None
+    if original_crs:
+        info["source_crs_name"] = original_crs.name
 
     revision_id = uuid4().hex
     input_ref = EvidenceRef(uuid4().hex, revision_id, job_id, "import",

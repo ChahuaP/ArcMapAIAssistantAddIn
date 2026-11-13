@@ -134,6 +134,7 @@
         const [tab, setTab] = useState('成果');
         const [mapOpen, showMapWorkspace] = useState(false);
         const [mapEditing, setMapEditing] = useState(false);
+        const [mapDisplay, setMapDisplay] = useState(null);
         const [layers, setLayers] = useState([]);
         const [hiddenLayers, hideLayers] = useState([]);
         const [activeLayer, setActiveLayer] = useState(null);
@@ -174,6 +175,7 @@
             hideLayers([]);
             setActiveLayer(null);
             setMapSelection(null);
+            setMapDisplay(null);
             showMapWorkspace(Boolean(state?.settings.workspace && !state.settings.modelConfig));
         }, [state?.settings.workspace]);
         const [initialMarkdown, setInitialMarkdown] = useState('');
@@ -520,7 +522,7 @@
             showMapWorkspace(true);
         }
         function replaceLayer(before, after) {
-            const item = { ...after, name: before.name };
+            const item = { ...after, name: before.name, style: before.style, group: before.group };
             setLayers(old => old.map(layer => mapKey(layer) === mapKey(before) ? item : layer));
             setActiveLayer(mapKey(item));
             setMapSelection(null);
@@ -532,7 +534,18 @@
             },
             hidden: hiddenLayers, toggle: id => hideLayers(old => old.includes(id) ? old.filter(value => value !== id) : [...old, id]),
             selectLayer: id => { setActiveLayer(id); setMapSelection(null); },
-            entries: coordinates, catalog, components: state.components, openComponents, fail, close: () => showMapWorkspace(false), selection: mapSelection, setSelection: setMapSelection,
+            entries: coordinates, catalog, components: state.components, openComponents,
+            display: mapDisplay, setDisplay: setMapDisplay,
+            styleLayer: (id, style) => setLayers(old => old.map(item => mapKey(item) === id ? { ...item, style } : item)),
+            importFrame: ({ layers: items, frame }) => {
+                setLayers(items);
+                setActiveLayer(mapKey(items[0]));
+                setMapSelection(null);
+                hideLayers(items.filter(item => !item.visible).map(mapKey));
+                setMapDisplay(frame.crs ? { wkt: frame.crs, units: frame.units, metresPerUnit: frame.metresPerUnit,
+                    label: frame.crsName || frame.name, bounds: frame.bounds } : null);
+            },
+            fail, close: () => showMapWorkspace(false), selection: mapSelection, setSelection: setMapSelection,
             replace: replaceLayer, editing: setMapEditing });
         async function configure(value) {
             const next = await api.configure(value);

@@ -2,9 +2,11 @@
 from base64 import b64encode
 import json
 import math
+from pathlib import Path
 import re
 from uuid import uuid4
 
+import numpy as np
 import pyogrio
 import shapely
 from pyproj import CRS, network
@@ -21,6 +23,7 @@ from guizhi.infrastructure.operations.runner import data_revision
 from guizhi.infrastructure.vector import digest
 
 MAX_VISIBLE = 8000
+MAX_MAP_POINTS = 180_000
 MANUAL_OPERATIONS = {
     "data.describe", "vector.area", "vector.buffer", "vector.clip", "vector.intersect",
     "vector.erase", "vector.dissolve", "vector.union", "vector.identity", "vector.symmetric_difference", "vector.update_overlay",
@@ -34,7 +37,9 @@ MAP_DELIVERIES = {"export", "report", "table", "workflow", "package", "boundarie
 
 
 def raster_layer(workspace, ref, name):
-    return {**workspace.read(ref["run"])["result"]["raster_preview"], "kind": "raster", "ref": ref, "name": name}
+    info = workspace.read(ref["run"])["result"]["raster_preview"]
+    source_path = workspace.read(ref["run"])["task"]["request"]["inputs"][0]["file"]
+    return {**info, "kind": "raster", "ref": ref, "name": name, "sourceName": source_path}
 
 
 def map_material(workspace, ref):
@@ -171,12 +176,18 @@ def describe(workspace, ref, file=None, name=None):
     crs = CRS(info["crs"]) if info["crs"] else None
     if crs and crs.to_epsg() in {0, 404000}:
         crs = None
-    if ref["artifact"] == "import" and not workspace.read(ref["run"])["result"]["crs"]:
-        crs = None
-    return {"ref": ref, "name": name, "revision": data_revision(file), "geometry": info["geometry_type"],
+    original = str(file)
+    source_crs_name = None
+    if ref["artifact"] == "import":
+        details = workspace.read(ref["run"])["result"]
+        original = (details.get("datasets") or [{}])[0].get("source") or original
+        crs = CRS(details["crs"]) if details["crs"] else None
+        source_crs_name = details.get("crs_name")
+    return {"ref": ref, "name": name, "sourceName": original, "revision": data_revision(file), "geometry": info["geometry_type"],
             "count": info["features"], "bounds": numbers(info["total_bounds"]),
             "crs": crs.to_string() if crs else None,
-            "crsName": crs.name if crs else "未定义坐标系",
+            "crsName": (source_crs_name or crs.name) if crs else "未定义坐标系",
+            "metresPerUnit": crs.axis_info[0].unit_conversion_factor if crs and crs.is_projected else None,
             "units": "degrees" if crs and crs.is_geographic else "m" if crs and crs.is_projected and
                 crs.axis_info[0].unit_conversion_factor == 1 else None,
             "fields": [{"name": field, "type": dtype} for field, dtype in zip(info["fields"], info["dtypes"], strict=True)]}
@@ -225,6 +236,8 @@ def features(workspace, payload):
     if convert:
         # A saved operation may have a limited domain or no validated inverse.
         read_extent = None if plan or extent is None else projection(target, current, extent).transform_bounds(*extent, errcheck=True)
+    if read_extent and read_extent[0] > read_extent[2]:
+        read_extent = (-180.0, read_extent[1], 180.0, read_extent[3])
     fids = payload.get("fids")
     if fids is not None:
         if not isinstance(fids, list) or not fids or len(fids) > 500 or any(type(fid) is not int for fid in fids):
@@ -233,28 +246,50 @@ def features(workspace, payload):
     else:
         options = {"bbox": read_extent, "max_features": MAX_VISIBLE + 1}
     frame = pyogrio.read_dataframe(file, layer=name, fid_as_index=True, columns=None if fids else [], **options)
-    if len(frame) > MAX_VISIBLE:
-        return {"features": [], "limited": True}
+    limited = len(frame) > MAX_VISIBLE
+    if limited:
+        frame = frame.iloc[:MAX_VISIBLE]
+    tx = projection(current, target, info["bounds"]) if convert and not plan else None
     if convert and len(frame):
         if plan:
             frame = apply_plan(frame, plan, workspace.root)
             if not frame.crs.equals(target, ignore_axis_order=True):
                 raise ValueError("转换方案的目标坐标系与地图不一致")
         else:
-            tx = projection(current, target, info["bounds"])
             frame.geometry = shapely.transform(frame.geometry.array,
                 lambda x, y, z=None: tx.transform(x, y, z, errcheck=True),
                 interleaved=False, include_z=None)
+    if fids is None:
+        # Bound each map response by vertex count; original geometries remain in the source.
+        if payload.get("tolerance") is not None and payload["tolerance"] > 0 and len(frame):
+            tolerance = float(payload["tolerance"])
+            if not math.isfinite(tolerance):
+                raise ValueError("地图分辨率无效")
+            frame = frame.set_geometry(shapely.simplify(frame.geometry.array, tolerance, preserve_topology=True))
+        points = np.cumsum(shapely.get_num_coordinates(frame.geometry.array))
+        limit = int(np.searchsorted(points, MAX_MAP_POINTS, side="right"))
+        limited = limited or limit < len(frame)
+        frame = frame.iloc[:limit]
     records = frame.drop(columns=frame.geometry.name).to_json(orient="records", date_format="iso", force_ascii=False)
     attributes = json.loads(records) if fids and len(frame.columns) > 1 else [{} for _ in frame.index]
     items = [{"id": int(fid), "geometry": shapely.geometry.mapping(shape), "properties": attrs}
              for (fid, shape), attrs in zip(frame.geometry.items(), attributes, strict=True)
              if shape is not None and not shape.is_empty]
-    return {"features": items, "limited": False}
+    display_bounds = info["bounds"]
+    if tx and display_bounds:
+        display_bounds = numbers(tx.transform_bounds(*display_bounds, errcheck=True))
+        if display_bounds and display_bounds[0] > display_bounds[2]:
+            display_bounds = [-180.0, display_bounds[1], 180.0, display_bounds[3]]
+    return {"features": items, "limited": limited, "bounds": display_bounds if not plan else numbers(frame.total_bounds)}
 
 
 def request(workspace, payload):
     action = payload["action"]
+    if action in {"mxd-read", "mxd-import", "mxd-write"}:
+        from guizhi.infrastructure import map_document
+
+        return {"mxd-read": map_document.read_document, "mxd-import": map_document.import_frame,
+                "mxd-write": map_document.write_document}[action](workspace, payload)
     if action == "tool":
         return manual_tool(workspace, payload)
     if action == "skill":
@@ -288,6 +323,12 @@ def request(workspace, payload):
             ref = {"run": record["id"], "artifact": "raster_preview"}
             result.append(raster_layer(workspace, ref, item["name"]))
         return result
+    if action == "raster-display":
+        from guizhi.infrastructure.operations.map_raster import image_preview
+
+        file = Path(map_material(workspace, payload["ref"])["file"])
+        image, info = image_preview(file, payload.get("target"))
+        return {"image": b64encode(image).decode("ascii"), "bounds": info["bounds"]}
     if action == "raster-preview":
         ref = payload["ref"]
         image = read_artifact(workspace, ref["run"], "raster_preview")

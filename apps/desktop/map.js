@@ -1,5 +1,6 @@
 import 'ol/ol.css';
 import { MapProcessing, TOOL_GROUPS } from './map-processing.js';
+import { LayerProperties, MxdOpen, symbol } from './map-layer-dialog.js';
 import Map from 'ol/Map.js';
 import View from 'ol/View.js';
 import Projection from 'ol/proj/Projection.js';
@@ -15,8 +16,9 @@ import Translate from 'ol/interaction/Translate.js';
 import Snap from 'ol/interaction/Snap.js';
 import { click } from 'ol/events/condition.js';
 import ScaleLine from 'ol/control/ScaleLine.js';
-import { Fill, Stroke, Style, Circle } from 'ol/style.js';
+import { Fill, Stroke, Style, Circle, RegularShape } from 'ol/style.js';
 import { createEmpty, extend, isEmpty } from 'ol/extent.js';
+import { getPointResolution } from 'ol/proj.js';
 
 const h = window.React.createElement;
 const { useEffect, useRef, useState } = window.React;
@@ -55,9 +57,9 @@ const glyphs = {
     more: 'M5 12h.1m6.9 0h.1m6.9 0h.1',
 };
 const commandIcons = {
-    全图: 'extent', 定位图层: 'target', 放大: 'zoomIn', 缩小: 'zoomOut', 清除选择: 'clear', 按属性选择: 'select', 按位置选择: 'target', 提取所选要素: 'download',
-    属性表: 'table', 添加图层: 'add', 导出属性表: 'table', 最近成果: 'table', 添加字段: 'add', 删除字段: 'trash', 修复几何: 'pencil', 新建图层: 'add', 复制图层: 'layers', 合并图层: 'layers', '导出 SHP': 'download', 坐标系设置: 'globe',
-    编辑图层: 'pencil', 选择: 'select', 绘制: 'pencil', 改节点: 'node', 移动: 'move',
+    全图: 'extent', 定位图层: 'target', 放大: 'zoomIn', 缩小: 'zoomOut', 清除选择: 'clear', 按属性选择: 'select', 按位置选择: 'target', 选中要素另存为图层: 'download',
+    属性表: 'table', 添加图层: 'add', 导出属性表: 'table', 最近成果: 'table', 添加字段: 'add', 删除字段: 'trash', 修复几何: 'pencil', 新建图层: 'add', 复制图层: 'layers', 合并图层: 'layers', '导出 SHP': 'download', 坐标系设置: 'globe', '打开 MXD': 'map', '保存 MXD': 'save',
+    编辑图层: 'pencil', 选择: 'select', 绘制: 'pencil', 编辑顶点: 'node', 移动: 'move',
     完成绘制: 'check', 撤销绘制点: 'undo', 编辑属性: 'table', 删除要素: 'trash',
     撤销: 'undo', 保存新版本: 'save', 退出编辑: 'close', 面积汇总: 'area', 缓冲分析: 'buffer',
     裁切: 'clip', 要素计数: 'count', 返回对话: 'chat',
@@ -73,10 +75,20 @@ const roles = { project: '项目范围', coverage: '重叠范围' };
 const key = item => item.ref.run + ':' + item.ref.artifact;
 const projection = (code, units) => new Projection({ code: code || 'local', units: units || 'm' });
 const feature = item => format.readFeature({ type: 'Feature', ...item });
-const style = (color, selected) => {
-    const stroke = new Stroke({ color: selected ? '#f7be49' : color, width: selected ? 3 : 1.6 });
-    const fill = new Fill({ color: selected ? '#f7be494e' : color + '31' });
-    return new Style({ stroke, fill, image: new Circle({ radius: selected ? 6 : 4, fill, stroke }) });
+const style = (color, selected, settings) => {
+    const appearance = symbol(settings, color);
+    const lineDash = appearance.pattern === 'dash' ? [9, 5] : appearance.pattern === 'dot' ? [2, 4] : undefined;
+    const stroke = new Stroke({ color: selected ? '#f7be49' : appearance.color,
+        width: selected ? 3 : appearance.width, lineDash: selected ? undefined : lineDash });
+    const fill = appearance.fill || selected
+        ? new Fill({ color: selected ? '#f7be494e' : appearance.fill + '31' }) : undefined;
+    const point = { radius: selected ? 6 : appearance.size / 2,
+        fill: new Fill({ color: selected ? '#f7be49' : appearance.color }),
+        stroke: new Stroke({ color: selected ? '#522d0c' : appearance.color, width: 1 }) };
+    const shape = appearance.shape;
+    const image = shape === 'circle' ? new Circle(point) : new RegularShape({ ...point,
+        points: 4, radius2: shape === 'cross' ? 0 : undefined, angle: shape === 'square' ? Math.PI / 4 : 0 });
+    return new Style({ stroke, fill, image });
 };
 const layerFor = (items, color) => new VectorLayer({
     source: new VectorSource({ features: items.map(feature) }), style: style(color, false),
@@ -90,7 +102,7 @@ function fit(view, layers, size) {
     const extent = createEmpty();
     for (const layer of layers) {
         if (!layer.getVisible()) continue;
-        const bounds = layer.getSource()?.getExtent?.() || layer.getExtent();
+        const bounds = layer.get('dataExtent') || layer.getSource()?.getExtent?.() || layer.getExtent();
         if (bounds) extend(extent, bounds);
     }
     if (!isEmpty(extent) && size?.every(n => n > 0)) view.fit(extent, { size, padding: [28, 28, 28, 28], maxZoom: 20 });
@@ -176,10 +188,17 @@ function CoordinateTools({ layer, display, setDisplay, entries, request, onLayer
 
 }
 
-function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle, entries, catalog, components, openComponents, fail, close, selection, setSelection, replace, editing }) {
+function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle, entries, catalog, components,
+    openComponents, display, setDisplay, styleLayer, importFrame, fail, close, selection, setSelection, replace, editing }) {
     const node = useRef(null);
     const graph = useRef(null);
-    const [display, setDisplay] = useState(null);
+    const [properties, setProperties] = useState(null);
+    const [document, setDocument] = useState(null);
+    const [cursor, setCursor] = useState(null);
+    const [scale, setScale] = useState(null);
+    const [viewReady, setViewReady] = useState(false);
+    const [ioStatus, setIoStatus] = useState('');
+    const [importIssues, setImportIssues] = useState([]);
     const [displayPlans, setDisplayPlans] = useState({});
     const [editLayer, setEditLayer] = useState(null);
     const [edit, setEdit] = useState('');
@@ -207,34 +226,67 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
     const native = editLayer || layers.find(item => item.crs && item.kind !== 'raster') || layers.find(item => item.crs) || layers[0];
     const target = display?.wkt || display?.value || native?.crs;
     const units = display ? display.units : native?.units;
+    const metresPerUnit = display ? display.metresPerUnit : native?.metresPerUnit;
+    const initialExtent = display?.bounds;
     const activeRef = useRef(active);
     activeRef.current = active;
 
     async function load(job) {
         setBusy(true);
+        setIoStatus('');
+        setImportIssues([]);
         try {
             const { layers: items, issues } = await job;
+            if (items.length) graph.current.fitNeeded = true;
             add(items);
-            setIssue(issues.map(item => item.name + '：' + item.message).join('；'));
-        } catch (error) { setIssue(window.GuizhiErrorText(error)); }
+            setImportIssues(issues);
+        } catch (error) { setIoStatus(window.GuizhiErrorText(error)); }
         finally { setBusy(false); }
+    }
+
+    async function mxd(job, accept) {
+        setBusy(true);
+        setIssue('');
+        setIoStatus('');
+        try {
+            const result = await job;
+            if (result) accept(result);
+        } catch (error) {
+            const text = String(error?.message || error).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '');
+            setIoStatus('地图工程操作失败。' + text);
+        } finally { setBusy(false); }
     }
 
     useEffect(() => {
         const view = new View({ projection: projection(target, units), center: [0, 0], zoom: 0 });
         const ol = attach(node.current, view, []);
+        setViewReady(false);
+        setScale(null);
+        const updateScale = () => {
+            if (!target) { setScale(null); return; }
+            const resolution = view.getResolution();
+            const metres = units === 'degrees' ? getPointResolution(view.getProjection(), resolution, view.getCenter(), 'm')
+                : resolution * (metresPerUnit || (units === 'm' ? 1 : NaN));
+            setScale(Number.isFinite(metres) && metres > 0 ? Math.max(1, Math.round(metres / .0002645833333)) : null);
+        };
+        const track = event => { if (!event.dragging) setCursor(event.coordinate); };
+        const clearCursor = () => setCursor(null);
+        ol.on('pointermove', track);
+        node.current.addEventListener('pointerleave', clearCursor);
+        setCursor(null);
         if (units === 'm' || units === 'degrees') ol.addControl(new ScaleLine({ units: 'metric' }));
         const select = new Select({ condition: click, layers: candidate => candidate.get('key') === activeRef.current,
             style: style(palette[0], true) });
         ol.addInteraction(select);
         select.on('select', () => setSelection({ key: activeRef.current, ids: select.getFeatures().getArray().map(item => item.getId()) }));
-        graph.current = { ol, view, select, byKey: new globalThis.Map(), fitNeeded: true };
+        graph.current = { ol, view, select, byKey: new globalThis.Map(), fitNeeded: true, initialExtent, updateScale };
         const observer = new ResizeObserver(() => ol.updateSize());
         observer.observe(node.current);
-        const moved = () => setViewRevision(value => value + 1);
+        const moved = () => { if (!graph.current?.fitNeeded) updateScale(); setViewRevision(value => value + 1); };
         ol.on('moveend', moved);
-        return () => { observer.disconnect(); ol.dispose(); graph.current = null; };
-    }, [target, units]);
+        const viewport = node.current;
+        return () => { viewport.removeEventListener('pointerleave', clearCursor); observer.disconnect(); ol.dispose(); graph.current = null; };
+    }, [target, units, metresPerUnit, initialExtent]);
 
     useEffect(() => {
         const state = graph.current;
@@ -254,27 +306,28 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
                 drawing.set('key', id);
                 state.ol.addLayer(drawing);
             }
+            if (item.kind !== 'raster') drawing.setStyle(style(palette[index % palette.length], false, item.style));
+            drawing.setZIndex(layers.length - index);
             drawing.setVisible(!hidden.includes(id));
             next.set(id, drawing);
             if (hidden.includes(id)) return null;
             if (item.kind === 'raster') {
-                const visible = !target || target === item.crs || display?.value === item.crs;
-                drawing.setVisible(visible);
-                if (!visible) return Promise.resolve({ id, drawing, raster: true,
-                    error: new Error('影像 ' + item.name + ' 的坐标系与地图不同。请切换到影像坐标系或先转换影像。') });
                 if (drawing.getSource()) return Promise.resolve({ id, drawing, raster: true });
-                return api.map({ action: 'raster-preview', ref: item.ref }).then(image => ({ id, drawing, raster: true,
-                    image: new Static({ url: 'data:image/png;base64,' + image, imageExtent: item.bounds,
+                const nativeRaster = !target || target === item.crs;
+                const request = nativeRaster ? api.map({ action: 'raster-preview', ref: item.ref }).then(image => ({ image, bounds: item.bounds }))
+                    : api.map({ action: 'raster-display', ref: item.ref, target });
+                return request.then(({ image, bounds }) => ({ id, drawing, raster: true, bounds,
+                    image: new Static({ url: 'data:image/png;base64,' + image, imageExtent: bounds,
                         projection: state.view.getProjection() }) })).catch(error => ({ id, drawing, raster: true, error }));
             }
             if (!item.crs && target) {
                 drawing.getSource().clear();
-                return null;
+                return Promise.resolve({ id, drawing, error: new Error(item.name + '：请先定义图层坐标系') });
             }
             const plan = entries.find(entry => entry.kind === 'plan' &&
                 (entry.plan.source_wkt === item.crs || entry.source_reference === item.crs) &&
                 (entry.plan.target_wkt === target || entry.target_reference === display?.value));
-            return api.map({ action: 'features', ref: item.ref, bbox,
+            return api.map({ action: 'features', ref: item.ref, bbox, tolerance: bbox && item.count > 8000 ? state.view.getResolution() * .5 : undefined,
                 target: target || null, plan: displayPlans[id] || (plan && plan.id + '@' + plan.revision) })
                 .then(result => ({ id, drawing, result })).catch(error => ({ id, drawing, error }));
         }).filter(Boolean);
@@ -286,22 +339,34 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
             setLimited(items.filter(item => item.result?.limited).map(item => item.id));
             for (const item of items) {
                 if (item.raster) {
-                    if (item.image) item.drawing.setSource(item.image);
+                    if (item.image) {
+                        item.drawing.setExtent(item.bounds);
+                        item.drawing.set('dataExtent', item.bounds);
+                        item.drawing.setSource(item.image);
+                    }
                     continue;
                 }
                 item.drawing.getSource().clear();
-                if (item.result) item.drawing.getSource().addFeatures(item.result.features.map(feature));
+                if (item.result) {
+                    item.drawing.set('dataExtent', item.result.bounds);
+                    item.drawing.getSource().addFeatures(item.result.features.map(feature));
+                }
             }
             if (state.fitNeeded && items.length) {
                 state.fitNeeded = false;
                 const drawn = [...next.values()];
-                if (drawn.some(item => item.getVisible() && (item instanceof ImageLayer ? Boolean(item.getSource()) : !isEmpty(item.getSource().getExtent())))) fit(state.view, drawn, state.ol.getSize());
+                if (state.initialExtent && state.ol.getSize()?.every(size => size > 0)) {
+                    state.view.fit(state.initialExtent, { size: state.ol.getSize(), padding: [12, 12, 12, 12] });
+                    state.initialExtent = null;
+                } else if (drawn.some(item => item.getVisible() && (item instanceof ImageLayer ? Boolean(item.getSource()) : !isEmpty(item.getSource().getExtent())))) fit(state.view, drawn, state.ol.getSize());
                 else if (native?.bounds && native.crs === target) state.view.fit(native.bounds, { maxZoom: 20, padding: [28, 28, 28, 28] });
+                state.updateScale();
+                setViewReady(true);
             }
             restoreSelection(state, selectionRef.current);
         });
         return () => { alive = false; };
-    }, [layers, hidden, target, units, viewRevision, entries, displayPlans, Boolean(edit)]);
+    }, [layers, hidden, target, units, initialExtent, viewRevision, entries, displayPlans, Boolean(edit)]);
 
     function restoreSelection(state, selected) {
         const drawing = selected && state.byKey.get(selected.key);
@@ -489,7 +554,7 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
     }
     const clear = () => setSelection({ key: active, ids: [] });
     const editCommands = edit ? [
-        group('要素编辑', ...[['select', '选择'], ['draw', '绘制'], ['modify', '改节点'], ['move', '移动']].map(([mode, title]) =>
+        group('要素编辑', ...[['select', '选择'], ['draw', '绘制'], ['modify', '编辑顶点'], ['move', '移动']].map(([mode, title]) =>
             command(title, () => setEdit(mode), { key: mode, disabled: busy || (['modify', 'move'].includes(mode) && !picked.length),
                 type: edit === mode ? 'primary' : 'default' })),
             edit === 'draw' && drawingPoints > 0 && command('完成绘制', () => drawingTool.current?.finishDrawing(),
@@ -504,6 +569,41 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
         command('保存新版本', saveEdit, { disabled: busy || !count, loading: busy, type: 'primary' }),
         command('退出编辑', () => { edits.current = []; applyDraft(); stopEdit(); }, { disabled: busy })),
     ] : [group('图层编辑', command('编辑图层', startEdit, { disabled: !editable || busy || limited.includes(active) }))];
+    function layerMenu(item, index) {
+        const id = key(item);
+        const raster = item.kind === 'raster';
+        return { items: [
+            { key: 'fit', label: '缩放至图层', icon: glyph('target') },
+            { key: 'table', label: '打开属性表', icon: glyph('table'), disabled: raster },
+            { key: 'properties', label: '图层属性', icon: glyph('layers') },
+            { key: 'style', label: '符号化', icon: glyph('pencil'), disabled: raster },
+            ...(id === active && picked.length && !raster ? [
+                { key: 'selection', label: '选中要素另存为图层', icon: glyph('download') }] : []),
+            { type: 'divider' },
+            { key: 'remove', label: '从地图移除', icon: glyph('trash'), danger: true },
+        ], onClick: ({ key: action }) => {
+            if (action === 'remove') { remove(id); return; }
+            if (action === 'properties' || action === 'style') {
+                setProperties({ item, color: palette[index % palette.length], start: action === 'style' ? 'style' : 'info' });
+                return;
+            }
+            if (action === 'selection') { openTool('data.export_selection'); return; }
+            if (action === 'table') {
+                if (id !== active) selectLayer(id);
+                setPage(0);
+                setTable([]);
+                return;
+            }
+            const g = graph.current;
+            const drawing = g?.byKey.get(id);
+            if (drawing) {
+                if (hidden.includes(id)) toggle(id);
+                const extent = drawing.get('dataExtent') || ((!target || item.crs === target) ? item.bounds : null);
+                if (extent) g.view.fit(extent, { size: g.ol.getSize(), maxZoom: 20, padding: [28, 28, 28, 28] });
+                else fit(g.view, [drawing], g.ol.getSize());
+            }
+        } };
+    }
     const commands = {
         地图: [group('导航', command('全图', () => position(false), { disabled: !layers.length }),
             command('定位图层', () => position(true), { disabled: !layer }),
@@ -511,21 +611,27 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
             group('选择', command('清除选择', clear, { disabled: !picked.length }),
                 command('属性表', () => { setPage(0); setTable(table ? null : []); }, { disabled: !layer || layer.kind === 'raster' }),
                 command('按属性选择', () => openTool('data.select_by_attribute'), { disabled: !layer?.fields?.length }),
-                command('按位置选择', () => openTool('data.select_by_location'), { disabled: !layer?.geometry || layers.filter(item => item.geometry).length < 2 }),
-                command('提取所选要素', () => openTool('data.export_selection'), { disabled: !picked.length }))],
-        数据: [group('导入', command('添加图层', () => load(api.mapImport()), { loading: busy, type: 'primary' })),
-            group('交付', command('导出 SHP', () => api.mapExport(layer.ref).catch(fail), { disabled: !layer?.crs || layer.kind === 'raster' }),
-                command('最近成果', () => setAnalysis(lastResult), { disabled: !lastResult })),
-            group('属性与坐标', command('导出属性表', () => openTool('presentation.export_table'), { disabled: !layer?.fields?.length }),
-                command('坐标系设置', () => setRibbon('坐标系'))),
+                command('按位置选择', () => openTool('data.select_by_location'), { disabled: !layer?.geometry || layers.filter(item => item.geometry).length < 2 }))],
+        数据: [group('地图工程', command('打开 MXD', () => mxd(api.mxdRead(), setDocument), { disabled: busy }),
+            command('保存 MXD', () => mxd(api.mxdWrite({ crs: target, bounds: graph.current?.view.calculateExtent(graph.current.ol.getSize()),
+                layers: [...layers].reverse().map((item, index) => ({ ref: item.ref, name: item.name, visible: !hidden.includes(key(item)),
+                    style: item.kind === 'raster' ? null : symbol(item.style, palette[(layers.length - index - 1) % palette.length]) })) }),
+            result => setIoStatus('已保存 MXD 和配套数据 · ' + result.layers + ' 个图层')), { disabled: busy || !layers.length || !viewReady })),
             group('图层管理', command('新建图层', () => openTool('geometry.create_dataset')),
                 command('复制图层', () => openTool('data.copy'), { disabled: !layer?.geometry }),
-                command('合并图层', () => openTool('data.merge'), { disabled: layers.filter(item => item.geometry).length < 2 }))],
+                command('合并图层', () => openTool('data.merge'), { disabled: layers.filter(item => item.geometry).length < 2 })),
+            group('保存数据', command('导出 SHP', () => api.mapExport(layer.ref).catch(fail), { disabled: !layer?.crs || layer.kind === 'raster' }),
+                command('导出属性表', () => openTool('presentation.export_table'), { disabled: !layer?.fields?.length }),
+                command('最近成果', () => setAnalysis(lastResult), { disabled: !lastResult }))],
         编辑: edit ? editCommands : [...editCommands,
             group('图层维护', command('添加字段', () => openTool('table.add_field'), { disabled: !layer?.geometry }),
                 command('删除字段', () => openTool('table.delete_field'), { disabled: !layer?.fields?.length }),
                 command('修复几何', () => openTool('geometry.repair'), { disabled: !layer?.geometry }))],
-        分析: TOOL_GROUPS.map(({ title, icon, tools }) => menuGroup(title, icon, tools, openTool)),
+        分析: TOOL_GROUPS.map(({ title, icon, tools }) => title === '叠加分析'
+            ? group(title, ...tools.slice(0, 2).map(item => command(item.title, () => openTool(item.id),
+                { key: item.id, icon: glyph(item.icon), disabled: busy })),
+                menuGroup('更多', icon, tools.slice(2), openTool))
+            : menuGroup(title, icon, tools, openTool)),
         业务: [...skillGroups.map(([title, ids]) => [title, catalog.filter(item => ids.includes(item.id))]),
             ['自定义业务', customSkills]].filter(([, items]) => items.length)
             .map(([title, items]) => menuGroup(title, 'analysis', items, id => setAnalysis({ skill: items.find(item => item.id === id) }))),
@@ -555,36 +661,31 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
                     h('div', { className: 'map-layer-row', key: key(item) },
                     h('input', { type: 'checkbox', 'aria-label': '显示 ' + item.name, checked: !hidden.includes(key(item)), disabled: Boolean(edit) || busy,
                         onChange: () => toggle(key(item)) }),
-                    h('span', { className: 'map-swatch', 'data-color': index % palette.length }),
-                    h(Button, { type: 'text', className: key(item) === active ? 'map-layer-active' : '',
-                        title: item.name, disabled: Boolean(edit) || busy,
-                        onClick: () => { setPage(0); setEditLayer(null); selectLayer(key(item)); } }, item.name),
-                    h(antd.Dropdown, { trigger: ['click'], menu: { items: [
-                        { key: 'fit', label: '缩放到图层' }, { key: 'table', label: '打开属性表', disabled: item.kind === 'raster' },
-                        { key: 'edit', label: '定位编辑工具', disabled: item.kind === 'raster' },
-                        { key: 'remove', label: '从地图移除', danger: true },
-                    ], onClick: ({ key: action }) => {
-                        const id = key(item);
-                        if (action === 'remove') { remove(id); return; }
-                        selectLayer(id);
-                        if (action === 'table') { setPage(0); setTable([]); }
-                        else if (action === 'edit') setRibbon('编辑');
-                        else {
-                            const g = graph.current, drawing = g?.byKey.get(id);
-                            if (drawing) fit(g.view, [drawing], g.ol.getSize());
-                        }
-                    } } }, h(Button, { type: 'text', size: 'small', disabled: Boolean(edit) || busy,
-                        'aria-label': item.name + '菜单', icon: glyph('more', 16) }))))),
+                    h('span', { className: 'map-swatch', 'data-color': index % palette.length,
+                        ref: node => { if (node) node.style.backgroundColor = symbol(item.style, palette[index % palette.length]).color; } }),
+                    h(antd.Dropdown, { trigger: ['contextMenu'], menu: layerMenu(item, index), disabled: Boolean(edit) || busy },
+                        h(Button, { type: 'text', className: key(item) === active ? 'map-layer-active' : '',
+                            title: item.group ? item.group + ' / ' + item.name : item.name, disabled: Boolean(edit) || busy,
+                            onClick: () => { setPage(0); setEditLayer(null); selectLayer(key(item)); } }, item.name)),
+                    h(antd.Dropdown, { trigger: ['click'], menu: layerMenu(item, index) },
+                        h(Button, { type: 'text', size: 'small', disabled: Boolean(edit) || busy,
+                            'aria-label': item.name + '菜单', icon: glyph('more', 16) }))))),
             h('div', { className: 'map-viewport' },
                 h('div', { className: 'geo-map', ref: node, tabIndex: 0, 'aria-label': '交互地图' }),
-                !layers.length && h('div', { className: 'map-empty' }, '添加或拖入空间数据'),
-                (issue || limited.length > 0) && h('div', { className: 'map-notice', role: 'status' },
-                    issue || '当前视野要素较多，请放大地图后查看。'))),
+                !layers.length && h(Button, { className: 'map-empty', type: 'default', icon: glyph('add', 30),
+                    title: '添加或拖入空间数据', 'aria-label': '添加或拖入空间数据', disabled: busy, onClick: () => load(api.mapImport()) }),
+                (ioStatus || issue || limited.length > 0 || busy) && h('div', { className: 'map-notice', role: 'status' },
+                    busy ? '正在处理地图数据…' : ioStatus || issue || '当前视野仅显示部分要素，放大后可查看更多。'))),
         h('footer', { className: 'map-status' },
             h('span', null, layers.length + ' 个图层'),
             layer && h('span', null, layer.name),
             picked.length > 0 && h('span', null, '已选 ' + picked.length + ' 个要素'),
-            h('span', { className: 'map-status-crs' }, glyph('globe', 14), h('span', null, display?.label || native?.crsName || '未设置坐标系'))),
+            h('span', { className: 'map-status-crs', title: display?.label || native?.crsName }, glyph('globe', 14),
+                h('span', null, display?.label || native?.crsName || '未设置坐标系')),
+            h('span', { className: 'map-status-measure', 'aria-label': '当前比例尺', title: '屏幕比例尺' },
+                scale ? '1 : ' + scale.toLocaleString('zh-CN') : '1 : —'),
+            h('span', { className: 'map-status-coordinates', 'aria-label': '鼠标坐标', title: '地图坐标 · X / Y' },
+                cursor && viewReady ? cursor.map(value => value.toFixed(units === 'degrees' ? 6 : 2)).join(' , ') + (units === 'degrees' ? ' °' : units === 'm' ? ' m' : '') : 'X —　Y —')),
         table && layer && layer.kind !== 'raster' && h('section', { className: 'map-attribute-panel', 'aria-label': '属性表' },
             h('header', { className: 'map-attribute-head' }, h('strong', null, glyph('table'), '属性表'),
                 h('span', null, layer.name), h(Button, { type: 'text', size: 'small', icon: glyph('close', 15),
@@ -594,6 +695,29 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
                 onChange: ids => setSelection({ key: active, ids }) },
             pagination: { current: page + 1, pageSize: 50, total: layer.count,
                 showSizeChanger: false, onChange: value => setPage(value - 1) } })),
+        properties && h(LayerProperties, { ...properties, close: () => setProperties(null), glyph,
+            save: value => styleLayer(key(properties.item), value) }),
+        document && h(MxdOpen, { document, busy, glyph, close: () => setDocument(null),
+            open: (frame, locate) => mxd(api.mxdImport(frame, locate), result => {
+                if (result.layers.length) {
+                    graph.current.fitNeeded = true;
+                    graph.current.initialExtent = result.frame.bounds;
+                    setDisplayPlans({});
+                    setTable(null);
+                    setLastResult(null);
+                    importFrame(result);
+                    setDocument(null);
+                }
+                setImportIssues(result.layers.length ? result.issues : []);
+                if (!result.layers.length && result.issues.length) {
+                    setIoStatus('此数据框暂未加载图层。' + result.issues.map(item => item.name + '：' + item.message).join('；'));
+                }
+            }), issue: ioStatus }),
+        importIssues.length > 0 && h(Modal, { open: true, centered: true, title: '未加载的图层', className: 'gis-dialog',
+            rootClassName: 'gis-modal-root', onCancel: () => setImportIssues([]), footer: h(Button, {
+                onClick: () => setImportIssues([]), type: 'primary' }, '关闭') },
+            h('ul', { className: 'map-field-editor' }, ...importIssues.map((item, index) =>
+                h('li', { key: index }, item.name + '：' + window.GuizhiErrorText(item.message))))),
         analysis && h(MapProcessing, { ...analysis, layers, active, picked, entries, components, openComponents, glyph, busy,
             setBusy, close: () => setAnalysis(null), Preview, onResult: result => {
                 setLastResult({ tool: analysis.tool, skill: analysis.skill, initialResult: result });

@@ -15,7 +15,7 @@ namespace ArcMapHarness.ArcMapBridgeExternal
     internal static class Program
     {
         [DllImport("user32.dll")]
-        private static extern int GetDesktopWindow();
+        internal static extern int GetDesktopWindow();
 
         [STAThread]
         private static int Main(string[] args)
@@ -32,7 +32,16 @@ namespace ArcMapHarness.ArcMapBridgeExternal
                 try
                 {
                     var product = Acquire(license);
-                    var result = (string)request["action"] == "view" ? WriteView(request) : WriteLayer(request);
+                    JObject result;
+                    switch ((string)request["action"])
+                    {
+                        case "view": result = WriteView(request); break;
+                        case "read-mxd": result = Mxd.Read(request); break;
+                        case "write-mxd": result = Mxd.Write(request); break;
+                        case "layer":
+                        case null: result = WriteLayer(request); break;
+                        default: throw new ArgumentException("Unknown ArcGIS request.");
+                    }
                     result["license"] = product.ToString();
                     Console.WriteLine(result.ToString(Formatting.None));
                     return 0;
@@ -80,11 +89,8 @@ namespace ArcMapHarness.ArcMapBridgeExternal
             throw new InvalidOperationException("No ArcGIS Desktop product license is available.");
         }
 
-        private static JObject WriteLayer(JObject request)
+        internal static ILayer OpenLayer(JObject request)
         {
-            string output = Path.GetFullPath((string)request["output"]);
-            if (!output.EndsWith(".lyr", StringComparison.OrdinalIgnoreCase) || File.Exists(output))
-                throw new InvalidOperationException("Write to a new layer file.");
             string source = Path.GetFullPath((string)request["source"]);
             ILayer layer;
             switch ((string)request["kind"])
@@ -111,7 +117,16 @@ namespace ArcMapHarness.ArcMapBridgeExternal
             if (!layer.Valid)
                 throw new InvalidOperationException("ArcGIS cannot open the data source.");
             layer.Name = (string)request["name"];
-            layer.Visible = true;
+            layer.Visible = (bool?)request["visible"] ?? true;
+            return layer;
+        }
+
+        private static JObject WriteLayer(JObject request)
+        {
+            string output = Path.GetFullPath((string)request["output"]);
+            if (!output.EndsWith(".lyr", StringComparison.OrdinalIgnoreCase) || File.Exists(output))
+                throw new InvalidOperationException("Write to a new layer file.");
+            ILayer layer = OpenLayer(request);
             ILayerFile document = new LayerFileClass();
             document.New(output);
             try

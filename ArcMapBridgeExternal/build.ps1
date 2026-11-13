@@ -55,7 +55,10 @@ $exe = Join-Path $output 'ArcMapBridge.exe'
 if (-not (Test-Path -LiteralPath $exe)) {
     throw "ArcMapBridge.exe 未生成：$exe"
 }
-$sourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $root "Program.cs")).Hash.ToLowerInvariant()
+$sourceHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData(
+    [Text.Encoding]::UTF8.GetBytes((@('Program.cs', 'Mxd.cs') | ForEach-Object {
+        (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $root $_)).Hash.ToLowerInvariant()
+    }) -join ':'))).ToLowerInvariant()
 $binaryHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $exe).Hash.ToLowerInvariant()
 $identity = Join-Path (Split-Path -Parent $exe) "ArcMapBridge.build"
 [System.IO.File]::WriteAllLines(

@@ -12,7 +12,7 @@ import pyogrio
 from pyproj import CRS
 
 from guizhi.domain.capabilities import MATERIAL_FORMATS, material_kind
-from guizhi.infrastructure.vector import source_files
+from guizhi.infrastructure.vector import shapefile_projection, source_files
 
 MAX_FILES = 1000
 MAX_BYTES = 2 << 30
@@ -35,8 +35,11 @@ def describe(file):
         for name, geometry in pyogrio.list_layers(file):
             if not geometry:
                 continue
-            info = pyogrio.read_info(file, layer=name, force_feature_count=False)
-            crs = CRS(info["crs"]) if info["crs"] else None
+            if file.suffix.lower() == ".shp":
+                crs = shapefile_projection(parts)
+            else:
+                info = pyogrio.read_info(file, layer=name, force_feature_count=False)
+                crs = CRS(info["crs"]) if info["crs"] else None
             layers.append({"name": name, "geometry": geometry, "crs": crs.to_string() if crs else None,
                            "projected_meters": bool(crs and crs.is_projected and
                                                     all(axis.unit_conversion_factor == 1 for axis in crs.axis_info[:2]))})
@@ -63,8 +66,19 @@ def bound_layer_metadata(materials):
             kind = material_kind(item["file"])
             description = {"kind": kind, "name": Path(item["file"]).name, "layer": item["layer"]}
             if kind == "vector":
-                info = pyogrio.read_info(item["file"], layer=item["layer"], force_feature_count=False)
-                description.update(fields=info["fields"].tolist(), geometry=info["geometry_type"], crs=info["crs"])
+                file = Path(item["file"])
+                if file.suffix.lower() == ".shp":
+                    parts = source_files(file)
+                    crs = shapefile_projection(parts)
+                    # GDAL can read DBF fields independently of the SHP projection.
+                    dbf = next(part for part in parts if part.suffix.lower() == ".dbf")
+                    info = pyogrio.read_info(dbf, force_feature_count=False)
+                    geometry = next((geom for name, geom in pyogrio.list_layers(file) if name == item["layer"]), None)
+                    description.update(fields=info["fields"].tolist(), geometry=geometry,
+                                       crs=crs.to_string() if crs else None)
+                else:
+                    info = pyogrio.read_info(file, layer=item["layer"], force_feature_count=False)
+                    description.update(fields=info["fields"].tolist(), geometry=info["geometry_type"], crs=info["crs"])
             elif kind == "raster":
                 from guizhi.infrastructure.operations.raster import metadata
 

@@ -334,8 +334,13 @@ dialog label { display: grid; gap: 5px; }
 .map-swatch[data-color="4"] { background: #cc5785; }
 .map-viewport { display: flex; flex-direction: column; min-height: 0; position: relative; overflow: hidden; }
 .map-viewport .geo-map { position: relative; background: var(--gis-map); }
-.map-notice, .map-empty { position: absolute; inset: 12px 12px auto; padding: 8px 12px; border-radius: 8px; background: var(--panel); color: var(--ink); pointer-events: none; }
-.map-empty { inset: 45% 10% auto; text-align: center; }
+.map-notice { position: absolute; inset: 12px 12px auto; padding: 8px 12px; border-radius: 8px; background: var(--panel); color: var(--ink); pointer-events: none; }
+.map-empty.ant-btn {
+    position: absolute; inset: 50% auto auto 50%; transform: translate(-50%, -50%);
+    width: 64px; height: 64px; color: var(--accent); border-color: var(--gis-edge); border-radius: 12px;
+    background: var(--panel);
+}
+.map-notice { max-height: 5em; overflow: auto; pointer-events: auto; }
 .map-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 7px 10px; background: var(--sub); }
 .map-legend-entry { display: flex; align-items: center; gap: 8px; padding: 6px 12px; }
 .map-coordinate { display: grid; margin-top: auto; padding: 6px; }
@@ -382,6 +387,8 @@ dialog label { display: grid; gap: 5px; }
 }
 .ribbon-menu { display: flex; align-items: center; }
 .ribbon-menu .ant-btn { min-height: 32px; }
+.ribbon-actions > .ribbon-menu { padding: 0; border: 0; background: transparent; }
+.ribbon-actions > .ribbon-menu .ant-btn { min-height: 28px; }
 .ribbon-group > span { color: var(--muted); font-size: 11px; }
 .ribbon-actions { display: flex; gap: 6px; align-items: center; }
 .ribbon-actions > .ant-btn, .map-layer-head > .ant-btn, .ribbon-tabs > .ant-btn { min-height: 28px; }
@@ -400,6 +407,10 @@ dialog label { display: grid; gap: 5px; }
 .map-status > span { white-space: nowrap; }
 .map-status-crs { margin-left: auto; min-width: 0; }
 .map-status-crs > span { overflow: hidden; text-overflow: ellipsis; }
+.map-status-measure, .map-status-coordinates {
+    padding-left: 9px; border-left: 1px solid var(--gis-edge); font-variant-numeric: tabular-nums;
+}
+.map-status-coordinates { min-width: 142px; text-align: right; }
 .ribbon-actions .map-coordinate { display: flex; gap: 8px; align-items: center; padding: 0; min-width: 220px; }
 
 .gis-modal-root .gis-dialog .ant-modal-content {
@@ -410,6 +421,16 @@ dialog label { display: grid; gap: 5px; }
 .gis-modal-root .gis-dialog .ant-modal-title { color: var(--ink); }
 .gis-modal-root .gis-dialog .ant-modal-footer { margin-top: 16px; }
 .gis-dialog .gis-result-cancel { display: none; }
+.gis-layer-tabs { margin-bottom: 12px; }
+.gis-layer-properties { display: grid; margin: 0; }
+.gis-layer-properties > div {
+    display: grid; grid-template-columns: 100px minmax(0,1fr); gap: 12px;
+    border-bottom: 1px solid var(--line); padding: 8px 0; align-items: start;
+}
+.gis-layer-properties dt { color: var(--muted); }
+.gis-layer-properties dd { margin: 0; overflow-wrap: anywhere; user-select: text; }
+.gis-layer-extent { font-variant-numeric: tabular-nums; }
+.gis-tool-field input[type=color] { min-height: 34px; width: 100%; padding: 3px 6px; cursor: pointer; }
 .gis-tool-fields, .gis-tool-field, .gis-mapping { display: grid; gap: 6px; min-width: 0; }
 .gis-tool-fields { margin: 0; padding: 0; border: 0; gap: 12px; }
 .gis-tool-field > span:first-child { font-weight: 600; }

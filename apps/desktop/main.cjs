@@ -435,11 +435,11 @@ async function startDesktop(options) {
     });
     bind('materialPaths', (paths, kind) => controller.intake(paths, kind));
     bind('map', async (surface, input) => {
-        if (surface !== window || !input || !['describe', 'features', 'table', 'crs-search', 'raster-preview', 'assign', 'transform', 'edit', 'tool'].includes(input.action)) {
+        if (surface !== window || !input || !['describe', 'features', 'table', 'crs-search', 'raster-preview', 'raster-display', 'assign', 'transform', 'edit', 'tool'].includes(input.action)) {
             throw new Error('地图请求无效');
         }
         if (!controller.settings.workspace) throw new Error('请先选择成果保存位置');
-        return ['describe', 'features', 'table', 'crs-search', 'raster-preview'].includes(input.action)
+        return ['describe', 'features', 'table', 'crs-search', 'raster-preview', 'raster-display'].includes(input.action)
             ? controller.reader.map(controller.settings.workspace, input) : controller.request('map', input);
     }, true);
     bind('mapSkill', async (surface, input) => {
@@ -471,6 +471,51 @@ async function startDesktop(options) {
         if (item.kind === 'report') await fs.promises.writeFile(output, await printReport(source));
         else await fs.promises.copyFile(source, output);
         shell.showItemInFolder(output);
+    }, true);
+    let currentMxd;
+    function requireMxdBridge() {
+        const executable = bridge();
+        if (!executable) throw new Error('请在「第三方扩展」安装 ArcGIS 组件后再使用 MXD');
+        return executable;
+    }
+    bind('mxdRead', async surface => {
+        if (surface !== window) throw new Error('请在地图工作区打开 MXD');
+        const executable = requireMxdBridge();
+        const pick = await dialog.showOpenDialog(window, { properties: ['openFile'], filters: [{ name: 'ArcGIS 地图工程', extensions: ['mxd'] }] });
+        if (pick.canceled) return null;
+        const source = externalPath(pick.filePaths[0]);
+        const manifest = await controller.request('map', { action: 'mxd-read', bridge: executable, source });
+        currentMxd = { source, manifest, workspace: controller.settings.workspace };
+        return { name: path.basename(source, '.mxd'), frames: manifest.frames.map(frame => ({
+            name: frame.name, count: frame.layers.length, unavailable: frame.layers.filter(item => !item.valid || item.kind === 'unsupported').length,
+        })) };
+    }, true);
+    bind('mxdImport', async (surface, index, relocate) => {
+        if (surface !== window || !currentMxd || currentMxd.workspace !== controller.settings.workspace ||
+                !Number.isInteger(index) || !currentMxd.manifest.frames[index]) throw new Error('请先打开 MXD 并选择数据框');
+        const { source, manifest } = currentMxd;
+        let search;
+        if (relocate) {
+            const pick = await dialog.showOpenDialog(window, { properties: ['openDirectory'] });
+            if (pick.canceled) return null;
+            search = externalPath(pick.filePaths[0]);
+        }
+        return controller.request('map', { action: 'mxd-import', source, frame: manifest.frames[index], search });
+    }, true);
+    bind('mxdWrite', async (surface, input) => {
+        if (surface !== window || !Array.isArray(input?.layers) || input.layers.length > 256 ||
+                input.layers.some(item => !mapLayers.has(mapKey(item.ref)))) throw new Error('请从地图工作区保存有效图层');
+        const executable = requireMxdBridge();
+        const pick = await dialog.showSaveDialog(window, { defaultPath: '规智地图.mxd',
+            filters: [{ name: 'ArcGIS 地图工程', extensions: ['mxd'] }] });
+        if (pick.canceled) return null;
+        const output = externalPath(pick.filePath);
+        const relative = path.relative(path.join(controller.settings.workspace, 'runs'), output);
+        if (!path.isAbsolute(relative) && relative.split(path.sep)[0] !== '..') throw new Error('请选择独立的地图工程保存位置');
+        const result = await controller.request('map', { action: 'mxd-write', bridge: executable, output,
+            name: path.basename(output, '.mxd'), layers: input.layers, crs: input.crs, bounds: input.bounds });
+        shell.showItemInFolder(output);
+        return result;
     }, true);
     bind('mapImport', async (surface, paths) => {
         if (surface !== window) throw new Error('请从工作台添加图层');

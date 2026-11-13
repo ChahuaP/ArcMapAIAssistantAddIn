@@ -13,7 +13,7 @@ import shapely
 
 from guizhi.domain.crs import TransformPlan
 from guizhi.infrastructure.crs_catalog import insert, store
-from guizhi.infrastructure.vector import digest, source_revision
+from guizhi.infrastructure.vector import digest, projection_text, source_revision
 
 UNITS = {"degree": pi / 180, "m": 1, "ft": 0.3048, "us-ft": 1200 / 3937}
 STEPS = {"pipeline", "unitconvert", "cart", "helmert", "tmerc", "utm", "hgridshift",
@@ -137,13 +137,7 @@ def shp_definition(path):
         raise ValueError(f"找到多个同名坐标文件 {projection_name}，请保留正确的一个")
     projection = projections[0]
     data = projection.read_bytes()
-    try:
-        raw = data.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        try:
-            raw = data.decode("gb18030")
-        except UnicodeDecodeError as exc:
-            raise ValueError(f"{projection.name} 的文本编码无法识别") from exc
+    raw = projection_text(projection, data)
     return raw, {"projection_file": str(projection.resolve()), "projection_sha256": sha256(data).hexdigest()}
 
 
