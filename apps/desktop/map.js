@@ -1,6 +1,6 @@
 import 'ol/ol.css';
 import { MapProcessing, TOOL_GROUPS } from './map-processing.js';
-import { LayerProperties, MxdOpen, categoryValue, layerSymbol, symbol } from './map-layer-dialog.js';
+import { LayerProperties, MxdOpen, categoryValue, layerSymbol, opacity, symbol } from './map-layer-dialog.js';
 import Map from 'ol/Map.js';
 import View from 'ol/View.js';
 import Projection from 'ol/proj/Projection.js';
@@ -74,14 +74,18 @@ function glyph(name, size = 17) {
 const roles = { project: '项目范围', coverage: '重叠范围' };
 const key = item => item.ref.run + ':' + item.ref.artifact;
 const projection = (code, units) => new Projection({ code: code || 'local', units: units || 'm' });
+const colorHex = value => {
+    const rgb = value.match(/^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/);
+    return rgb ? '#' + rgb.slice(1).map(channel => Number(channel).toString(16).padStart(2, '0')).join('') : null;
+};
 const feature = item => format.readFeature({ type: 'Feature', ...item });
 const style = (color, selected, settings) => {
     const appearance = symbol(settings, color);
     const lineDash = appearance.pattern === 'dash' ? [9, 5] : appearance.pattern === 'dot' ? [2, 4] : undefined;
-    const stroke = new Stroke({ color: selected ? '#f7be49' : appearance.color,
-        width: selected ? 3 : appearance.width, lineDash: selected ? undefined : lineDash });
+    const stroke = !appearance.noOutline || selected ? new Stroke({ color: selected ? '#f7be49' : appearance.color,
+        width: selected ? 3 : appearance.width, lineDash: selected ? undefined : lineDash }) : undefined;
     const fill = appearance.fill || selected
-        ? new Fill({ color: selected ? '#f7be494e' : appearance.fill + '31' }) : undefined;
+        ? new Fill({ color: selected ? '#f7be494e' : appearance.fill + Math.round(appearance.fillOpacity * 255 / 100).toString(16).padStart(2, '0') }) : undefined;
     const point = { radius: selected ? 6 : appearance.size / 2,
         fill: new Fill({ color: selected ? '#f7be49' : appearance.color }),
         stroke: new Stroke({ color: selected ? '#522d0c' : appearance.color, width: 1 }) };
@@ -262,6 +266,10 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
     }
 
     useEffect(() => {
+        node.current.style.backgroundColor = /^#[0-9a-f]{6}$/i.test(display?.background || '') ? display.background : '';
+    }, [display?.background]);
+
+    useEffect(() => {
         const view = new View({ projection: projection(target, units), center: [0, 0], zoom: 0 });
         const ol = attach(node.current, view, []);
         setViewReady(false);
@@ -299,7 +307,12 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
         const previous = state.byKey;
         const next = new globalThis.Map();
         const layerKeys = layers.map(key);
-        for (const [id, existing] of previous) if (!layerKeys.includes(id)) state.ol.removeLayer(existing);
+        for (const [id, existing] of previous) {
+            if (layerKeys.includes(id)) continue;
+            const fillLayer = existing.get('fillLayer');
+            if (fillLayer) state.ol.removeLayer(fillLayer);
+            state.ol.removeLayer(existing);
+        }
         const bbox = !state.fitNeeded && state.ol.getSize()?.every(size => size > 0)
             ? state.view.calculateExtent(state.ol.getSize()) : null;
         const jobs = layers.map((item, index) => {
@@ -310,21 +323,47 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
                 drawing.set('key', id);
                 state.ol.addLayer(drawing);
             }
+            const order = 2 * (layers.length - index);
+            const layerOpacity = opacity(item.style?.opacity ?? item.opacity) / 100;
+            const visible = !hidden.includes(id);
             if (item.kind !== 'raster') {
                 const color = palette[index % palette.length];
-                const base = style(color, false, item.style);
+                const appearance = symbol(item.style, color);
                 const classification = item.style?.classification;
                 const field = classification?.field;
-                if (field) {
-                    const classStyle = shade => style(shade, false, { ...item.style, color: shade,
-                        fill: item.style.fill === null ? null : shade });
-                    const byValue = new globalThis.Map(classification.classes.map(entry => [entry.value, classStyle(entry.color)]));
-                    const other = classStyle(classification.other);
-                    drawing.setStyle(feature => byValue.get(categoryValue(feature.get(field))) || other);
-                } else drawing.setStyle(base);
+                const render = settings => {
+                    if (!field) return style(color, false, settings);
+                    const classStyle = (shade, fill) => style(shade, false, { ...settings, color: shade,
+                        fill: settings.fill === null || fill === null ? null : fill || shade });
+                    const byValue = new globalThis.Map(classification.classes.map(entry =>
+                        [entry.value, classStyle(entry.color, entry.fillColor)]));
+                    const other = classStyle(classification.other, classification.otherFill);
+                    return feature => byValue.get(categoryValue(feature.get(field))) || other;
+                };
+                let fillLayer = drawing.get('fillLayer');
+                if (/Polygon$/.test(item.geometry) && appearance.fill && appearance.fillOpacity < 100) {
+                    // ArcGIS blends the polygon fill once per layer and draws outlines separately.
+                    if (!fillLayer) {
+                        fillLayer = new VectorLayer({ source: drawing.getSource() });
+                        drawing.set('fillLayer', fillLayer);
+                        state.ol.addLayer(fillLayer);
+                    }
+                    fillLayer.setStyle(render({ ...appearance, fillOpacity: 100, noOutline: true }));
+                    fillLayer.setOpacity(layerOpacity * appearance.fillOpacity / 100);
+                    fillLayer.setZIndex(order - 1);
+                    fillLayer.setVisible(visible);
+                    drawing.setStyle(render({ ...appearance, fillOpacity: 0 }));
+                } else {
+                    if (fillLayer) {
+                        state.ol.removeLayer(fillLayer);
+                        drawing.unset('fillLayer');
+                    }
+                    drawing.setStyle(render(appearance));
+                }
             }
-            drawing.setZIndex(layers.length - index);
-            drawing.setVisible(!hidden.includes(id));
+            drawing.setOpacity(layerOpacity);
+            drawing.setZIndex(order);
+            drawing.setVisible(visible);
             next.set(id, drawing);
             if (hidden.includes(id)) return null;
             if (item.kind === 'raster') {
@@ -631,7 +670,7 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
         if (message && !notices.has(message)) notices.set(message, []);
     }
     const coordinateTools = () => h(CoordinateTools, { layer, display,
-        setDisplay: item => { setDisplayPlans({}); setDisplay(item); },
+        setDisplay: item => { setDisplayPlans({}); setDisplay(item ? { ...item, background: display?.background } : null); },
         displayPlan: displayPlans[active], setDisplayPlan: value => setDisplayPlans(old => ({ ...old, [active]: value })),
         entries, request: api.map, onLayer: item => { add([item]); setCoordinatesOpen(false); }, fail });
     const commands = {
@@ -644,7 +683,8 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
                 command('按位置选择', () => openTool('data.select_by_location'), { disabled: !layer?.geometry || layers.filter(item => item.geometry).length < 2 }))],
         数据: [group('地图工程', command('打开 MXD', () => mxd(api.mxdRead(), value => { setLocateMxd(null); setDocument(value); }), { disabled: busy }),
             command('保存 MXD', () => mxd(api.mxdWrite({ crs: target, bounds: graph.current?.view.calculateExtent(graph.current.ol.getSize()),
-                layers: [...layers].reverse().map((item, index) => ({ ref: item.ref, name: item.name, visible: !hidden.includes(key(item)),
+                background: display?.background || colorHex(getComputedStyle(node.current).backgroundColor),
+                layers: [...layers].reverse().map((item, index) => ({ ref: item.ref, name: item.name, visible: !hidden.includes(key(item)), opacity: opacity(item.opacity),
                     style: item.kind === 'raster' ? null : layerSymbol(item.style, palette[(layers.length - index - 1) % palette.length]) })) }),
             result => setIoStatus('已保存 MXD 和配套数据 · ' + result.layers + ' 个图层')), { disabled: busy || !layers.length || !viewReady })),
             group('图层管理', command('新建图层', () => openTool('geometry.create_dataset')),

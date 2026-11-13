@@ -543,7 +543,7 @@
                 setMapSelection(null);
                 hideLayers(items.filter(item => !item.visible).map(mapKey));
                 setMapDisplay(frame.crs ? { wkt: frame.crs, units: frame.units, metresPerUnit: frame.metresPerUnit,
-                    label: frame.crsName || frame.name, bounds: frame.bounds } : null);
+                    label: frame.crsName || frame.name, bounds: frame.bounds, background: frame.background } : null);
             },
             fail, close: () => showMapWorkspace(false), selection: mapSelection, setSelection: setMapSelection,
             replace: replaceLayer, editing: setMapEditing });

@@ -2,9 +2,14 @@ const h = window.React.createElement;
 const { useRef, useState } = window.React;
 const { Button, Modal, Select, InputNumber } = window.antd;
 const hex = /^#[0-9a-f]{6}$/i;
+export const opacity = (value, defaultValue = 100) => Number.isFinite(value)
+    ? Math.round(Math.min(100, Math.max(0, value))) : defaultValue;
 export function symbol(value, color) {
     return { color: hex.test(value?.color) ? value.color : color,
         fill: value?.fill === null ? null : hex.test(value?.fill) ? value.fill : color,
+        fillOpacity: opacity(value?.fillOpacity, 19),
+        opacity: opacity(value?.opacity),
+        noOutline: value?.noOutline === true,
         shape: ['circle', 'square', 'diamond', 'cross'].includes(value?.shape) ? value.shape : 'circle',
         pattern: ['solid', 'dash', 'dot'].includes(value?.pattern) ? value.pattern : 'solid',
         width: Math.min(8, Math.max(.5, Number(value?.width) || 1.6)),
@@ -33,7 +38,7 @@ function Classification({ item, style, update, color, setLoading }) {
     const request = useRef(0);
     const value = style.classification;
     function colors(list, selected) {
-        return list.map((entry, index) => ({ ...entry, color: palettes[selected][index % palettes[selected].length] }));
+        return list.map((entry, index) => ({ ...entry, color: palettes[selected][index % palettes[selected].length], fillColor: palettes[selected][index % palettes[selected].length] }));
     }
     async function field(name) {
         const token = ++request.current;
@@ -62,10 +67,10 @@ function Classification({ item, style, update, color, setLoading }) {
             h('thead', null, h('tr', null, h('th', null, '颜色'), h('th', null, '字段值'), h('th', null, '要素数'))),
             h('tbody', null, ...value.classes.map((entry, index) => h('tr', { key: JSON.stringify(entry.value) },
                 h('td', null, colorInput('分类颜色 ' + (entry.value ?? '空值'), entry.color,
-                    next => update('classification', { ...value, classes: value.classes.map((item, i) => i === index ? { ...item, color: next } : item) }))),
+                    next => update('classification', { ...value, classes: value.classes.map((item, i) => i === index ? { ...item, color: next, fillColor: next } : item) }))),
                 h('td', null, entry.label || (entry.value ?? '空值')), h('td', null, entry.count ?? '—'))),
             h('tr', null, h('td', null, colorInput('其他值颜色', value.other || color,
-                next => update('classification', { ...value, other: next }))), h('td', null, '其他值' + (value.remaining ? '（' + value.remaining + ' 类）' : '')),
+                next => update('classification', { ...value, other: next, otherFill: next }))), h('td', null, '其他值' + (value.remaining ? '（' + value.remaining + ' 类）' : '')),
                 h('td', null, '—')))));
 }
 
@@ -123,7 +128,8 @@ export function LayerProperties({ item, color, close, save, glyph, start = 'info
             points ? measure('size', '点大小', 4, 28, 1) : measure('width', '线宽', .5, 8, .5),
             polygon && field('面填充', h('input', { type: 'checkbox', checked: style.fill !== null,
                 'aria-label': '面填充', onChange: event => update('fill', event.target.checked ? style.color : null) })),
-            polygon && style.fill && !style.classification && styleColor('fill', '填充颜色', style.color)))
+            polygon && style.fill && !style.classification && styleColor('fill', '填充颜色', style.color),
+            polygon && style.fill && measure('fillOpacity', '填充不透明度（%）', 0, 100, 1)))
             : h('dl', { className: 'gis-layer-properties' }, ...info.map(([label, value]) => prop(label, value))));
 }
 

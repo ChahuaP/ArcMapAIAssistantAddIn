@@ -102,16 +102,54 @@ def import_frame(workspace, payload):
                         {"file": str(file), "layer": name}]}))
                 layer = describe(workspace, {"run": record["id"], "artifact": "import"})
             result.append({**layer, "name": item["name"], "style": item.get("style"), "group": item["group"],
-                           "visible": item["visible"], "sourceName": str(file)})
+                           "visible": item["visible"], "opacity": item.get("opacity", 100), "sourceName": str(file)})
         except (OSError, ValueError, RuntimeError) as error:
             issues.append({"name": item["name"], "message": str(error), "missing": isinstance(error, FileNotFoundError)})
-    frame = {key: payload["frame"].get(key) for key in ("name", "crs", "bounds")}
+    frame = {key: payload["frame"].get(key) for key in ("name", "crs", "bounds", "background")}
     if frame["crs"]:
         crs = CRS(frame["crs"])
         frame["crsName"] = crs.name
         frame["units"] = "degrees" if crs.is_geographic else "m" if crs.is_projected else None
         frame["metresPerUnit"] = crs.axis_info[0].unit_conversion_factor if crs.is_projected else None
     return {"layers": result, "issues": issues, "frame": frame}
+
+
+def verify_mxd_symbols(expected, actual):
+    if expected is None:
+        return True
+    if actual is None:
+        return False
+    def color(value):
+        return value.casefold() if value else None
+
+    if any(expected.get(key, default) != actual.get(key, default)
+           for key, default in (("opacity", 100), ("noOutline", False))):
+        return False
+    if expected.get("classification"):
+        left = expected["classification"]
+        right = actual.get("classification")
+        if not right or left["field"] != right["field"]:
+            return False
+        if [(item["value"], item.get("label") or ("空值" if item["value"] is None else item["value"]), color(item["color"]))
+            for item in left["classes"]] != [(item["value"], item.get("label"), color(item["color"])) for item in right["classes"]]:
+            return False
+        if color(left["other"]) != color(right["other"]):
+            return False
+        if expected.get("fill") is not None and actual.get("fill") is not None:
+            if color(left.get("otherFill", left["other"])) != color(right.get("otherFill")) or any(
+                    color(a.get("fillColor", a["color"])) != color(b.get("fillColor"))
+                    for a, b in zip(left["classes"], right["classes"], strict=True)):
+                return False
+    elif color(expected["color"]) != color(actual.get("color")):
+        return False
+    if actual.get("fill") is not None:
+        if expected.get("fill") is None or expected.get("fillOpacity", 19) != actual["fillOpacity"]:
+            return False
+        if not expected.get("classification") and color(expected["fill"]) != color(actual["fill"]):
+            return False
+    if "shape" in actual:
+        return expected["shape"] == actual["shape"] and abs(expected["size"] - actual["size"]) < 1e-7
+    return expected["pattern"] == actual["pattern"] and abs(expected["width"] - actual["width"]) < 1e-7
 
 
 def write_document(workspace, payload):
@@ -132,6 +170,7 @@ def write_document(workspace, payload):
         for index, item in enumerate(items, 1):
             ref = item["ref"]
             dataset = f"layer_{index}"
+            geometry = None
             if ref["artifact"] == "raster_preview":
                 from guizhi.infrastructure.operations.raster import normalize
 
@@ -142,23 +181,33 @@ def write_document(workspace, payload):
             else:
                 file, name = source(workspace, ref)
                 frame = pyogrio.read_dataframe(file, layer=name)
+                geometry = pyogrio.read_info(file, layer=name)["geometry_type"]
                 try:
                     export_frame(frame, gdb, dataset, "OpenFileGDB", tolerance=2e-8, allow_z=True)
                 except (ValueError, AssertionError, pyogrio.errors.DataLayerError) as error:
                     raise ValueError(f"图层「{item['name']}」无法保存到 ArcGIS 文件地理数据库：{error}") from error
                 layer = {"kind": "vector", "source": str(gdb), "dataset": dataset}
-            layers.append({**layer, "name": item["name"], "visible": item["visible"], "style": item.get("style")})
+            layers.append({**layer, "name": item["name"], "visible": item["visible"], "opacity": item.get("opacity", 100), "style": item.get("style"), "geometry": geometry})
         target_crs = CRS(payload["crs"]).to_wkt(version="WKT1_ESRI") if payload.get("crs") else None
         view = bounds(payload["bounds"]) if payload.get("bounds") else None
         with TemporaryDirectory(prefix="mxd-", dir=workspace.root) as temp:
             bridge(Path(payload["bridge"]), Path(temp), "write",
                    {"action": "write-mxd", "output": str(temporary), "layers": layers, "crs": target_crs,
-                    "bounds": view, "name": payload.get("name")}, timeout=90)
+                    "bounds": view, "background": payload.get("background"), "name": payload.get("name")}, timeout=90)
             check = bridge(Path(payload["bridge"]), Path(temp), "verify",
                            {"action": "read-mxd", "source": str(temporary)}, timeout=90)
             actual = list(frame_layers(check["frames"][0]["layers"]))
             if [item["name"] for item in actual] != [item["name"] for item in reversed(layers)] or not all(item["valid"] for item in actual):
                 raise ValueError("MXD 保存后未能重新打开全部图层")
+            if payload.get("background") and (check["frames"][0].get("background") or "").casefold() != payload["background"].casefold():
+                raise ValueError("MXD 底色未能保留")
+            for before, after in zip(reversed(layers), actual, strict=True):
+                valid = verify_mxd_symbols(before["style"], after.get("style"))
+                if before["style"] and "Polygon" in (before["geometry"] or ""):
+                    valid = valid and (before["style"]["fill"] is None) == (after.get("style", {}).get("fill") is None)
+                if not valid or before["visible"] != after["visible"] or (
+                        before["kind"] == "raster" and before["opacity"] != after.get("opacity", 100)):
+                    raise ValueError(f"图层「{before['name']}」的符号或可见性未能保留")
         temporary.rename(output)
     except (OSError, ValueError, RuntimeError, InterruptedError):
         shutil.rmtree(data)

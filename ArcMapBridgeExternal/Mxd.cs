@@ -73,12 +73,12 @@ namespace ArcMapHarness.ArcMapBridgeExternal
                 if (basis == null) basis = appearance;
                 classes.Add(new JObject {
                     ["value"] = value == "<Null>" ? null : value, ["label"] = unique.get_Label(value),
-                    ["color"] = appearance["fill"]?.Type == JTokenType.String ? appearance["fill"] : appearance["color"]
+                    ["color"] = appearance["color"], ["fillColor"] = appearance["fill"]
                 });
             }
             if (basis == null) return other;
             basis["classification"] = new JObject { ["field"] = unique.get_Field(0), ["classes"] = classes,
-                ["other"] = (string)(other?["fill"]) ?? (string)(other?["color"]) ?? "#7d8999" };
+                ["other"] = (string)(other?["color"]) ?? "#7d8999", ["otherFill"] = other?["fill"] };
             return basis;
         }
 
@@ -95,14 +95,72 @@ namespace ArcMapHarness.ArcMapBridgeExternal
                     case esriSimpleMarkerStyle.esriSMSCross:
                     case esriSimpleMarkerStyle.esriSMSX: shape = "cross"; break;
                 }
-                return new JObject { ["color"] = Hex(marker.Color), ["shape"] = shape, ["size"] = marker.Size };
+                return new JObject { ["color"] = Hex(marker.Color), ["shape"] = shape, ["size"] = marker.Size / 0.75 };
             }
             var fill = symbol as ISimpleFillSymbol;
             var line = fill == null ? symbol as ILineSymbol : fill.Outline;
             if (line == null) return null;
             return new JObject { ["color"] = Hex(line.Color), ["pattern"] = LineStyle(line as ISimpleLineSymbol),
-                ["width"] = line.Width, ["fill"] = fill == null || fill.Style == esriSimpleFillStyle.esriSFSHollow ||
+                ["width"] = line.Width / 0.75, ["noOutline"] = line is ISimpleLineSymbol edge &&
+                    edge.Style == esriSimpleLineStyle.esriSLSNull, ["fill"] = fill == null || fill.Style == esriSimpleFillStyle.esriSFSHollow ||
                     fill.Style == esriSimpleFillStyle.esriSFSNull ? null : Hex(fill.Color) };
+        }
+
+        private const string PolygonAppearanceGroup = "Guizhi.Mxd.PolygonAppearance/1";
+
+        private static IMapFrame Frame(IMapDocument document, IMap map)
+        {
+            return ((IGraphicsContainer)document.PageLayout).FindFrame(map) as IMapFrame;
+        }
+
+        private static string Background(IMapDocument document, IMap map)
+        {
+            var frame = Frame(document, map);
+            var background = (frame?.Background ?? ((IMapAdmin2)map).NonFrameBackground) as ISymbolBackground;
+            return Hex(background?.FillSymbol?.Color);
+        }
+
+        private static void SetBackground(IMapDocument document, IMap map, string color)
+        {
+            if (color == null) return;
+            ISymbolBackground background = new SymbolBackgroundClass();
+            background.FillSymbol = new SimpleFillSymbolClass { Color = Color(color),
+                Outline = (ILineSymbol)new SimpleLineSymbolClass { Style = esriSimpleLineStyle.esriSLSNull } };
+            var frame = Frame(document, map);
+            if (frame != null) frame.Background = (IBackground)background;
+            ((IMapAdmin2)map).NonFrameBackground = (IBackground)background;
+        }
+
+        private static JObject PolygonAppearance(ICompositeLayer group)
+        {
+            if (group.Count != 2) throw new InvalidOperationException("规智面符号图层缺少填充或边线。");
+            var stroke = Layer(group.get_Layer(0));
+            var fill = Layer(group.get_Layer(1));
+            if ((string)stroke["name"] != "边线" || (string)fill["name"] != "填充")
+                throw new InvalidOperationException("规智面符号的子图层无法识别。");
+            if (!JToken.DeepEquals(stroke["workspace"], fill["workspace"]) ||
+                !JToken.DeepEquals(stroke["dataset"], fill["dataset"]))
+                throw new InvalidOperationException("规智面符号的边线和填充引用了不同的数据。");
+            var style = (JObject)stroke["style"];
+            var fillStyle = (JObject)fill["style"];
+            style["fill"] = fillStyle["fill"];
+            style["fillOpacity"] = fillStyle["opacity"];
+            if (style["classification"] is JObject classification && fillStyle["classification"] is JObject fillClassification)
+            {
+                var entries = (JArray)classification["classes"];
+                var fillEntries = (JArray)fillClassification["classes"];
+                if (entries.Count != fillEntries.Count)
+                    throw new InvalidOperationException("规智面符号的边线和填充分类不一致。");
+                for (int i = 0; i < entries.Count; i++)
+                {
+                    if (!JToken.DeepEquals(entries[i]["value"], fillEntries[i]["value"]))
+                        throw new InvalidOperationException("规智面符号的边线和填充分类不一致。");
+                    entries[i]["fillColor"] = fillEntries[i]["fillColor"];
+                }
+                classification["otherFill"] = fillClassification["otherFill"];
+            }
+            stroke["valid"] = (bool)stroke["valid"] && (bool)fill["valid"];
+            return stroke;
         }
 
         private static JObject Layer(ILayer layer)
@@ -120,6 +178,14 @@ namespace ArcMapHarness.ArcMapBridgeExternal
             if (group != null)
             {
                 var layers = (ICompositeLayer)group;
+                if (((ILayerGeneralProperties)group).LayerDescription == PolygonAppearanceGroup)
+                {
+                    var appearance = PolygonAppearance(layers);
+                    appearance["name"] = layer.Name;
+                    appearance["visible"] = layer.Visible;
+                    appearance["style"]["opacity"] = Opacity(layer);
+                    return appearance;
+                }
                 var children = new JArray();
                 for (int i = 0; i < layers.Count; i++)
                     children.Add(Layer(layers.get_Layer(i)));
@@ -146,7 +212,13 @@ namespace ArcMapHarness.ArcMapBridgeExternal
             }
             else result["kind"] = "unsupported";
             result["valid"] = layer.Valid;
-            if (layer.Valid && feature != null) result["style"] = Appearance(layer);
+            if (layer.Valid && feature != null && Appearance(layer) is JObject style)
+            {
+                style["opacity"] = Opacity(layer);
+                style["fillOpacity"] = 100;
+                result["style"] = style;
+            }
+            if (raster != null) result["opacity"] = Opacity(layer);
             return result;
         }
 
@@ -169,7 +241,7 @@ namespace ArcMapHarness.ArcMapBridgeExternal
                     for (int index = 0; index < map.LayerCount; index++)
                         layers.Add(Layer(map.get_Layer(index)));
                     frames.Add(new JObject { ["name"] = map.Name, ["crs"] = Wkt(map.SpatialReference),
-                        ["bounds"] = Extent(((IActiveView)map).Extent), ["layers"] = layers });
+                        ["bounds"] = Extent(((IActiveView)map).Extent), ["background"] = Background(document, map), ["layers"] = layers });
                 }
                 bool known = false;
                 int major = 0, minor = 0, patch = 0, build = 0;
@@ -192,11 +264,15 @@ namespace ArcMapHarness.ArcMapBridgeExternal
         {
             var color = Color((string)style["color"]);
             double width = (double?)style["width"] ?? 1.5;
-            ISimpleLineSymbol line = new SimpleLineSymbolClass { Color = color, Width = width };
-            switch ((string)style["pattern"])
+            ISimpleLineSymbol line = new SimpleLineSymbolClass { Color = color, Width = width * 0.75 };
+            if ((bool?)style["noOutline"] == true) line.Style = esriSimpleLineStyle.esriSLSNull;
+            if ((bool?)style["noOutline"] != true)
             {
-                case "dash": line.Style = esriSimpleLineStyle.esriSLSDash; break;
-                case "dot": line.Style = esriSimpleLineStyle.esriSLSDot; break;
+                switch ((string)style["pattern"])
+                {
+                    case "dash": line.Style = esriSimpleLineStyle.esriSLSDash; break;
+                    case "dot": line.Style = esriSimpleLineStyle.esriSLSDot; break;
+                }
             }
             ISymbol symbol = (ISymbol)line;
             switch (geometry)
@@ -204,7 +280,7 @@ namespace ArcMapHarness.ArcMapBridgeExternal
                 case esriGeometryType.esriGeometryPoint:
                 case esriGeometryType.esriGeometryMultipoint:
                     ISimpleMarkerSymbol marker = new SimpleMarkerSymbolClass
-                    { Color = color, Size = (double?)style["size"] ?? 8, Outline = false };
+                    { Color = color, Size = ((double?)style["size"] ?? 8) * 0.75, Outline = false };
                     switch ((string)style["shape"])
                     {
                         case "square": marker.Style = esriSimpleMarkerStyle.esriSMSSquare; break;
@@ -217,23 +293,18 @@ namespace ArcMapHarness.ArcMapBridgeExternal
                     var fill = (string)style["fill"];
                     ISimpleFillSymbol area = new SimpleFillSymbolClass { Outline = (ILineSymbol)line,
                         Style = fill == null ? esriSimpleFillStyle.esriSFSHollow : esriSimpleFillStyle.esriSFSSolid };
-                    if (fill != null)
-                    {
-                        var tint = Color(fill);
-                        tint.Transparency = 55;
-                        area.Color = tint;
-                    }
+                    if (fill != null) area.Color = Color(fill);
                     symbol = (ISymbol)area;
                     break;
             }
             return symbol;
         }
 
-        private static ISymbol ClassSymbol(esriGeometryType geometry, JObject basis, string color)
+        private static ISymbol ClassSymbol(esriGeometryType geometry, JObject basis, string color, JToken fill = null)
         {
             var style = (JObject)basis.DeepClone();
             style["color"] = color;
-            if (style["fill"]?.Type == JTokenType.String) style["fill"] = color;
+            if (style["fill"]?.Type == JTokenType.String) style["fill"] = fill ?? new JValue(color);
             return MakeSymbol(geometry, style);
         }
 
@@ -255,16 +326,60 @@ namespace ArcMapHarness.ArcMapBridgeExternal
             renderer.FieldCount = 1;
             renderer.set_Field(0, name);
             renderer.set_FieldType(0, feature.FeatureClass.Fields.get_Field(index).Type == esriFieldType.esriFieldTypeString);
-            renderer.DefaultSymbol = ClassSymbol(geometry, style, (string)classification["other"]);
+            renderer.DefaultSymbol = ClassSymbol(geometry, style, (string)classification["other"], classification["otherFill"]);
             renderer.DefaultLabel = "其他值";
             renderer.UseDefaultSymbol = true;
             foreach (JObject entry in (JArray)classification["classes"])
             {
                 var value = (string)entry["value"] ?? "<Null>";
-                renderer.AddValue(value, "", ClassSymbol(geometry, style, (string)entry["color"]));
+                renderer.AddValue(value, "", ClassSymbol(geometry, style, (string)entry["color"], entry["fillColor"]));
                 renderer.set_Label(value, (string)entry["label"] ?? (value == "<Null>" ? "空值" : value));
             }
             feature.Renderer = (IFeatureRenderer)renderer;
+        }
+
+        private static int Opacity(ILayer layer)
+        {
+            return layer is ILayerEffects effects ? 100 - effects.Transparency : 100;
+        }
+
+        private static void SetOpacity(ILayer layer, int value)
+        {
+            if (value < 0 || value > 100) throw new ArgumentOutOfRangeException("opacity");
+            if (layer is ILayerEffects effects) effects.Transparency = (short)(100 - value);
+        }
+
+        private static ILayer BuildLayer(JObject item)
+        {
+            var layer = Program.OpenLayer(item);
+            var style = item["style"] as JObject;
+            int opacity = (int?)style?["opacity"] ?? (int?)item["opacity"] ?? 100;
+            if (style != null && layer is IFeatureLayer feature && feature.FeatureClass.ShapeType == esriGeometryType.esriGeometryPolygon &&
+                style["fill"]?.Type == JTokenType.String && (int?)style["fillOpacity"] != 100)
+            {
+                var fill = Program.OpenLayer(item);
+                fill.Name = "填充";
+                layer.Name = "边线";
+                var fillStyle = (JObject)style.DeepClone();
+                fillStyle["noOutline"] = true;
+                SetStyle(fill, fillStyle);
+                SetOpacity(fill, (int?)style["fillOpacity"] ?? 19);
+                var strokeStyle = (JObject)style.DeepClone();
+                strokeStyle["fill"] = null;
+                SetStyle(layer, strokeStyle);
+                layer.Visible = fill.Visible = true;
+                IGroupLayer group = new GroupLayerClass();
+                var combined = (ILayer)group;
+                combined.Name = (string)item["name"];
+                ((ILayerGeneralProperties)group).LayerDescription = PolygonAppearanceGroup;
+                group.Add(layer);
+                group.Add(fill);
+                SetOpacity(combined, opacity);
+                return combined;
+            }
+            SetStyle(layer, style);
+            SetOpacity(layer, opacity);
+            return layer;
         }
 
         internal static JObject Write(JObject request)
@@ -289,10 +404,10 @@ namespace ArcMapHarness.ArcMapBridgeExternal
                     factory.CreateESRISpatialReference(wkt, out reference, out length);
                     map.SpatialReference = reference;
                 }
+                SetBackground(document, map, (string)request["background"]);
                 foreach (JObject item in (JArray)request["layers"])
                 {
-                    var layer = Program.OpenLayer(item);
-                    SetStyle(layer, item["style"] as JObject);
+                    var layer = BuildLayer(item);
                     map.AddLayer(layer);
                     layer.Visible = (bool?)item["visible"] ?? true;
                 }

@@ -514,7 +514,7 @@ async function startDesktop(options) {
         const relative = path.relative(path.join(controller.settings.workspace, 'runs'), output);
         if (!path.isAbsolute(relative) && relative.split(path.sep)[0] !== '..') throw new Error('请选择独立的地图工程保存位置');
         const result = await controller.request('map', { action: 'mxd-write', bridge: executable, output,
-            name: path.basename(output, '.mxd'), layers: input.layers, crs: input.crs, bounds: input.bounds });
+            name: path.basename(output, '.mxd'), layers: input.layers, crs: input.crs, bounds: input.bounds, background: input.background });
         shell.showItemInFolder(output);
         return result;
     }, true);
