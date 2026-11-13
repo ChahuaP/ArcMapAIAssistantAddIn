@@ -124,7 +124,7 @@
         initial, catalog, refresh, plans, initialMarkdown }) {
         const [section, select] = useState(typeof initial === 'string' ? initial : state.settings.workspace ? 'model' : 'storage');
         useEffect(() => { if (typeof initial === 'string') select(initial); }, [initial]);
-        const [value, change] = useState({ ...state.settings, key: '' });
+        const [value, change] = useState({ ...state.settings, modelConfig: state.settings.modelConfig || window.GuizhiModel.initial(), key: '' });
         const [error, setError] = useState('');
         const [saving, setSaving] = useState(false);
         const [testingModel, setTestingModel] = useState(false);
@@ -139,7 +139,7 @@
             setError('');
             setSaving(true);
             try {
-                await save(value);
+                await save({ ...value, modelConfig: value.modelConfig.mode ? value.modelConfig : undefined });
                 update('key', '');
                 close();
             } catch (issue) { fail(issue); }

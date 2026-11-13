@@ -304,13 +304,17 @@ async function startDesktop(options) {
         return { task: state.tasks[0].id };
     }, true);
     bind('configure', input => {
-        const { config, key } = controller.selectModel(input);
-        if (!controller.settings.modelVision || input.key?.trim() ||
-                JSON.stringify(config) !== JSON.stringify(controller.settings.modelConfig)) {
-            if (verifiedVision !== visionIdentity(config, key)) throw new Error('请先通过所选模型的读图测试');
+        if (input.modelConfig) {
+            const { config, key } = controller.selectModel(input);
+            if (!controller.settings.modelVision || input.key?.trim() ||
+                    JSON.stringify(config) !== JSON.stringify(controller.settings.modelConfig)) {
+                if (verifiedVision !== visionIdentity(config, key)) throw new Error('请先通过所选模型的读图测试');
+            }
+        } else if (controller.settings.modelConfig) {
+            throw new Error('请保留当前模型配置');
         }
         const workspace = controller.settings.workspace;
-        const state = controller.configure({ ...input, modelVision: true });
+        const state = controller.configure({ ...input, modelVision: Boolean(input.modelConfig) });
         if (state.settings.workspace !== workspace) {
             imageInputs.clear();
             mapLayers.clear();
@@ -389,7 +393,7 @@ async function startDesktop(options) {
     }, true);
     bind('workbench', section => {
         reveal();
-        if (section === 'components') window.webContents.send('guizhi:settings', section);
+        if (['components', 'model'].includes(section)) window.webContents.send('guizhi:settings', section);
     });
     bind('workspace', async () => {
         const pick = await dialog.showOpenDialog(window, { properties: ['openDirectory', 'createDirectory'] });
@@ -431,12 +435,42 @@ async function startDesktop(options) {
     });
     bind('materialPaths', (paths, kind) => controller.intake(paths, kind));
     bind('map', async (surface, input) => {
-        if (surface !== window || !input || !['describe', 'features', 'table', 'crs-search', 'raster-preview', 'assign', 'transform', 'edit', 'analyze'].includes(input.action)) {
+        if (surface !== window || !input || !['describe', 'features', 'table', 'crs-search', 'raster-preview', 'assign', 'transform', 'edit', 'tool'].includes(input.action)) {
             throw new Error('地图请求无效');
         }
         if (!controller.settings.workspace) throw new Error('请先选择成果保存位置');
         return ['describe', 'features', 'table', 'crs-search', 'raster-preview'].includes(input.action)
             ? controller.reader.map(controller.settings.workspace, input) : controller.request('map', input);
+    }, true);
+    bind('mapSkill', async (surface, input) => {
+        if (surface !== window || !input || typeof input.skill !== 'string' ||
+                !input.materials || typeof input.materials !== 'object') throw new Error('地图业务请求无效');
+        const materials = Object.fromEntries(Object.entries(input.materials).map(([role, group]) => [role,
+            group.map(item => {
+                if (item.ref) {
+                    const layer = mapLayers.get(mapKey(item.ref));
+                    if (!layer) throw new Error('业务所选图层已移除');
+                    return { ref: layer.ref };
+                }
+                return materialBindings({ input: [{ ...item, file: externalPath(item.file) }] }).input[0];
+            })]));
+        return controller.request('map', { action: 'skill', skill: input.skill, materials,
+            parameters: input.parameters, coordinatePlans: input.coordinatePlans });
+    }, true);
+    bind('mapDelivery', async (surface, item) => {
+        if (surface !== window || !item) throw new Error('请从地图工作区打开成果');
+        const source = await controller.request('map', { action: 'delivery', run: item.run, kind: item.kind });
+        const extension = item.kind === 'report' ? '.pdf' : path.extname(source).toLowerCase();
+        const pick = await dialog.showSaveDialog(window, { defaultPath: '规智-' + path.basename(source, path.extname(source)) + extension,
+            filters: [{ name: extension.slice(1).toUpperCase(), extensions: [extension.slice(1)] }] });
+        if (pick.canceled) return;
+        const output = externalPath(pick.filePath);
+        const relative = path.relative(path.join(controller.settings.workspace, 'runs'), output);
+        if (path.extname(output).toLowerCase() !== extension || relative === '' ||
+                (!path.isAbsolute(relative) && relative.split(path.sep)[0] !== '..')) throw new Error('请选择独立的成果保存位置');
+        if (item.kind === 'report') await fs.promises.writeFile(output, await printReport(source));
+        else await fs.promises.copyFile(source, output);
+        shell.showItemInFolder(output);
     }, true);
     bind('mapImport', async (surface, paths) => {
         if (surface !== window) throw new Error('请从工作台添加图层');

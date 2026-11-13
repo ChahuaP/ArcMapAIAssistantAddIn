@@ -1,8 +1,7 @@
 (() => {
     const h = React.createElement;
     const { useState } = React;
-    const api = window.guizhi;
-    const { button, iconButton, icon } = window.GuizhiShell;
+
     const kinds = { vector: 'SHP / GeoJSON / GeoPackage', raster: 'TIFF / IMG', cad: 'DXF',
         document: 'PDF / Word / Excel / TXT' };
     const geometry = { point: '点', line: '线', polygon: '面' };
@@ -34,6 +33,7 @@
     }
 
     function Material({ item, change, plans = [], role }) {
+        const { iconButton, icon } = window.GuizhiShell;
         const name = item.name;
         const problem = issue(item, role);
         const info = item.kind === 'vector' ? item.layerInfo?.find(layer => layer.name === item.layer) : item.metadata;
@@ -62,7 +62,9 @@
         } catch (error) { fail(error); }
     }
 
-    function RoleMaterials({ roles, materials, change, plans, fail, disabled }) {
+    function RoleMaterials({ roles, materials, change, plans = [], fail, disabled, picker, onPending }) {
+        const api = window.guizhi;
+        const { button } = window.GuizhiShell;
         const [pending, setPending] = useState('');
         return roles.filter(role => !role.resource).map(role => {
             const items = materials[role.id] || [];
@@ -74,8 +76,9 @@
             const add = async source => {
                 if (disabled || pending) return;
                 setPending(role.id);
+                onPending?.(role.id);
                 try { await intake(source(), append, fail); }
-                finally { setPending(''); }
+                finally { setPending(''); onPending?.(''); }
             };
             return h('section', { key: role.id, className: 'role-material',
                 onDragOver: event => { event.preventDefault(); event.stopPropagation(); }, onDrop: event => {
@@ -95,6 +98,7 @@
                         else group.splice(index, 1);
                         change({ ...materials, [role.id]: group });
                     } })),
+                items.length < role.maximum && picker?.(role, items, append, Boolean(pending)),
                 items.length < role.maximum && button('paperclip', pending === role.id ? '正在读取本地材料…' : '添加' + role.label, {
                     disabled: disabled || Boolean(pending), loading: pending === role.id, onClick: () => add(() => api.material(role.kind)),
                 }));

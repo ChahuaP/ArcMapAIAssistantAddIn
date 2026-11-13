@@ -11,14 +11,123 @@ from pyproj import CRS, network
 from pyproj.aoi import AreaOfInterest
 from pyproj.transformer import TransformerGroup
 
+from guizhi.application.skills import execute as execute_skill
 from guizhi.application.tasks import run_operation
 from guizhi.infrastructure.crs_catalog import get_plan
 from guizhi.infrastructure.coordinates import apply_plan
 from guizhi.infrastructure.export import package_layer
 from guizhi.infrastructure.operations.evidence import read_artifact
 from guizhi.infrastructure.operations.runner import data_revision
+from guizhi.infrastructure.vector import digest
 
 MAX_VISIBLE = 8000
+MANUAL_OPERATIONS = {
+    "data.describe", "vector.area", "vector.buffer", "vector.clip", "vector.intersect",
+    "vector.erase", "vector.dissolve", "vector.union", "vector.identity", "vector.symmetric_difference", "vector.update_overlay",
+    "vector.spatial_join", "data.copy", "data.merge", "data.append", "data.select_by_attribute",
+    "data.select_by_location", "data.export_selection", "geometry.create_dataset", "geometry.repair",
+    "geometry.explode", "table.add_field", "table.delete_field", "table.add_coordinates",
+    "presentation.export_table", "raster.statistics", "raster.clip", "raster.reproject", "raster.mosaic",
+}
+MAP_DELIVERIES = {"export", "report", "table", "workflow", "package", "boundaries", "classification",
+                  "balance", "permit_history", "raster", "bands", "drawing", "selection"}
+
+
+def raster_layer(workspace, ref, name):
+    return {**workspace.read(ref["run"])["result"]["raster_preview"], "kind": "raster", "ref": ref, "name": name}
+
+
+def map_material(workspace, ref):
+    if not isinstance(ref, dict) or set(ref) != {"run", "artifact"}:
+        raise ValueError("请选择已保存的地图图层")
+    if ref["artifact"] == "raster_preview":
+        file = read_artifact(workspace, ref["run"], "raster-1")
+        return {"file": str(file), "layer": None, "revision": digest(file)}
+    return material(*source(workspace, ref))
+
+
+def output_layers(workspace, record, title):
+    data = record["result"]
+    result = []
+    for entry in data["evidence"]:
+        kind = entry["step"]
+        if kind not in {"export", "boundaries"}:
+            continue
+        ref = {"run": record["id"], "artifact": kind}
+        file = read_artifact(workspace, record["id"], kind)
+        if file.suffix.lower() == ".gpkg":
+            layer = describe(workspace, ref, file, data.get("export_layer") if kind == "export" else None)
+            result.append({**layer, "name": title + (" · 边界" if kind == "boundaries" else "")})
+        elif file.suffix.lower() in {".tif", ".tiff", ".img"}:
+            preview = successful(run_operation(workspace.root, {"operation": "map_raster.preview", "inputs": [
+                {"file": str(file), "layer": None, "revision": entry["sha256"]}]}))
+            result.append(raster_layer(workspace, {"run": preview["id"], "artifact": "raster_preview"}, title + " · 影像"))
+    return result
+
+
+def map_result(workspace, record, title, *, include_steps=False):
+    data = record["result"]
+    steps = data.get("workflow", {}).get("steps", [])
+    records = [(record, title)]
+    if include_steps:
+        records = [(successful(workspace.read(step["run_id"])), title if len(steps) == 1 else
+                    title + " · " + step_title(step["operation"])) for step in steps]
+    layers = [layer for child, label in records for layer in output_layers(workspace, child, label)]
+    deliveries = []
+    for child, label in records:
+        deliveries.extend({"run": child["id"], "kind": ref["step"], "label": label if len(records) > 1 else "",
+                           "extension": read_artifact(workspace, child["id"], ref["step"]).suffix.lower()}
+                          for ref in child["result"]["evidence"] if ref["step"] in MAP_DELIVERIES)
+    if include_steps:
+        deliveries.append({"run": record["id"], "kind": "workflow", "label": "", "extension": ".json"})
+    map_data = next((json.loads(read_artifact(workspace, child["id"], "map").read_text(encoding="utf-8"))
+                     for child, _ in reversed(records) if any(ref["step"] == "map" for ref in child["result"]["evidence"])), None)
+    statistics = {}
+    for child, _ in records:
+        statistics.update(child["result"].get("statistics", {}))
+    statistics.update(data.get("statistics", {}))
+    return {"run": record["id"], "layers": layers, "statistics": statistics,
+            "selection": data.get("selection"), "map": map_data, "deliveries": deliveries}
+
+
+def step_title(operation):
+    from guizhi.domain.capabilities import CAPABILITIES
+    from guizhi.domain.operations import OPERATIONS
+
+    return (OPERATIONS.get(operation) or CAPABILITIES[operation]).title
+
+
+def manual_tool(workspace, payload):
+    operation = payload["operation"]
+    if operation not in MANUAL_OPERATIONS:
+        raise ValueError("地图分析工具无效")
+    refs = payload["refs"]
+    if not isinstance(refs, list) or len(refs) > 32:
+        raise ValueError("一次最多选择 32 个图层")
+    items = [map_material(workspace, ref) for ref in refs]
+    parameters = dict(payload["parameters"])
+    if operation == "data.export_selection":
+        fids = parameters.get("fids")
+        if len(items) != 1 or not isinstance(fids, list) or not 1 <= len(fids) <= 500:
+            raise ValueError("请选择 1 至 500 个地图要素")
+        parameters = {"selection": {"layer": items[0]["layer"], "revision": items[0]["revision"], "fids": fids}}
+    title = {"data.export_selection": "所选要素"}.get(operation) or step_title(operation)
+    if operation == "geometry.create_dataset":
+        name = payload.get("name")
+        if not isinstance(name, str) or not 1 <= len(name.strip()) <= 120:
+            raise ValueError("请填写 1 至 120 字的图层名称")
+        title = name.strip()
+    record = run_operation(workspace.root, {"operation": operation, "inputs": items,
+                           "parameters": parameters, "idempotency_key": uuid4().hex})
+    return map_result(workspace, successful(record), title)
+
+
+def manual_skill(workspace, payload):
+    groups = {role: [map_material(workspace, item["ref"]) if "ref" in item else item for item in items]
+              for role, items in payload["materials"].items()}
+    record = execute_skill(workspace.root, groups, skill=payload["skill"], skill_parameters=payload["parameters"],
+                           coordinate_plans=payload["coordinatePlans"])
+    return map_result(workspace, successful(record), record["result"]["workflow"]["skill"]["title"], include_steps=True)
 
 
 def source(workspace, ref):
@@ -58,6 +167,7 @@ def describe(workspace, ref, file=None, name=None):
     if file is None:
         file, name = source(workspace, ref)
     info = pyogrio.read_info(file, layer=name, force_total_bounds=True)
+    name = info["layer_name"]
     crs = CRS(info["crs"]) if info["crs"] else None
     if crs and crs.to_epsg() in {0, 404000}:
         crs = None
@@ -145,6 +255,15 @@ def features(workspace, payload):
 
 def request(workspace, payload):
     action = payload["action"]
+    if action == "tool":
+        return manual_tool(workspace, payload)
+    if action == "skill":
+        return manual_skill(workspace, payload)
+    if action == "delivery":
+        kind = payload["kind"]
+        if kind not in MAP_DELIVERIES:
+            raise ValueError("成果类型无效")
+        return str(read_artifact(workspace, payload["run"], kind))
     if action == "import":
         items = payload["items"]
         if not isinstance(items, list) or not 1 <= len(items) <= 32:
@@ -167,7 +286,7 @@ def request(workspace, payload):
             record = successful(run_operation(workspace.root, {"operation": "map_raster.preview", "inputs": [
                 {name: item[name] for name in ("file", "layer")}]}))
             ref = {"run": record["id"], "artifact": "raster_preview"}
-            result.append({**record["result"]["raster_preview"], "kind": "raster", "ref": ref, "name": item["name"]})
+            result.append(raster_layer(workspace, ref, item["name"]))
         return result
     if action == "raster-preview":
         ref = payload["ref"]
@@ -201,33 +320,12 @@ def request(workspace, payload):
             units = "degrees" if crs.is_geographic else "m" if crs.axis_info[0].unit_conversion_factor == 1 else None
             result.append({"value": "EPSG:" + item.code, "label": item.name + " · EPSG:" + item.code, "units": units})
         return result
-    if action == "material" and payload["ref"].get("artifact") == "raster_preview":
-        run = payload["ref"]["run"]
-        refs = workspace.read(run)["result"]["evidence"]
-        evidence = next(item for item in refs if item["step"] == "raster-1")
-        file = read_artifact(workspace, run, evidence["step"])
-        return {"file": str(file), "layer": None, "layers": [], "kind": "raster",
-                "name": payload["name"], "revision": evidence["sha256"]}
-    file, name = source(workspace, payload["ref"])
     if action == "material":
-        return {**material(file, name), "layers": [name], "kind": "vector", "name": payload.get("name", name)}
-    if action == "analyze":
-        kind = payload["kind"]
-        operations = {"area": "vector.area", "buffer": "vector.buffer", "clip": "vector.clip"}
-        if kind == "count":
-            return {"feature_count": describe(workspace, payload["ref"], file, name)["count"]}
-        if kind not in operations:
-            raise ValueError("地图分析工具无效")
-        items = [material(file, name)]
-        if kind == "clip":
-            mask, layer = source(workspace, payload["mask"])
-            items.append(material(mask, layer))
-        parameters = {"distance": payload["distance"], "unit": "meters"} if kind == "buffer" else {}
-        record = successful(run_operation(workspace.root, {"operation": operations[kind], "inputs": items, "parameters": parameters}))
-        if kind == "area":
-            return record["result"]["statistics"]
-        return {"layer": describe(workspace, {"run": record["id"], "artifact": "export"}),
-                "title": "缓冲" if kind == "buffer" else "裁切"}
+        item = map_material(workspace, payload["ref"])
+        name = item["layer"]
+        return {**item, "layers": [name] if name else [], "kind": "vector" if name else "raster",
+                "name": payload.get("name", name)}
+    file, name = source(workspace, payload["ref"])
     if action == "export":
         return package_layer(workspace, file, payload["output"], name)
     if action == "assign":

@@ -174,7 +174,7 @@
             hideLayers([]);
             setActiveLayer(null);
             setMapSelection(null);
-            showMapWorkspace(false);
+            showMapWorkspace(Boolean(state?.settings.workspace && !state.settings.modelConfig));
         }, [state?.settings.workspace]);
         const [initialMarkdown, setInitialMarkdown] = useState('');
         const [adding, setAdding] = useState(false);
@@ -268,6 +268,11 @@
             if (command === 'reset') return resetConversation();
             if (busy || adding || !draft.prompt.trim()) return;
             if (!ready) return api.workbench().catch(fail);
+            if (!state.settings.modelConfig) {
+                if (launcher) return api.workbench('model').catch(fail);
+                showSettings('model');
+                return;
+            }
             if (suggestion.exact && !picked.length) return choose(suggestion.items[0], true);
             if (!canSubmit) return;
             setError('');
@@ -306,7 +311,7 @@
                 ...[draft.project, draft.control].filter(Boolean)];
             return resetConversation(next);
         }
-        const ready = Boolean(state?.settings.workspace && state?.settings.modelConfig);
+        const ready = Boolean(state?.settings.workspace);
         const picked = [draft.project, draft.control, ...draft.unassigned, ...Object.values(draft.materials).flat()].filter(Boolean);
         function appendMaterials(items) {
             setDraft(current => {
@@ -444,7 +449,7 @@
                 !skill && ready && h('section', { className: 'quick-section' }, h('div', { className: 'section-head' },
                     h('h2', null, '常用业务'), h(antd.Button, { type: 'link', onClick: () => showBusiness('browse') }, '全部业务')), tiles))),
             h('footer', { className: 'launcher-footer' },
-                h('span', { className: 'muted' }, ready ? (state.settings.modelConfig.mode === 'local' ? '本地服务' : '在线服务')
+                h('span', { className: 'muted' }, ready ? (state.settings.modelConfig?.mode === 'local' ? '本地模型' : state.settings.modelConfig ? '在线模型' : '地图模式')
                     : '请在工作台完成首次设置'),
                 h('span', null, h('kbd', null, 'Enter'), ' 发送　', h('kbd', null, 'Esc'), ' 收起')));
         const sidebar = expanded => {
@@ -456,7 +461,7 @@
             nav('app', '工作台', { className: mapOpen ? '' : 'rail-current', 'aria-current': mapOpen ? undefined : 'page',
                 disabled: mapEditing, onClick: () => showMapWorkspace(false) }),
             nav('map', '地图工作区', { disabled: !ready || mapOpen, 'aria-current': mapOpen ? 'page' : undefined, onClick: () => openMap() }),
-            nav('grid', '业务中心', { disabled: !ready, onClick: () => showBusiness('browse') }),
+            nav('grid', '业务中心', { disabled: !ready || mapEditing, onClick: () => showBusiness('browse') }),
             nav('settings', '设置', { disabled: mapEditing, onClick: () => showSettings(true) }));
         };
         const conversation = h('section', { className: 'conversation' + (task ? '' : ' conversation-empty'), 'aria-label': '办理对话' },
@@ -527,7 +532,7 @@
             },
             hidden: hiddenLayers, toggle: id => hideLayers(old => old.includes(id) ? old.filter(value => value !== id) : [...old, id]),
             selectLayer: id => { setActiveLayer(id); setMapSelection(null); },
-            entries: coordinates, fail, close: () => showMapWorkspace(false), selection: mapSelection, setSelection: setMapSelection,
+            entries: coordinates, catalog, components: state.components, openComponents, fail, close: () => showMapWorkspace(false), selection: mapSelection, setSelection: setMapSelection,
             replace: replaceLayer, editing: setMapEditing });
         async function configure(value) {
             const next = await api.configure(value);
@@ -541,7 +546,7 @@
             close: () => { setInitialMarkdown(''); showSettings(false); },
             save: configure,
         }) : h(Workbench, { appearance, saveAppearance, sidebar, conversation: mapWorkspace || conversation, inspector: mapOpen ? null : inspector, fail,
-            arcgis: () => showSettings('extensions'),
+            arcgis: () => { if (!mapEditing) showSettings('extensions'); },
             connected: Boolean(state?.arcgis?.host) });
         return h(Theme, { appearance }, layout,
             business && h(Business, { catalog, choose, close: () => showBusiness('') }));

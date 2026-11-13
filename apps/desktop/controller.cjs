@@ -146,10 +146,10 @@ class DesktopController {
 
     configure(input) {
         if (this.active || this.modelTesting || this.skillBusy || this.hostBusy) throw new Error('请先结束当前任务');
-        const { config, key, encrypted } = this.selectModel(input);
+        const { config, key, encrypted } = input.modelConfig ? this.selectModel(input) : {};
         const workspace = this.workspaceReady(input.workspace);
         let encryptedKey = encrypted;
-        if (normalizeKey(input.key)) {
+        if (config && normalizeKey(input.key)) {
             if (!this.storage.isEncryptionAvailable()) throw new Error('系统凭据加密不可用');
             encryptedKey = this.storage.encryptString(key).toString('base64');
         }
@@ -170,7 +170,7 @@ class DesktopController {
         try {
             const result = await exec(this.runtime.python, ['-I', '-B', cli, '--workspace',
                 this.settings.workspace, command, ...args], {
-                windowsHide: true, timeout: ['skill-trial', 'skill-publish', 'material-intake', 'crs-solve', 'crs-define',
+                windowsHide: true, timeout: command === 'map' ? 600_000 : ['skill-trial', 'skill-publish', 'material-intake', 'crs-solve', 'crs-define',
                     'arcgis-capture', 'arcgis-revision'].includes(command) ? 240000 : command === 'arcgis-stage' ? 95000 : 30000,
                 maxBuffer: 8 << 20 });
             return JSON.parse(result.stdout);

@@ -72,6 +72,12 @@
                 h('footer', { className: 'onboarding-footer' }, h('div', { className: 'onboarding-content setting-row' },
                     h('div', { className: 'business-actions' },
                         step > 0 && h(antd.Button, { disabled: blocked, onClick: () => { setError(''); setStep(step - 1); } }, '上一步'),
+                        step === 1 && h(antd.Button, { disabled: blocked, onClick: async () => {
+                            setSaving(true);
+                            try { await save({ workspace: value.workspace }); }
+                            catch (issue) { fail(issue); }
+                            finally { setSaving(false); }
+                        } }, '仅使用地图'),
                         step === 2 && h(antd.Button, { type: 'text', disabled: blocked, onClick: () => advance(true) }, '跳过语音')),
                     h('div', { className: 'business-actions' },
                         error && h('span', { className: 'error', role: 'alert' }, error),

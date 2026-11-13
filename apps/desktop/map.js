@@ -1,4 +1,5 @@
 import 'ol/ol.css';
+import { MapProcessing, TOOL_GROUPS } from './map-processing.js';
 import Map from 'ol/Map.js';
 import View from 'ol/View.js';
 import Projection from 'ol/proj/Projection.js';
@@ -48,19 +49,20 @@ const glyphs = {
     save: 'M4 3h13l3 3v15H4zM8 3v6h8V3m-8 18v-7h8v7',
     trash: 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13m-8 4v5m4-5v5',
     close: 'm6 6 12 12M18 6 6 18',
+    chevron: 'm6 9 6 6 6-6',
     check: 'm5 12 4 4L19 6',
     chat: 'M4 5h16v12H9l-5 4zM8 9h8m-8 4h5',
     more: 'M5 12h.1m6.9 0h.1m6.9 0h.1',
 };
 const commandIcons = {
-    全图: 'extent', 定位图层: 'target', 放大: 'zoomIn', 缩小: 'zoomOut', 清除选择: 'clear',
-    属性表: 'table', 添加图层: 'add', '导出 SHP': 'download', 坐标系设置: 'globe',
+    全图: 'extent', 定位图层: 'target', 放大: 'zoomIn', 缩小: 'zoomOut', 清除选择: 'clear', 按属性选择: 'select', 按位置选择: 'target', 提取所选要素: 'download',
+    属性表: 'table', 添加图层: 'add', 导出属性表: 'table', 最近成果: 'table', 添加字段: 'add', 删除字段: 'trash', 修复几何: 'pencil', 新建图层: 'add', 复制图层: 'layers', 合并图层: 'layers', '导出 SHP': 'download', 坐标系设置: 'globe',
     编辑图层: 'pencil', 选择: 'select', 绘制: 'pencil', 改节点: 'node', 移动: 'move',
     完成绘制: 'check', 撤销绘制点: 'undo', 编辑属性: 'table', 删除要素: 'trash',
     撤销: 'undo', 保存新版本: 'save', 退出编辑: 'close', 面积汇总: 'area', 缓冲分析: 'buffer',
     裁切: 'clip', 要素计数: 'count', 返回对话: 'chat',
 };
-const tabIcons = { 地图: 'map', 数据: 'layers', 编辑: 'pencil', 分析: 'analysis', 坐标系: 'globe' };
+const tabIcons = { 地图: 'map', 数据: 'layers', 编辑: 'pencil', 分析: 'analysis', 坐标系: 'globe', 业务: 'analysis' };
 function glyph(name, size = 17) {
     return h('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'none',
         stroke: 'currentColor', strokeWidth: name === 'more' ? 3 : 1.65, strokeLinecap: 'round',
@@ -132,7 +134,7 @@ function Preview({ map, choose, selected, open, hasLayers }) {
     if (!map && !hasLayers) return null;
     return h('section', { className: 'map-panel', 'aria-label': '成果地图' },
         h('div', { className: 'map-head' }, h('h2', null, '成果地图'),
-            h(Button, { size: 'small', onClick: open }, '展开地图')),
+            open && h(Button, { size: 'small', onClick: open }, '展开地图')),
         map?.features?.length > 0 && h('div', { className: 'geo-map', ref: node, tabIndex: 0, 'aria-label': '空间成果地图' }),
         map?.features?.some(item => item.role === 'coverage') && h('label', { className: 'map-legend-entry' },
             h('input', { type: 'checkbox', checked: visible, onChange: event => show(event.target.checked) }), '重叠范围'));
@@ -174,7 +176,7 @@ function CoordinateTools({ layer, display, setDisplay, entries, request, onLayer
 
 }
 
-function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle, entries, fail, close, selection, setSelection, replace, editing }) {
+function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle, entries, catalog, components, openComponents, fail, close, selection, setSelection, replace, editing }) {
     const node = useRef(null);
     const graph = useRef(null);
     const [display, setDisplay] = useState(null);
@@ -184,7 +186,7 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
     const [ribbon, setRibbon] = useState('地图');
     const [layerSearch, setLayerSearch] = useState('');
     const [analysis, setAnalysis] = useState(null);
-    useEffect(() => { editing(Boolean(edit)); return () => editing(false); }, [Boolean(edit)]);
+    const [lastResult, setLastResult] = useState(null);
     const [count, setCount] = useState(0);
     const [fieldEdit, setFieldEdit] = useState(null);
     const edits = useRef([]);
@@ -192,6 +194,7 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
     const [drawingPoints, setDrawingPoints] = useState(0);
     const original = useRef(new globalThis.Map());
     const [busy, setBusy] = useState(false);
+    useEffect(() => { editing(Boolean(edit) || busy); return () => editing(false); }, [Boolean(edit), busy]);
     const [issue, setIssue] = useState('');
     const [table, setTable] = useState(null);
     const [tableLayer, setTableLayer] = useState(null);
@@ -324,6 +327,17 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
     }, [layer, page, Boolean(table)]);
 
     const picked = selection?.key === active ? selection.ids : [];
+    const openTool = tool => setAnalysis({ tool });
+    const skillGroups = [
+        ['规划与用地', ['control-check', 'farmland-balance', 'annual-land', 'permit-history']],
+        ['数据与影像', ['shared-delivery', 'cad-coordinates', 'imagery-change']],
+    ];
+    const customSkills = catalog.filter(item => !skillGroups.some(([, ids]) => ids.includes(item.id)));
+    const menuGroup = (title, icon, items, onClick) => h('section', { className: 'ribbon-group ribbon-menu' }, h(antd.Dropdown, {
+        trigger: ['click'], menu: { items: items.map(item => ({ key: item.id, label: item.title, icon: glyph(item.icon || icon) })),
+            onClick: ({ key: id }) => onClick(id) },
+    }, h(Button, { size: 'small', icon: glyph(icon), disabled: busy }, title, glyph('chevron', 13))));
+
     const editable = Boolean(layer?.crs && !hidden.includes(active) &&
         /^(Multi)?(Point|LineString|Polygon)$/.test(layer.geometry));
     function push(changes) {
@@ -495,16 +509,26 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
             command('定位图层', () => position(true), { disabled: !layer }),
             command('放大', () => graph.current.view.adjustZoom(1)), command('缩小', () => graph.current.view.adjustZoom(-1))),
             group('选择', command('清除选择', clear, { disabled: !picked.length }),
-                command('属性表', () => { setPage(0); setTable(table ? null : []); }, { disabled: !layer || layer.kind === 'raster' }))],
+                command('属性表', () => { setPage(0); setTable(table ? null : []); }, { disabled: !layer || layer.kind === 'raster' }),
+                command('按属性选择', () => openTool('data.select_by_attribute'), { disabled: !layer?.fields?.length }),
+                command('按位置选择', () => openTool('data.select_by_location'), { disabled: !layer?.geometry || layers.filter(item => item.geometry).length < 2 }),
+                command('提取所选要素', () => openTool('data.export_selection'), { disabled: !picked.length }))],
         数据: [group('导入', command('添加图层', () => load(api.mapImport()), { loading: busy, type: 'primary' })),
-            group('交付', command('导出 SHP', () => api.mapExport(layer.ref).catch(fail), { disabled: !layer?.crs || layer.kind === 'raster' })),
-            group('坐标参考', command('坐标系设置', () => setRibbon('坐标系')))],
-        编辑: editCommands,
-        分析: [group('矢量分析',
-            command('面积汇总', () => setAnalysis({ kind: 'area' }), { disabled: !layer?.geometry?.includes('Polygon') }),
-            command('缓冲分析', () => setAnalysis({ kind: 'buffer', distance: '' }), { disabled: !layer?.geometry }),
-            command('裁切', () => setAnalysis({ kind: 'clip' }), { disabled: !layer?.geometry || !layers.some(item => key(item) !== active && item.geometry?.includes('Polygon')) })),
-            group('要素统计', command('要素计数', () => setAnalysis({ kind: 'count' }), { disabled: !layer?.geometry }))],
+            group('交付', command('导出 SHP', () => api.mapExport(layer.ref).catch(fail), { disabled: !layer?.crs || layer.kind === 'raster' }),
+                command('最近成果', () => setAnalysis(lastResult), { disabled: !lastResult })),
+            group('属性与坐标', command('导出属性表', () => openTool('presentation.export_table'), { disabled: !layer?.fields?.length }),
+                command('坐标系设置', () => setRibbon('坐标系'))),
+            group('图层管理', command('新建图层', () => openTool('geometry.create_dataset')),
+                command('复制图层', () => openTool('data.copy'), { disabled: !layer?.geometry }),
+                command('合并图层', () => openTool('data.merge'), { disabled: layers.filter(item => item.geometry).length < 2 }))],
+        编辑: edit ? editCommands : [...editCommands,
+            group('图层维护', command('添加字段', () => openTool('table.add_field'), { disabled: !layer?.geometry }),
+                command('删除字段', () => openTool('table.delete_field'), { disabled: !layer?.fields?.length }),
+                command('修复几何', () => openTool('geometry.repair'), { disabled: !layer?.geometry }))],
+        分析: TOOL_GROUPS.map(({ title, icon, tools }) => menuGroup(title, icon, tools, openTool)),
+        业务: [...skillGroups.map(([title, ids]) => [title, catalog.filter(item => ids.includes(item.id))]),
+            ['自定义业务', customSkills]].filter(([, items]) => items.length)
+            .map(([title, items]) => menuGroup(title, 'analysis', items, id => setAnalysis({ skill: items.find(item => item.id === id) }))),
         坐标系: [group('坐标参考', h(CoordinateTools, { layer, display,
             setDisplay: item => { setDisplayPlans({}); setDisplay(item); },
             displayPlan: displayPlans[active], setDisplayPlan: value => setDisplayPlans(old => ({ ...old, [active]: value })),
@@ -516,7 +540,7 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
             h('div', { className: 'ribbon-tabs' },
                 h('div', { role: 'tablist', 'aria-label': '地图工具' }, ...Object.keys(commands).map(tab => h(Button, {
                     key: tab, type: 'text', icon: glyph(tabIcons[tab], 16), role: 'tab', 'aria-selected': ribbon === tab,
-                    disabled: Boolean(edit) && tab !== '编辑', onClick: () => setRibbon(tab),
+                    disabled: busy || Boolean(edit) && tab !== '编辑', onClick: () => setRibbon(tab),
                 }, tab))),
                 command('返回对话', close, { disabled: Boolean(edit) || busy })),
             h('div', { className: 'ribbon-tools', role: 'tabpanel', 'aria-label': ribbon }, ...commands[ribbon].map((item, i) =>
@@ -529,11 +553,11 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
                     allowClear: true, value: layerSearch, onChange: event => setLayerSearch(event.target.value) }),
                 ...layers.map((item, index) => (!layerSearch || item.name.toLowerCase().includes(layerSearch.toLowerCase())) &&
                     h('div', { className: 'map-layer-row', key: key(item) },
-                    h('input', { type: 'checkbox', 'aria-label': '显示 ' + item.name, checked: !hidden.includes(key(item)), disabled: Boolean(edit),
+                    h('input', { type: 'checkbox', 'aria-label': '显示 ' + item.name, checked: !hidden.includes(key(item)), disabled: Boolean(edit) || busy,
                         onChange: () => toggle(key(item)) }),
                     h('span', { className: 'map-swatch', 'data-color': index % palette.length }),
                     h(Button, { type: 'text', className: key(item) === active ? 'map-layer-active' : '',
-                        title: item.name, disabled: Boolean(edit),
+                        title: item.name, disabled: Boolean(edit) || busy,
                         onClick: () => { setPage(0); setEditLayer(null); selectLayer(key(item)); } }, item.name),
                     h(antd.Dropdown, { trigger: ['click'], menu: { items: [
                         { key: 'fit', label: '缩放到图层' }, { key: 'table', label: '打开属性表', disabled: item.kind === 'raster' },
@@ -549,7 +573,7 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
                             const g = graph.current, drawing = g?.byKey.get(id);
                             if (drawing) fit(g.view, [drawing], g.ol.getSize());
                         }
-                    } } }, h(Button, { type: 'text', size: 'small', disabled: Boolean(edit),
+                    } } }, h(Button, { type: 'text', size: 'small', disabled: Boolean(edit) || busy,
                         'aria-label': item.name + '菜单', icon: glyph('more', 16) }))))),
             h('div', { className: 'map-viewport' },
                 h('div', { className: 'geo-map', ref: node, tabIndex: 0, 'aria-label': '交互地图' }),
@@ -570,37 +594,18 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
                 onChange: ids => setSelection({ key: active, ids }) },
             pagination: { current: page + 1, pageSize: 50, total: layer.count,
                 showSizeChanger: false, onChange: value => setPage(value - 1) } })),
-        analysis && h(Modal, { open: true, centered: true, width: 440, className: 'gis-dialog', rootClassName: 'gis-modal-root',
-            title: h('span', { className: 'gis-dialog-title' }, glyph(analysis.kind), { area: '面积汇总', buffer: '缓冲分析', clip: '裁切', count: '要素计数' }[analysis.kind]),
-            okText: analysis.result ? '完成' : '运行', cancelText: '取消', confirmLoading: busy,
-            onCancel: () => { if (!busy) setAnalysis(null); },
-            okButtonProps: { disabled: (analysis.kind === 'clip' && !analysis.mask) ||
-                (analysis.kind === 'buffer' && (!analysis.distance.trim() || !Number.isFinite(Number(analysis.distance)) || Number(analysis.distance) <= 0)) },
-            onOk: async () => {
-                if (analysis.result) { setAnalysis(null); return; }
-                setBusy(true);
-                try {
-                    const result = await api.map({ action: 'analyze', ref: layer.ref, kind: analysis.kind,
-                        distance: Number(analysis.distance), mask: layers.find(item => key(item) === analysis.mask)?.ref });
-                    if (result.layer) { add([{ ...result.layer, name: layer.name + ' · ' + result.title }]); setAnalysis(null); }
-                    else setAnalysis({ ...analysis, result });
-                } catch (error) {
-                    setAnalysis({ ...analysis, error: window.GuizhiErrorText(error) });
-                } finally { setBusy(false); }
-            } }, h('div', { className: 'map-field-editor' },
-                h('div', { className: 'gis-input-layer' }, glyph('layers'),
-                    h('div', null, h('small', null, '输入图层'), h('strong', null, layer.name))),
-                analysis.kind === 'buffer' && h('label', null, '缓冲距离（米）',
-                    h(Input, { type: 'number', min: 0, value: analysis.distance,
-                        onChange: event => setAnalysis({ ...analysis, distance: event.target.value, error: null }) })),
-                analysis.kind === 'clip' && h(Choice, { value: analysis.mask, placeholder: '选择裁切范围',
-                    'aria-label': '裁切范围', options: layers.filter(item => key(item) !== active && item.geometry?.includes('Polygon'))
-                        .map(item => ({ value: key(item), label: item.name })),
-                    onChange: mask => setAnalysis({ ...analysis, mask, error: null }) }),
-                analysis.error && h('p', { className: 'error', role: 'alert' }, analysis.error),
-                analysis.result && h('p', { role: 'status', className: 'gis-analysis-result' }, analysis.result.area_m2 === undefined
-                    ? '要素数 ' + analysis.result.feature_count
-                    : '合并面积 ' + analysis.result.area_m2.toLocaleString('zh-CN', { maximumFractionDigits: 2 }) + ' 平方米'))),
+        analysis && h(MapProcessing, { ...analysis, layers, active, picked, entries, components, openComponents, glyph, busy,
+            setBusy, close: () => setAnalysis(null), Preview, onResult: result => {
+                setLastResult({ tool: analysis.tool, skill: analysis.skill, initialResult: result });
+                if (result.selection) {
+                    selectLayer(result.input);
+                    setSelection({ key: result.input, ids: result.selection.fids });
+                }
+                if (result.layers.length) {
+                    graph.current.fitNeeded = true;
+                    add(result.layers);
+                }
+            } }),
         fieldEdit && h(Modal, { open: true, centered: true, className: 'gis-dialog', rootClassName: 'gis-modal-root',
             title: h('span', { className: 'gis-dialog-title' }, glyph('table'), '编辑属性'), okText: '应用', cancelText: '取消',
             onCancel: () => setFieldEdit(null), onOk: () => {
