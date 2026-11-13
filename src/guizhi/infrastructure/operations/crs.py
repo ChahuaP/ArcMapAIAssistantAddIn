@@ -6,7 +6,11 @@ from guizhi.infrastructure.crs_catalog import get, get_plan
 
 
 def assign(ctx, definition: str):
-    entry = get(ctx.workspace, "definition", definition)
+    if definition.startswith("EPSG:") and definition[5:].isdigit():
+        crs = CRS.from_epsg(int(definition[5:]))
+        entry = {"definition": {"wkt": crs.to_wkt()}, "authority": definition}
+    else:
+        entry = get(ctx.workspace, "definition", definition)
     frame = ctx.frames[0]
     if frame.crs is not None:
         raise ValueError("Use transformation for a dataset with an existing CRS")

@@ -39,13 +39,17 @@ def shapefile(workspace, run, kind, output):
     if kind not in {"export", "boundaries"}:
         raise ValueError("请选择矢量成果")
     source = read_artifact(workspace, run, kind)
+    return package_layer(workspace, source, output)
+
+
+def package_layer(workspace, source, output, layer=None):
     output = external_root(Path(output))
     if source.suffix.lower() != ".gpkg" or output.suffix.lower() != ".zip" or output.is_relative_to(workspace.runs):
         raise ValueError("请选择独立位置保存 SHP 成果包（ZIP）")
     layers = [name for name, geometry in pyogrio.list_layers(source) if geometry]
-    if len(layers) != 1:
+    if layer is None and len(layers) != 1:
         raise ValueError("SHP 成果包需要一个可导出的矢量图层")
-    frame = pyogrio.read_dataframe(source, layer=layers[0])
+    frame = pyogrio.read_dataframe(source, layer=layer or layers[0])
     fields = dbf_fields(frame.drop(columns=frame.geometry.name).columns, frame.geometry.name)
     with TemporaryDirectory(prefix="guizhi-export-", dir=output.parent) as folder:
         root = Path(folder)

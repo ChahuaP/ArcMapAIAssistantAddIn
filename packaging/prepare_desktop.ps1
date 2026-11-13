@@ -28,6 +28,8 @@ try {
         package_lock_sha256 = (Get-FileHash -LiteralPath (Join-Path $RuntimeRoot 'package-lock.json')).Hash.ToLowerInvariant()
     }
     $manifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $RuntimeRoot 'runtime-identity.json') -Encoding UTF8
+    & node (Join-Path $PSScriptRoot 'bundle_map.cjs') $RuntimeRoot $RuntimeRoot
+    if ($LASTEXITCODE -ne 0) { throw 'Map frontend compilation failed' }
     Write-Output $binary
 } finally {
     foreach ($key in $before.Keys) { [Environment]::SetEnvironmentVariable($key, $before[$key], 'Process') }

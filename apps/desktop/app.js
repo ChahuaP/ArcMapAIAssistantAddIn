@@ -118,6 +118,25 @@
         const [catalog, setCatalog] = useState([]);
         const [business, showBusiness] = useState('');
         const [tab, setTab] = useState('成果');
+        const [mapOpen, showMapWorkspace] = useState(false);
+        const [layers, setLayers] = useState([]);
+        const [hiddenLayers, hideLayers] = useState([]);
+        const [activeLayer, setActiveLayer] = useState(null);
+        const [mapSelection, setMapSelection] = useState(null);
+        const mapKey = window.GuizhiMap.key;
+        function addLayers(items) {
+            if (!items.length) return;
+            setLayers(old => [...new Map([...old, ...items].map(item => [mapKey(item), item])).values()]);
+            setActiveLayer(mapKey(items.at(-1)));
+            setMapSelection(null);
+        }
+        useEffect(() => {
+            setLayers([]);
+            hideLayers([]);
+            setActiveLayer(null);
+            setMapSelection(null);
+            showMapWorkspace(false);
+        }, [state?.settings.workspace]);
         const [initialMarkdown, setInitialMarkdown] = useState('');
         const [adding, setAdding] = useState(false);
         const { Business } = window.GuizhiBusiness;
@@ -363,7 +382,8 @@
                 h('span', null, h('kbd', null, 'Enter'), ' 发送　', h('kbd', null, 'Esc'), ' 收起')));
         const sidebar = h('aside', { className: 'sidebar' },
             iconButton('plus', '新的对话', { type: 'primary', disabled: sending || adding, onClick: () => resetConversation() }),
-            h('span', { className: 'rail-current', title: '工作台', 'aria-label': '工作台', 'aria-current': 'page' }, icon('app')),
+            iconButton('app', '工作台', { className: mapOpen ? undefined : 'rail-current', onClick: () => showMapWorkspace(false) }),
+            iconButton('map', '地图工作区', { disabled: !ready, onClick: () => openMap() }),
             iconButton('grid', '业务中心', { disabled: !ready, onClick: () => showBusiness('browse') }),
             iconButton('settings', '设置', { onClick: () => showSettings(true) }));
         const conversation = h('section', { className: 'conversation' + (task ? '' : ' conversation-empty'), 'aria-label': '办理对话' },
@@ -373,7 +393,8 @@
                 h('article', { key: item.id + '-question', className: 'bubble user' }, item.prompt),
                 h(Result, { key: item.id + '-answer', task: item, retry, fail, voiceReply, openComponents,
                     parcel: resultTask?.id === item.id ? parcel : null, selectParcel: id => { viewResult(item.id); selectParcel(id); },
-                    showMap: item.map && item.id !== resultTask?.id ? () => { viewResult(item.id); selectParcel(null); setTab('成果'); } : undefined,
+                    showMap: item.map || item.mapLayers?.length ? () => { viewResult(item.id); selectParcel(null); setTab('成果');
+                        void openMap(item); } : undefined,
                     editSkill: text => { setInitialMarkdown(text); showSettings('skills'); } }),
             ]) : h('div', { className: 'welcome' }, h('img', { src: '/mark.svg', alt: '', width: 50 }),
                 h('h2', null, '今天要办理什么？'), h('p', null, '输入办理要求，或选择已有业务。'), tiles)),
@@ -389,8 +410,8 @@
                     icon('file'), h('span', null, item.name || item.file?.split(/[\\/]/).at(-1)),
                     item.layer && h('small', null, item.layer))) : h('p', { className: 'muted' }, '暂无材料')
                 : h(React.Fragment, null,
-                    h(window.GuizhiMap, { key: resultTask?.id || 'empty', map: resultTask?.map, selected: parcel,
-                        choose: item => selectParcel(item.id) }),
+                    h(window.GuizhiMap.Preview, { key: resultTask?.id || 'empty', map: resultTask?.map, selected: parcel,
+                        hasLayers: Boolean(resultTask?.mapLayers?.length), open: () => openMap(resultTask), choose: item => selectParcel(item.id) }),
                     (resultTask?.hasReport || resultTask?.deliveries?.length > 0) && h('section', { className: 'artifact-list' },
                         h('h2', null, '成果文件'),
                         resultTask.hasReport && h('div', { className: 'delivery-row' },
@@ -402,12 +423,25 @@
                             const title = deliverables[kind] || '业务成果';
                             return h('div', { key: kind, className: 'delivery-row' },
                                 button('file', title, { type: 'text', onClick: () => api.delivery(resultTask.id, kind).catch(fail) }),
-                                extension && button('folder', name ? '导出 ' + name : '另存为', {
-                                    'aria-label': name ? '导出 ' + name + ' · ' + title : '另存为 · ' + title,
-                                    onClick: () => api.exportDelivery(resultTask.id, kind, 'original').catch(fail) }),
-                                extension === '.gpkg' && button('file', '导出 SHP', {
-                                    onClick: () => api.exportDelivery(resultTask.id, kind, 'shp').catch(fail) }));
+                                extension === '.gpkg' && button('file', '下载 SHP 成果包', { type: 'primary',
+                                    onClick: () => api.exportDelivery(resultTask.id, kind, 'shp').catch(fail) }),
+                                extension && button('folder', name ? '导出 ' + name : '另存原格式', {
+                                    'aria-label': name ? '导出 ' + name + ' · ' + title : '另存原格式 · ' + title,
+                                    onClick: () => api.exportDelivery(resultTask.id, kind, 'original').catch(fail) }));;
                         })))));
+        async function openMap(item) {
+            if (item?.mapLayers?.length) {
+                try {
+                    const results = await Promise.all(item.mapLayers.map(ref => api.map({ action: 'describe', ref })));
+                    addLayers(results);
+                } catch (error) { fail(error); return; }
+            }
+            showMapWorkspace(true);
+        }
+        const mapWorkspace = mapOpen && h(window.GuizhiMap.WorkspaceMap, { layers, add: addLayers, active: activeLayer,
+            hidden: hiddenLayers, toggle: id => hideLayers(old => old.includes(id) ? old.filter(value => value !== id) : [...old, id]),
+            selectLayer: id => { setActiveLayer(id); setMapSelection(null); },
+            entries: coordinates, fail, close: () => showMapWorkspace(false), selection: mapSelection, setSelection: setMapSelection });
         async function configure(value) {
             const next = await api.configure(value);
             setState(next);
@@ -419,7 +453,7 @@
             initial: settings, catalog, refresh, plans, initialMarkdown,
             close: () => { setInitialMarkdown(''); showSettings(false); },
             save: configure,
-        }) : h(Workbench, { appearance, saveAppearance, sidebar, conversation, inspector, fail,
+        }) : h(Workbench, { appearance, saveAppearance, sidebar, conversation: mapWorkspace || conversation, inspector, fail,
             arcgis: () => showSettings('extensions'),
             connected: Boolean(state?.arcgis?.host) });
         return h(Theme, { appearance }, layout,

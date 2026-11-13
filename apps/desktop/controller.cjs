@@ -335,6 +335,9 @@ class DesktopController {
                 if (record.status !== 'succeeded') throw new Error('成果未发布');
                 const map = checkedArtifact(record, 'map');
                 if (map) task.map = JSON.parse(map.bytes);
+                task.mapLayers = record.result.evidence
+                    .filter(item => ['export', 'boundaries'].includes(item.step) && path.extname(item.path).toLowerCase() === '.gpkg')
+                    .map(item => ({ run: task.runId, artifact: item.step }));
                 task.hasReport = Boolean(checkedArtifact(record, 'report'));
                 const findings = checkedArtifact(record, 'case');
                 if (findings) task.approval = JSON.parse(findings.bytes);

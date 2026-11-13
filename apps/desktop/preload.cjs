@@ -3,7 +3,7 @@ const { contextBridge, ipcRenderer, webUtils } = require('electron');
 const api = {};
 for (const name of ['state', 'configure', 'workspace', 'material', 'submit', 'cancel', 'report',
     'skills', 'capabilities', 'capability', 'skillShow', 'skillPreview', 'skillTrial', 'skillPublish', 'skillOpen', 'skillTemplate', 'delivery',
-    'exportDelivery', 'diagnostics', 'diagnosticsUpload',
+    'exportDelivery', 'map', 'mapImport', 'mapExport', 'diagnostics', 'diagnosticsUpload',
     'coordinates', 'coordinateFile', 'importCoordinate', 'coordinateRename', 'coordinateRemove', 'coordinateSolve', 'coordinateApply',
     'resetConversation', 'approvalSource', 'workbench',
     'appearance', 'shortcutCapture', 'readDraft', 'saveDraft', 'openLauncher', 'fitLauncher', 'hideLauncher', 'portraitVoice', 'voiceTurn',
@@ -12,6 +12,7 @@ for (const name of ['state', 'configure', 'workspace', 'material', 'submit', 'ca
     'arcgisInstall', 'arcgisConfigure', 'arcgisRetry', 'arcgisCapture', 'componentInstall', 'componentCancel', 'openLink']) {
     api[name] = (...args) => ipcRenderer.invoke('guizhi:' + name, ...args);
 }
+api.mapDrop = files => ipcRenderer.invoke('guizhi:mapImport', files.map(file => webUtils.getPathForFile(file)).filter(Boolean));
 api.intakeDropped = (files, kind) => ipcRenderer.invoke('guizhi:materialPaths',
     files.map(file => webUtils.getPathForFile(file)).filter(Boolean), kind);
 for (const name of ['state', 'settings', 'speechPartial', 'appearance', 'draft', 'launcherFocus',

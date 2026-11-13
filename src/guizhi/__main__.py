@@ -35,6 +35,7 @@ def main() -> int:
     commands.add_parser("material-describe").add_argument("file", type=Path)
     commands.add_parser("material-intake").add_argument("request", type=Path)
     commands.add_parser("_material-reader")
+    commands.add_parser("map").add_argument("request", type=Path)
     shapefile = commands.add_parser("export-shp")
     shapefile.add_argument("run_id")
     shapefile.add_argument("kind")
@@ -106,6 +107,12 @@ def main() -> int:
             from guizhi.infrastructure.materials import serve
 
             serve(sys.stdin.buffer, sys.stdout)
+            return 0
+        if args.command == "map":
+            from guizhi.infrastructure.map_workspace import request
+
+            result = request(Workspace(args.workspace, create=True), json.loads(args.request.read_text(encoding="utf-8-sig")))
+            print(json.dumps(result, allow_nan=False))
             return 0
         if args.command in {"release-seed", "release-active", "tool-plan", "tool-apply"}:
             from guizhi.application import tool_repair

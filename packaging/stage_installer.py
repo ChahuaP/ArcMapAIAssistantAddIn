@@ -114,6 +114,9 @@ def build(stage, runtime, desktop, dsh, speech, arcmap, addin, tree, commit):
         target = payload / "renderer/node_modules" / package
         copy_file(source / asset, target / asset)
         copy_file(source / "LICENSE", target / "LICENSE")
+    bundle = SOURCE / "packaging" / "bundle_map.cjs"
+    subprocess.run([str(runtime / "node/node.exe"), str(bundle), str(desktop),
+                    str(payload / "renderer")], check=True)
     bootstrap = stage / "bootstrap"
     bootstrap.mkdir()
     for name in BOOTSTRAP_FILES:

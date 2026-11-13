@@ -33,13 +33,15 @@ async function startDesktop(options) {
         if (!item || !path.isAbsolute(item)) throw new Error('请选择有效的运行目录');
     }
     const vendor = path.join(rendererRuntime, 'node_modules');
-    const localFiles = ['index.html', 'app.js', 'shell-ui.js', 'settings.js', 'map.js', 'coordinates.js', 'skills.js',
+    const localFiles = ['index.html', 'app.js', 'shell-ui.js', 'settings.js', 'coordinates.js', 'skills.js',
         'materials-ui.js', 'skill-editor.js',
         'style.css', 'theme.css', 'mark.svg', 'luhe-banner.png', 'model-form.js', 'onboarding.js',
         'portrait.html', 'portrait.css', 'portrait.js', 'task-commands.js', 'speech-settings.js',
         'speech-audio.js', 'voice-input.js', 'visual.html', 'visual.css', 'visual.js', 'arcgis-extension.js', 'markdown.js', 'messages.js',
         'component-actions.js'];
     const files = new Map(localFiles.map(name => ['/' + name, path.join(__dirname, name)]));
+    files.set('/map.js', path.join(rendererRuntime, 'map.js'));
+    files.set('/map.css', path.join(rendererRuntime, 'map.css'));
     files.set('/react.js', path.join(vendor, 'react', 'umd', 'react.production.min.js'));
     files.set('/react-dom.js', path.join(vendor, 'react-dom', 'umd', 'react-dom.production.min.js'));
     files.set('/dayjs.js', path.join(vendor, 'dayjs', 'dayjs.min.js'));
@@ -359,6 +361,29 @@ async function startDesktop(options) {
         return pick.canceled ? { items: [], issues: [] } : controller.intake(pick.filePaths, kind);
     });
     bind('materialPaths', (paths, kind) => controller.intake(paths, kind));
+    bind('map', async (surface, input) => {
+        if (surface !== window || !input || !['describe', 'features', 'table', 'crs-search', 'assign', 'transform'].includes(input.action)) {
+            throw new Error('地图请求无效');
+        }
+        return controller.request('map', input);
+    }, true);
+    bind('mapImport', async (surface, paths) => {
+        if (surface !== window) throw new Error('请从工作台添加图层');
+        const files = paths || (await dialog.showOpenDialog(window, { properties: ['openFile', 'multiSelections'],
+            filters: [{ name: '空间数据', extensions: [...formats.vector.extensions, 'zip'] }] })).filePaths;
+        if (!files.length) return { layers: [], issues: [] };
+        const intake = await controller.intake(files, 'vector');
+        const items = intake.items.flatMap(item => item.layers.map(layer => ({ file: item.file, layer, revision: null })));
+        return { layers: items.length ? await controller.request('map', { action: 'import', items }) : [],
+            issues: intake.issues };
+    }, true);
+    bind('mapExport', async (surface, ref) => {
+        if (surface !== window) throw new Error('请从工作台导出图层');
+        const pick = await dialog.showSaveDialog(window, { defaultPath: '规智-图层.zip',
+            filters: [{ name: 'SHP 成果包', extensions: ['zip'] }] });
+        if (pick.canceled) return;
+        return controller.request('map', { action: 'export', ref, output: externalPath(pick.filePath) });
+    }, true);
     bind('exportDelivery', async (id, kind, format) => {
         if (!['shp', 'pdf', 'original'].includes(format) || (format === 'pdf') !== (kind === 'report')) {
             throw new Error('成果导出格式无效');
