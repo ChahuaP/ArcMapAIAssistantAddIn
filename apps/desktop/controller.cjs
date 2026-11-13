@@ -3,11 +3,11 @@ const { createHash, randomUUID } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { promisify } = require('node:util');
-const { startAgent } = require('./agent-process.cjs');
+const { AgentProcess } = require('./agent-process.cjs');
 const { materialBindings } = require('./materials.cjs');
 const { MaterialReader } = require('./material-reader.cjs');
 const { visualRecipe } = require('./visual-recipes.cjs');
-const { modelConfig, modelKey, credentialScope, normalizeKey, modelFailure, modelFailureCode } = require('../../src/guizhi/infrastructure/dsh/model-config.cjs');
+const { modelConfig, modelKey, credentialScope, normalizeKey, route, modelFailure, modelFailureCode } = require('../../src/guizhi/infrastructure/dsh/model-config.cjs');
 
 const exec = promisify(execFile);
 const cli = path.join(__dirname, '../../src/guizhi/__main__.py');
@@ -118,8 +118,34 @@ class DesktopController {
         return { config, key: requireModel || config.provider !== 'custom' ? modelKey(config, key) : key, encrypted };
     }
 
+    modelService(config, key) {
+        const identity = JSON.stringify(route(config));
+        if (this.service?.identity === identity && this.service.key === key) return this.service.ready;
+        const prior = this.service;
+        const entry = { identity, key };
+        entry.ready = (async () => {
+            await prior?.ready.then(service => service.close(), () => {});
+            const service = new AgentProcess({ ...this.runtime, modelConfig: config, apiKey: key });
+            void service.exited.then(() => { if (this.service === entry) this.service = undefined; });
+            try { await service.ready; }
+            catch (error) { await service.close(); throw error; }
+            return service;
+        })();
+        this.service = entry;
+        void entry.ready.catch(() => { if (this.service === entry) this.service = undefined; });
+        return entry.ready;
+    }
+
+    warmModel() {
+        if (!this.settings.modelConfig) return;
+        try {
+            const { config, key } = this.selectModel({ modelConfig: this.settings.modelConfig });
+            void this.modelService(config, key).catch(error => console.error('DSH startup:', modelFailure(error.message) || '模型调度服务启动失败'));
+        } catch (error) { console.error('DSH configuration:', modelFailure(error.message) || '模型服务配置不可用'); }
+    }
+
     configure(input) {
-        if (this.active || this.skillBusy || this.hostBusy) throw new Error('请先结束当前任务');
+        if (this.active || this.modelTesting || this.skillBusy || this.hostBusy) throw new Error('请先结束当前任务');
         const { config, key, encrypted } = this.selectModel(input);
         const workspace = this.workspaceReady(input.workspace);
         let encryptedKey = encrypted;
@@ -132,6 +158,7 @@ class DesktopController {
         save(this.file, settings);
         const changedWorkspace = workspace !== this.settings.workspace;
         this.settings = settings;
+        this.warmModel();
         if (changedWorkspace) {
             this.resetConversation();
             this.removeLegacyHistory();
@@ -193,7 +220,7 @@ class DesktopController {
 
     submit({ prompt, project, control, skill, materials = {}, skillParameters, parameterText, dialogue = false }) {
         if (!this.settings.workspace) throw new Error('请先选择成果保存位置');
-        if (this.active) throw new Error('已有任务在运行');
+        if (this.active || this.modelTesting) throw new Error('已有任务在运行');
         if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 4000) throw new Error('请输入办理事项');
         let bindings = materialBindings({ ...materials, ...(project ? { project: [project] } : {}),
             ...(control ? { control: [control] } : {}) });
@@ -222,35 +249,33 @@ class DesktopController {
         const next = [task, ...this.tasks];
         this.persist(next);
         this.tasks = next;
-        const child = startAgent(this.runtime, this.settings.workspace);
-        this.active = { child, task, config, files: Object.values(bindings).flat().map(item => item.file) };
-        child.on('message', message => {
-            if (message.type === 'event') {
-                if (task.status !== 'running') return;
-                const visual = visualRecipe(message.event);
-                if (visual) {
-                    task.visual = visual;
-                    task.step = visual.label;
-                    this.onChange(this.state());
-                }
-            } else if (message.type === 'result') {
-                void this.complete(task, message.result);
-            }
-        });
-        child.once('error', () => void this.complete(task, { status: 'failed' }));
-        child.once('exit', () => {
-            if (!this.active?.settling && this.active?.task === task) {
-                void this.complete(task, { status: 'interrupted' });
-            }
-        });
-        child.send({ type: 'start', options: { ...this.runtime, workspace: this.settings.workspace,
-            modelConfig: config, apiKey: key,
+        const stop = new AbortController();
+        const active = { stop, task, config, files: Object.values(bindings).flat().map(item => item.file) };
+        this.active = active;
+        const options = { workspace: this.settings.workspace, modelConfig: config, apiKey: key,
             prompt: task.prompt, skill, skillParameters, materials: bindings, previousRun, history, dialogue,
             projectPlan: project?.plan || materials.project?.[0]?.plan,
-            controlPlan: control?.plan || materials.control?.[0]?.plan } });
+            controlPlan: control?.plan || materials.control?.[0]?.plan };
+        active.done = this.dispatch(options, { signal: stop.signal, onEvent: event => {
+            if (task.status !== 'running') return;
+            const visual = visualRecipe(event);
+            if (visual) {
+                task.visual = visual;
+                task.step = visual.label;
+                this.onChange(this.state());
+            }
+        } }).then(receipt => this.complete(task, receipt), error => this.complete(task, {
+            status: stop.signal.aborted ? 'cancelled' : 'failed', error: error.message,
+        }));
         try { if (suppliedMaterials) this.onStarted?.(task); }
         catch (error) { console.error('ArcGIS display:', error.message); }
         return this.state();
+    }
+
+    async dispatch(options, callbacks) {
+        const { modelConfig, apiKey, ...request } = options;
+        const service = await this.modelService(modelConfig, apiKey);
+        return service.run(request, callbacks);
     }
 
     resetConversation() {
@@ -338,10 +363,10 @@ class DesktopController {
 
     cancel() {
         const active = this.active;
-        if (active?.child.connected && !active.settling && active.task.status !== 'cancelling') {
+        if (active && !active.settling && !active.stop.signal.aborted) {
             active.task.status = 'cancelling';
             if (this.tasks.includes(active.task)) this.persist();
-            active.child.send({ type: 'cancel' }, error => { if (error) console.error('Agent cancellation:', error.message); });
+            active.stop.abort();
         }
         return this.state();
     }
@@ -376,14 +401,11 @@ class DesktopController {
 
     async close() {
         this.reader.close();
-        const child = this.active?.child;
-        if (!child) return;
+        const active = this.active;
         this.cancel();
-        if (child.exitCode !== null || child.signalCode !== null) return;
-        await new Promise(resolve => {
-            const timer = setTimeout(() => { child.kill(); }, 15000);
-            child.once('exit', () => { clearTimeout(timer); resolve(); });
-        });
+        this.modelTesting?.stop.abort();
+        try { await Promise.allSettled([active?.done, this.modelTesting?.done]); }
+        finally { await this.service?.ready.then(service => service.close(), () => {}); }
     }
 }
 

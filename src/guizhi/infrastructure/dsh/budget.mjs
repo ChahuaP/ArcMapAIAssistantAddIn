@@ -2,7 +2,7 @@ import { existsSync, renameSync, writeFileSync } from 'node:fs';
 
 export const inject = ['llm'];
 
-export function apply(ctx, config) {
+export function meter(config) {
     let calls = 0;
     let charged = 0;
     let reserved = 0;
@@ -16,7 +16,7 @@ export function apply(ctx, config) {
     }
 
     checkpoint('ready');
-    ctx.on('llm/stream', async function* (options, next) {
+    return async function* (options, next) {
         // Verified workflows already have a deterministic delivery message.
         if (existsSync(config.operation)) {
             yield { type: 'finish', reason: { kind: 'stop' } };
@@ -49,5 +49,9 @@ export function apply(ctx, config) {
             charged += Number.isFinite(billed) ? billed : estimate;
             checkpoint(refused === null ? 'ready' : 'exhausted', refused ?? 0);
         }
-    });
+    };
+}
+
+export function apply(ctx, config) {
+    ctx.on('llm/stream', meter(config));
 }

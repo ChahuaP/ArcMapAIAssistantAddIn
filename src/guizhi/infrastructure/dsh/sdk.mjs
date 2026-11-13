@@ -90,7 +90,7 @@ export async function loadHarness(python, runtime) {
     return { DeepSeekHarness, versions };
 }
 
-export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
+export async function dispatch(options, { signal, onEvent = () => {}, getService } = {}) {
     const modelConfig = models.modelConfig(options.modelConfig);
     const apiKey = models.modelKey(modelConfig, options.apiKey);
     const { id: provider } = models.route(modelConfig);
@@ -113,7 +113,7 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
             !Number.isSafeInteger(calls) || calls < 1 || calls > 40) {
         throw new Error('Invalid model budget');
     }
-    const { DeepSeekHarness, versions } = await loadHarness(options.python, options.runtime);
+    const { versions } = await loadHarness(options.python, options.runtime);
     const workspace = externalPath(options.workspace ?? '');
     const parent = join(workspace, 'dispatch');
     if (existsSync(parent) && relative(parent, realpathSync(parent)) !== '') {
@@ -130,11 +130,6 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
     const provenance = { provider, model, route_sha256: hash(JSON.stringify(modelConfig)),
         profile_sha256: hash(readFileSync(profile)), request_sha256: hash(request),
         schema_sha256: hash(Buffer.concat(schema)), retrieval_version: '1.0.0' };
-    const mcpArgs = ['-I', '-B', fileURLToPath(new URL('./mcp.py', import.meta.url)),
-        '--workspace', workspace, '--dispatch', directory, '--model-provenance', JSON.stringify(provenance)];
-    if (options.projectPlan) mcpArgs.push('--project-plan', options.projectPlan);
-    if (options.controlPlan) mcpArgs.push('--control-plan', options.controlPlan);
-    if (options.previousRun) mcpArgs.push('--previous-run', options.previousRun);
     const deadline = AbortSignal.timeout(timeoutMs);
     const stop = signal ? AbortSignal.any([signal, deadline]) : deadline;
     stop.throwIfAborted();
@@ -150,7 +145,6 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
         skill: options.skill ?? null, previous_run: options.previousRun ?? null, project_plan: options.projectPlan ?? null,
         control_plan: options.controlPlan ?? null, skill_parameters: options.skillParameters ?? null,
         dsh: versions['@deepseek-ai/dsh'] }));
-    if (options.skillParameters !== undefined) mcpArgs.push('--use-bound-parameters');
     const usage = new Map();
     function event(item) {
         appendFileSync(join(directory, 'events.jsonl'), JSON.stringify(item) + '\n');
@@ -158,17 +152,15 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
     }
     let stopListener;
     let stopProgress;
-    let harness;
+    let owned;
+    let boundService;
+    let ran = false;
     let result;
     let attempted = false;
     try {
         event({ kind: 'dispatch', id, provider, model });
-        const aborted = new Promise(resolveAbort => {
-            stopListener = addAbortListener(stop, () => {
-                writeFileSync(join(directory, 'cancelled'), '');
-                resolveAbort(null);
-            });
-        });
+        const cancelled = join(directory, 'cancelled');
+        stopListener = addAbortListener(stop, () => writeFileSync(cancelled, ''));
         const { stdout } = await exec(options.python, ['-I', '-B', join(source, 'src/guizhi/__main__.py'),
             '--workspace', workspace, '_dispatch-replay', requestFile], { windowsHide: true, maxBuffer: 4 << 20 });
         const prepared = JSON.parse(stdout);
@@ -182,18 +174,19 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
             result = { status: deadline.aborted ? 'timed_out' : 'cancelled' };
         } else {
             stopProgress = watchRun(workspace, id, event);
-            mcpArgs.push('--materials', JSON.stringify(prepared.materials));
-            if (prepared.selected) mcpArgs.push('--skill', prepared.selected.reference);
-            if (prepared.key) mcpArgs.push('--plan-key', prepared.key);
-            const env = { ...runtimeEnv(options, mcpArgs),
-                GUIZHI_BUDGET_CONFIG: JSON.stringify({ tokens, calls, checkpoint: budgetPath, operation: operationPath }) };
-            harness = new DeepSeekHarness({
-                profile: 'sdk-minimal', patches: [profile], dshHome: join(directory, 'dsh-home'),
-                cwd: directory, processCwd: directory, provider, model, maxTokens: 1024,
-                initializeTimeoutMs: 45000, env,
-            });
-            await harness.start();
-            if (!existsSync(budgetPath)) throw new Error('Model budget guard did not initialize');
+            const service = getService ? await getService() :
+                (owned = new (await import('./service.mjs')).DispatchService(options));
+            await service.ready;
+            stop.throwIfAborted();
+            service.bind({ id, workspace, cancelled, materials: prepared.materials,
+                skill: prepared.selected?.reference ?? null, parameters: options.skillParameters ?? null,
+                plans: { project_plan: options.projectPlan, control_plan: options.controlPlan },
+                previousRun: options.previousRun ?? null, provenance, planKey: prepared.key,
+                flushRequest: join(directory, 'flush.request'), flushReceipt: join(directory, 'flush.receipt'),
+                budget: { tokens, calls, checkpoint: budgetPath, operation: operationPath } });
+            boundService = service;
+            event({ kind: 'runtime_bound', runtime_id: service.id });
+            const { harness } = service;
             const roles = Object.fromEntries(Object.entries(materials).map(([role, items]) => [role, items.length]));
             const bound = options.skillParameters !== undefined ? '办理参数已在本机绑定，执行技能时省略 skill_parameters。' : '';
             const selection = prepared.selected ? `已选技能和本轮材料摘要：${JSON.stringify(prepared.selected)}。`
@@ -201,7 +194,7 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
             const context = `${selection}${bound}有已选历史成果：${Boolean(options.previousRun)}。\n`;
             const conversation = history.length ? '最近对话记录（每项为用户提问与规智答复）：' + JSON.stringify(history) + '\n' : '';
             const speech = options.dialogue ? '本轮使用语音输入。先实际办理，再用简洁口语回答，不用 Markdown。\n' : '';
-            const run = prompt => Promise.race([harness.run(prompt, {
+            const run = prompt => harness.run(prompt, {
                 sessionId: id,
                 onNotification(note) {
                     if (note.method === 'session.status') {
@@ -221,8 +214,9 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
                     }
                     event(item);
                 },
-            }), aborted]);
+            });
             let response = await run(context + conversation + speech + '用户请求：' + options.prompt);
+            ran = true;
             const needsSelectedWorkflow = options.skill && Object.keys(roles).length > 0 && /^请办理/u.test(options.prompt.trim());
             const needsMeasurement = options.dialogue && Object.keys(roles).length > 0 &&
                 /统计|计算|清点|多少|数量|覆盖率|重叠面积/u.test(options.prompt);
@@ -233,10 +227,11 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
                 response = await run('请调用 execute_workflow，按本轮已选业务和已绑定的材料实际办理，取得作业回执后再回答。' +
                     context + '用户请求：' + options.prompt);
             }
-            if (response === null) {
+            if (stop.aborted) {
                 writeFileSync(join(directory, 'cancelled'), '');
                 result = { status: deadline.aborted ? 'timed_out' : 'cancelled' };
             } else {
+                if (!existsSync(budgetPath)) throw new Error('本轮模型预算未初始化');
                 const issuePath = join(directory, 'input-issue.json');
                 const receipt = existsSync(operationPath) ? readJson(operationPath) : null;
                 const issue = existsSync(issuePath) ? readJson(issuePath) : null;
@@ -260,11 +255,16 @@ export async function dispatch(options, { signal, onEvent = () => {} } = {}) {
         }
     } catch (error) {
         writeFileSync(join(directory, 'cancelled'), '');
-        result = { status: 'failed', error: safeError(error.message) };
+        result = stop.aborted ? { status: deadline.aborted ? 'timed_out' : 'cancelled' }
+            : { status: 'failed', error: safeError(error.message) };
     } finally {
         stopListener?.[Symbol.dispose]();
         try {
-            await harness?.close();
+            if (boundService) {
+                try { if (ran) await boundService.archive(id, directory); }
+                finally { boundService.release(id); }
+            }
+            await owned?.close();
         } catch (error) {
             result = { ...result, status: 'failed', shutdown_error: safeError(error.message) };
         }

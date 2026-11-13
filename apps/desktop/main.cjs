@@ -89,7 +89,10 @@ async function startDesktop(options) {
     const controller = new DesktopController({ userData: app.getPath('userData'), runtime, dsh,
         safeStorage, externalPath, onChange: broadcast, bundledArcmap: options.bundledArcmap,
         installationRoot: options.installationRoot, diagnostics });
-    if (!options.verifyStartup) controller.reader.start();
+    if (!options.verifyStartup) {
+        controller.reader.start();
+        controller.warmModel();
+    }
     const hostRoot = process.env.GUIZHI_ARCGIS_HOSTS || path.join(process.env.LOCALAPPDATA, 'Guizhi', 'ArcGIS', 'hosts');
     sync = new ArcGisSync(controller, hostRoot, app.getPath('documents'), () => broadcast(controller.state()));
     controller.onStarted = task => sync.started(task);
@@ -251,15 +254,17 @@ async function startDesktop(options) {
         const settings = controller.state().settings;
         const config = settings.modelConfig;
         if (check && config) {
-            if (controller.active) throw new Error('请在当前任务结束后检查模型');
+            if (controller.active || controller.modelTesting) throw new Error('请在当前任务结束后检查模型');
             const at = new Date().toISOString();
             try {
                 const { key } = controller.selectModel({ modelConfig: config });
-                await testModel(controller.runtime, config, key);
+                const stop = new AbortController();
+                controller.modelTesting = { stop, done: testModel(controller, config, key, stop.signal) };
+                await controller.modelTesting.done;
                 if (controller.settings.modelConfig === config) modelCheck = { state: 'verified', at };
             } catch (error) {
                 if (controller.settings.modelConfig === config) modelCheck = { state: 'failed', at, detail: error.message };
-            }
+            } finally { controller.modelTesting = undefined; }
         }
         const appearance = desktop.appearance();
         return { model: { mode: config?.mode, name: config?.model, state: config ? 'configured' : 'missing', ...modelCheck },

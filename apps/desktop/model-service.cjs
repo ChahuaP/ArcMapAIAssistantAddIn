@@ -2,7 +2,6 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
-const { startAgent } = require('./agent-process.cjs');
 const { presets, route, validModel, modelFailure } = require('../../src/guizhi/infrastructure/dsh/model-config.cjs');
 
 const connectionTimeout = 12_000;
@@ -99,23 +98,14 @@ async function checkModelConnection(runtime, config, key) {
     }
 }
 
-async function testModel(runtime, modelConfig, apiKey) {
+async function testModel(controller, modelConfig, apiKey, signal) {
     const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'guizhi-model-'));
     let usedTool = false;
     try {
-        const receipt = await new Promise((resolve, reject) => {
-            let result;
-            const child = startAgent(runtime, workspace);
-            child.on('message', message => {
-                if (message.event?.tool === 'mcp__guizhi__list_skills') usedTool = true;
-                if (message.type === 'result') result = message.result;
-            });
-            child.once('error', () => reject(new Error('无法启动模型调度进程')));
-            child.once('close', () => result ? resolve(result) : reject(new Error('模型调度进程已退出')));
-            child.send({ type: 'start', options: { ...runtime, workspace, modelConfig, apiKey,
-                prompt: '这是连接测试。请调用 list_skills 工具，随后回答已读取业务目录。不要执行任何办理工作流。',
-                timeoutMs: 90000, maxModelCalls: 4, maxModelTokens: 32000 } });
-        });
+        const receipt = await controller.dispatch({ workspace, modelConfig, apiKey,
+            prompt: '这是连接测试。请调用 list_skills 工具，随后回答已读取业务目录。不要执行任何办理工作流。',
+            timeoutMs: 90000, maxModelCalls: 4, maxModelTokens: 32000 },
+        { signal, onEvent: event => { if (event.tool === 'mcp__guizhi__list_skills') usedTool = true; } });
         if (usedTool && receipt.status === 'answered') return { model: modelConfig.model, tools: true };
         const reason = receipt.error || receipt.response || '';
         if (/\b(401|403)\b|unauthorized|invalid api key/i.test(reason)) {

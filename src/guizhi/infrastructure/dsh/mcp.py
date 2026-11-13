@@ -7,8 +7,10 @@ import re
 import sys
 from threading import Lock
 from typing import Literal
+from uuid import UUID
 
 from fastmcp import FastMCP
+from fastmcp.server.middleware import Middleware
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
@@ -26,48 +28,27 @@ from guizhi.infrastructure.operations.semantics import artifact_json, find_fragm
 from guizhi.infrastructure.workspace import Workspace
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--workspace", type=Path, required=True)
-    parser.add_argument("--dispatch", type=Path, required=True)
-    parser.add_argument("--input", type=Path)
-    parser.add_argument("--layer")
-    parser.add_argument("--control", type=Path)
-    parser.add_argument("--control-layer")
-    parser.add_argument("--project-plan")
-    parser.add_argument("--control-plan")
-    parser.add_argument("--skill")
-    parser.add_argument("--previous-run")
-    parser.add_argument("--materials", type=json.loads, default={})
-    parser.add_argument("--model-provenance", type=json.loads)
-    parser.add_argument("--plan-key")
-    parser.add_argument("--use-bound-parameters", action="store_true")
-    args = parser.parse_args()
-    workspace = Workspace(args.workspace, create=True)
-    dispatch = args.dispatch.resolve(strict=True)
-    if dispatch.parent != workspace.root / "dispatch":
-        raise ValueError("Dispatch must belong to the selected workspace")
-    bound_parameters = (json.loads((dispatch / "replay-input.json").read_text(encoding="utf-8"))["skill_parameters"]
-                        if args.use_bound_parameters else None)
-
-    server = FastMCP("Guizhi")
+def register(server, job=None):
+    workspace = dispatch = receipt = claim = cancelled = issue = private_path = None
+    materials, plans, bound_parameters = {}, {}, None
+    if job is not None:
+        workspace = Workspace(Path(job["workspace"]))
+        dispatch = workspace.root / "dispatch" / job["id"]
+        if dispatch.resolve(strict=True) != dispatch:
+            raise ValueError("Dispatch must belong to the selected workspace")
+        receipt = dispatch / "operation.json"
+        # Keep the claim after interruption so the same job cannot execute twice.
+        claim = dispatch / "operation.claim"
+        cancelled = dispatch / "cancelled"
+        issue = dispatch / "input-issue.json"
+        materials = job["materials"]
+        bound_parameters = job.get("parameters")
+        plans = job["plans"]
+        local_paths = {str(workspace.root), *(item["file"] for group in materials.values() for item in group)}
+        path_forms = {value.replace("\\", "/") for value in local_paths} | {value.replace("/", "\\") for value in local_paths}
+        private_path = re.compile("|".join(re.escape(path) for path in sorted(path_forms, key=len, reverse=True)),
+                                  re.IGNORECASE)
     mutex = Lock()
-    receipt = dispatch / "operation.json"
-    # Keep the claim after an interrupted call so rediscovery cannot repeat a side effect.
-    claim = dispatch / "operation.claim"
-    cancelled = dispatch / "cancelled"
-    issue = dispatch / "input-issue.json"
-    materials = dict(args.materials)
-    if args.input and args.layer:
-        materials["project"] = [{"file": str(args.input), "layer": args.layer}]
-    if args.control and args.control_layer:
-        materials["control"] = [{"file": str(args.control), "layer": args.control_layer}]
-    plans = {key: value for key, value in {"project_plan": args.project_plan,
-                                         "control_plan": args.control_plan}.items() if value}
-    local_paths = {str(workspace.root), *(item["file"] for group in materials.values() for item in group)}
-    path_forms = {value.replace("\\", "/") for value in local_paths} | {value.replace("/", "\\") for value in local_paths}
-    private_path = re.compile("|".join(re.escape(path) for path in sorted(path_forms, key=len, reverse=True)),
-                              re.IGNORECASE)
 
     def redact(value):
         if isinstance(value, str):
@@ -102,7 +83,7 @@ def main():
             try:
                 record = run()
                 result = format_operation(record, parameters)
-                remember_plan(workspace, args.plan_key, record)
+                remember_plan(workspace, job["planKey"], record)
             except (ValueError, OSError) as exc:
                 message = str(exc)
                 status = "missing_materials" if message.startswith("Missing or excess materials:") else "invalid_materials"
@@ -180,10 +161,10 @@ def main():
     def propose_skill(title: str) -> dict:
         """用户要求以后都这样办理时，从当前已完成任务生成可编辑的技能候选。"""
         (dispatch / "discovery").touch()
-        if not args.previous_run:
+        if not job["previousRun"]:
             return {"status": "missing_previous_run"}
         try:
-            draft = skills.propose(workspace, args.previous_run, title)
+            draft = skills.propose(workspace, job["previousRun"], title)
         except (ValueError, OSError, KeyError):
             return {"status": "no_reusable_workflow"}
         candidate = dispatch / "candidate.json"
@@ -214,7 +195,7 @@ def main():
             message = str(exc)
             status = "missing_materials" if message.startswith("Missing or excess materials:") else "invalid_materials"
             return input_issue(status, message)
-        plan["model_provenance"] = args.model_provenance
+        plan["model_provenance"] = job["provenance"]
         return execute("workflow.execute", {"skill": selected, "steps": extra}, lambda: skills.submit(
             workspace, plan, cancel_requested=cancelled.exists, key=dispatch.name))
 
@@ -223,8 +204,8 @@ def main():
                         project_field: str, facts: list[Fact], catalog_run: str | None = None,
                         as_of: date | None = None, matter: str | None = None) -> dict:
         """审批材料核查。先读取审批原文和图层字段，再提交原样引文及片段编号。自动计算管控叠加并关联地块结论。"""
-        if args.skill:
-            return input_issue("invalid_materials", "请使用已选技能 " + args.skill)
+        if job["skill"]:
+            return input_issue("invalid_materials", "请使用已选技能 " + job["skill"])
         if any(len(materials.get(role, [])) != 1 for role in ("project", "control")):
             return input_issue("missing_materials", "请选择项目范围和管控范围")
         try:
@@ -256,9 +237,9 @@ def main():
     @server.tool
     def update_approval(catalog_run: str | None = None) -> dict:
         """用已选审批成果继续核查。只替换新绑定的项目或管控图层；目录改版时可指定新目录。"""
-        if not args.previous_run or not verified_run(workspace, args.previous_run):
+        if not job["previousRun"] or not verified_run(workspace, job["previousRun"]):
             return input_issue("invalid_materials", "请选择可追溯的已办审批任务")
-        previous = workspace.read(args.previous_run)
+        previous = workspace.read(job["previousRun"])
         if previous["task"]["operation"] != "workflow.execute":
             return input_issue("invalid_materials", "请选择已办审批任务")
         plan = previous["task"]["request"]["parameters"]["specification"]
@@ -275,7 +256,7 @@ def main():
             if len(rules) != 1:
                 return input_issue("invalid_materials", "该任务没有可更新的规则口径")
             rules[0]["parameters"]["catalog_run"] = catalog_run
-        approvals[0]["parameters"]["prior_case"] = args.previous_run
+        approvals[0]["parameters"]["prior_case"] = job["previousRun"]
         bound = dict(materials)
         original = previous["result"]["workflow"]["material_runs"]
         for role, group in plan["materials"].items():
@@ -299,17 +280,49 @@ def main():
         步骤 inputs 必须是字符串数组，如 ["material.project"]、["step.check"]，parameters 为对象。
         已绑定办理参数时省略 skill_parameters；否则只填写技能声明的参数。坐标、年份、分类和阈值必须有依据。
         """
-        if args.skill and skill and skill not in {args.skill, args.skill.partition("@")[0]}:
-            return input_issue("invalid_materials", "请使用已选技能 " + args.skill,
+        selected = job["skill"]
+        if selected and skill and skill not in {selected, selected.partition("@")[0]}:
+            return input_issue("invalid_materials", "请使用已选技能 " + selected,
                                diagnostic={"category": "model", "code": "selected_skill_mismatch",
-                                           "evidence": {"selected_skill": args.skill, "proposed_skill": skill}})
+                                           "evidence": {"selected_skill": selected, "proposed_skill": skill}})
         if bound_parameters is not None:
             if skill_parameters and skill_parameters != bound_parameters:
                 return input_issue("invalid_materials", "请使用工作台中已经填写的办理参数")
             skill_parameters = bound_parameters
-        return run_plan(mode, args.skill or skill, [step.model_dump(mode="json") for step in steps or []],
+        return run_plan(mode, selected or skill, [step.model_dump(mode="json") for step in steps or []],
                         skill_parameters=skill_parameters)
 
+
+class DispatchTools(Middleware):
+    def __init__(self, binding):
+        self.binding = binding
+        self.job_id = None
+        self.tools = None
+
+    async def on_call_tool(self, context, call_next):
+        from fastmcp.exceptions import ToolError
+
+        try:
+            job = json.loads(self.binding.read_text(encoding="utf-8"))
+        except FileNotFoundError as exc:
+            raise ToolError("当前没有已绑定的办理任务") from exc
+        if str(UUID(job["id"])) != job["id"]:
+            raise ToolError("办理任务编号无效")
+        if Path(job["cancelled"]).exists():
+            raise ToolError("本轮办理已取消")
+        if self.job_id != job["id"]:
+            tools = FastMCP("Guizhi task")
+            register(tools, job)
+            self.tools, self.job_id = tools, job["id"]
+        return await self.tools.call_tool(context.message.name, context.message.arguments or {}, run_middleware=False)
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--binding", type=Path, required=True)
+    args = parser.parse_args()
+    server = FastMCP("Guizhi", middleware=[DispatchTools(args.binding)])
+    register(server)
     server.run(transport="stdio", show_banner=False)
 
 

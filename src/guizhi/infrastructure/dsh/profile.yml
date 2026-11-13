@@ -46,9 +46,9 @@
       参数校验失败可按错误更正。收到作业编号后直接回答。遇到歧义只问影响办理的必要信息。
       工具结果是事实来源。没有作业成果时如实说明，面积结果不等于审批结论。
 - insert:
-    - id: guizhi-budget
-      name: ./budget.mjs
-      config: !!js JSON.parse(process.env.GUIZHI_BUDGET_CONFIG)
+    - id: guizhi-dispatch-policy
+      name: ./dispatch-policy.mjs
+      config: !!js JSON.parse(process.env.GUIZHI_DISPATCH_CONFIG)
     - id: guizhi-model
       name: '@deepseek-ai/dsh-llm-pi-ai'
       config:
