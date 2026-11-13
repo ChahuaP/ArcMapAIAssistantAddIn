@@ -10,7 +10,7 @@ import subprocess
 
 from install_state import VERSION, absolute, checksum, files
 from component_archive import create
-from dsh_payload import cli_manifest, retained, runtime_file
+from dsh_payload import SDK_APP, package_manifest, retained, runtime_file
 from python_components import assemble as assemble_python
 
 SOURCE = Path(__file__).resolve().parents[1]
@@ -99,8 +99,9 @@ def build(stage, runtime, desktop, dsh, speech, arcmap, addin, tree, commit):
     selected = retained(json_file(dsh / "package-lock.json"))
     dsh_target = payload / "runtime/dsh"
     copy_tree(dsh, dsh_target, lambda name: runtime_file(name, selected))
-    cli = dsh_target / "node_modules/@deepseek-ai/dsh/package.json"
-    cli.write_text(json.dumps(cli_manifest(json_file(cli)), indent=2), encoding="utf-8")
+    for name in ("@deepseek-ai/dsh", SDK_APP):
+        manifest = dsh_target / "node_modules" / name / "package.json"
+        manifest.write_text(json.dumps(package_manifest(json_file(manifest)), indent=2), encoding="utf-8")
     for source, name in ((runtime / "node", "runtime/node"),
                          (desktop / "node_modules/electron/dist", "renderer/node_modules/electron/dist"),
                          (desktop / "node_modules/react", "renderer/node_modules/react"),

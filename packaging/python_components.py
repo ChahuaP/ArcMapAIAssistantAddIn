@@ -13,6 +13,16 @@ PACKAGES = {
 }
 
 
+def core_file(name, excluded):
+    if name in excluded or name.startswith("Lib/site-packages/bin/"):
+        return False
+    if not name.startswith("Lib/site-packages/"):
+        return True
+    # Preserve public helpers such as pandas.testing. Only strip test suites and bytecode caches.
+    directories = name.split("/")[2:-1]
+    return not {"test", "tests", "__pycache__"}.intersection(directories)
+
+
 def assemble(python, payload, stage, version, copy_tree):
     # RECORD is authoritative even for namespace packages and bundled native libraries.
     names = set().union(*PACKAGES.values())
@@ -27,7 +37,7 @@ def assemble(python, payload, stage, version, copy_tree):
     groups = {kind: {name for package in packages for name in records[package]}
               for kind, packages in PACKAGES.items()}
     excluded = {site.joinpath(name).as_posix() for group in groups.values() for name in group}
-    copy_tree(python, payload, lambda name: name not in excluded and not name.startswith("Lib/site-packages/bin/"))
+    copy_tree(python, payload, lambda name: core_file(name, excluded))
 
     components = {}
     for kind, members in groups.items():

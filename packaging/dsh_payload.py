@@ -11,6 +11,8 @@ CLI = {"@deepseek-ai/" + name for name in (
     "dsh-plugin-manager", "dsh-sdk-minimal", "dsh-llm-pi-ai", "dsh-mcp-client",
 )}
 CLI.update({"commander", "js-yaml", "node-addon-require-builtin"})
+SDK_APP = "@deepseek-ai/dsh-sdk-app"
+OFFICE_SKILL = "@deepseek-ai/dsh-skill-office"
 
 
 def retained(lock):
@@ -43,6 +45,9 @@ def retained(lock):
         regular = set(entry.get("dependencies", {}))
         if location == "node_modules/@deepseek-ai/dsh":
             regular &= CLI
+        elif location == f"node_modules/{SDK_APP}":
+            # sdk-minimal uses the startup plugin, not the standard SDK's Office skill.
+            regular.discard(OFFICE_SKILL)
         peers = entry.get("peerDependencies", {})
         meta = entry.get("peerDependenciesMeta", {})
         todo.extend((location, dep, False) for dep in regular)
@@ -56,11 +61,18 @@ def runtime_file(name, selected):
         return name in {"package.json", "package-lock.json"}
     if name.endswith((".map", ".d.ts", ".d.cts", ".d.mts")):
         return False
+    pty = name.removeprefix("node_modules/node-pty/")
+    if pty != name and (pty.endswith(".pdb") or pty.startswith(("prebuilds/win32-arm64/", "third_party/"))):
+        # The pinned Windows x64 package loads its bundled x64 prebuilds.
+        return False
     owner = re.match(r"^(.*/node_modules/|node_modules/)((?:@[^/]+/)?[^/]+)/", name)
     return bool(owner and owner[1] + owner[2] in selected)
 
 
-def cli_manifest(manifest):
+def package_manifest(manifest):
     dependencies = manifest["dependencies"]
-    manifest["dependencies"] = {name: dependencies.get(name, manifest["version"]) for name in sorted(CLI)}
+    if manifest["name"] == "@deepseek-ai/dsh":
+        manifest["dependencies"] = {name: dependencies.get(name, manifest["version"]) for name in sorted(CLI)}
+    elif manifest["name"] == SDK_APP:
+        del dependencies[OFFICE_SKILL]
     return manifest
