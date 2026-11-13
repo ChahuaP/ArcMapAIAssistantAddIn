@@ -51,7 +51,7 @@ def layer_file(item, document, search):
             candidates.insert(0, search / source_file.name)
         source_file = next((item for item in candidates if item.exists()), None)
         if source_file is None:
-            raise ValueError("找不到同名数据源，请指定数据目录")
+            raise FileNotFoundError("找不到同名数据源")
     if not source_file.drive or str(source_file).startswith("\\"):
         raise ValueError("请选择本机数据源")
     if source_file.suffix.lower() not in {".shp", ".gdb", ".tif", ".tiff", ".img"}:
@@ -104,7 +104,7 @@ def import_frame(workspace, payload):
             result.append({**layer, "name": item["name"], "style": item.get("style"), "group": item["group"],
                            "visible": item["visible"], "sourceName": str(file)})
         except (OSError, ValueError, RuntimeError) as error:
-            issues.append({"name": item["name"], "message": str(error)})
+            issues.append({"name": item["name"], "message": str(error), "missing": isinstance(error, FileNotFoundError)})
     frame = {key: payload["frame"].get(key) for key in ("name", "crs", "bounds")}
     if frame["crs"]:
         crs = CRS(frame["crs"])

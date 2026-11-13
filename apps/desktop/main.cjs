@@ -485,7 +485,10 @@ async function startDesktop(options) {
         const manifest = await controller.request('map', { action: 'mxd-read', bridge: executable, source });
         currentMxd = { source, manifest, workspace: controller.settings.workspace };
         return { name: path.basename(source, '.mxd'), frames: manifest.frames.map(frame => ({
-            name: frame.name, count: frame.layers.length, unavailable: frame.layers.filter(item => !item.valid || item.kind === 'unsupported').length,
+            name: frame.name, count: frame.layers.length,
+            missing: frame.layers.filter(item => !item.valid && (item.source || item.workspace && item.dataset)).length,
+            unsupported: frame.layers.filter(item => item.kind === 'unsupported' ||
+                !(item.source || item.workspace && item.dataset)).length,
         })) };
     }, true);
     bind('mxdImport', async (surface, index, relocate) => {

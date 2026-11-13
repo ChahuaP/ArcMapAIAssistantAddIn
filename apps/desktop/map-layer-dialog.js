@@ -127,18 +127,20 @@ export function LayerProperties({ item, color, close, save, glyph, start = 'info
             : h('dl', { className: 'gis-layer-properties' }, ...info.map(([label, value]) => prop(label, value))));
 }
 
-export function MxdOpen({ document, busy, open, close, glyph, issue }) {
+export function MxdOpen({ document, busy, open, close, glyph, issue, locateAvailable }) {
     const [frame, setFrame] = useState(0);
     const current = document.frames[frame];
-    return h(Modal, { open: true, centered: true, width: 490, className: 'gis-dialog', rootClassName: 'gis-modal-root',
+    const canLocate = current?.missing > 0 || locateAvailable === frame;
+    return h(Modal, { open: true, centered: true, width: 440, className: 'gis-dialog', rootClassName: 'gis-modal-root',
         title: h('span', { className: 'gis-dialog-title' }, glyph('map'), document.name),
         onCancel: busy ? undefined : close, closable: !busy, keyboard: !busy, maskClosable: false,
         footer: [h(Button, { key: 'close', disabled: busy, onClick: close }, '取消'),
-            h(Button, { key: 'locate', disabled: busy || !current, onClick: () => open(frame, true) }, '指定数据目录并打开'),
-            h(Button, { key: 'open', type: 'primary', loading: busy, disabled: !current, onClick: () => open(frame, false) }, '打开数据框')] },
-        h('div', { className: 'map-field-editor' },
-            h('label', null, '数据框', h(Select, { 'aria-label': '数据框', value: frame, disabled: busy,
+            canLocate && h(Button, { key: 'locate', disabled: busy, onClick: () => open(frame, true) }, '找数据'),
+            h(Button, { key: 'open', type: 'primary', loading: busy, disabled: !current, onClick: () => open(frame, false) }, '打开')] },
+        h('div', { className: 'mxd-open-fields' },
+            document.frames.length > 1 && h('label', null, '数据框', h(Select, { 'aria-label': '数据框', value: frame, disabled: busy,
                 options: document.frames.map((item, value) => ({ value, label: item.name + ' · ' + item.count + ' 个图层' })), onChange: setFrame })),
-            current?.unavailable > 0 && h('p', { className: 'muted' }, current.unavailable + ' 个图层的数据源缺失或类型暂不支持。'),
+            canLocate && h('p', { className: 'muted' }, '部分图层找不到数据。点「找数据」选择原始数据所在的文件夹。'),
+            current?.unsupported > 0 && h('p', { className: 'muted' }, current.unsupported + ' 个图层的类型暂不支持。'),
             issue && h('p', { className: 'error', role: 'alert' }, issue)));
 }

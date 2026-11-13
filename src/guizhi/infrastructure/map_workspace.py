@@ -11,6 +11,7 @@ import pyogrio
 import shapely
 from pyproj import CRS, network
 from pyproj.aoi import AreaOfInterest
+from pyproj.enums import TransformDirection
 from pyproj.transformer import TransformerGroup
 
 from guizhi.application.skills import execute as execute_skill
@@ -203,22 +204,21 @@ def bounds(value):
 
 def projection(source_crs, target_crs, extent):
     network.set_network_enabled(False)
-    group = TransformerGroup(source_crs, target_crs, always_xy=True, allow_ballpark=False)
+    area = None
+    geodetic = source_crs.geodetic_crs
+    if extent and geodetic is not None:
+        # An AOI needs longitude and latitude. Undo the source projection in its own datum.
+        # A separate WGS 84 datum transformation can require grids unrelated to the map.
+        local = TransformerGroup(source_crs, geodetic, always_xy=True, allow_ballpark=False)
+        if not local.best_available or not local.transformers:
+            raise ValueError("无法从图层坐标系确定转换范围，请选择已验证的转换方案")
+        west, south, east, north = local.transformers[0].transform_bounds(*extent, errcheck=True)
+        if not (-180 <= west <= 180 and -180 <= east <= 180 and -90 <= south <= north <= 90):
+            raise ValueError("图层坐标超出坐标系适用范围，请检查图层坐标系")
+        area = AreaOfInterest(west, south, east, north)
+    group = TransformerGroup(source_crs, target_crs, always_xy=True, allow_ballpark=False, area_of_interest=area)
     if not group.best_available or not group.transformers:
-        raise ValueError("当前图层缺少可靠的坐标转换或所需格网，请在设置中选择已验证的转换方案")
-    approximate = group.transformers[0]
-    if extent:
-        world = approximate.transform_bounds(*extent, errcheck=True)
-        if target_crs.to_epsg() != 4326:
-            to_geo = TransformerGroup(source_crs, 4326, always_xy=True, allow_ballpark=False)
-            if not to_geo.best_available or not to_geo.transformers:
-                raise ValueError("无法验证坐标转换的适用范围")
-            world = to_geo.transformers[0].transform_bounds(*extent, errcheck=True)
-        if world[0] <= world[2] and world[1] <= world[3] and -90 <= world[1] <= world[3] <= 90:
-            area = AreaOfInterest(*world)
-            group = TransformerGroup(source_crs, target_crs, always_xy=True, allow_ballpark=False, area_of_interest=area)
-    if not group.best_available or not group.transformers:
-        raise ValueError("当前范围缺少可用的坐标转换或格网")
+        raise ValueError("缺少可靠的坐标转换或所需格网，请选择已验证的转换方案")
     return group.transformers[0]
 
 
@@ -242,24 +242,35 @@ def features(workspace, payload):
         raise ValueError("请先为该图层指定已知坐标系")
     convert = target and current and not current.equals(target, ignore_axis_order=True)
     plan = get_plan(workspace, payload["plan"]) if convert and payload.get("plan") else None
-    read_extent = extent
-    if convert:
-        # A saved operation may have a limited domain or no validated inverse.
-        read_extent = None if plan or extent is None else projection(target, current, extent).transform_bounds(*extent, errcheck=True)
-    if read_extent and read_extent[0] > read_extent[2]:
-        read_extent = (-180.0, read_extent[1], 180.0, read_extent[3])
     fids = payload.get("fids")
+    tx = projection(current, target, info["bounds"]) if convert and not plan else None
+    display_bounds = info["bounds"]
+    if tx and display_bounds:
+        display_bounds = numbers(tx.transform_bounds(*display_bounds, errcheck=True))
+        if display_bounds and display_bounds[0] > display_bounds[2]:
+            display_bounds = [-180.0, display_bounds[1], 180.0, display_bounds[3]]
+    read_extent = extent
+    if convert and fids is None:
+        read_extent = None
+        if tx and tx.has_inverse and extent and display_bounds:
+            west, south = max(extent[0], display_bounds[0]), max(extent[1], display_bounds[1])
+            east, north = min(extent[2], display_bounds[2]), min(extent[3], display_bounds[3])
+            if west > east or south > north:
+                return {"features": [], "limited": False, "bounds": display_bounds}
+            read_extent = numbers(tx.transform_bounds(west, south, east, north,
+                                                     direction=TransformDirection.INVERSE, errcheck=True))
+            if read_extent and read_extent[0] > read_extent[2]:
+                read_extent = (-180.0, read_extent[1], 180.0, read_extent[3])
     if fids is not None:
         if not isinstance(fids, list) or not fids or len(fids) > 500 or any(type(fid) is not int for fid in fids):
             raise ValueError("请选择有效的地图要素")
         options = {"fids": fids}
     else:
-        options = {"bbox": read_extent, "max_features": MAX_VISIBLE + 1}
+        options = {"bbox": tuple(read_extent) if read_extent is not None else None, "max_features": MAX_VISIBLE + 1}
     frame = pyogrio.read_dataframe(file, layer=name, fid_as_index=True, columns=None if fids else payload.get("fields", []), **options)
     limited = len(frame) > MAX_VISIBLE
     if limited:
         frame = frame.iloc[:MAX_VISIBLE]
-    tx = projection(current, target, info["bounds"]) if convert and not plan else None
     if convert and len(frame):
         if plan:
             frame = apply_plan(frame, plan, workspace.root)
@@ -270,6 +281,8 @@ def features(workspace, payload):
                 lambda x, y, z=None: tx.transform(x, y, z, errcheck=True),
                 interleaved=False, include_z=None)
     if fids is None:
+        if convert and extent and read_extent is None and len(frame):
+            frame = frame.cx[extent[0]:extent[2], extent[1]:extent[3]]
         # Bound each map response by vertex count; original geometries remain in the source.
         if payload.get("tolerance") is not None and payload["tolerance"] > 0 and len(frame):
             tolerance = float(payload["tolerance"])
@@ -289,11 +302,6 @@ def features(workspace, payload):
     items = [{"id": int(fid), "geometry": shapely.geometry.mapping(shape), "properties": attrs}
              for (fid, shape), attrs in zip(frame.geometry.items(), attributes, strict=True)
              if shape is not None and not shape.is_empty]
-    display_bounds = info["bounds"]
-    if tx and display_bounds:
-        display_bounds = numbers(tx.transform_bounds(*display_bounds, errcheck=True))
-        if display_bounds and display_bounds[0] > display_bounds[2]:
-            display_bounds = [-180.0, display_bounds[1], 180.0, display_bounds[3]]
     return {"features": items, "limited": limited, "bounds": display_bounds if not plan else numbers(frame.total_bounds)}
 
 

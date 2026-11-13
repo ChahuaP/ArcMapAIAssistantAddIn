@@ -217,6 +217,8 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
     const [busy, setBusy] = useState(false);
     useEffect(() => { editing(Boolean(edit) || busy); return () => editing(false); }, [Boolean(edit), busy]);
     const [issue, setIssue] = useState('');
+    const [layerErrors, setLayerErrors] = useState([]);
+    const [locateMxd, setLocateMxd] = useState(null);
     const [table, setTable] = useState(null);
     const [tableLayer, setTableLayer] = useState(null);
     const [page, setPage] = useState(0);
@@ -336,7 +338,7 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
             }
             if (!item.crs && target) {
                 drawing.getSource().clear();
-                return Promise.resolve({ id, drawing, error: new Error(item.name + '：请先定义图层坐标系') });
+                return Promise.resolve({ id, drawing, error: new Error('请先定义图层坐标系') });
             }
             const plan = entries.find(entry => entry.kind === 'plan' &&
                 (entry.plan.source_wkt === item.crs || entry.source_reference === item.crs) &&
@@ -348,8 +350,14 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
         state.byKey = next;
         Promise.all(jobs).then(items => {
             if (!alive) return;
-            const errors = items.filter(item => item.error);
-            setIssue(errors.map(item => window.GuizhiErrorText(item.error)).join('；'));
+            const errors = new globalThis.Map();
+            for (const item of items.filter(item => item.error)) {
+                const message = window.GuizhiErrorText(item.error);
+                const affected = errors.get(message) || new Set();
+                affected.add(layers.find(layer => key(layer) === item.id)?.name || '图层');
+                errors.set(message, affected);
+            }
+            setLayerErrors([...errors].map(([message, affected]) => ({ message, names: [...affected] })));
             setLimited(items.filter(item => item.result?.limited).map(item => item.id));
             for (const item of items) {
                 if (item.raster) {
@@ -618,6 +626,10 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
             }
         } };
     }
+    const notices = new globalThis.Map(layerErrors.map(({ message, names }) => [message, names]));
+    for (const message of [document ? '' : ioStatus, issue]) {
+        if (message && !notices.has(message)) notices.set(message, []);
+    }
     const coordinateTools = () => h(CoordinateTools, { layer, display,
         setDisplay: item => { setDisplayPlans({}); setDisplay(item); },
         displayPlan: displayPlans[active], setDisplayPlan: value => setDisplayPlans(old => ({ ...old, [active]: value })),
@@ -630,7 +642,7 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
                 command('属性表', () => { setPage(0); setTable(table ? null : []); }, { disabled: !layer || layer.kind === 'raster' }),
                 command('按属性选择', () => openTool('data.select_by_attribute'), { disabled: !layer?.fields?.length }),
                 command('按位置选择', () => openTool('data.select_by_location'), { disabled: !layer?.geometry || layers.filter(item => item.geometry).length < 2 }))],
-        数据: [group('地图工程', command('打开 MXD', () => mxd(api.mxdRead(), setDocument), { disabled: busy }),
+        数据: [group('地图工程', command('打开 MXD', () => mxd(api.mxdRead(), value => { setLocateMxd(null); setDocument(value); }), { disabled: busy }),
             command('保存 MXD', () => mxd(api.mxdWrite({ crs: target, bounds: graph.current?.view.calculateExtent(graph.current.ol.getSize()),
                 layers: [...layers].reverse().map((item, index) => ({ ref: item.ref, name: item.name, visible: !hidden.includes(key(item)),
                     style: item.kind === 'raster' ? null : layerSymbol(item.style, palette[(layers.length - index - 1) % palette.length]) })) }),
@@ -699,8 +711,11 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
                 h('div', { className: 'geo-map', ref: node, tabIndex: 0, 'aria-label': '交互地图' }),
                 !layers.length && h(Button, { className: 'map-empty', type: 'default', icon: glyph('add', 30),
                     title: '添加或拖入空间数据', 'aria-label': '添加或拖入空间数据', disabled: busy, onClick: () => load(api.mapImport()) }),
-                (ioStatus || issue || limited.length > 0 || busy) && h('div', { className: 'map-notice', role: 'status' },
-                    busy ? '正在处理地图数据…' : ioStatus || issue || '当前视野仅显示部分要素，放大后可查看更多。'))),
+                (notices.size > 0 || limited.length > 0 || busy) && h('div', { className: 'map-notice', role: 'status' },
+                    busy ? '正在处理地图数据…' : notices.size > 0 ?
+                        [...notices].map(([message, names]) => h('div', { key: message }, message,
+                            names.length > 0 && h('span', { className: 'muted' }, '（' + names.join('、') + '）')))
+                        : '当前视野仅显示部分要素，放大后可查看更多。'))),
         h('footer', { className: 'map-status' },
             h('span', null, layers.length + ' 个图层'),
             layer && h('span', null, layer.name),
@@ -725,12 +740,13 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
             coordinateTools()),
         properties && h(LayerProperties, { ...properties, close: () => setProperties(null), glyph,
             save: value => styleLayer(key(properties.item), value) }),
-        document && h(MxdOpen, { document, busy, glyph, close: () => setDocument(null),
+        document && h(MxdOpen, { document, busy, glyph, locateAvailable: locateMxd, close: () => setDocument(null),
             open: (frame, locate) => mxd(api.mxdImport(frame, locate), result => {
                 if (result.layers.length) {
                     graph.current.fitNeeded = true;
                     graph.current.initialExtent = result.frame.bounds;
                     setDisplayPlans({});
+                    setLayerErrors([]);
                     setExpandedLegends({});
                     setTable(null);
                     setLastResult(null);
@@ -739,7 +755,8 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
                 }
                 setImportIssues(result.layers.length ? result.issues : []);
                 if (!result.layers.length && result.issues.length) {
-                    setIoStatus('此数据框暂未加载图层。' + result.issues.map(item => item.name + '：' + item.message).join('；'));
+                    setLocateMxd(result.issues.some(item => item.missing) ? frame : null);
+                    setIoStatus('未能加载图层。' + [...new Set(result.issues.map(item => window.GuizhiErrorText(item.message)))].join('。'));
                 }
             }), issue: ioStatus }),
         importIssues.length > 0 && h(Modal, { open: true, centered: true, title: '未加载的图层', className: 'gis-dialog',
