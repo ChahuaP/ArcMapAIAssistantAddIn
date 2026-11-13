@@ -7,11 +7,8 @@ import re
 import shutil
 from uuid import uuid4
 
-import rasterio
-
 from guizhi.domain.imagery import ModelProfile
-from guizhi.infrastructure.operations.imagery import check_grid, session_for
-from guizhi.infrastructure.operations.raster import check_source
+from guizhi.infrastructure.optional_components import require
 
 
 def root(workspace):
@@ -57,6 +54,9 @@ def activate(workspace, name, version, active):
 
 
 def install(workspace, model_file, profile_file):
+    require("imagery")
+    from guizhi.infrastructure.operations.imagery import session_for
+
     source, profile_source = Path(model_file).resolve(strict=True), Path(profile_file).resolve(strict=True)
     if source.suffix.lower() != ".onnx" or not 0 < source.stat().st_size <= 50 << 20:
         raise ValueError("请选择不超过 50 MB 的影像模型文件")
@@ -89,6 +89,11 @@ def install(workspace, model_file, profile_file):
 
 
 def resolve(workspace, scene_files, values):
+    require("imagery")
+    from guizhi.infrastructure.operations.imagery import check_grid
+    from guizhi.infrastructure.operations.raster import check_source
+    import rasterio
+
     try:
         dates = [date.fromisoformat(values[key]) for key in ("from_date", "to_date")]
     except (KeyError, ValueError, TypeError) as error:

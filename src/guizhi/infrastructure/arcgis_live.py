@@ -12,7 +12,6 @@ import pyogrio
 
 from guizhi.infrastructure.arcmap import bridge, export_frame, file_stamps, json_file, local_data
 from guizhi.infrastructure.operations.evidence import read_artifact
-from guizhi.infrastructure.operations.raster import check_source, normalize
 from guizhi.infrastructure.operations.runner import data_revision
 from guizhi.infrastructure.vector import digest, source_files, source_revision
 from guizhi.infrastructure.workspace import Workspace
@@ -139,6 +138,8 @@ def prepare(root, executable, payload):
             export_frame(frame, data, dataset, "OpenFileGDB", tolerance)
             kind, path = "vector", data / dataset
         elif suffix in {".tif", ".tiff", ".img"}:
+            from guizhi.infrastructure.operations.raster import check_source, normalize
+
             files = check_source(file)
             before = source_revision(files)
             if material and material.get("revision") and material["revision"] != before:

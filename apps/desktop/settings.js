@@ -8,7 +8,7 @@
         ['model', 'server', '模式与模型'], ['voice', 'mic', '语音与音色'],
         ['crs', 'globe', '坐标系与转换'], ['appearance', 'sun', '外观与交互'],
         ['storage', 'folder', '成果与存储'], ['skills', 'grid', '业务管理'],
-        ['extensions', 'link', '第三方扩展'], ['about', 'info', '关于与诊断'],
+        ['components', 'layers', '按需组件'], ['extensions', 'link', '第三方扩展'], ['about', 'info', '关于与诊断'],
     ];
     const themes = [{ value: 'system', label: '跟随系统' }, { value: 'light', label: '明亮' },
         { value: 'dark', label: '暗色' }];
@@ -123,6 +123,7 @@
     window.GuizhiSettings = function Settings({ state, appearance, saveAppearance, save, close, entries, setEntries,
         initial, catalog, refresh, plans, initialMarkdown }) {
         const [section, select] = useState(typeof initial === 'string' ? initial : state.settings.workspace ? 'model' : 'storage');
+        useEffect(() => { if (typeof initial === 'string') select(initial); }, [initial]);
         const [value, change] = useState({ ...state.settings, key: '' });
         const [error, setError] = useState('');
         const [saving, setSaving] = useState(false);
@@ -160,6 +161,17 @@
             storage: () => card('成果保存位置', h(Workspace, { value: value.workspace,
                 change: workspace => update('workspace', workspace), fail, disabled: saving })),
             skills: () => h(window.GuizhiBusiness.Business, { catalog, refresh, plans, initialMarkdown, manage: true }),
+            components: () => {
+                const available = state.components || {};
+                return Object.entries(window.GuizhiComponentNames).filter(([id]) => available[id]).map(([id, label]) =>
+                    h('section', { className: 'settings-card', key: id },
+                        h('div', { className: 'section-head' }, h('h2', null, label),
+                            h(antd.Tag, { color: available[id].installed ? 'success' : undefined },
+                                available[id].installed ? '已安装' : '未安装')),
+                        id === 'imagery' && !available.raster?.installed
+                            ? h('p', { className: 'muted' }, '请先安装栅格处理组件。')
+                            : h(window.GuizhiComponentActions, { kind: id, component: available[id] })));
+            },
             extensions: () => h(window.GuizhiArcgisExtension, { sync: state.arcgis }),
             about: () => h(About, { state }),
         };

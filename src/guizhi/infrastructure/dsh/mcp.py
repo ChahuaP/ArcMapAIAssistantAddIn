@@ -121,7 +121,7 @@ def register(server, job=None):
             workspace.root, {"operation": "semantics.read_documents", "inputs": documents,
                              "idempotency_key": dispatch.name + ".documents"}, cancelled.exists))
         if record["status"] != "succeeded":
-            return {"status": record["status"], "message": "无法读取绑定的审批材料"}
+            return input_issue(record["status"], record["error"] or "无法读取绑定的审批材料")
         (dispatch / "discovery").touch()
         index = artifact_json(workspace, record["id"], "document_index")
         return {"status": "indexed", "document_run": record["id"], "reused": reused,
@@ -180,7 +180,10 @@ def register(server, job=None):
         if operation:
             if operation not in skills.OPERATIONS:
                 return {"error": "Unknown operation"}
-            return {operation: capability(operation)}
+            try:
+                return {operation: capability(operation)}
+            except ValueError as exc:
+                return {"error": str(exc)}
         return {name: [spec.title, spec.minimum, spec.maximum] for name, spec in skills.OPERATIONS.items()
                 if not domain or name.startswith(domain + ".")}
 

@@ -2,6 +2,12 @@
     const h = React.createElement;
     const { useState } = React;
     const { button } = window.GuizhiShell;
+    const names = { ocr: '文档 OCR', raster: '栅格处理', imagery: '专业影像识别' };
+    window.GuizhiComponentNames = names;
+    window.GuizhiComponentLink = function ComponentLink({ message, open }) {
+        return /请先在「设置 → 按需组件」安装/.test(message || '') &&
+            button('settings', '打开按需组件', { onClick: open });
+    };
 
     window.GuizhiComponentActions = function ComponentActions({ kind, component }) {
         const [busy, setBusy] = useState(false);

@@ -88,8 +88,12 @@ async function startDesktop(options) {
         local: new LocalSpeechRuntime(python, externalPath),
         bundledLocalRoot: options.bundledSpeech || components.installed('speech'),
         websocket: () => require(path.join(dsh || path.join(runtime, 'dsh'), 'node_modules', 'ws')) });
-    const withSpeech = state => ({ ...state, speech: { ...speech.state(), component: components.state().speech }, voiceReply,
-        appearance: desktop.appearance(), arcgis: { ...sync?.state(), component: components.state().arcmap }, version });
+    const withSpeech = state => {
+        const available = components.state();
+        return { ...state, speech: { ...speech.state(), component: available.speech }, voiceReply,
+            appearance: desktop.appearance(), arcgis: { ...sync?.state(), component: available.arcmap },
+            components: available, version };
+    };
     function setVoiceReply(value) {
         if (!voiceReply && !value) return;
         voiceReply = value;
@@ -312,13 +316,16 @@ async function startDesktop(options) {
         }
         desktop.dragPortrait(phase, point);
     }, true);
-    bind('workbench', reveal);
+    bind('workbench', section => {
+        reveal();
+        if (section === 'components') window.webContents.send('guizhi:settings', section);
+    });
     bind('workspace', async () => {
         const pick = await dialog.showOpenDialog(window, { properties: ['openDirectory', 'createDirectory'] });
         return pick.canceled ? null : pick.filePaths[0];
     });
     bind('componentInstall', async (surface, kind, method) => {
-        if (surface !== window || !['speech', 'arcmap'].includes(kind) || !['download', 'offline'].includes(method)) {
+        if (surface !== window || !Object.hasOwn(components.entries, kind) || !['download', 'offline'].includes(method)) {
             throw new Error('组件安装请求无效');
         }
         let archive;
@@ -331,7 +338,7 @@ async function startDesktop(options) {
         await components.install(kind, archive);
     }, true);
     bind('componentCancel', (surface, kind) => {
-        if (surface !== window || !['speech', 'arcmap'].includes(kind)) throw new Error('组件安装请求无效');
+        if (surface !== window || !Object.hasOwn(components.entries, kind)) throw new Error('组件安装请求无效');
         components.cancel(kind);
     }, true);
     bind('arcgisInstall', async () => {

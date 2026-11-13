@@ -54,6 +54,7 @@ Filename: "{app}\bootstrap\pythonw.exe"; Parameters: "-I -B ""{app}\bootstrap\in
 Type: files; Name: "{app}\active.json"
 Type: files; Name: "{app}\install.lock"
 Type: files; Name: "{app}\last-install-error.txt"
+Type: filesandordirs; Name: "{app}\guizhi-python-components"
 
 [Code]
 var

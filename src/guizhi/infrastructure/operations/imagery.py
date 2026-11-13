@@ -7,13 +7,17 @@ from math import isclose
 import geopandas as gpd
 import numpy as np
 from pyproj import CRS
-import rasterio as rio
-from rasterio.features import shapes
 from shapely import make_valid
 from shapely.geometry import shape
 
 from guizhi.domain.imagery import Classification, ModelProfile
 from guizhi.infrastructure.operations.report import publish_report
+from guizhi.infrastructure.optional_components import require
+
+require("raster")
+
+import rasterio as rio
+from rasterio.features import shapes
 
 MAX_CELLS = 4_000_000
 MAX_POLYGONS = 50_000
@@ -39,6 +43,7 @@ def check_grid(src, model):
 
 
 def session_for(path, model):
+    require("imagery")
     import onnxruntime as ort
 
     data = path.read_bytes()
@@ -168,6 +173,7 @@ def classified(src):
 
 
 def change(ctx):
+    require("imagery")
     first, second = ctx.rasters
     out = ctx.path("change.tif")
     with rio.open(first) as start, rio.open(second) as end:

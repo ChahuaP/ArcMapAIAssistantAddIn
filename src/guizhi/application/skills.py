@@ -94,12 +94,20 @@ def catalog(workspace, *, include_history=False):
     return list({item["id"]: item for item in entries}.values())
 
 
+def required_components(skill):
+    domains = {step["operation"].split(".", 1)[0] for step in skill["steps"]}
+    return (["raster"] if domains & {"raster", "imagery"} or
+            any(role["kind"] == "raster" and role["minimum"] for role in skill["materials"]) else []) + (
+        ["imagery"] if "imagery" in domains else [])
+
+
 def summaries(workspace):
     return [{**{key: item[key] for key in ("id", "title", "aliases", "materials", "revision")},
              "summary": next((line.strip() for line in item["markdown"].split("---", 2)[-1].splitlines()
                               if line.strip() and not line.startswith("#")), "")[:250],
              "outputs": list(dict.fromkeys(ref["kind"] for ref in item["evidence"])),
-             "parameters": item.get("parameters", {}), "release_version": release_version(item)} for item in catalog(workspace)]
+             "parameters": item.get("parameters", {}), "components": required_components(item),
+             "release_version": release_version(item)} for item in catalog(workspace)]
 
 
 def release_version(item):

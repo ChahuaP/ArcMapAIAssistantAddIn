@@ -11,6 +11,7 @@ import subprocess
 from install_state import VERSION, absolute, checksum, files
 from component_archive import create
 from dsh_payload import cli_manifest, retained, runtime_file
+from python_components import assemble as assemble_python
 
 SOURCE = Path(__file__).resolve().parents[1]
 BOOTSTRAP_FILES = {"python.exe", "pythonw.exe", "python311._pth", "python311.zip", "LICENSE.txt", "python.cat"}
@@ -100,7 +101,7 @@ def build(stage, runtime, desktop, dsh, speech, arcmap, addin, tree, commit):
     copy_tree(dsh, dsh_target, lambda name: runtime_file(name, selected))
     cli = dsh_target / "node_modules/@deepseek-ai/dsh/package.json"
     cli.write_text(json.dumps(cli_manifest(json_file(cli)), indent=2), encoding="utf-8")
-    for source, name in ((runtime / "python", "runtime/python"), (runtime / "node", "runtime/node"),
+    for source, name in ((runtime / "node", "runtime/node"),
                          (desktop / "node_modules/electron/dist", "renderer/node_modules/electron/dist"),
                          (desktop / "node_modules/react", "renderer/node_modules/react"),
                          (desktop / "node_modules/react-dom", "renderer/node_modules/react-dom")):
@@ -121,9 +122,9 @@ def build(stage, runtime, desktop, dsh, speech, arcmap, addin, tree, commit):
     copy_file(SOURCE / "packaging/install_state.py", bootstrap / "install_state.py")
     copy_file(SOURCE / "packaging/guizhi.ico", bootstrap / "guizhi.ico")
 
-    components = {}
     archives = stage / "components"
     archives.mkdir()
+    components = assemble_python(runtime / "python", payload / "runtime/python", stage, version, copy_tree)
     if speech:
         speech_identity = json_file(speech / "identity.json")
         spec = json_file(SOURCE / "packaging/local-speech/models.lock.json")

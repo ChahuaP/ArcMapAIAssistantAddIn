@@ -14,6 +14,7 @@ const origin = 'https://123.56.108.57:8443/guizhi/releases/';
 class Components {
     constructor(userData, version, python, changed) {
         this.root = path.join(userData, 'components', version);
+        this.pythonRoot = path.resolve(path.dirname(python), '../../../../guizhi-python-components');
         this.entries = fs.existsSync(catalog) ? JSON.parse(fs.readFileSync(catalog, 'utf8')) : {};
         this.python = python;
         this.changed = changed;
@@ -24,10 +25,14 @@ class Components {
     installed(kind) {
         const entry = this.entries[kind];
         if (!entry) return undefined;
-        const root = path.join(this.root, kind + '-' + entry.sha256.slice(0, 16));
+        const root = this.target(kind, entry);
         if (!fs.existsSync(root) || fs.lstatSync(root).isSymbolicLink()) return undefined;
-        const marker = kind === 'speech' ? 'identity.json' : 'ArcMapBridge.exe';
+        const marker = entry.python ? 'component.json' : kind === 'speech' ? 'identity.json' : 'ArcMapBridge.exe';
         return fs.existsSync(path.join(root, marker)) ? root : undefined;
+    }
+
+    target(kind, entry) {
+        return path.join(entry.python ? this.pythonRoot : this.root, kind + '-' + entry.sha256.slice(0, 16));
     }
 
     state() {
@@ -39,11 +44,14 @@ class Components {
     async install(kind, archive) {
         if (!Object.hasOwn(this.entries, kind)) throw new Error('该组件不可用');
         if (this.installed(kind)) return;
+        if (kind === 'imagery' && !this.installed('raster')) throw new Error('请先安装栅格处理组件');
         if (this.progress.has(kind)) throw new Error('该组件正在安装');
         const entry = this.entries[kind];
-        fs.mkdirSync(this.root, { recursive: true });
-        const temp = path.join(this.root, randomUUID() + '.download');
-        const target = path.join(this.root, kind + '-' + entry.sha256.slice(0, 16));
+        const target = this.target(kind, entry);
+        const root = path.dirname(target);
+        fs.mkdirSync(root, { recursive: true });
+        if (fs.realpathSync(root).toLowerCase() !== root.toLowerCase()) throw new Error('组件目录不能指向其他位置');
+        const temp = path.join(root, randomUUID() + '.download');
         const stop = new AbortController();
         this.active.set(kind, stop);
         try {

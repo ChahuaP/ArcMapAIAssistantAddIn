@@ -153,8 +153,8 @@ def import_definition(workspace, path, layer=None):
     if suffix == ".shp" and path.is_file():
         raw, evidence = shp_definition(path)
     elif suffix in {".tif", ".tiff", ".img"}:
-        import rasterio
         from guizhi.infrastructure.operations.raster import source_files
+        import rasterio
 
         files = source_files(path)
         with rasterio.open(path) as src:

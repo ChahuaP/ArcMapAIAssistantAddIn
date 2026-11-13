@@ -4,9 +4,12 @@ from zipfile import ZipFile
 
 import pypdfium2
 
+from guizhi.infrastructure.optional_components import require
+
 
 @lru_cache(maxsize=1)
 def ocr_engine():
+    require("ocr")
     from rapidocr_onnxruntime import RapidOCR
 
     return RapidOCR(intra_op_num_threads=2, inter_op_num_threads=2)
@@ -25,8 +28,9 @@ def pdf_fragments(path, check):
                 yield {"page": page_number, "box": [left, bottom, right, top],
                        "coordinates": "pdf_points", "method": "text"}, text
                 continue
+            engine = ocr_engine()
             image = page.render(scale=2, rev_byteorder=True).to_numpy()
-            results, _ = ocr_engine()(image)
+            results, _ = engine(image)
             for quad, line, score in results or []:
                 check()
                 if line.strip():

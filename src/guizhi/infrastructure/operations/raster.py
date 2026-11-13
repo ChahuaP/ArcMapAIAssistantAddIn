@@ -9,6 +9,11 @@ from uuid import uuid4
 import numpy as np
 from pyproj import CRS
 from pyproj.transformer import TransformerGroup
+
+from guizhi.infrastructure.optional_components import require
+
+require("raster")
+
 import rasterio as rio
 from rasterio.shutil import copy as copy_dataset
 from rasterio.enums import Resampling

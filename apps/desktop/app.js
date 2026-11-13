@@ -55,7 +55,7 @@
                         : h('small', { key: index }, locator(ref)))))));
     }
 
-    function Result({ task, retry, fail, editSkill, parcel, selectParcel, showMap, voiceReply }) {
+    function Result({ task, retry, fail, editSkill, parcel, selectParcel, showMap, voiceReply, openComponents }) {
         if (active(task)) return h('article', { className: 'bubble assistant working', role: 'status' },
             h('i', { className: 'pulse' }), task.status === 'cancelling' ? '正在结束任务' : task.step || '正在理解任务');
         if (voiceReply?.task === task.id) return h('article', { className: 'bubble assistant' },
@@ -85,6 +85,7 @@
             timed_out: '办理超时。请检查模型服务或输入文件是否正被占用。' }[task.status];
         return h('article', { className: 'bubble assistant' }, h('strong', null, labels[task.status] || '未完成'),
             markdown(task.response ? errorText(task.response) : detail || '请检查材料、坐标和模型设置后继续。'),
+            h(window.GuizhiComponentLink, { message: task.response, open: openComponents }),
             task.diagnosticId && h('p', { className: 'muted' }, '故障编号 ', h('code', null, task.diagnosticId)),
             h('button', { className: 'report', onClick: () => retry(task) }, '继续处理'));
     }
@@ -133,7 +134,7 @@
             api.readDraft().then(receiveDraft).catch(fail);
             const callbacks = [
                 api.onState(setState), api.onVoiceCaption(setVoiceReply),
-                api.onSettings(() => showSettings(true)), api.onAppearance(setAppearance), api.onDraft(receiveDraft),
+                api.onSettings(section => showSettings(section || true)), api.onAppearance(setAppearance), api.onDraft(receiveDraft),
                 api.onLauncherFocus(() => document.querySelector('.launcher textarea')?.focus()),
             ];
             const dismiss = event => {
@@ -186,8 +187,10 @@
         const materialsReady = skill ? draft.unassigned.length === 0 && skill.materials.every(role => roleReady(role, draft.materials[role.id]))
             : [draft.project, draft.control, ...freeInputs].filter(Boolean).every(materialReady);
         const fields = skill?.parameters || {};
+        const missingComponents = (skill?.components || []).filter(kind => state?.components?.[kind]?.installed === false);
+        const openComponents = () => launcher ? api.workbench('components').catch(fail) : showSettings('components');
         const suggestion = !skill && !draft.freeMode ? matchBusiness(draft.prompt, catalog) : { items: [] };
-        const canSubmit = materialsReady && parametersReady(fields, draft.parameterText) &&
+        const canSubmit = materialsReady && !missingComponents.length && parametersReady(fields, draft.parameterText) &&
             (suggestion.items.length < 2 || suggestion.exact);
         async function submit(event) {
             event.preventDefault();
@@ -285,6 +288,7 @@
         const composer = h('form', { className: 'composer' + (skill ? ' composer-skill' : ''), onSubmit: submit,
             onDragOver: event => event.preventDefault(), onDrop: drop },
             error && h('p', { role: 'alert', className: 'error' }, error),
+            h(window.GuizhiComponentLink, { message: error, open: openComponents }),
             h('textarea', { 'aria-label': '办理事项', placeholder: launcher
                 ? '说说需要办理什么，也可以把材料拖到这里' : '继续提问或补充办理要求', rows: 2,
                 value: draft.prompt, maxLength: 4000, onChange: event => update('prompt', event.target.value),
@@ -305,10 +309,13 @@
                         freeMode: true, materials: { inputs: [...old.unassigned, ...Object.values(old.materials).flat()] } })) }, '改为自由任务')),
                 freeInputs.length > 0 && h('div', { className: 'unassigned' }, h('small', null, '请为已添加的材料分配角色'),
                     ...freeInputs.map(freeMaterial)),
+                missingComponents.length > 0 && h('div', { className: 'section-head' },
+                    h('span', null, '需安装：' + missingComponents.map(kind => window.GuizhiComponentNames[kind]).join('、')),
+                    button('settings', '打开按需组件', { onClick: openComponents })),
                 h(RoleMaterials, { roles: skill.materials, materials: draft.materials,
                     change: value => {
                         if (shared.current.materials === draft.materials) update('materials', value);
-                    }, plans, fail, disabled: busy }),
+                    }, plans, fail, disabled: busy || Boolean(missingComponents.length) }),
                 Object.keys(fields).length > 0 && h('div', { className: 'setting-fields' }, h(ParameterFields, {
                     fields, values: draft.parameterText, disabled: busy, change: value => update('parameterText', value) }))),
             !skill && picked.length > 0 && h('div', { className: 'materials' },
@@ -354,7 +361,7 @@
                 h('span', { className: 'status-tag' }, labels[task.status] || '未完成')),
             h('div', { className: 'messages', ref: messages }, task ? turns.flatMap(item => [
                 h('article', { key: item.id + '-question', className: 'bubble user' }, item.prompt),
-                h(Result, { key: item.id + '-answer', task: item, retry, fail, voiceReply,
+                h(Result, { key: item.id + '-answer', task: item, retry, fail, voiceReply, openComponents,
                     parcel: resultTask?.id === item.id ? parcel : null, selectParcel: id => { viewResult(item.id); selectParcel(id); },
                     showMap: item.map && item.id !== resultTask?.id ? () => { viewResult(item.id); selectParcel(null); setTab('成果'); } : undefined,
                     editSkill: text => { setInitialMarkdown(text); showSettings('skills'); } }),

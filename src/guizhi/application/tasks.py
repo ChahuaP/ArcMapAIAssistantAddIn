@@ -104,7 +104,12 @@ def supervise(workspace: Workspace, run_id: str, cancel_requested: Callable[[], 
             if cancel_requested is not None and cancel_requested():
                 workspace.request_cancel(run_id)
             if process.returncode:
-                workspace.finish(run_id, "failed", error=error.strip() or f"Worker exited {process.returncode}")
+                    message = error.strip() or f"Worker exited {process.returncode}"
+                    try:
+                        message = json.loads(message)["error"]
+                    except (ValueError, TypeError, KeyError):
+                        pass
+                    workspace.finish(run_id, "failed", error=message)
             else:
                 workspace.finish(run_id, "succeeded", result=json.loads(output))
         except BaseException:
