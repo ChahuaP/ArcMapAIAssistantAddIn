@@ -266,7 +266,9 @@ class DesktopController {
             controlPlan: control?.plan || materials.control?.[0]?.plan };
         active.done = this.dispatch(options, { signal: stop.signal, onEvent: event => {
             if (task.status !== 'running') return;
-            const visual = visualRecipe(event);
+            const details = event.details;
+            const label = details?.role && layerLabels?.[details.role]?.name;
+            const visual = visualRecipe(label ? { ...event, details: { ...details, layer: label } } : event);
             if (visual) {
                 task.visual = visual;
                 const progress = task.progress || [];

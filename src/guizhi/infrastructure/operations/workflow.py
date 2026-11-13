@@ -141,9 +141,10 @@ def execute(ctx, specification: dict):
                 inputs.append(material_from(ctx, records[name]))
         parameters = resolve_value(step.parameters, records, specification.get("skill_parameters", {}))
         layers = {item["layer"] for item in inputs if item["layer"]}
+        input_role = step.inputs[0].partition(".")[2] if len(step.inputs) == 1 and step.inputs[0].startswith("material.") else None
         operation = OPERATIONS.get(step.operation) or CAPABILITIES[step.operation]
         ctx.progress("workflow_step_started", step_id=step.id, operation=step.operation,
-                     title=operation.title, layer=next(iter(layers)) if len(layers) == 1 else None)
+                     title=operation.title, role=input_role, layer=next(iter(layers)) if len(layers) == 1 else None)
         if step.operation in {"control_check", "vector_inventory"}:
             expected = 2 if step.operation == "control_check" else 1
             if len(inputs) != expected:
