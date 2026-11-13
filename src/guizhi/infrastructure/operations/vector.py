@@ -9,6 +9,16 @@ from guizhi.infrastructure.operations.common import (
 )
 
 
+def area(ctx):
+    frame = ctx.frames[0]
+    valid(frame, polygon=True)
+    crs = frame.crs
+    if crs is None or not crs.is_projected or len(crs.axis_info) != 2:
+        raise ValueError("请先将图层转换到适用的投影坐标系，再汇总面积")
+    scale = crs.axis_info[0].unit_conversion_factor * crs.axis_info[1].unit_conversion_factor
+    return {"statistics": {"feature_count": len(frame), "area_m2": float(shapely.area(shapely.union_all(frame.geometry)) * scale)}}
+
+
 def buffer(ctx, distance: float, unit: Unit):
     frame = ctx.frames[0]
     valid(frame)

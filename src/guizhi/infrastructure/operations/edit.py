@@ -56,8 +56,12 @@ def changes(ctx, changes: Annotated[list[Change], Field(min_length=1, max_length
             additions.append({**{name: updates.get(name) for name in fields}, geometry: candidate})
         else:
             for name, value in updates.items():
-                if value is None and pd.api.types.is_integer_dtype(frame[name].dtype):
-                    frame[name] = frame[name].astype("Int64")
+                if value is None:
+                    dtype = frame[name].dtype
+                    if pd.api.types.is_bool_dtype(dtype):
+                        frame[name] = frame[name].astype("boolean")
+                    elif pd.api.types.is_integer_dtype(dtype):
+                        frame[name] = frame[name].astype("Int64")
                 frame.at[change.fid, name] = value
             if candidate is not None:
                 frame.at[change.fid, geometry] = candidate

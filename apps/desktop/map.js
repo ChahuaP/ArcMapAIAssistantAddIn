@@ -93,7 +93,7 @@ function Preview({ map, choose, selected, open, hasLayers }) {
             h('input', { type: 'checkbox', checked: visible, onChange: event => show(event.target.checked) }), '重叠范围'));
 }
 
-function CoordinateTools({ layer, display, setDisplay, entries, request, onLayer, fail }) {
+function CoordinateTools({ layer, display, setDisplay, entries, request, onLayer, fail, displayPlan, setDisplayPlan }) {
     const [query, search] = useState('');
     const [standard, setStandard] = useState([]);
     const [plan, setPlan] = useState('');
@@ -119,22 +119,29 @@ function CoordinateTools({ layer, display, setDisplay, entries, request, onLayer
             placeholder: '指定图层已有坐标系', 'aria-label': '指定图层已有坐标系',
             onChange: value => request({ action: 'assign', ref: layer.ref, crs: value }).then(onLayer).catch(fail) }),
         layer?.crs && layer.kind !== 'raster' && plans.length > 0 && h('div', { className: 'map-coordinate-actions' },
+            display && h(Choice, { value: displayPlan || undefined, placeholder: '为该图层选择显示转换',
+                'aria-label': '显示转换方案', allowClear: true, onChange: setDisplayPlan,
+                options: plans.map(entry => ({ value: entry.id + '@' + entry.revision, label: entry.title })) }),
             h(Choice, { value: plan || undefined, placeholder: '选择已保存转换方案', 'aria-label': '选择已保存转换方案',
                 options: plans.map(entry => ({ value: entry.id + '@' + entry.revision, label: entry.title })), onChange: setPlan }),
             h(Button, { disabled: !plan, onClick: () => request({ action: 'transform', ref: layer.ref, plan }).then(onLayer).catch(fail) },
                 '转换并保存')));
+
 }
 
 function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle, entries, fail, close, selection, setSelection, useSelection, replace, editing }) {
     const node = useRef(null);
     const graph = useRef(null);
     const [display, setDisplay] = useState(null);
+    const [displayPlans, setDisplayPlans] = useState({});
     const [editLayer, setEditLayer] = useState(null);
     const [edit, setEdit] = useState('');
     useEffect(() => { editing(Boolean(edit)); return () => editing(false); }, [Boolean(edit)]);
     const [count, setCount] = useState(0);
     const [fieldEdit, setFieldEdit] = useState(null);
     const edits = useRef([]);
+    const drawingTool = useRef(null);
+    const [drawingPoints, setDrawingPoints] = useState(0);
     const original = useRef(new globalThis.Map());
     const [busy, setBusy] = useState(false);
     const [issue, setIssue] = useState('');
@@ -199,7 +206,7 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
             next.set(id, drawing);
             if (hidden.includes(id)) return null;
             if (item.kind === 'raster') {
-                const visible = !target || target === item.crs;
+                const visible = !target || target === item.crs || display?.value === item.crs;
                 drawing.setVisible(visible);
                 if (!visible) return Promise.resolve({ id, drawing, raster: true,
                     error: new Error('影像 ' + item.name + ' 的坐标系与地图不同。请切换到影像坐标系或先转换影像。') });
@@ -216,7 +223,7 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
                 (entry.plan.source_wkt === item.crs || entry.source_reference === item.crs) &&
                 (entry.plan.target_wkt === target || entry.target_reference === display?.value));
             return api.map({ action: 'features', ref: item.ref, bbox,
-                target: target || null, plan: plan && plan.id + '@' + plan.revision })
+                target: target || null, plan: displayPlans[id] || (plan && plan.id + '@' + plan.revision) })
                 .then(result => ({ id, drawing, result })).catch(error => ({ id, drawing, error }));
         }).filter(Boolean);
         state.byKey = next;
@@ -242,7 +249,7 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
             restoreSelection(state, selectionRef.current);
         });
         return () => { alive = false; };
-    }, [layers, hidden, target, units, viewRevision, entries, Boolean(edit)]);
+    }, [layers, hidden, target, units, viewRevision, entries, displayPlans, Boolean(edit)]);
 
     function restoreSelection(state, selected) {
         const drawing = selected && state.byKey.get(selected.key);
@@ -328,7 +335,20 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
         };
         if (edit === 'draw') {
             const draw = new Draw({ type: layer.geometry.replace(/^Multi/, '') });
+            drawingTool.current = draw;
+            draw.on('drawstart', event => {
+                const geometry = event.feature.getGeometry();
+                const measure = () => {
+                    const coordinates = geometry.getCoordinates();
+                    const vertices = layer.geometry.endsWith('Polygon') ? coordinates[0] : coordinates;
+                    setDrawingPoints(Math.max(0, vertices.length - 1));
+                };
+                geometry.on('change', measure);
+                measure();
+            });
+            draw.on('drawabort', () => setDrawingPoints(0));
             draw.on('drawend', event => {
+                setDrawingPoints(0);
                 const id = 'new-' + crypto.randomUUID();
                 push([{ action: 'add', id, geometry: format.writeGeometryObject(event.feature.getGeometry()) }]);
                 applyDraft();
@@ -352,7 +372,11 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
             }
         }
         for (const interaction of interactions) g.ol.addInteraction(interaction);
-        return () => { for (const interaction of interactions) g.ol.removeInteraction(interaction); };
+        return () => {
+            drawingTool.current?.abortDrawing();
+            drawingTool.current = null;
+            for (const interaction of interactions) g.ol.removeInteraction(interaction);
+        };
     }, [edit, active]);
 
     async function saveEdit() {
@@ -414,7 +438,9 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
                         onClick: () => { setPage(0); setEditLayer(null); selectLayer(key(item)); } }, item.name),
                     h(Button, { type: 'text', size: 'small', disabled: Boolean(edit),
                         'aria-label': '移除 ' + item.name, title: '从地图移除', onClick: () => remove(key(item)) }, '×'))),
-                !edit && h(CoordinateTools, { layer, display, setDisplay, entries, request: api.map, onLayer: item => add([item]), fail })),
+                !edit && h(CoordinateTools, { layer, display, setDisplay: item => { setDisplayPlans({}); setDisplay(item); },
+                    displayPlan: displayPlans[active], setDisplayPlan: value => setDisplayPlans(old => ({ ...old, [active]: value })),
+                    entries, request: api.map, onLayer: item => add([item]), fail })),
             h('div', { className: 'map-viewport' },
                 h('div', { className: 'geo-map', ref: node, tabIndex: 0, 'aria-label': '交互地图' }),
                 !layers.length && h('div', { className: 'map-empty' }, '添加或拖入空间数据'),
@@ -431,6 +457,10 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
                     ...[['select', '选择'], ['draw', '绘制'], ['modify', '改节点'], ['move', '移动']].map(([mode, title]) =>
                         h(Button, { size: 'small', key: mode, disabled: busy || (['modify', 'move'].includes(mode) && !picked.length),
                             type: edit === mode ? 'primary' : 'default', onClick: () => setEdit(mode) }, title)),
+                    edit === 'draw' && drawingPoints > 0 && h(React.Fragment, null,
+                        h(Button, { size: 'small', disabled: drawingPoints < (layer.geometry.endsWith('Polygon') ? 3 : 2),
+                            onClick: () => drawingTool.current?.finishDrawing() }, '完成绘制'),
+                        h(Button, { size: 'small', onClick: () => drawingTool.current?.removeLastPoint() }, '撤销绘制点')),
                     h(Button, { size: 'small', disabled: busy || picked.length !== 1 || !layer.fields.length, onClick: openFields }, '编辑属性'),
                     h(Button, { size: 'small', disabled: busy || !picked.length, onClick: () => {
                         push(picked.map(id => ({ action: 'delete', id }))); applyDraft();

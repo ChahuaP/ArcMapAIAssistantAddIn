@@ -46,6 +46,7 @@ CAPABILITIES = {
     "data.select_by_location": Capability("按位置选择", 2, 2),
     "data.clear_selection": Capability("清除选择"),
     "data.export_selection": Capability("导出选择"),
+    "vector.area": Capability("汇总面积"),
     "vector.buffer": Capability("缓冲分析"),
     "vector.clip": Capability("裁切", 2, 2),
     "vector.intersect": Capability("相交", 2, 32),

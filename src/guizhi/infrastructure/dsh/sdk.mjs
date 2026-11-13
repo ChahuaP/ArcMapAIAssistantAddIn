@@ -37,6 +37,7 @@ function verifiedResponse(receipt, dialogue) {
             if (findings.length) parts.push(findings.join('、') + '。');
         }
     }
+    if (stats.area_m2 !== undefined) parts.push(`合并范围面积 ${area(stats.area_m2)} m²。`);
     if (stats.feature_count !== undefined) parts.push(`共 ${stats.feature_count} 个要素。`);
     if (stats.geometry_types && !dialogue) parts.push(Object.entries(stats.geometry_types)
         .map(([name, count]) => `${name} ${count} 个`).join('，') + '。');
