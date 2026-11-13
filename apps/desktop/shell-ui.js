@@ -62,10 +62,12 @@
                 right && iconButton('right', '折叠或展开材料与成果', { onClick: right, onKeyDown: resize(1) })));
     }
 
-    function Workbench({ appearance, saveAppearance, sidebar, conversation, inspector, arcgis, connected, fail }) {
+    function Workbench({ appearance, saveAppearance, sidebar, conversation, inspector, map, composer,
+        mode, setMode, activity, onCancel, arcgis, connected, fail }) {
         const [width, setWidth] = useState(innerWidth);
         const [panels, setPanels] = useState(appearance.panels);
         const [drawer, showDrawer] = useState(false);
+        const [split, setSplit] = useState(32);
         const restored = useRef(appearance.expandedPanels || [56, 362]);
         useEffect(() => { setPanels(appearance.panels); }, [appearance.panels]);
         useEffect(() => {
@@ -78,7 +80,7 @@
         }, []);
         const compact = width < 1040;
         const left = panels[0] >= 160 ? 176 : 56;
-        const right = !inspector || compact || !panels[1] ? 0 : Math.min(panels[1], Math.max(250, width - left - 410));
+        const right = !inspector || compact || !panels[1] || mode !== 'chat' ? 0 : Math.min(panels[1], Math.max(250, width - left - 410));
         function persist(next) {
             setPanels(next);
             next.forEach((size, index) => { if (size > 0) restored.current[index] = size; });
@@ -100,16 +102,37 @@
                 persist(next);
             };
         }
-        const sideSizes = sizes => [left, compact || !inspector ? panels[1] : right ? Math.round(sizes[2]) : 0];
+        const sideSizes = sizes => [left, compact || !inspector || mode !== 'chat' ? panels[1] : right ? Math.round(sizes[2]) : 0];
+        const mapVisible = mode !== 'chat';
+        const chatVisible = mode !== 'map';
+        const modeButtons = [
+            ['chat', 'left', '仅显示对话'],
+            ['split', 'app', '并排显示'],
+            ['map', 'right', '仅显示地图'],
+        ].map(([value, glyph, label]) => iconButton(glyph, label, { key: value, 'aria-pressed': mode === value,
+            className: mode === value ? 'workbench-mode-active' : '', onClick: () => setMode(value) }));
         return h('div', { className: 'desktop-frame' },
-            h(Titlebar, { arcgis, connected, left: () => toggle(0), right: inspector && (() => toggle(1)), resize }),
+            h(Titlebar, { arcgis, connected, left: () => toggle(0), right: inspector && mode === 'chat' && (() => toggle(1)), resize }),
             h(Splitter, { className: 'workbench-panels', lazy: true,
                 onResizeEnd: sizes => persist(sideSizes(sizes)) },
                 h(Splitter.Panel, { size: left, min: left, max: left, resizable: false }, sidebar(left > 56)),
-                h(Splitter.Panel, { min: 400 }, conversation),
+                h(Splitter.Panel, { min: 0 }, h('div', { className: 'workbench-center' },
+                    h('div', { className: 'workbench-modes', 'aria-label': '工作区布局' }, ...modeButtons),
+                    h(Splitter, { className: 'workbench-content', lazy: true,
+                        onResizeEnd: ([a, b]) => { if (a && b) setSplit(a / (a + b) * 100); } },
+                        h(Splitter.Panel, { size: chatVisible ? mapVisible ? split + '%' : '100%' : 0,
+                            min: chatVisible && mapVisible ? 270 : 0, resizable: chatVisible && mapVisible }, chatVisible && conversation),
+                        h(Splitter.Panel, { size: mapVisible ? chatVisible ? (100 - split) + '%' : '100%' : 0,
+                            min: mapVisible && chatVisible ? 420 : 0, resizable: chatVisible && mapVisible }, map)),
+                    !chatVisible && h('div', { className: 'workbench-chat-dock' }, composer))),
                 h(Splitter.Panel, { size: right, min: right ? 250 : 0, max: 520, resizable: Boolean(right) }, right > 0 && inspector)),
-            inspector && compact && h(Drawer, { title: '材料与成果', width: 360, getContainer: false,
-                rootStyle: { position: 'absolute' }, open: drawer, onClose: () => showDrawer(false) }, inspector));
+            inspector && compact && mode === 'chat' && h(Drawer, { title: '材料与成果', width: 360, getContainer: false,
+                rootStyle: { position: 'absolute' }, open: drawer, onClose: () => showDrawer(false) }, inspector),
+            activity && h('div', { className: 'workbench-ai-edge', 'aria-hidden': true }),
+            activity && h('div', { className: 'workbench-ai-status', role: 'status' },
+                icon('layers'), h('span', null, activity.label),
+                activity.target && h('strong', null, activity.target),
+                button('close', '接管', { size: 'small', onClick: onCancel })));
     }
     window.GuizhiShell = { Theme, Workbench, Titlebar, brand, button, iconButton, icon, productName };
 })();

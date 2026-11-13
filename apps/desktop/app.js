@@ -116,6 +116,8 @@
 
     function App() {
         const [state, setState] = useState(null);
+        const currentWorkspace = useRef(null);
+        currentWorkspace.current = state?.settings.workspace;
         const [voiceReply, setVoiceReply] = useState(null);
         const [draft, renderDraft] = useState(emptyDraft);
         const shared = useRef(draft);
@@ -132,10 +134,17 @@
         const [catalog, setCatalog] = useState([]);
         const [business, showBusiness] = useState('');
         const [tab, setTab] = useState('成果');
-        const [mapOpen, showMapWorkspace] = useState(false);
+        const [mapMode, setMapMode] = useState('chat');
+        const [mapMounted, setMapMounted] = useState(false);
+        const mapOpen = mapMode !== 'chat';
+        function showMapWorkspace(show) {
+            if (show) setMapMounted(true);
+            setMapMode(show ? 'split' : 'chat');
+        }
         const [mapEditing, setMapEditing] = useState(false);
         const [mapDisplay, setMapDisplay] = useState(null);
         const [mapBackground, setMapBackground] = useState(null);
+        const [mapActions, setMapActions] = useState(null);
         const [layers, setLayers] = useState([]);
         const [hiddenLayers, hideLayers] = useState([]);
         const [activeLayer, setActiveLayer] = useState(null);
@@ -178,7 +187,9 @@
             setMapSelection(null);
             setMapDisplay(null);
             setMapBackground(null);
-            showMapWorkspace(Boolean(state?.settings.workspace && !state.settings.modelConfig));
+            setMapActions(null);
+            setMapMounted(Boolean(state?.settings.workspace && !state.settings.modelConfig));
+            setMapMode(state?.settings.workspace && !state.settings.modelConfig ? 'map' : 'chat');
         }, [state?.settings.workspace]);
         const [initialMarkdown, setInitialMarkdown] = useState('');
         const [adding, setAdding] = useState(false);
@@ -229,6 +240,45 @@
         const plans = coordinates.filter(entry => entry.kind === 'plan');
         const turns = (state?.tasks || []).slice().reverse();
         const task = turns.at(-1);
+        const taskRunning = ['running', 'cancelling'].includes(task?.status);
+        const activity = taskRunning && state?.settings.showOperation !== false
+            ? task.status === 'cancelling' ? { label: '正在停止办理' } : task.visual || { label: '正在分析任务' } : null;
+        useEffect(() => {
+            if (!taskRunning || launcher) return;
+            setMapMounted(true);
+            setMapMode(mode => mode === 'chat' ? 'split' : mode);
+        }, [taskRunning]);
+        const shownMapRuns = useRef(new Set());
+        const shownSteps = useRef(new Set());
+        const pendingStepLayers = useRef(new Map());
+        useEffect(() => {
+            shownSteps.current.clear();
+            pendingStepLayers.current.clear();
+            shownMapRuns.current.clear();
+        }, [state?.settings.workspace]);
+        useEffect(() => {
+            if (launcher || !task?.progress) return;
+            const workspace = state.settings.workspace;
+            for (const step of task.progress) {
+                if (step.phase !== 'workflow_step_finished' || step.kind === 'stop' || !step.childRun || shownSteps.current.has(step.childRun)) continue;
+                shownSteps.current.add(step.childRun);
+                const pending = api.map({ action: 'step-layers', run: step.childRun }).then(items => {
+                    if (workspace === currentWorkspace.current) addLayers(items);
+                    return items;
+                });
+                pendingStepLayers.current.set(step.childRun, pending);
+                void pending.catch(fail);
+            }
+        }, [task?.progress]);
+        const [layoutReady, setLayoutReady] = useState(null);
+        useEffect(() => {
+            if (launcher || task?.status !== 'succeeded' || !(task.mapLayers?.length || task.layout || task.mapActions) || shownMapRuns.current.has(task.id)) return;
+            shownMapRuns.current.add(task.id);
+            void openMap(task).then(() => {
+                if (task.layout && !task.layoutImage && !task.layoutError) setLayoutReady(task.id);
+                if (task.mapActions) setMapActions({ id: task.id, actions: task.mapActions });
+            });
+        }, [task?.id, task?.status]);
         const resultTask = turns.find(item => item.id === viewed) ||
             turns.findLast(item => item.map || item.hasReport || item.deliveries?.length) || task;
         useEffect(() => { viewResult(null); selectParcel(null); }, [task?.id]);
@@ -419,7 +469,8 @@
                 h(RoleMaterials, { roles: skill.materials, materials: draft.materials,
                     change: value => {
                         if (shared.current.materials === draft.materials) update('materials', value);
-                    }, plans, fail, disabled: busy || Boolean(missingComponents.length) }),
+                    }, plans, fail, disabled: busy || Boolean(missingComponents.length),
+                    picker: window.GuizhiMap.roleLayerPicker(launcher ? references : layers, busy) }),
                 Object.keys(fields).length > 0 && h('div', { className: 'setting-fields' }, h(ParameterFields, {
                     fields, values: draft.parameterText, disabled: busy, change: value => update('parameterText', value) }))),
             !skill && picked.length > 0 && h('div', { className: 'materials' },
@@ -479,6 +530,9 @@
                     showMap: item.map || item.mapLayers?.length ? () => { viewResult(item.id); selectParcel(null); setTab('成果');
                         void openMap(item); } : undefined,
                     editSkill: text => { setInitialMarkdown(text); showSettings('skills'); } }),
+                item.layout && h('div', { key: item.id + '-layout', className: 'map-layout-result' },
+                    item.layoutImage ? button('map', '打开地图图片', { onClick: () => api.openMapLayout(item.id).catch(fail) })
+                        : h('span', { role: 'status' }, item.layoutError || '正在绘制地图图片…')),
             ]) : h('div', { className: 'welcome' }, h('img', { src: '/mark.svg', alt: '', width: 50 }),
                 h('h2', null, '今天要办理什么？'), h('p', null, '输入办理要求，或选择已有业务。'), tiles)),
             h('div', { className: 'compose-wrap' }, composer));
@@ -515,13 +569,20 @@
         async function openMap(item) {
             if (item?.mapLayers?.length) {
                 try {
-                    const results = await Promise.all(item.mapLayers.map(ref => api.map({ action: 'describe', ref })));
+                    const stepRuns = new Set(item.progress?.filter(step => step.kind !== 'stop' && step.childRun).map(step => step.childRun));
+                    const stepOutputs = (await Promise.all([...stepRuns].map(run => pendingStepLayers.current.get(run)))).flat().filter(Boolean);
+                    const results = stepOutputs.length ? [] : await Promise.all(item.mapLayers.map(ref => api.map({ action: 'describe', ref })));
                     const inputs = layers.length ? [] : await api.mapTaskInputs(item.id);
                     addLayers([...inputs, ...results.map((entry, index) =>
                         ({ ...entry, name: index ? '边界成果' : '办理成果' }))]);
-                } catch (error) { fail(error); return; }
+                } catch (error) { fail(error); if (item.layout) await api.mapLayoutError(item.id, window.GuizhiErrorText(error)); return; }
             }
-            showMapWorkspace(true);
+            if (item?.layout && !item.mapLayers?.length && !layers.length) {
+                await api.mapLayoutError(item.id, '地图中没有可绘制的图层，请先添加图层。');
+                return;
+            }
+            setMapMounted(true);
+            setMapMode(mode => mode === 'chat' ? 'split' : mode);
         }
         function replaceLayer(before, after) {
             const item = { ...after, name: before.name, style: before.style, group: before.group };
@@ -529,7 +590,7 @@
             setActiveLayer(mapKey(item));
             setMapSelection(null);
         }
-        const mapWorkspace = mapOpen && h(window.GuizhiMap.WorkspaceMap, { layers, add: addLayers, active: activeLayer,
+        const mapWorkspace = mapMounted && h(window.GuizhiMap.WorkspaceMap, { layers, add: addLayers, active: activeLayer,
             remove: id => {
                 setLayers(old => old.filter(item => mapKey(item) !== id));
                 if (activeLayer === id) { setActiveLayer(null); setMapSelection(null); }
@@ -548,7 +609,11 @@
                     label: frame.crsName || frame.name, bounds: frame.bounds } : null);
                 setMapBackground(frame.background);
             },
-            fail, close: () => showMapWorkspace(false), selection: mapSelection, setSelection: setMapSelection,
+            fail, activity: state.settings.screenHighlight !== false ? activity : null,
+            requestedLayout: task?.id === layoutReady && !task.layoutImage && !task.layoutError && task.layout
+                ? { taskId: task.id, layout: task.layout } : null,
+            onLayout: api.mapLayoutError, mapActions, onMapActions: () => setMapActions(null),
+            selection: mapSelection, setSelection: setMapSelection,
             replace: replaceLayer, editing: setMapEditing });
         async function configure(value) {
             const next = await api.configure(value);
@@ -561,7 +626,9 @@
             initial: settings, catalog, refresh, plans, initialMarkdown,
             close: () => { setInitialMarkdown(''); showSettings(false); },
             save: configure,
-        }) : h(Workbench, { appearance, saveAppearance, sidebar, conversation: mapWorkspace || conversation, inspector: mapOpen ? null : inspector, fail,
+        }) : h(Workbench, { appearance, saveAppearance, sidebar, conversation, inspector, map: mapWorkspace, composer,
+            mode: mapMode, setMode: mode => { if (mode !== 'chat') setMapMounted(true); setMapMode(mode); },
+            activity, onCancel: () => api.cancel().then(setState).catch(fail), fail,
             arcgis: () => { if (!mapEditing) showSettings('extensions'); },
             connected: Boolean(state?.arcgis?.host) });
         return h(Theme, { appearance }, layout,

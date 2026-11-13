@@ -16,12 +16,17 @@ from guizhi.infrastructure.operations.common import (
 
 def describe(ctx):
     frame, info = ctx.frames[0], ctx.info[0]
-    bounds = [float(n) for n in frame.total_bounds]
-    return {"statistics": {"feature_count": len(frame)}, "revision": ctx.selection_hashes[0],
-            "layer": ctx.request.inputs[0].layer, "bounds": bounds if np.isfinite(bounds).all() else None,
-            "crs": frame.crs.to_string() if frame.crs else None, "crs_name": info.get("source_crs_name"),
+    bounds = [float(n) for n in info["total_bounds"]] if info["total_bounds"] else None
+    crs = ctx.datasets[0]["crs_wkt"]
+    if crs:
+        from pyproj import CRS
+
+        crs = CRS(crs).to_string()
+    return {"statistics": {"feature_count": info["features"]}, "revision": ctx.selection_hashes[0],
+            "layer": ctx.request.inputs[0].layer, "bounds": bounds if bounds and np.isfinite(bounds).all() else None,
+            "crs": crs, "crs_name": info.get("source_crs_name"),
             "geometry_type": info["geometry_type"],
-            "geometry_types": sorted(frame.geom_type.dropna().unique().tolist())}
+            "geometry_types": sorted(frame.geom_type.dropna().unique().tolist()) if frame is not None else []}
 
 
 def list_fields(ctx):

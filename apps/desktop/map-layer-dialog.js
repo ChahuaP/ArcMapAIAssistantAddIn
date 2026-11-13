@@ -164,9 +164,9 @@ export function LayerProperties({ item, color, close, save, glyph, start = 'info
             : h('dl', { className: 'gis-layer-properties' }, ...info.map(([label, value]) => prop(label, value))));
 }
 
-export function MapProperties({ background, close, save, glyph }) {
+export function MapProperties({ background, close, save, glyph, coordinates }) {
     const [color, setColor] = useState(background);
-    return h(Modal, { open: true, centered: true, width: 400, className: 'gis-dialog', rootClassName: 'gis-modal-root',
+    return h(Modal, { open: true, centered: true, width: 480, className: 'gis-dialog', rootClassName: 'gis-modal-root',
         title: h('span', { className: 'gis-dialog-title' }, glyph('map'), '地图属性'), onCancel: close,
         footer: [h(Button, { key: 'cancel', onClick: close }, '取消'),
             h(Button, { key: 'save', type: 'primary', onClick: () => { save(color); close(); } }, '应用')] },
@@ -174,7 +174,8 @@ export function MapProperties({ background, close, save, glyph }) {
             h('span', null, '背景颜色'),
             h(ColorInput, { label: '背景颜色', value: color, change: setColor }),
             h(Button, { disabled: color.toLowerCase() === defaultMapBackground,
-                onClick: () => setColor(defaultMapBackground) }, '恢复白色')));
+                onClick: () => setColor(defaultMapBackground) }, '恢复白色')),
+        h('section', { className: 'map-properties-coordinates' }, h('h3', null, '坐标系'), coordinates));
 }
 
 export function MxdOpen({ document, busy, open, close, glyph, issue, locateAvailable }) {

@@ -25,3 +25,16 @@ def transform(ctx, plan: str):
     converted = apply_plan(ctx.frames[0], entry, ctx.workspace.root)
     ctx.json("transformation.json", entry, "transform")
     ctx.publish(converted, geometry_type=ctx.info[0]["geometry_type"])
+
+
+def reproject(ctx, definition: str):
+    import shapely
+    from guizhi.infrastructure.map_workspace import projection
+
+    target = (CRS.from_user_input(definition) if definition.startswith("EPSG:")
+              else CRS(get(ctx.workspace, "definition", definition)["definition"]["wkt"]))
+    frame = ctx.frames[0]
+    tx = projection(frame.crs, target, None if frame.empty else frame.total_bounds)
+    converted = frame.set_geometry(shapely.transform(frame.geometry.array,
+        lambda x, y, z=None: tx.transform(x, y, z, errcheck=True), interleaved=False, include_z=None))
+    ctx.publish(converted.set_crs(target, allow_override=True), geometry_type=ctx.info[0]["geometry_type"])

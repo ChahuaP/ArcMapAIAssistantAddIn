@@ -12,6 +12,8 @@ def image_preview(file, target=None):
     with raster.rio.open(file) as source:
         options = {}
         if target:
+            if source.crs is None:
+                raise ValueError("请先定义影像的坐标系")
             destination = raster.CRS.from_user_input(target)
             origin = raster.CRS.from_user_input(source.crs)
             if not origin.equals(destination, ignore_axis_order=True):
@@ -22,10 +24,10 @@ def image_preview(file, target=None):
                            "warp_extras": {"COORDINATE_OPERATION": group.transformers[0].definition}}
         with raster.rio.Env(PROJ_NETWORK="OFF"), WarpedVRT(source, resampling=Resampling.nearest, **options) as src:
             image = render(src)
-            crs = raster.CRS(src.crs)
-            return image, {"bounds": list(src.bounds), "crs": crs.to_string(), "crsName": crs.name,
-                           "units": "degrees" if crs.is_geographic else "m" if crs.axis_info[0].unit_conversion_factor == 1 else None,
-                           "metresPerUnit": crs.axis_info[0].unit_conversion_factor if crs.is_projected else None,
+            crs = raster.CRS(src.crs) if src.crs else None
+            return image, {"bounds": list(src.bounds), "crs": crs.to_string() if crs else None, "crsName": crs.name if crs else "未定义坐标系",
+                           "units": "degrees" if crs and crs.is_geographic else "m" if crs and crs.axis_info[0].unit_conversion_factor == 1 else None,
+                           "metresPerUnit": crs.axis_info[0].unit_conversion_factor if crs and crs.is_projected else None,
                            "width": src.width, "height": src.height, "bands": src.count}
 
 

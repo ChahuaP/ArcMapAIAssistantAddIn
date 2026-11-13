@@ -1,5 +1,6 @@
 import 'ol/ol.css';
-import { MapProcessing, TOOL_GROUPS } from './map-processing.js';
+import { MapProcessing, TOOL_GROUPS, roleLayerPicker } from './map-processing.js';
+import { MapLayout, layoutDefaults, mapImage } from './map-layout.js';
 import { LayerProperties, MapProperties, MxdOpen, categoryValue, defaultMapBackground, layerSymbol, opacity, symbol } from './map-layer-dialog.js';
 import Map from 'ol/Map.js';
 import View from 'ol/View.js';
@@ -62,9 +63,9 @@ const commandIcons = {
     编辑图层: 'pencil', 选择: 'select', 绘制: 'pencil', 编辑顶点: 'node', 移动: 'move',
     完成绘制: 'check', 撤销绘制点: 'undo', 编辑属性: 'table', 删除要素: 'trash',
     撤销: 'undo', 保存新版本: 'save', 退出编辑: 'close', 面积汇总: 'area', 缓冲分析: 'buffer',
-    裁切: 'clip', 要素计数: 'count', 返回对话: 'chat',
+    裁切: 'clip', 要素计数: 'count', 打开: 'map', 保存: 'save', 字段计算: 'analysis',
 };
-const tabIcons = { 地图: 'map', 数据: 'layers', 编辑: 'pencil', 分析: 'analysis', 坐标系: 'globe', 业务: 'analysis' };
+const tabIcons = { 地图: 'map', 数据: 'layers', 编辑: 'pencil', 分析: 'analysis', 制图: 'map', 业务: 'analysis' };
 function glyph(name, size = 17) {
     return h('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'none',
         stroke: 'currentColor', strokeWidth: name === 'more' ? 3 : 1.65, strokeLinecap: 'round',
@@ -173,18 +174,31 @@ function CoordinateTools({ layer, display, setDisplay, entries, request, onLayer
     }, [query]);
     useEffect(() => setPlan(''), [layer]);
     const definitions = entries.filter(entry => entry.kind === 'definition');
-    const options = [...definitions.map(entry => ({ value: entry.id + '@' + entry.revision, label: entry.title,
-        wkt: entry.definition.wkt, units: { degree: 'degrees', metre: 'm', meter: 'm' }[entry.definition.axes?.[0]?.unit] })), ...standard];
+    const catalog = [...definitions.map(entry => ({ value: entry.id + '@' + entry.revision, label: entry.title,
+        wkt: entry.definition.wkt, units: { degree: 'degrees', metre: 'm', meter: 'm' }[entry.definition.axes?.[0]?.unit] })),
+        ...standard.filter(item => !definitions.some(entry => {
+            const identifier = entry.definition.projjson?.id;
+            return (entry.definition.authority || (identifier && identifier.authority + ':' + identifier.code)) === item.value;
+        }))];
+    const options = [
+        ...['地理坐标系', '投影坐标系'].map(label => ({ label, options: catalog.filter(item => (item.kind ||
+            (item.units === 'degrees' ? '地理坐标系' : '投影坐标系')) === label) })).filter(group => group.options.length),
+    ];
+    const [destination, setDestination] = useState(null);
+    useEffect(() => setDestination(null), [layer]);
     const plans = entries.filter(entry => entry.kind === 'plan');
     return h('div', { className: 'map-coordinate' },
         h('span', null, layer?.crsName || '尚未添加图层'),
         h(Choice, { showSearch: true, filterOption: false, allowClear: true, onSearch: search,
             placeholder: '地图显示坐标系', 'aria-label': '地图显示坐标系',
-            options: [...options, ...(display && !options.some(item => item.value === display.value) ? [display] : [])],
+            options: [...options, ...(display?.value && !catalog.some(item => item.value === display.value) ? [display] : [])],
             value: display?.value, onChange: (value, item) => setDisplay(value ? item : null) }),
-        layer && !layer.crs && h(Choice, { showSearch: true, filterOption: false, onSearch: search, options,
-            placeholder: '指定图层已有坐标系', 'aria-label': '指定图层已有坐标系',
-            onChange: value => request({ action: 'assign', ref: layer.ref, crs: value }).then(onLayer).catch(fail) }),
+        layer && h('div', { className: 'map-coordinate-actions' },
+            h(Choice, { showSearch: true, filterOption: false, onSearch: search, options,
+                value: destination?.value, placeholder: layer.crs ? '选择目标坐标系' : '选择图层已有坐标系',
+                'aria-label': layer.crs ? '目标坐标系' : '图层已有坐标系', onChange: (value, item) => setDestination(item) }),
+            h(Button, { disabled: !destination, onClick: () => request({ action: layer.crs ? 'reproject' : 'assign',
+                ref: layer.ref, crs: destination.value }).then(onLayer).catch(fail) }, layer.crs ? '转换投影' : '定义坐标系')),
         layer?.crs && layer.kind !== 'raster' && plans.length > 0 && h('div', { className: 'map-coordinate-actions' },
             display && h(Choice, { value: displayPlan || undefined, placeholder: '为该图层选择显示转换',
                 'aria-label': '显示转换方案', allowClear: true, onChange: setDisplayPlan,
@@ -197,12 +211,13 @@ function CoordinateTools({ layer, display, setDisplay, entries, request, onLayer
 }
 
 function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle, entries, catalog, components,
-    openComponents, display, setDisplay, background, setBackground, styleLayer, importFrame, fail, close, selection, setSelection, replace, editing }) {
+    openComponents, display, setDisplay, background, setBackground, styleLayer, importFrame, fail, activity,
+    requestedLayout, onLayout, mapActions, onMapActions, selection, setSelection, replace, editing }) {
     const node = useRef(null);
     const graph = useRef(null);
     const [properties, setProperties] = useState(null);
     const [mapProperties, setMapProperties] = useState(false);
-    const [coordinatesOpen, setCoordinatesOpen] = useState(false);
+    const [layout, setLayout] = useState(false);
     const [document, setDocument] = useState(null);
     const [cursor, setCursor] = useState(null);
     const [scale, setScale] = useState(null);
@@ -224,6 +239,10 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
     const [drawingPoints, setDrawingPoints] = useState(0);
     const original = useRef(new globalThis.Map());
     const [busy, setBusy] = useState(false);
+    const exportedLayout = useRef(null);
+    const appliedActions = useRef(null);
+    const [importing, setImporting] = useState(null);
+    useEffect(() => api.onMapImportProgress(setImporting), []);
     useEffect(() => { editing(Boolean(edit) || busy); return () => editing(false); }, [Boolean(edit), busy]);
     const [issue, setIssue] = useState('');
     const [layerErrors, setLayerErrors] = useState([]);
@@ -231,11 +250,14 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
     const [table, setTable] = useState(null);
     const [tableLayer, setTableLayer] = useState(null);
     const [page, setPage] = useState(0);
+    const [sort, setSort] = useState({});
     const [limited, setLimited] = useState([]);
     const [viewRevision, setViewRevision] = useState(0);
     const selectionRef = useRef(selection);
     selectionRef.current = selection;
     const layer = layers.find(item => key(item) === active);
+    const focused = item => [activity?.target, ...(activity?.targets || [])].filter(Boolean).some(name =>
+        [item.name, item.sourceName?.split(/[\\/]/).at(-1)].includes(name));
     const native = editLayer || layers.find(item => item.crs && item.kind !== 'raster') || layers.find(item => item.crs) || layers[0];
     const target = display?.wkt || display?.value || native?.crs;
     const units = display ? display.units : native?.units;
@@ -244,9 +266,95 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
     const backgroundColor = background || defaultMapBackground;
     const activeRef = useRef(active);
     activeRef.current = active;
+    async function exportImage(config, taskId) {
+        setBusy(true);
+        try {
+            const legend = layers.flatMap((item, index) => {
+                if (hidden.includes(key(item))) return [];
+                const appearance = symbol(item.style, palette[index % palette.length]);
+                const classification = item.style?.classification;
+                if (classification) return classification.classes.map(entry => ({
+                    name: entry.label || entry.value || '空值', color: entry.color,
+                    fill: classFill(appearance, entry.color, entry.fillColor),
+                }));
+                return [{ name: item.name, color: appearance.color,
+                    fill: /Polygon/.test(item.geometry || '') ? appearance.fill : appearance.color }];
+            });
+            const result = await api.mapLayout({ format: config.format,
+                data: mapImage(graph.current.ol, node.current, backgroundColor, legend, config), taskId });
+            if (result) setLayout(false);
+        } catch (error) { if (taskId) await onLayout(taskId, window.GuizhiErrorText(error)); else fail(error); }
+        finally { setBusy(false); }
+    }
+    useEffect(() => {
+        if (!requestedLayout || mapActions || !viewReady || busy || !node.current?.clientWidth ||
+                exportedLayout.current === requestedLayout.taskId) return;
+        exportedLayout.current = requestedLayout.taskId;
+        void exportImage(requestedLayout.layout, requestedLayout.taskId);
+    }, [requestedLayout, mapActions, viewReady, busy, layers]);
+    useEffect(() => {
+        if (!mapActions || !viewReady || busy || edit || !node.current?.clientWidth || appliedActions.current === mapActions.id) return;
+        appliedActions.current = mapActions.id;
+        const map = graph.current;
+        try {
+            const actions = mapActions.actions.map(action => {
+                const matches = action.layer ? layers.filter(item => item.name === action.layer) : [];
+                if (action.layer && matches.length !== 1) throw new Error('请确认地图中的图层名称唯一：' + action.layer);
+                const item = matches[0];
+                if (action.action === 'table' && (item.kind === 'raster' || action.field && !item.fields.some(field => field.name === action.field))) {
+                    throw new Error('图层或排序字段没有可用的属性表：' + action.layer);
+                }
+                if (action.action === 'symbol' && item.kind === 'raster') throw new Error('影像图层不能使用矢量符号');
+                return { action, item };
+            });
+            const visibility = new Set(hidden);
+            for (const { action, item } of actions) {
+                const id = item && key(item);
+                switch (action.action) {
+                    case 'background': setBackground(action.color); break;
+                    case 'visibility':
+                        if (visibility.has(id) === action.visible) {
+                            toggle(id);
+                            if (action.visible) visibility.delete(id); else visibility.add(id);
+                        }
+                        break;
+                    case 'symbol': {
+                        const appearance = layerSymbol(item.style, palette[layers.indexOf(item) % palette.length]);
+                        if (appearance.classification && (action.color || action.fill)) {
+                            const classification = appearance.classification;
+                            appearance.classification = { ...classification,
+                                classes: classification.classes.map(entry => ({ ...entry, ...(action.color && { color: action.color }),
+                                    ...(action.fill && { fillColor: action.fill }) })),
+                                ...(action.color && { other: action.color }), ...(action.fill && { otherFill: action.fill }) };
+                        }
+                        styleLayer(id, { ...appearance, ...(action.color && { color: action.color }),
+                            ...(action.fill && { fill: action.fill }), ...(action.fill_opacity !== undefined && { fillOpacity: action.fill_opacity }) });
+                        break;
+                    }
+                    case 'table':
+                        selectLayer(id);
+                        setPage(0);
+                        setSort(action.field ? { key: id, field: action.field,
+                            direction: action.direction === 'descending' ? 'descend' : 'ascend' } : {});
+                        setTable([]);
+                        break;
+                    case 'zoom': {
+                        const drawing = item && map.byKey.get(id);
+                        const extent = drawing?.get('dataExtent') || (item?.crs === target ? item?.bounds : null);
+                        if (extent) map.view.fit(extent, { size: map.ol.getSize(), padding: [28, 28, 28, 28], maxZoom: 20 });
+                        else if (!item) fit(map.view, [...map.byKey.values()], map.ol.getSize());
+                        else throw new Error('图层尚无可定位的范围：' + action.layer);
+                        break;
+                    }
+                }
+            }
+        } catch (error) { fail(error); }
+        finally { onMapActions(); }
+    }, [mapActions, viewReady, busy, edit, layers]);
 
     async function load(job) {
         setBusy(true);
+        setImporting({ label: '正在读取数据' });
         setIoStatus('');
         setImportIssues([]);
         try {
@@ -255,7 +363,7 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
             add(items);
             setImportIssues(issues);
         } catch (error) { setIoStatus(window.GuizhiErrorText(error)); }
-        finally { setBusy(false); }
+        finally { setBusy(false); setImporting(null); }
     }
 
     async function mxd(job, accept) {
@@ -384,7 +492,9 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
             const plan = entries.find(entry => entry.kind === 'plan' &&
                 (entry.plan.source_wkt === item.crs || entry.source_reference === item.crs) &&
                 (entry.plan.target_wkt === target || entry.target_reference === display?.value));
-            return api.map({ action: 'features', ref: item.ref, bbox, tolerance: bbox && item.count > 8000 ? state.view.getResolution() * .5 : undefined,
+            const overviewTolerance = item.bounds && Math.max(item.bounds[2] - item.bounds[0], item.bounds[3] - item.bounds[1]) / 2000;
+            return api.map({ action: 'features', ref: item.ref, bbox, tolerance: item.count > 8000
+                ? (bbox ? state.view.getResolution() * .5 : (!target || target === item.crs) ? overviewTolerance : undefined) : undefined,
                 target: target || null, fields: item.style?.classification ? [item.style.classification.field] : [], plan: displayPlans[id] || (plan && plan.id + '@' + plan.revision) })
                 .then(result => ({ id, drawing, result })).catch(error => ({ id, drawing, error }));
         }).filter(Boolean);
@@ -448,11 +558,12 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
     useEffect(() => {
         if (!layer || layer.kind === 'raster' || !table) return;
         let alive = true;
-        api.map({ action: 'table', ref: layer.ref, page }).then(result => {
+        const order = sort.key === key(layer) ? sort : {};
+        api.map({ action: 'table', ref: layer.ref, page, sort: order.field, direction: order.direction }).then(result => {
             if (alive) { setTable(result.rows); setTableLayer(key(layer)); }
         }).catch(error => { if (alive) fail(error); });
         return () => { alive = false; };
-    }, [layer, page, Boolean(table)]);
+    }, [layer, page, sort, Boolean(table)]);
 
     const picked = selection?.key === active ? selection.ids : [];
     const openTool = tool => setAnalysis({ tool });
@@ -605,7 +716,9 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
     }
 
     const columns = [{ title: '要素', dataIndex: 'id', width: 75 },
-        ...(layer?.fields || []).map(field => ({ title: field.name, render: (_, row) => String(row.values[field.name] ?? '—') }))];
+        ...(layer?.fields || []).map(field => ({ title: field.name, key: field.name, sorter: true,
+            sortOrder: sort.key === active && sort.field === field.name ? sort.direction : null,
+            render: (_, row) => String(row.values[field.name] ?? '—') }))];
     const command = (label, onClick, props = {}) => h(Button, { size: 'small', icon: glyph(commandIcons[label]),
         onClick, ...props }, label);
     const group = (label, ...items) => h('section', { className: 'ribbon-group', 'aria-label': label },
@@ -640,12 +753,20 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
             { key: 'table', label: '打开属性表', icon: glyph('table'), disabled: raster },
             { key: 'properties', label: '图层属性', icon: glyph('layers') },
             { key: 'style', label: '符号化', icon: glyph('pencil'), disabled: raster },
+            { key: 'export', label: '导出', icon: glyph('download'), children: [
+                { key: 'export-data', label: '导出为…' },
+                ...(!raster ? [{ key: 'export-table', label: '导出属性表' }] : []),
+            ] },
             ...(id === active && picked.length && !raster ? [
                 { key: 'selection', label: '选中要素另存为图层', icon: glyph('download') }] : []),
             { type: 'divider' },
             { key: 'remove', label: '从地图移除', icon: glyph('trash'), danger: true },
         ], onClick: ({ key: action }) => {
             if (action === 'remove') { remove(id); return; }
+            if (action === 'export-data' || action === 'export-table') {
+                api.mapExport(item.ref, action === 'export-table').catch(fail);
+                return;
+            }
             if (action === 'properties' || action === 'style') {
                 setProperties({ item, color: palette[index % palette.length], start: action === 'style' ? 'style' : 'info' });
                 return;
@@ -674,42 +795,40 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
     const coordinateTools = () => h(CoordinateTools, { layer, display,
         setDisplay: item => { setDisplayPlans({}); setDisplay(item); },
         displayPlan: displayPlans[active], setDisplayPlan: value => setDisplayPlans(old => ({ ...old, [active]: value })),
-        entries, request: api.map, onLayer: item => { add([item]); setCoordinatesOpen(false); }, fail });
+        entries, request: api.map, onLayer: item => replace(layer, item), fail });
     const commands = {
         地图: [group('导航', command('全图', () => position(false), { disabled: !layers.length }),
             command('定位图层', () => position(true), { disabled: !layer }),
             command('放大', () => graph.current.view.adjustZoom(1)), command('缩小', () => graph.current.view.adjustZoom(-1))),
             group('选择', command('清除选择', clear, { disabled: !picked.length }),
-                command('属性表', () => { setPage(0); setTable(table ? null : []); }, { disabled: !layer || layer.kind === 'raster' }),
                 command('按属性选择', () => openTool('data.select_by_attribute'), { disabled: !layer?.fields?.length }),
                 command('按位置选择', () => openTool('data.select_by_location'), { disabled: !layer?.geometry || layers.filter(item => item.geometry).length < 2 })),
             group('显示', command('地图属性', () => setMapProperties(true), { disabled: busy }))],
-        数据: [group('地图工程', command('打开 MXD', () => mxd(api.mxdRead(), value => { setLocateMxd(null); setDocument(value); }), { disabled: busy }),
-            command('保存 MXD', () => mxd(api.mxdWrite({ crs: target, bounds: graph.current?.view.calculateExtent(graph.current.ol.getSize()),
+        数据: [group('地图工程', command('打开', () => mxd(api.mxdRead(), value => { setLocateMxd(null); setDocument(value); }),
+            { disabled: busy, 'aria-label': '打开地图工程' }),
+            command('保存', () => mxd(api.mxdWrite({ crs: target, bounds: graph.current?.view.calculateExtent(graph.current.ol.getSize()),
                 background: backgroundColor,
                 layers: [...layers].reverse().map((item, index) => ({ ref: item.ref, name: item.name, visible: !hidden.includes(key(item)), opacity: opacity(item.opacity),
                     style: item.kind === 'raster' ? null : layerSymbol(item.style, palette[(layers.length - index - 1) % palette.length]) })) }),
-            result => setIoStatus('已保存 MXD 和配套数据 · ' + result.layers + ' 个图层')), { disabled: busy || !layers.length || !viewReady })),
-            group('图层管理', command('新建图层', () => openTool('geometry.create_dataset')),
+            result => setIoStatus('已保存 MXD 和配套数据 · ' + result.layers + ' 个图层')),
+            { disabled: busy || !layers.length || !viewReady, 'aria-label': '保存地图工程' })),
+            group('图层管理', command('添加图层', () => load(api.mapImport()), { disabled: Boolean(edit) || busy }),
+                command('新建图层', () => openTool('geometry.create_dataset')),
                 command('复制图层', () => openTool('data.copy'), { disabled: !layer?.geometry }),
                 command('合并图层', () => openTool('data.merge'), { disabled: layers.filter(item => item.geometry).length < 2 })),
-            group('保存数据', command('导出 SHP', () => api.mapExport(layer.ref).catch(fail), { disabled: !layer?.crs || layer.kind === 'raster' }),
-                command('导出属性表', () => openTool('presentation.export_table'), { disabled: !layer?.fields?.length }),
-                command('最近成果', () => setAnalysis(lastResult), { disabled: !lastResult }))],
-        编辑: edit ? editCommands : [...editCommands,
-            group('图层维护', command('添加字段', () => openTool('table.add_field'), { disabled: !layer?.geometry }),
-                command('删除字段', () => openTool('table.delete_field'), { disabled: !layer?.fields?.length }),
-                command('修复几何', () => openTool('geometry.repair'), { disabled: !layer?.geometry }))],
+            group('成果', command('最近成果', () => setAnalysis(lastResult), { disabled: !lastResult }))],
+        编辑: editCommands,
+        制图: [group('出图', command('导出地图', () => setLayout(true), { icon: glyph('download'), disabled: busy || !viewReady }))],
         分析: TOOL_GROUPS.map(({ title, icon, tools }) => {
             const prominent = { '统计与选择': 2, '矢量处理': 2, '叠加分析': 2 }[title] || 0;
             return prominent ? group(title, ...tools.slice(0, prominent).map(item => command(item.title, () => openTool(item.id),
-                { key: item.id, icon: glyph(item.icon), disabled: busy })),
+                { key: item.id, icon: glyph(item.icon), disabled: busy,
+                    'data-ai-focus': activity?.operation === item.id ? 'true' : undefined })),
                 menuGroup('更多', icon, tools.slice(prominent), openTool)) : menuGroup(title, icon, tools, openTool);
         }),
         业务: [...skillGroups.map(([title, ids]) => [title, catalog.filter(item => ids.includes(item.id))]),
             ['自定义业务', customSkills]].filter(([, items]) => items.length)
             .map(([title, items]) => menuGroup(title, 'analysis', items, id => setAnalysis({ skill: items.find(item => item.id === id) }))),
-        坐标系: [group('坐标参考', command('坐标系设置', () => setCoordinatesOpen(true), { disabled: busy }))],
     };
     return h('section', { className: 'workspace-map', 'aria-label': '地图工作区', onDragOver: event => event.preventDefault(),
         onDrop: event => { event.preventDefault(); if (!busy && !edit) void load(api.mapDrop([...event.dataTransfer.files])); } },
@@ -718,19 +837,19 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
                 h('div', { role: 'tablist', 'aria-label': '地图工具' }, ...Object.keys(commands).map(tab => h(Button, {
                     key: tab, type: 'text', icon: glyph(tabIcons[tab], 16), role: 'tab', 'aria-selected': ribbon === tab,
                     disabled: busy || Boolean(edit) && tab !== '编辑', onClick: () => setRibbon(tab),
-                }, tab))),
-                command('返回对话', close, { disabled: Boolean(edit) || busy })),
+                    'data-ai-focus': activity?.operation && tab === (/^(data|table)\./.test(activity.operation) ? '数据' :
+                        activity.operation.startsWith('presentation.') ? '制图' : '分析') ? 'true' : undefined,
+                }, tab)))),
             h('div', { className: 'ribbon-tools', role: 'tabpanel', 'aria-label': ribbon }, ...commands[ribbon].map((item, i) =>
                 window.React.cloneElement(item, { key: i })))),
         h('div', { className: 'map-workspace-body' },
             h('aside', { className: 'map-layers', 'aria-label': '图层和图例' },
-                h('div', { className: 'map-layer-head' }, h('strong', null, glyph('layers'), '图层'),
-                    command('添加图层', () => load(api.mapImport()), { disabled: Boolean(edit) || busy })),
+                h('div', { className: 'map-layer-head' }, h('strong', null, glyph('layers'), '图层')),
                 layers.length > 5 && h(Input, { size: 'small', placeholder: '查找图层', 'aria-label': '查找图层',
                     allowClear: true, value: layerSearch, onChange: event => setLayerSearch(event.target.value) }),
                 ...layers.map((item, index) => (!layerSearch || item.name.toLowerCase().includes(layerSearch.toLowerCase())) &&
                     h('div', { className: 'map-layer-entry', key: key(item) },
-                    h('div', { className: 'map-layer-row' },
+                    h('div', { className: 'map-layer-row', 'data-ai-focus': focused(item) ? 'true' : undefined },
                     h('input', { type: 'checkbox', 'aria-label': '显示 ' + item.name, checked: !hidden.includes(key(item)), disabled: Boolean(edit) || busy,
                         onChange: () => toggle(key(item)) }),
                     h('span', { className: 'map-swatch', 'data-color': index % palette.length,
@@ -752,6 +871,13 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
                             entry.label || (entry.value ?? '空值')))))))),
             h('div', { className: 'map-viewport' },
                 h('div', { className: 'geo-map', ref: node, tabIndex: 0, 'aria-label': '交互地图', style: { backgroundColor } }),
+                activity && h('div', { className: 'map-ai-note', 'data-kind': activity.kind },
+                    glyph(({ read: 'layers', transform: 'globe', calculate: 'analysis', publish: 'save', draw: 'pencil' })[activity.kind] || 'target'),
+                    h('span', null, activity.label), activity.target && h('strong', null, activity.target)),
+                importing && h('div', { className: 'map-import-progress', role: 'status' },
+                    h('span', null, importing.label),
+                    importing.total ? h('progress', { max: importing.total, value: importing.completed,
+                        'aria-label': '图层导入进度' }) : h('progress', { 'aria-label': '图层导入进度' })),
                 !layers.length && h(Button, { className: 'map-empty', type: 'default', icon: glyph('add', 30),
                     title: '添加或拖入空间数据', 'aria-label': '添加或拖入空间数据', disabled: busy, onClick: () => load(api.mapImport()) }),
                 (notices.size > 0 || limited.length > 0 || busy) && h('div', { className: 'map-notice', role: 'status' },
@@ -771,20 +897,28 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
                 cursor && viewReady ? cursor.map(value => value.toFixed(units === 'degrees' ? 6 : 2)).join(' , ') + (units === 'degrees' ? ' °' : units === 'm' ? ' m' : '') : 'X —　Y —')),
         table && layer && layer.kind !== 'raster' && h('section', { className: 'map-attribute-panel', 'aria-label': '属性表' },
             h('header', { className: 'map-attribute-head' }, h('strong', null, glyph('table'), '属性表'),
-                h('span', null, layer.name), h(Button, { type: 'text', size: 'small', icon: glyph('close', 15),
+                h('span', null, layer.name),
+                command('添加字段', () => openTool('table.add_field'), { disabled: busy }),
+                command('删除字段', () => openTool('table.delete_field'), { disabled: busy || !layer.fields?.length }),
+                command('字段计算', () => openTool('table.calculate_field'), { disabled: busy || !layer.fields?.length }),
+                h(Button, { type: 'text', size: 'small', icon: glyph('close', 15),
                     'aria-label': '关闭属性表', onClick: () => setTable(null) })),
             h(Table, { className: 'map-attributes', size: 'small', columns, rowKey: 'id', dataSource: tableLayer === active ? table : [],
+            onChange: (_, filters, sorter, { action }) => {
+                if (action !== 'sort') return;
+                setPage(0);
+                setSort(sorter.order ? { key: active, field: sorter.columnKey, direction: sorter.order } : {});
+            },
             scroll: { x: 'max-content', y: 130 }, rowSelection: { selectedRowKeys: picked, preserveSelectedRowKeys: true,
                 onChange: ids => setSelection({ key: active, ids }) },
             pagination: { current: page + 1, pageSize: 50, total: layer.count,
                 showSizeChanger: false, onChange: value => setPage(value - 1) } })),
-        coordinatesOpen && h(Modal, { open: true, centered: true, title: '坐标系', className: 'gis-dialog', rootClassName: 'gis-modal-root',
-            onCancel: () => setCoordinatesOpen(false), footer: h(Button, { onClick: () => setCoordinatesOpen(false) }, '完成') },
-            coordinateTools()),
         properties && h(LayerProperties, { ...properties, close: () => setProperties(null), glyph,
             save: value => styleLayer(key(properties.item), value) }),
-        mapProperties && h(MapProperties, { background: backgroundColor, save: setBackground,
+        mapProperties && h(MapProperties, { background: backgroundColor, save: setBackground, coordinates: coordinateTools(),
             close: () => setMapProperties(false), glyph }),
+        layout && h(MapLayout, { initial: { ...layoutDefaults, title: layer?.name || '规智地图' },
+            busy, close: () => setLayout(false), exportImage }),
         document && h(MxdOpen, { document, busy, glyph, locateAvailable: locateMxd, close: () => setDocument(null),
             open: (frame, locate) => mxd(api.mxdImport(frame, locate), result => {
                 if (result.layers.length) {
@@ -816,7 +950,15 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
                     selectLayer(result.input);
                     setSelection({ key: result.input, ids: result.selection.fids });
                 }
-                if (result.layers.length) {
+                if (result.layers.length && ['table.add_field', 'table.delete_field', 'table.calculate_field'].includes(analysis.tool)) {
+                    const input = layers.find(item => key(item) === result.input);
+                    if (input) {
+                        const output = result.layers[0];
+                        const classification = input.style?.classification;
+                        replace(classification && !output.fields.some(field => field.name === classification.field)
+                            ? { ...input, style: { ...input.style, classification: undefined } } : input, output);
+                    }
+                } else if (result.layers.length) {
                     graph.current.fitNeeded = true;
                     add(result.layers);
                 }
@@ -834,4 +976,4 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
                 } }))))));
 }
 
-window.GuizhiMap = { Preview, WorkspaceMap, key };
+window.GuizhiMap = { Preview, WorkspaceMap, key, roleLayerPicker };

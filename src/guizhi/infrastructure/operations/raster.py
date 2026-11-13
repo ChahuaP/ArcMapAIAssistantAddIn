@@ -27,8 +27,8 @@ def source_files(file):
     file = Path(file).absolute()
     with rio.open(file) as src:
         driver = "HFA" if file.suffix.lower() == ".img" else "GTiff"
-        if src.driver != driver or src.crs is None or not src.count or src.subdatasets:
-            raise ValueError("请选择有坐标定义且波段可读的 GeoTIFF 或 ERDAS IMG")
+        if src.driver != driver or not src.count or src.subdatasets:
+            raise ValueError("请选择波段可读的 GeoTIFF 或 ERDAS IMG")
         if any(np.dtype(dtype).kind not in "iuf" or
                (np.dtype(dtype).kind in "iu" and np.dtype(dtype).itemsize > 4) for dtype in src.dtypes):
             raise ValueError("Raster samples must be real numbers representable exactly as float64")
@@ -76,7 +76,7 @@ def normalize(source, target, check):
 def metadata(file):
     check_source(file)
     with rio.open(file) as src:
-        return {"crs": src.crs.to_wkt(), "width": src.width, "height": src.height, "bands": src.count,
+        return {"crs": src.crs.to_wkt() if src.crs else None, "width": src.width, "height": src.height, "bands": src.count,
                 "resolution": list(src.res), "transform": list(src.transform)[:6], "bounds": list(src.bounds),
                 "dtypes": list(src.dtypes), "nodata": [
                     val if val is None or np.isfinite(val) else "NaN" for val in src.nodatavals]}
@@ -212,6 +212,23 @@ def reproject(ctx, target_crs: str, resampling: Literal["nearest", "bilinear", "
     if resolution is not None and any(not np.isfinite(value) or value <= 0 for value in resolution):
         raise ValueError("Target resolution must contain two positive finite numbers")
     return reproject_raster(ctx, target_crs, resampling, resolution)
+
+
+def assign(ctx, target_crs: str):
+    from guizhi.infrastructure.crs_catalog import get
+
+    source = ctx.rasters[0]
+    target = (CRS.from_user_input(target_crs) if target_crs.startswith("EPSG:")
+              else CRS(get(ctx.workspace, "definition", target_crs)["definition"]["wkt"]))
+    with rio.open(source) as src:
+        if src.crs:
+            raise ValueError("图层已有坐标系，请使用投影转换")
+    out = ctx.path("result.tif")
+    with rio.Env(GDAL_TIFF_INTERNAL_MASK=True):
+        copy_dataset(source, out, driver="GTiff", strict=True, compress="deflate", BIGTIFF="IF_SAFER")
+        with rio.open(out, "r+") as dst:
+            dst.crs = target.to_wkt()
+    return {"raster": metadata(out), "data_revision": ctx.record("export", out)["sha256"]}
 
 
 def mosaic(ctx, overlap: Literal["first", "last"] = "first"):

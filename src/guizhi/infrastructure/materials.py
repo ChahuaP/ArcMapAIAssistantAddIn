@@ -50,9 +50,9 @@ def describe(file):
         from guizhi.infrastructure.operations import raster
 
         metadata = raster.metadata(file)
-        crs = CRS(metadata["crs"])
-        metadata.update(crs=crs.to_string(), companions=[part.name for part in raster.source_files(file)[1:]],
-                        projected_meters=crs.is_projected and all(axis.unit_conversion_factor == 1 for axis in crs.axis_info[:2]))
+        crs = CRS(metadata["crs"]) if metadata["crs"] else None
+        metadata.update(crs=crs.to_string() if crs else None, companions=[part.name for part in raster.source_files(file)[1:]],
+                        projected_meters=bool(crs and crs.is_projected and all(axis.unit_conversion_factor == 1 for axis in crs.axis_info[:2])))
     return {"file": str(file), "name": file.name, "kind": kind, "layers": [item["name"] for item in layers],
             "layer": layers[0]["name"] if len(layers) == 1 else "" if layers else None,
             "layerInfo": layers, "metadata": metadata}

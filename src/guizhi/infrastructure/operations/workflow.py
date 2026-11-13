@@ -144,7 +144,8 @@ def execute(ctx, specification: dict):
         input_role = step.inputs[0].partition(".")[2] if len(step.inputs) == 1 and step.inputs[0].startswith("material.") else None
         operation = OPERATIONS.get(step.operation) or CAPABILITIES[step.operation]
         ctx.progress("workflow_step_started", step_id=step.id, operation=step.operation,
-                     title=operation.title, role=input_role, layer=next(iter(layers)) if len(layers) == 1 else None)
+                     title=operation.title, role=input_role, layer=next(iter(layers)) if len(layers) == 1 else None,
+                     layers=sorted(layers))
         if step.operation in {"control_check", "vector_inventory"}:
             expected = 2 if step.operation == "control_check" else 1
             if len(inputs) != expected:
@@ -181,10 +182,15 @@ def execute(ctx, specification: dict):
     ctx.json("workflow.json", manifest, "workflow")
     last = committed(records[steps[-1].id])
     outputs = {}
+    actions = []
     for record in records.values():
         for ref in record["result"]["evidence"]:
-            if ref["step"] in {"export", "report", "map", "table", "view", "selection", "case", "package", "boundaries", "raster_preview"}:
+            if ref["step"] == "map_actions":
+                actions.extend(json.loads(read_artifact(ctx.workspace, record["id"], "map_actions").read_text(encoding="utf-8")))
+            elif ref["step"] in {"export", "report", "map", "table", "view", "selection", "case", "package", "boundaries", "raster_preview", "layout"}:
                 outputs[ref["step"]] = (record["id"], ref["sha256"])
+    if actions:
+        ctx.json("map-actions.json", actions, "map_actions")
     for kind, (run_id, checksum) in outputs.items():
         src = read_artifact(ctx.workspace, run_id, kind)
         output = ctx.path(kind + src.suffix)

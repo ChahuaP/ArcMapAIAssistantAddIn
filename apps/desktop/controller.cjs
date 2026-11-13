@@ -237,7 +237,7 @@ class DesktopController {
         if (!skill && bindings.inputs) {
             const { inputs, ...named } = bindings;
             layerLabels = Object.fromEntries((materials.inputs || []).map((item, index) => ['layer-' + (index + 1), {
-                name: item.name || item.layer, ...(item.mapSelection ? { selected: item.mapSelection.fids.length } : {}),
+                name: item.name || item.layer, layer: item.layer, ...(item.mapSelection ? { selected: item.mapSelection.fids.length } : {}),
             }]));
             bindings = { ...named, ...Object.fromEntries(inputs.map((item, index) => ['layer-' + (index + 1), [item]])) };
         }
@@ -270,10 +270,13 @@ class DesktopController {
             const label = details?.role && layerLabels?.[details.role]?.name;
             const visual = visualRecipe(label ? { ...event, details: { ...details, layer: label } } : event);
             if (visual) {
-                task.visual = visual;
+                task.visual = { ...visual, operation: details?.operation, childRun: details?.child_run_id,
+                    phase: event.phase, targets: (details?.layers || []).map(name =>
+                        Object.values(layerLabels || {}).find(label => label.layer === name)?.name || name) };
                 const progress = task.progress || [];
-                if (progress.at(-1)?.label !== visual.label || progress.at(-1)?.target !== visual.target) {
-                    task.progress = [...progress.slice(-31), visual];
+                if (progress.at(-1)?.label !== visual.label || progress.at(-1)?.target !== visual.target ||
+                        progress.at(-1)?.childRun !== task.visual.childRun) {
+                    task.progress = [...progress.slice(-63), task.visual];
                 }
                 this.onChange(this.state());
             }
@@ -341,6 +344,10 @@ class DesktopController {
                 if (record.status !== 'succeeded') throw new Error('成果未发布');
                 const map = checkedArtifact(record, 'map');
                 if (map) task.map = JSON.parse(map.bytes);
+                const layout = checkedArtifact(record, 'layout');
+                if (layout) task.layout = JSON.parse(layout.bytes);
+                const actions = checkedArtifact(record, 'map_actions');
+                if (actions) task.mapActions = JSON.parse(actions.bytes);
                 task.mapLayers = record.result.evidence
                     .filter(item => ['export', 'boundaries'].includes(item.step) && path.extname(item.path).toLowerCase() === '.gpkg')
                     .map(item => ({ run: task.runId, artifact: item.step }));

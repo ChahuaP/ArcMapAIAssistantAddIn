@@ -16,6 +16,7 @@ function visualRecipe(event) {
     if (phase === 'operation_verified') return recipe('check', '规智已校验成果');
     if (phase === 'workflow_publishing') return recipe('publish', '规智正在保存成果');
     if (phase === 'workflow_step_finished') {
+        if (item.status !== 'succeeded') return recipe('stop', '工具步骤未完成');
         return item.reused ? recipe('reuse', '规智正在复用已验证步骤') : recipe('check', '规智正在核对步骤成果');
     }
     if (phase !== 'workflow_step_started') return null;

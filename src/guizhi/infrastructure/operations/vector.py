@@ -19,11 +19,14 @@ def area(ctx):
     return {"statistics": {"feature_count": len(frame), "area_m2": float(shapely.area(shapely.union_all(frame.geometry)) * scale)}}
 
 
-def buffer(ctx, distance: float, unit: Unit):
+def buffer(ctx, distance: float, unit: Unit, cap: Literal["round", "flat", "square"] = "round",
+           join: Literal["round", "mitre", "bevel"] = "round", dissolve: bool = False):
     frame = ctx.frames[0]
     valid(frame)
     width = distance_in_crs(frame.crs, distance, unit)
-    result = frame.set_geometry(shapely.buffer(frame.geometry.to_numpy(), width, quad_segs=24))
+    shapes = shapely.buffer(frame.geometry.to_numpy(), width, quad_segs=24, cap_style=cap, join_style=join)
+    result = (geopandas.GeoDataFrame(geometry=[shapely.union_all(shapes)], crs=frame.crs) if dissolve and len(shapes)
+              else frame.set_geometry(shapes))
     ctx.publish(result, geometry_type="Polygon" if result.empty else None)
     return {"distance": {"value": distance, "unit": unit, "map_units": width}}
 

@@ -6,7 +6,6 @@ const { pathToFileURL } = require('node:url');
 const { DesktopController } = require('./controller.cjs');
 const { SpeechController } = require('./speech.cjs');
 const { LocalSpeechRuntime } = require('./local-speech.cjs');
-const { VisualSession } = require('./visual.cjs');
 const { createShell } = require('./shell.cjs');
 const { listModels, checkModelConnection, testModel } = require('./model-service.cjs');
 const { formats, materialBindings } = require('./materials.cjs');
@@ -37,7 +36,7 @@ async function startDesktop(options) {
         'materials-ui.js', 'skill-editor.js',
         'style.css', 'theme.css', 'mark.svg', 'luhe-banner.png', 'model-form.js', 'onboarding.js',
         'portrait.html', 'portrait.css', 'portrait.js', 'task-commands.js', 'speech-settings.js',
-        'speech-audio.js', 'voice-input.js', 'visual.html', 'visual.css', 'visual.js', 'arcgis-extension.js', 'markdown.js', 'messages.js',
+        'speech-audio.js', 'voice-input.js', 'arcgis-extension.js', 'markdown.js', 'messages.js',
         'component-actions.js'];
     const files = new Map(localFiles.map(name => ['/' + name, path.join(__dirname, name)]));
     files.set('/map.js', path.join(rendererRuntime, 'map.js'));
@@ -70,7 +69,6 @@ async function startDesktop(options) {
     const workbenchUrl = origin + '/index.html';
     const launcherUrl = workbenchUrl + '?surface=launcher';
     const portraitUrl = origin + '/portrait.html';
-    let visual;
     let sync;
     let draft = {};
     const imageInputs = new Map();
@@ -79,7 +77,7 @@ async function startDesktop(options) {
     let mapCatalogVersion = 0;
     const mapKey = ref => ref.run + ':' + ref.artifact;
     const knownLayers = () => [...mapLayers.values()]
-        .map(item => ({ id: mapKey(item.ref), name: item.name }));
+        .map(({ ref, name, kind, geometry, crs, units }) => ({ id: mapKey(ref), ref, name, kind, geometry, crs, units }));
     let modelCheck;
     let verifiedVision;
     const visionIdentity = (config, key) => JSON.stringify([config, createHash('sha256').update(key).digest('hex')]);
@@ -109,7 +107,6 @@ async function startDesktop(options) {
         desktop.notify('voiceCaption', voiceReply);
     }
     function broadcast(state) {
-        visual?.update(state);
         desktop.notify('state', withSpeech(state));
     }
     const controller = new DesktopController({ userData: app.getPath('userData'), runtime, dsh,
@@ -123,9 +120,6 @@ async function startDesktop(options) {
     sync = new ArcGisSync(controller, hostRoot, app.getPath('documents'), () => broadcast(controller.state()));
     controller.onStarted = task => sync.started(task);
     controller.onCompleted = (task, previousTask) => sync.completed(task, previousTask);
-    visual = new VisualSession({ python: controller.runtime.python,
-        masks: () => portrait.isVisible() ? [portrait.getBounds()] : [],
-        cancel: () => broadcast(controller.cancel()) });
     const partition = portrait.webContents.session;
     partition.setPermissionRequestHandler((source, permission, callback, details) => callback(
         ((source === portrait.webContents && source.getURL() === portraitUrl) ||
@@ -147,7 +141,7 @@ async function startDesktop(options) {
             portrait.hide();
         } },
         { label: '设置', click: () => { reveal(); window.webContents.send('guizhi:settings'); } },
-        { label: '接管', click: () => visual.takeover() },
+        { label: '接管', click: () => broadcast(controller.cancel()) },
         { type: 'separator' }, { label: '退出', click: () => app.quit() },
     ]));
     tray.on('double-click', reveal);
@@ -164,7 +158,6 @@ async function startDesktop(options) {
         closing = true;
         desktop.close();
         sync.close();
-        visual.close();
         speech.cancel();
         diagnostics.close();
         void controller.close().finally(() => { quitting = true; tray.destroy(); app.quit(); });
@@ -433,7 +426,7 @@ async function startDesktop(options) {
     });
     bind('materialPaths', (paths, kind) => controller.intake(paths, kind));
     bind('map', async (surface, input) => {
-        if (surface !== window || !input || !['describe', 'features', 'table', 'crs-search', 'raster-preview', 'raster-display', 'categories', 'assign', 'transform', 'edit', 'tool'].includes(input.action)) {
+        if (surface !== window || !input || !['describe', 'features', 'table', 'crs-search', 'raster-preview', 'raster-display', 'categories', 'assign', 'reproject', 'transform', 'edit', 'tool', 'step-layers'].includes(input.action)) {
             throw new Error('地图请求无效');
         }
         if (!controller.settings.workspace) throw new Error('请先选择成果保存位置');
@@ -523,12 +516,21 @@ async function startDesktop(options) {
         const files = paths || (await dialog.showOpenDialog(window, { properties: ['openFile', 'multiSelections'],
             filters: [{ name: '空间数据', extensions: [...formats.vector.extensions, ...formats.raster.extensions, 'zip'] }] })).filePaths;
         if (!files.length) return { layers: [], issues: [] };
+        window.webContents.send('guizhi:mapImportProgress', { label: '正在读取文件信息' });
         const intake = await controller.intake(files, 'any');
         const items = intake.items.filter(item => item.kind === 'vector')
             .flatMap(item => item.layers.map(layer => ({ file: item.file, layer, revision: null })));
         const images = intake.items.filter(item => item.kind === 'raster');
-        const layers = items.length ? await controller.request('map', { action: 'import', items }) : [];
-        if (images.length) layers.push(...await controller.request('map', { action: 'raster-import', items: images }));
+        const jobs = [...items.map(item => ['import', item]), ...images.map(item => ['raster-import', item])];
+        const layers = [];
+        for (const [completed, [action, item]] of jobs.entries()) {
+            const name = item.name || path.basename(item.file);
+            window.webContents.send('guizhi:mapImportProgress', { label: '正在加载 ' + name, total: jobs.length > 1 ? jobs.length : 0, completed });
+            try { layers.push(...await controller.request('map', { action, items: [item] })); }
+            catch (error) { intake.issues.push({ name, message: error.message }); }
+        }
+        if (jobs.length) window.webContents.send('guizhi:mapImportProgress', { label: '正在绘制图层',
+            total: jobs.length, completed: jobs.length });
         for (const item of intake.items) if (!['vector', 'raster'].includes(item.kind)) {
             intake.issues.push({ name: item.name, message: '地图支持矢量和影像图层' });
         }
@@ -540,13 +542,70 @@ async function startDesktop(options) {
         if (!task?.runId) throw new Error('办理成果尚未发布');
         return controller.request('map', { action: 'task-inputs', run: task.runId });
     }, true);
-    bind('mapExport', async (surface, ref) => {
+    bind('mapExport', async (surface, ref, table) => {
         if (surface !== window) throw new Error('请从工作台导出图层');
-        const pick = await dialog.showSaveDialog(window, { defaultPath: '规智-图层.zip',
-            filters: [{ name: 'SHP 成果包', extensions: ['zip'] }] });
+        const item = mapLayers.get(mapKey(ref));
+        if (!item) throw new Error('请选择地图中的图层');
+        const raster = item.kind === 'raster';
+        const filters = table && !raster ? [{ name: '属性表', extensions: ['csv'] }]
+            : raster ? [{ name: 'GeoTIFF', extensions: ['tif'] }, { name: 'JPEG 影像', extensions: ['jpg'] }]
+                : [{ name: 'SHP 成果包', extensions: ['zip'] }, { name: 'GeoPackage', extensions: ['gpkg'] },
+                    { name: 'GeoJSON', extensions: ['geojson'] }];
+        const pick = await dialog.showSaveDialog(window, { defaultPath: '规智-图层.' + filters[0].extensions[0], filters });
         if (pick.canceled) return;
-        return controller.request('map', { action: 'export', ref, output: externalPath(pick.filePath) });
+        const output = externalPath(pick.filePath);
+        const extension = path.extname(output).slice(1).toLowerCase();
+        const relative = path.relative(path.join(controller.settings.workspace, 'runs'), output);
+        if (!filters.some(filter => filter.extensions.includes(extension)) ||
+                !path.isAbsolute(relative) && relative.split(path.sep)[0] !== '..') throw new Error('请选择有效的导出位置与格式');
+        const result = await controller.request('map', { action: 'export', ref, output, format: extension });
+        shell.showItemInFolder(output);
+        return result;
     }, true);
+    bind('mapLayout', async (surface, { format, data, taskId }) => {
+        if (surface !== window || !['png', 'jpg'].includes(format) || typeof data !== 'string' || data.length > 24 << 20) {
+            throw new Error('地图图片无效');
+        }
+        const prefix = 'data:image/' + (format === 'jpg' ? 'jpeg' : 'png') + ';base64,';
+        if (!data.startsWith(prefix)) throw new Error('地图图片格式无效');
+        const bytes = Buffer.from(data.slice(prefix.length), 'base64');
+        if (nativeImage.createFromBuffer(bytes).isEmpty()) throw new Error('地图图片无法读取');
+        if (taskId) {
+            const task = controller.tasks.find(item => item.id === taskId && item.status === 'succeeded' && item.layout?.format === format);
+            if (!task || !/^[a-f0-9]{32}$/.test(task.runId)) throw new Error('制图任务已经失效');
+            const file = path.join(controller.settings.workspace, 'runs', task.runId, 'map-layout.' + format);
+            fs.writeFileSync(file, bytes, { flag: 'wx' });
+            task.layoutImage = createHash('sha256').update(bytes).digest('hex');
+            controller.persist();
+            broadcast(controller.state());
+            return true;
+        }
+        const pick = await dialog.showSaveDialog(window, { defaultPath: '规智地图.' + format,
+            filters: [{ name: '地图图片', extensions: [format] }] });
+        if (pick.canceled) return false;
+        const output = externalPath(pick.filePath);
+        const relative = path.relative(path.join(controller.settings.workspace, 'runs'), output);
+        if (path.extname(output).toLowerCase() !== '.' + format ||
+                !path.isAbsolute(relative) && relative.split(path.sep)[0] !== '..') throw new Error('请选择独立的图片保存位置');
+        fs.writeFileSync(output, bytes, { flag: 'wx' });
+        shell.showItemInFolder(output);
+        return true;
+    }, true);
+    bind('mapLayoutError', (surface, id, message) => {
+        const task = controller.tasks.find(item => item.id === id && item.layout);
+        if (surface !== window || !task || typeof message !== 'string') return;
+        task.layoutError = message.slice(0, 260);
+        controller.persist();
+        broadcast(controller.state());
+    }, true);
+    bind('openMapLayout', async id => {
+        const task = controller.tasks.find(item => item.id === id && item.layoutImage);
+        if (!task || !/^[a-f0-9]{32}$/.test(task.runId) || !['png', 'jpg'].includes(task.layout?.format)) throw new Error('地图图片尚未生成');
+        const file = path.join(controller.settings.workspace, 'runs', task.runId, 'map-layout.' + task.layout.format);
+        if (createHash('sha256').update(fs.readFileSync(file)).digest('hex') !== task.layoutImage) throw new Error('地图图片已变化');
+        const error = await shell.openPath(file);
+        if (error) throw new Error('无法打开地图图片');
+    });
     bind('exportDelivery', async (id, kind, format) => {
         if (!['shp', 'pdf', 'original'].includes(format) || (format === 'pdf') !== (kind === 'report')) {
             throw new Error('成果导出格式无效');
@@ -595,6 +654,20 @@ async function startDesktop(options) {
             reveal();
             window.webContents.send('guizhi:settings', 'model');
             throw new Error('请先在设置中通过模型读图测试');
+        }
+        if (task.skill && task.materials) {
+            const workspace = controller.settings.workspace;
+            const version = mapCatalogVersion;
+            const materials = await Promise.all(Object.entries(task.materials).map(async ([role, group]) =>
+                [role, await Promise.all(group.map(async item => {
+                    if (!item.ref) return item;
+                    const layer = mapLayers.get(mapKey(item.ref));
+                    if (!layer) throw new Error('业务所选图层已移除');
+                    const material = await controller.reader.map(workspace, { action: 'material', ref: layer.ref, name: layer.name });
+                    return { ...material, plan: item.plan };
+                }))]));
+            if (workspace !== controller.settings.workspace || version !== mapCatalogVersion) throw new Error('地图图层已变更，请重新提交');
+            task = { ...task, materials: Object.fromEntries(materials) };
         }
         if (!task.skill) {
             const explicit = [...task.prompt.matchAll(/[@＠]「([^」]+)」/gu)].map(match => match[1]);
@@ -711,7 +784,7 @@ async function startDesktop(options) {
         if (!controller.settings.workspace || !controller.settings.modelConfig) reveal();
         desktop.showPortrait();
     }
-    return { window, launcher, portrait, tray, controller, speech, visual, arcgis: sync, components };
+    return { window, launcher, portrait, tray, controller, speech, arcgis: sync, components };
 }
 
 module.exports = { startDesktop };

@@ -4,6 +4,10 @@ import json
 import math
 from pathlib import Path
 import re
+import sqlite3
+from contextlib import closing
+from functools import lru_cache
+from shutil import copyfile
 from uuid import uuid4
 
 import numpy as np
@@ -19,7 +23,7 @@ from guizhi.application.tasks import run_operation
 from guizhi.infrastructure.crs_catalog import get_plan
 from guizhi.infrastructure.coordinates import apply_plan
 from guizhi.infrastructure.export import package_layer
-from guizhi.infrastructure.operations.evidence import read_artifact
+from guizhi.infrastructure.operations.evidence import artifact_path, read_artifact
 from guizhi.infrastructure.operations.runner import data_revision
 from guizhi.infrastructure.vector import digest
 
@@ -32,6 +36,7 @@ MANUAL_OPERATIONS = {
     "data.select_by_location", "data.export_selection", "geometry.create_dataset", "geometry.repair",
     "geometry.explode", "table.add_field", "table.delete_field", "table.add_coordinates",
     "presentation.export_table", "raster.statistics", "raster.clip", "raster.reproject", "raster.mosaic",
+    "table.calculate_field",
 }
 MAP_DELIVERIES = {"export", "report", "table", "workflow", "package", "boundaries", "classification",
                   "balance", "permit_history", "raster", "bands", "drawing", "selection"}
@@ -136,18 +141,33 @@ def manual_skill(workspace, payload):
     return map_result(workspace, successful(record), record["result"]["workflow"]["skill"]["title"], include_steps=True)
 
 
+@lru_cache(maxsize=256)
+def interactive_revision(file, size, modified, changed):
+    return digest(file), data_revision(file)
+
+
 def source(workspace, ref):
     if not isinstance(ref, dict) or set(ref) != {"run", "artifact"}:
         raise ValueError("请选择已保存的地图图层")
     run, kind = ref["run"], ref["artifact"]
     if not isinstance(run, str) or not re.fullmatch(r"[a-f0-9]{32}", run) or kind not in {"import", "export", "boundaries"}:
         raise ValueError("地图图层引用无效")
-    file = read_artifact(workspace, run, kind)
+    record = workspace.read(run)
+    if record["status"] != "succeeded":
+        raise ValueError("图层尚未发布")
+    evidence = next((item for item in record["result"]["evidence"] if item["step"] == kind), None)
+    if evidence is None:
+        raise ValueError("图层成果不存在")
+    file = artifact_path(workspace, run, evidence["path"])
+    stat = file.stat()
+    checksum, _ = interactive_revision(file, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+    if checksum != evidence["sha256"]:
+        raise ValueError("图层成果已变化")
     if file.suffix.lower() != ".gpkg":
         raise ValueError("该成果不是矢量图层")
     layers = [(name, geom) for name, geom in pyogrio.list_layers(file) if geom]
     if kind == "import":
-        name = workspace.read(run)["result"]["layer"]
+        name = record["result"]["layer"]
     elif len(layers) == 1:
         name = layers[0][0]
     else:
@@ -184,7 +204,9 @@ def describe(workspace, ref, file=None, name=None):
         original = (details.get("datasets") or [{}])[0].get("source") or original
         crs = CRS(details["crs"]) if details["crs"] else None
         source_crs_name = details.get("crs_name")
-    return {"ref": ref, "name": name, "sourceName": original, "revision": data_revision(file), "geometry": info["geometry_type"],
+    stat = file.stat()
+    _, revision = interactive_revision(file, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+    return {"ref": ref, "name": name, "sourceName": original, "revision": revision, "geometry": info["geometry_type"],
             "count": info["features"], "bounds": numbers(info["total_bounds"]),
             "crs": crs.to_string() if crs else None,
             "crsName": (source_crs_name or crs.name) if crs else "未定义坐标系",
@@ -206,7 +228,7 @@ def projection(source_crs, target_crs, extent):
     network.set_network_enabled(False)
     area = None
     geodetic = source_crs.geodetic_crs
-    if extent and geodetic is not None:
+    if extent is not None and geodetic is not None:
         # An AOI needs longitude and latitude. Undo the source projection in its own datum.
         # A separate WGS 84 datum transformation can require grids unrelated to the map.
         local = TransformerGroup(source_crs, geodetic, always_xy=True, allow_ballpark=False)
@@ -316,6 +338,9 @@ def request(workspace, payload):
         return manual_tool(workspace, payload)
     if action == "skill":
         return manual_skill(workspace, payload)
+    if action == "step-layers":
+        record = successful(workspace.read(payload["run"]))
+        return output_layers(workspace, record, step_title(record["task"]["operation"]))
     if action == "delivery":
         kind = payload["kind"]
         if kind not in MAP_DELIVERIES:
@@ -377,10 +402,20 @@ def request(workspace, payload):
         page = payload["page"]
         if type(page) is not int or not 0 <= page <= 1_000_000:
             raise ValueError("属性表页码无效")
-        frame = pyogrio.read_dataframe(file, layer=name, fid_as_index=True, read_geometry=False,
-                                       skip_features=page * 50, max_features=50)
-        return {"rows": [{"id": int(fid), "values": attrs} for fid, attrs in zip(frame.index,
-                 json.loads(frame.to_json(orient="records", date_format="iso", force_ascii=False)), strict=True)]}
+        from guizhi.infrastructure.operations.table import identifier
+
+        info = pyogrio.read_info(file, layer=name)
+        order = payload.get("sort")
+        fields = list(info["fields"])
+        if order is not None and (order not in fields or payload.get("direction") not in {"ascend", "descend"}):
+            raise ValueError("请选择有效的排序字段")
+        fid = identifier(info["fid_column"])
+        sort = f'{identifier(order)} {"DESC" if payload["direction"] == "descend" else "ASC"}, ' if order else ""
+        columns = ", ".join([fid, *map(identifier, fields)])
+        with closing(sqlite3.connect(file.as_uri() + "?mode=ro", uri=True)) as db:
+            rows = db.execute(f"SELECT {columns} FROM {identifier(name)} ORDER BY {sort}{fid} LIMIT 50 OFFSET ?", (page * 50,)).fetchall()
+        return {"rows": [{"id": row[0], "values": {field: value.hex() if isinstance(value, bytes) else value
+                         for field, value in zip(fields, row[1:], strict=True)}} for row in rows]}
     if action == "crs-search":
         from pyproj.database import query_crs_info
         query = str(payload.get("query", "")).strip().casefold()
@@ -394,21 +429,35 @@ def request(workspace, payload):
             if not (crs.is_geographic or crs.is_projected) or len(crs.axis_info) != 2:
                 continue
             units = "degrees" if crs.is_geographic else "m" if crs.axis_info[0].unit_conversion_factor == 1 else None
-            result.append({"value": "EPSG:" + item.code, "label": item.name + " · EPSG:" + item.code, "units": units})
+            result.append({"value": "EPSG:" + item.code, "label": item.name + " · EPSG:" + item.code, "units": units,
+                           "metresPerUnit": crs.axis_info[0].unit_conversion_factor if crs.is_projected else None,
+                           "kind": "投影坐标系" if crs.is_projected else "地理坐标系"})
         return result
     if action == "material":
         item = map_material(workspace, payload["ref"])
         name = item["layer"]
         return {**item, "layers": [name] if name else [], "kind": "vector" if name else "raster",
                 "name": payload.get("name", name)}
-    file, name = source(workspace, payload["ref"])
+    if action in {"assign", "reproject"} and payload["ref"]["artifact"] == "raster_preview":
+        item = map_material(workspace, payload["ref"])
+        code = payload["crs"]
+        if action == "reproject" and not code.startswith("EPSG:"):
+            from guizhi.infrastructure.crs_catalog import get
+
+            code = get(workspace, "definition", code)["definition"]["wkt"]
+        record = successful(run_operation(workspace.root, {"operation": "raster." + action, "inputs": [item],
+            "parameters": {"target_crs": code, **({"resampling": payload.get("resampling", "nearest")} if action == "reproject" else {})}}))
+        return output_layers(workspace, record, "影像")[0]
     if action == "export":
-        return package_layer(workspace, file, payload["output"], name)
+        return export_layer(workspace, payload)
+    file, name = source(workspace, payload["ref"])
     if action == "assign":
         code = payload["crs"]
         if describe(workspace, payload["ref"])["crs"]:
             raise ValueError("图层已有坐标系，请使用坐标转换")
         return produce(workspace, "crs.assign", file, name, {"definition": code})
+    if action == "reproject":
+        return produce(workspace, "crs.reproject", file, name, {"definition": payload["crs"]})
     if action == "transform":
         return produce(workspace, "crs.transform", file, name, {"plan": payload["plan"]})
     if action in {"edit", "selection"}:
@@ -433,3 +482,39 @@ def produce(workspace, operation, file, name, parameters):
     record = successful(run_operation(workspace.root, {"operation": operation,
         "inputs": [material(file, name)], "parameters": parameters, "idempotency_key": uuid4().hex}))
     return describe(workspace, {"run": record["id"], "artifact": "export"})
+
+
+def export_layer(workspace, payload):
+    output = Path(payload["output"])
+    extension = payload["format"]
+    if output.suffix.lower() != "." + extension or output.exists():
+        raise ValueError("请选择尚未使用的导出文件名")
+    ref = payload["ref"]
+    if ref["artifact"] == "raster_preview":
+        from guizhi.infrastructure.operations import raster
+
+        file = map_material(workspace, ref)["file"]
+        if extension == "tif":
+            copyfile(file, output)
+        elif extension == "jpg":
+            with raster.rio.open(file) as src:
+                if src.count not in {1, 3} or set(src.dtypes) != {"uint8"}:
+                    raise ValueError("JPEG 支持单波段或三波段 8 位影像，请将此图层导出为 GeoTIFF")
+            raster.copy_dataset(file, output, driver="JPEG", strict=True, WORLDFILE="YES")
+        else:
+            raise ValueError("请选择 GeoTIFF 或 JPEG")
+    else:
+        file, name = source(workspace, ref)
+        if extension == "zip":
+            return package_layer(workspace, file, output, name)
+        if extension == "csv":
+            record = successful(run_operation(workspace.root, {"operation": "presentation.export_table",
+                "inputs": [material(file, name)]}))
+            copyfile(read_artifact(workspace, record["id"], "table"), output)
+        elif extension in {"gpkg", "geojson"}:
+            from guizhi.infrastructure.gdal_translate import vector_translate
+
+            vector_translate(file, output, "-f", "GPKG" if extension == "gpkg" else "GeoJSON", name)
+        else:
+            raise ValueError("请选择有效的矢量导出格式")
+    return {"file": str(output)}

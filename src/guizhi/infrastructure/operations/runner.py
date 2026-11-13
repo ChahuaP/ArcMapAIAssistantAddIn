@@ -89,6 +89,7 @@ class Execution:
             frame, info, revision, evidence, originals = import_layer(
                 material.file, material.layer, directory, f"input-{i + 1}.gpkg", job["id"], check,
                 allow_undefined=request.operation in {"data.describe", "data.list_fields", "crs.assign"},
+                metadata_only=request.operation in {"data.describe", "data.list_fields"},
                 expected_source_revision=material.revision,
             )
             stable = data_revision(directory / evidence.path)

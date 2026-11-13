@@ -2,6 +2,7 @@
 from contextlib import closing
 from dataclasses import asdict
 from hashlib import file_digest, sha256
+from math import isclose
 from pathlib import Path
 import sqlite3
 import shutil
@@ -116,7 +117,7 @@ def source_revision(files):
     return sha256("\n".join(f"{file.name.casefold()} {digest(file)}" for file in files).encode()).hexdigest()
 
 
-def snapshot_external(source, snapshot, layer, ensure_supervised, allow_undefined, expected):
+def snapshot_external(source, snapshot, layer, ensure_supervised, allow_undefined, expected, metadata_only):
     files = source_files(source)
     initial = source_revision(files)
     if expected and expected != initial:
@@ -144,16 +145,39 @@ def snapshot_external(source, snapshot, layer, ensure_supervised, allow_undefine
                     target.write_text(projection_text(file, file.read_bytes()), encoding="utf-8")
                 else:
                     target.hardlink_to(file)
-            defined = convert_external(staging / copied.name, snapshot, layer, allow_undefined, ensure_supervised)
+            defined = convert_external(staging / copied.name, snapshot, layer, allow_undefined, ensure_supervised, metadata_only)
         finally:
             shutil.rmtree(staging)
     else:
-        defined = convert_external(copied, snapshot, layer, allow_undefined, ensure_supervised)
+        defined = convert_external(copied, snapshot, layer, allow_undefined, ensure_supervised, metadata_only)
     return defined, copies
 
 
-def convert_external(copied, snapshot, layer, allow_undefined, check):
+def convert_external(copied, snapshot, layer, allow_undefined, check, metadata_only):
     info = pyogrio.read_info(copied, layer=layer)
+    if metadata_only and copied.suffix.lower() == ".shp" and copied.stat().st_size >= 64 << 20:
+        from guizhi.infrastructure.gdal_translate import vector_translate
+
+        defined = bool(info["crs"])
+        names = {name.casefold() for name in info["fields"]}
+        fid, geometry = "fid", "geom"
+        while fid in names:
+            fid += "_"
+        while geometry in names:
+            geometry += "_"
+        crs = shapefile_projection(source_files(copied))
+        projection = ("-a_srs", crs.to_wkt()) if crs else ()
+        vector_translate(copied, snapshot, "-f", "GPKG", "-preserve_fid", *projection,
+                         "-lco", "FID=" + fid, "-lco", "GEOMETRY_NAME=" + geometry,
+                         "-lco", "SPATIAL_INDEX=YES", layer)
+        saved = pyogrio.read_info(snapshot, layer=layer)
+        same_bounds = all(isclose(a, b, rel_tol=1e-9, abs_tol=1e-8)
+                          for a, b in zip(saved["total_bounds"] or (), info["total_bounds"] or ()))
+        if (saved["features"] != info["features"] or saved["fields"].tolist() != info["fields"].tolist() or not same_bounds
+                or (defined and not crs.equals(CRS(saved["crs"]), ignore_axis_order=True))):
+            raise ValueError("矢量快照的要素数、字段、范围或坐标系校验失败")
+        check()
+        return defined
     with warnings.catch_warnings():
         warnings.simplefilter("error", RuntimeWarning)
         frame = pyogrio.read_dataframe(copied, layer=layer, fid_as_index=True)
@@ -184,7 +208,7 @@ def convert_external(copied, snapshot, layer, allow_undefined, check):
 
 
 def import_layer(source_path, layer, directory, filename, job_id, ensure_supervised, *, allow_undefined=False,
-                 expected_source_revision=None):
+                 expected_source_revision=None, metadata_only=False):
     source = Path(source_path)
     snapshot = directory / "artifacts" / filename
     originals = []
@@ -192,15 +216,18 @@ def import_layer(source_path, layer, directory, filename, job_id, ensure_supervi
         defined = snapshot_gpkg(source, snapshot, layer, ensure_supervised, allow_undefined=allow_undefined)
     else:
         defined, originals = snapshot_external(source, snapshot, layer, ensure_supervised, allow_undefined,
-                                               expected_source_revision)
+                                               expected_source_revision, metadata_only)
     info = pyogrio.read_info(snapshot, layer=layer)
-    with warnings.catch_warnings():
-        warnings.simplefilter("error", RuntimeWarning)
-        frame = pyogrio.read_dataframe(snapshot, layer=layer, fid_as_index=True)
-    if not isinstance(frame, geopandas.GeoDataFrame) or (defined and frame.crs is None):
-        raise ValueError(f"Layer must contain spatial features with a defined CRS: {layer}")
-    if not defined and frame.crs is not None:
-        frame = frame.set_crs(None, allow_override=True)
+    crs = CRS(info["crs"]) if defined else None
+    frame = None
+    if not metadata_only or info["geometry_type"] in {"Unknown", "GeometryCollection"}:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", RuntimeWarning)
+            frame = pyogrio.read_dataframe(snapshot, layer=layer, fid_as_index=True)
+        if not isinstance(frame, geopandas.GeoDataFrame) or (defined and frame.crs is None):
+            raise ValueError(f"Layer must contain spatial features with a defined CRS: {layer}")
+        if not defined and frame.crs is not None:
+            frame = frame.set_crs(None, allow_override=True)
     original_crs = shapefile_projection(originals) if defined and source.suffix.lower() == ".shp" else None
     if original_crs:
         info["source_crs_name"] = original_crs.name
@@ -209,7 +236,7 @@ def import_layer(source_path, layer, directory, filename, job_id, ensure_supervi
     input_ref = EvidenceRef(uuid4().hex, revision_id, job_id, "import",
                             snapshot.relative_to(directory).as_posix(), digest(snapshot))
     dataset = DatasetRevision(revision_id, str(source), layer, input_ref.id,
-                              frame.crs.to_wkt() if frame.crs else None)
+                              crs.to_wkt() if crs else None)
     raw_refs = [EvidenceRef(uuid4().hex, revision_id, job_id, f"{snapshot.stem}-source-{i}",
                            file.relative_to(directory).as_posix(), digest(file)) for i, file in enumerate(originals, 1)]
     return frame, info, dataset, input_ref, raw_refs

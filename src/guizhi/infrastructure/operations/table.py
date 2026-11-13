@@ -177,6 +177,43 @@ def delete_field(ctx, field: str):
     return table_copy(ctx, action)
 
 
+def calculate_field(ctx, field: str, source_field: str, operator: Literal["copy", "add", "subtract", "multiply", "divide"] = "copy",
+                    operand: float = 0):
+    frame = ctx.frames[0]
+    if any(name not in frame or name == frame.geometry.name for name in (field, source_field)):
+        raise ValueError("请选择有效的属性字段")
+    import operator as arithmetic
+    from pandas.api.types import is_numeric_dtype
+
+    values = frame[source_field]
+    if operator != "copy":
+        if not is_numeric_dtype(values) or not isfinite(operand) or (operator == "divide" and operand == 0):
+            raise ValueError("算术计算需要数字字段和有效数值，除数不能为零")
+        compute = {"add": arithmetic.add, "subtract": arithmetic.sub,
+                   "multiply": arithmetic.mul, "divide": arithmetic.truediv}
+        values = compute[operator](values, operand)
+    from pandas import isna
+
+    def action(db, table, fields):
+        column = identifier(field)
+        fid = identifier(ctx.info[0]["fid_column"])
+        data = []
+        for key, value in values.items():
+            if isna(value):
+                data.append((None, int(key)))
+            elif hasattr(value, "item"):
+                data.append((value.item(), int(key)))
+            else:
+                data.append((value, int(key)))
+        db.executemany(f"UPDATE {table} SET {column}=? WHERE {fid}=?", data)
+        if any(db.execute(f"SELECT {column} FROM {table} WHERE {fid}=?", (key,)).fetchone()[0] != value
+               for value, key in data):
+            raise ValueError("计算结果与目标字段类型不匹配")
+        return {"calculated_field": field, "updated": len(data)}
+
+    return table_copy(ctx, action)
+
+
 def write_rows(ctx, where, assignments):
     frame = ctx.frames[0]
     fids = list(map(int, frame.index[condition(frame, where)]))

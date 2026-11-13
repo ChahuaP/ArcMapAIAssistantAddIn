@@ -156,7 +156,7 @@
                     'aria-label': '界面主题', onChange: theme => saveAppearance({ theme }).catch(fail) })),
                 card('快捷面板', h(ShortcutCapture, { appearance, save: saveAppearance, fail })),
                 card('办理过程', checkbox('showOperation', '显示办理过程'),
-                    value.showOperation !== false && checkbox('screenHighlight', '高亮屏幕中的对应图层')),
+                    value.showOperation !== false && checkbox('screenHighlight', '高亮工作区中的工具和图层')),
             ],
             storage: () => card('成果保存位置', h(Workspace, { value: value.workspace,
                 change: workspace => update('workspace', workspace), fail, disabled: saving })),

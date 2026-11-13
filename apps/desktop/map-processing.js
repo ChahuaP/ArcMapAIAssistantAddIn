@@ -4,7 +4,6 @@ const { Button, Input, Modal, Select } = window.antd;
 const key = item => item && item.ref.run + ':' + item.ref.artifact;
 const vector = item => Boolean(item?.geometry);
 const polygon = item => vector(item) && item.geometry.includes('Polygon');
-const point = item => item?.geometry === 'Point';
 const raster = item => item?.kind === 'raster';
 const options = values => Object.entries(values).map(([value, label]) => ({ value, label }));
 const dropdown = (value, choices, onChange, extra = {}) => h(Select, {
@@ -25,12 +24,12 @@ const tools = [
     { title: '统计与选择', icon: 'analysis', tools: [area, count, selectAttr, selectLocation] },
     { title: '矢量处理', icon: 'layers', tools: [
         tool('vector.buffer', '缓冲分析', 'buffer', vector),
-        tool('vector.clip', '裁切', 'clip', vector, polygon),
         tool('vector.dissolve', '融合', 'layers', vector),
     ] },
     { title: '叠加分析', icon: 'clip', tools: [
         tool('vector.intersect', '相交', 'clip', vector, vector),
         tool('vector.erase', '擦除', 'clear', vector, polygon),
+        tool('vector.clip', '裁剪', 'clip', vector, polygon),
         tool('vector.union', '联合', 'layers', polygon, polygon),
         tool('vector.identity', '标识叠加', 'clip', polygon, polygon),
         tool('vector.update_overlay', '更新叠加', 'layers', polygon, polygon),
@@ -43,11 +42,6 @@ const tools = [
         tool('raster.reproject', '栅格重投影', 'globe', raster),
         { ...tool('raster.mosaic', '拼接栅格', 'layers', raster), multiple: true },
     ] },
-    { title: '数据整理', icon: 'table', tools: [
-        tool('geometry.explode', '拆分多部件', 'layers', vector),
-        { ...tool('data.append', '追加要素', 'add', vector, vector), multiple: true },
-        tool('table.add_coordinates', '写入点坐标', 'target', point),
-    ] },
 ];
 export const TOOL_GROUPS = tools;
 const definitions = Object.fromEntries([...tools.flatMap(group => group.tools),
@@ -58,6 +52,7 @@ const definitions = Object.fromEntries([...tools.flatMap(group => group.tools),
     tool('geometry.repair', '修复几何', 'pencil', vector),
     tool('table.add_field', '添加字段', 'add', vector),
     tool('table.delete_field', '删除字段', 'trash', vector),
+    tool('table.calculate_field', '字段计算', 'analysis', vector),
     tool('presentation.export_table', '导出属性表', 'table', vector),
 ].map(item => [item.id, item]));
 const layerOptions = layers => layers.map(item => ({ value: key(item), label: item.name }));
@@ -65,6 +60,18 @@ const layerMatches = (role, item) => (raster(item) ? 'raster' : 'vector') === ro
     (role.geometry === 'any' || ({ line: 'LineString', polygon: 'Polygon', point: 'Point' }[role.geometry] &&
         item.geometry?.includes({ line: 'LineString', polygon: 'Polygon', point: 'Point' }[role.geometry]))) &&
     (role.coordinate === 'any' || Boolean(item.crs) && (role.coordinate !== 'projected_meters' || item.units === 'm'));
+export const roleLayerPicker = (layers, busy) => (role, items, append, pending) => {
+    const choices = layers.filter(layer => layer.ref && layerMatches(role, layer) && !items.some(item => item.mapKey === key(layer)));
+    return choices.length > 0 && dropdown(null, layerOptions(choices), id => {
+        const item = choices.find(layer => key(layer) === id);
+        const kind = raster(item) ? 'raster' : 'vector';
+        const roleInfo = { name: item.name, geometry: item.geometry, crs: item.crs, projected_meters: item.units === 'm' };
+        append([{ file: id, mapKey: id, ref: item.ref, kind, name: item.name,
+            layer: kind === 'raster' ? null : item.name, layers: kind === 'raster' ? [] : [item.name],
+            layerInfo: [roleInfo], metadata: roleInfo }]);
+    }, { disabled: busy || pending, showSearch: true, optionFilterProp: 'label', placeholder: '从地图选图层',
+        'aria-label': '选择' + role.label + '图层' });
+};
 const stats = {
     project_area_m2: '项目面积（平方米）', covered_area_m2: '重叠面积（平方米）', coverage_ratio: '覆盖率',
     area_m2: '合并面积（平方米）', file_count: '交付文件数', year_count: '统计年份数', feature_count: '要素数', selected_count: '选中要素数', row_count: '统计记录数',
@@ -104,8 +111,13 @@ function toolForm(definition, layers, refs, setRefs, values, update, picked) {
         parameters = { geometry_type: values.geometry_type, epsg: number(values.epsg) };
         valid = Boolean(values.name?.trim() && values.geometry_type && Number.isInteger(parameters.epsg) && parameters.epsg > 0);
     } else if (id === 'vector.buffer') {
-        controls.push(numeric('缓冲距离（米）', values.distance, value => update('distance', value), 0));
-        parameters = { distance: number(values.distance), unit: 'meters' };
+        controls.push(numeric('缓冲距离', values.distance, value => update('distance', value), 0),
+            select('unit', '距离单位', { meters: '米', kilometers: '千米', map_units: '图层单位' }),
+            select('cap', '端点', { round: '圆头', flat: '平头', square: '方头' }),
+            select('join', '拐角', { round: '圆角', mitre: '尖角', bevel: '斜角' }),
+            select('dissolve', '重叠缓冲区', { keep: '保留各要素', all: '融合全部' }));
+        parameters = { distance: number(values.distance), unit: values.unit || 'meters', cap: values.cap || 'round',
+            join: values.join || 'round', dissolve: values.dissolve === 'all' };
         valid &&= Number.isFinite(parameters.distance) && parameters.distance > 0;
     } else if (id === 'data.select_by_attribute') {
         controls.push(columns('field', '属性字段'), select('op', '比较方式', { eq: '等于', ne: '不等于', gt: '大于', gte: '大于或等于',
@@ -143,6 +155,15 @@ function toolForm(definition, layers, refs, setRefs, values, update, picked) {
         controls.push(columns('field', '删除字段'));
         parameters = { field: values.field };
         valid &&= names.includes(values.field);
+    } else if (id === 'table.calculate_field') {
+        const operator = values.operator || 'copy';
+        controls.push(columns('field', '目标字段'), columns('source_field', '来源字段'),
+            select('operator', '计算方式', { copy: '复制字段', add: '加', subtract: '减', multiply: '乘', divide: '除' }));
+        if (operator !== 'copy') controls.push(numeric('数值', values.operand, value => update('operand', value)));
+        parameters = { field: values.field, source_field: values.source_field, operator,
+            ...(operator !== 'copy' ? { operand: number(values.operand) } : {}) };
+        valid &&= names.includes(values.field) && names.includes(values.source_field) &&
+            (operator === 'copy' || Number.isFinite(parameters.operand) && (operator !== 'divide' || parameters.operand !== 0));
     } else if (id === 'vector.spatial_join') {
         controls.push(select('mode', '连接方式', { one_to_one: '一对一', one_to_many: '一对多' }));
         parameters = { mode: values.mode || 'one_to_one' };
@@ -261,18 +282,7 @@ export function MapProcessing({ tool: id, skill, layers, active, picked, entries
         .filter(kind => components?.[kind]?.installed === false);
     const roles = skill?.materials.filter(role => !role.resource) || [];
     const { RoleMaterials, roleReady } = window.GuizhiMaterials;
-    function picker(role, items, append, pending) {
-        const choices = layers.filter(layer => layerMatches(role, layer) && !items.some(item => item.mapKey === key(layer)));
-        return choices.length > 0 && dropdown(null, layerOptions(choices), id => {
-            const item = choices.find(layer => key(layer) === id);
-            const isRaster = raster(item);
-            const roleInfo = { name: item.name, geometry: item.geometry, crs: item.crs, projected_meters: item.units === 'm' };
-            append([{ file: id, mapKey: id, ref: item.ref, kind: isRaster ? 'raster' : 'vector', name: item.name,
-                layer: isRaster ? null : item.name, layers: isRaster ? [] : [item.name],
-                layerInfo: [roleInfo], metadata: roleInfo }]);
-        }, { disabled: busy || pending, showSearch: true, optionFilterProp: 'label', placeholder: '从地图选图层',
-            'aria-label': '选择' + role.label + '图层' });
-    }
+    const picker = roleLayerPicker(layers, busy);
     const form = definition ? toolForm(definition, layers, refs, (next, inputChanged) => {
         setRefs(inputChanged ? [next[0], ...next.slice(1).filter(ref => ref !== next[0])] : next);
         if (inputChanged) setValues(old => ({ ...old, field: undefined, fields: undefined }));

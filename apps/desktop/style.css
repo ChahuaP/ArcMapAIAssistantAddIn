@@ -489,3 +489,34 @@ dialog label { display: grid; gap: 5px; }
 .mxd-open-fields:empty { display: none; }
 .mxd-open-fields > label { display: grid; gap: 4px; }
 .mxd-open-fields > p { margin: 0; }
+.workbench-center { height: 100%; min-height: 0; display: flex; flex-direction: column; }
+.workbench-content { flex: 1; min-height: 0; }
+.workbench-modes { flex: none; display: flex; justify-content: end; gap: 4px; padding: 3px 10px;
+    border-bottom: 1px solid var(--line); background: var(--panel); }
+.workbench-modes .ant-btn { width: 30px; height: 28px; }
+.workbench-mode-active.ant-btn { background: var(--soft); }
+.workbench-chat-dock { flex: none; padding: 4px 12px 8px; background: var(--panel); border-top: 1px solid var(--line); }
+.workbench-chat-dock .composer textarea { min-height: 36px; max-height: 110px; }
+.workbench-content .welcome .skill-tiles { grid-template-columns: 1fr; }
+.workbench-ai-edge { position: fixed; z-index: 1200; inset: 0; pointer-events: none;
+    border: 2px solid #54a9ff; border-radius: 9px; box-shadow: inset 0 0 30px #309aff64;
+    background: radial-gradient(circle, #eef8ffb0 1px, transparent 1.5px) 0 0 / 8px 8px;
+    mask-image: linear-gradient(#000, transparent 45px, transparent calc(100% - 45px), #000),
+        linear-gradient(90deg, #000, transparent 35px, transparent calc(100% - 35px), #000);
+    animation: guizhi-ai-flow 4s ease-in-out infinite alternate; }
+@keyframes guizhi-ai-flow { 0% { opacity: .44; background-position: 0 0; } 100% { opacity: .9; background-position: 32px 16px; } }
+.workbench-ai-status, .map-ai-note, .map-import-progress {
+    display: flex; align-items: center; gap: 8px; background: var(--panel); border: 1px solid var(--border);
+    color: var(--ink); border-radius: 8px; padding: 8px 12px; box-shadow: 0 4px 18px var(--shadow);
+}
+.workbench-ai-status { position: fixed; z-index: 1201; bottom: 12px; left: 50%; transform: translateX(-50%); }
+.map-ai-note, .map-import-progress { position: absolute; z-index: 2; top: 10px; right: 10px; pointer-events: none; }
+.map-ai-note[data-kind=calculate], .map-ai-note[data-kind=transform] { border-color: #428ee2; }
+[data-ai-focus=true] { outline: 2px solid #438de4; outline-offset: -2px; background: var(--soft); }
+.map-import-progress { flex-direction: column; align-items: stretch; min-width: 185px; }
+.map-import-progress progress { width: 100%; accent-color: #2385de; }
+.map-properties-coordinates { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 12px; }
+.map-properties-coordinates h3 { margin: 0 0 8px; }
+.map-layout-options { display: flex; gap: 12px; flex-wrap: wrap; }
+.map-layout-result { align-self: flex-start; }
+@media (prefers-reduced-motion: reduce) { .workbench-ai-edge { animation: none; } }

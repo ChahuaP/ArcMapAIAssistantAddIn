@@ -23,7 +23,9 @@ STEPS = {"pipeline", "unitconvert", "cart", "helmert", "tmerc", "utm", "hgridshi
 
 def describe_definition(raw):
     crs = CRS.from_wkt(raw)
+    authority = crs.to_authority(min_confidence=100)
     return {"original": raw, "wkt": crs.to_wkt(), "projjson": crs.to_json_dict(),
+            "authority": ":".join(authority) if authority else None,
             "name": crs.name, "axes": [{"name": axis.name, "direction": axis.direction,
                                         "unit": axis.unit_name} for axis in crs.axis_info]}
 
