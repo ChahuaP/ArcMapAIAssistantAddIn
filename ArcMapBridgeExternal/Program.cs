@@ -27,7 +27,7 @@ namespace ArcMapHarness.ArcMapBridgeExternal
                     throw new ArgumentException("Supply a local ArcGIS request.");
                 var request = JObject.Parse(File.ReadAllText(args[0], Encoding.UTF8));
                 if (!RuntimeManager.Bind(ProductCode.Desktop))
-                    throw new InvalidOperationException("ArcGIS Desktop runtime could not be bound.");
+                    throw new InvalidOperationException("未检测到可用的 ArcGIS Desktop 运行环境。");
                 var license = new AoInitializeClass();
                 try
                 {
@@ -86,7 +86,7 @@ namespace ArcMapHarness.ArcMapBridgeExternal
                     license.Initialize(product) == esriLicenseStatus.esriLicenseCheckedOut)
                     return product;
             }
-            throw new InvalidOperationException("No ArcGIS Desktop product license is available.");
+            throw new InvalidOperationException("本机 ArcGIS Desktop 许可不可用。");
         }
 
         internal static ILayer OpenLayer(JObject request)

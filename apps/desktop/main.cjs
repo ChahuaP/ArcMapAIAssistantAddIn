@@ -87,13 +87,11 @@ async function startDesktop(options) {
     const python = path.join(runtime, 'python', 'python.exe');
     const components = new Components(app.getPath('userData'), version, python, () => {
         speech.bundledLocalRoot = options.bundledSpeech || components.installed('speech');
-        controller.bundledArcmap = bridge();
-        sync.refresh();
         broadcast(controller.state());
     });
     function bridge() {
-        const root = components.installed('arcmap');
-        return options.bundledArcmap || (root && path.join(root, 'ArcMapBridge.exe'));
+        const bundled = path.join(__dirname, '../../packaging/arcgis/ArcMapBridge.exe');
+        return options.bundledArcmap || (fs.existsSync(bundled) ? bundled : undefined);
     }
     const speech = new SpeechController({ userData: app.getPath('userData'), storage: safeStorage,
         local: new LocalSpeechRuntime(python, externalPath),
@@ -102,7 +100,7 @@ async function startDesktop(options) {
     const withSpeech = state => {
         const available = components.state();
         return { ...state, speech: { ...speech.state(), component: available.speech }, voiceReply,
-            appearance: desktop.appearance(), arcgis: { ...sync?.state(), component: available.arcmap },
+            appearance: desktop.appearance(), arcgis: sync?.state(),
             components: available, version };
     };
     function setVoiceReply(value) {
@@ -435,11 +433,11 @@ async function startDesktop(options) {
     });
     bind('materialPaths', (paths, kind) => controller.intake(paths, kind));
     bind('map', async (surface, input) => {
-        if (surface !== window || !input || !['describe', 'features', 'table', 'crs-search', 'raster-preview', 'raster-display', 'assign', 'transform', 'edit', 'tool'].includes(input.action)) {
+        if (surface !== window || !input || !['describe', 'features', 'table', 'crs-search', 'raster-preview', 'raster-display', 'categories', 'assign', 'transform', 'edit', 'tool'].includes(input.action)) {
             throw new Error('地图请求无效');
         }
         if (!controller.settings.workspace) throw new Error('请先选择成果保存位置');
-        return ['describe', 'features', 'table', 'crs-search', 'raster-preview', 'raster-display'].includes(input.action)
+        return ['describe', 'features', 'table', 'crs-search', 'raster-preview', 'raster-display', 'categories'].includes(input.action)
             ? controller.reader.map(controller.settings.workspace, input) : controller.request('map', input);
     }, true);
     bind('mapSkill', async (surface, input) => {
@@ -475,7 +473,7 @@ async function startDesktop(options) {
     let currentMxd;
     function requireMxdBridge() {
         const executable = bridge();
-        if (!executable) throw new Error('请在「第三方扩展」安装 ArcGIS 组件后再使用 MXD');
+        if (!executable) throw new Error('本版缺少 MXD 桥接程序，请使用完整的规智发行包');
         return executable;
     }
     bind('mxdRead', async surface => {

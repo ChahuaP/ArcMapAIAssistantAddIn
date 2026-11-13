@@ -140,17 +140,13 @@ def build(stage, runtime, desktop, dsh, speech, arcmap, addin, tree, commit):
                 if checksum(speech / "models" / mode / item["file"]) != item["sha256"]:
                     raise ValueError("Local speech asset differs from its pinned checksum")
         components["speech"] = create(speech, archives / f"Guizhi-{version}-speech.zip")
-    if arcmap:
-        if not addin or not all((arcmap / name).is_file() for name in ("ArcMapBridge.exe", "ArcMapBridge.build")):
-            raise ValueError("The ArcGIS component requires the verified x86 Bridge and add-in")
-        for file in arcmap.iterdir():
-            if file.is_file() and (file.suffix.lower() in {".exe", ".dll"} or
-                                   file.name in {"ArcMapBridge.exe.config", "ArcMapBridge.build"}):
-                copy_file(file, stage / "arcmap" / file.name)
-        copy_file(addin, stage / "arcmap/Guizhi.esriaddin")
-        components["arcmap"] = create(stage / "arcmap", archives / f"Guizhi-{version}-arcgis.zip")
-    elif addin:
-        raise ValueError("The ArcGIS extension requires the optional Bridge component")
+    if not arcmap or not addin or not all((arcmap / name).is_file() for name in ("ArcMapBridge.exe", "ArcMapBridge.build")):
+        raise ValueError("The release requires the verified ArcGIS Desktop bridge and add-in")
+    for file in arcmap.iterdir():
+        if file.is_file() and (file.suffix.lower() in {".exe", ".dll"} or
+                               file.name in {"ArcMapBridge.exe.config", "ArcMapBridge.build"}):
+            copy_file(file, core / "packaging/arcgis" / file.name)
+    copy_file(addin, core / "packaging/arcgis/Guizhi.esriaddin")
     (core / "packaging/components.json").write_text(json.dumps(components, sort_keys=True), encoding="utf-8")
     hashes = {name: checksum(file) for name, file in files(payload)}
     boot = {name: checksum(file) for name, file in files(bootstrap)}

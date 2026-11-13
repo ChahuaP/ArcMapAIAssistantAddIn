@@ -222,6 +222,16 @@ def projection(source_crs, target_crs, extent):
     return group.transformers[0]
 
 
+def category_value(value):
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return str(value).lower()
+    if isinstance(value, float) and value.is_integer() and abs(value) < 1e21:
+        return str(int(value))
+    return str(value)
+
+
 def features(workspace, payload):
     file, name = source(workspace, payload["ref"])
     info = describe(workspace, payload["ref"], file, name)
@@ -245,7 +255,7 @@ def features(workspace, payload):
         options = {"fids": fids}
     else:
         options = {"bbox": read_extent, "max_features": MAX_VISIBLE + 1}
-    frame = pyogrio.read_dataframe(file, layer=name, fid_as_index=True, columns=None if fids else [], **options)
+    frame = pyogrio.read_dataframe(file, layer=name, fid_as_index=True, columns=None if fids else payload.get("fields", []), **options)
     limited = len(frame) > MAX_VISIBLE
     if limited:
         frame = frame.iloc[:MAX_VISIBLE]
@@ -271,7 +281,11 @@ def features(workspace, payload):
         limited = limited or limit < len(frame)
         frame = frame.iloc[:limit]
     records = frame.drop(columns=frame.geometry.name).to_json(orient="records", date_format="iso", force_ascii=False)
-    attributes = json.loads(records) if fids and len(frame.columns) > 1 else [{} for _ in frame.index]
+    attributes = json.loads(records) if len(frame.columns) > 1 else [{} for _ in frame.index]
+    if not fids and payload.get("fields"):
+        for row in attributes:
+            for key, value in row.items():
+                row[key] = category_value(value)
     items = [{"id": int(fid), "geometry": shapely.geometry.mapping(shape), "properties": attrs}
              for (fid, shape), attrs in zip(frame.geometry.items(), attributes, strict=True)
              if shape is not None and not shape.is_empty]
@@ -337,6 +351,19 @@ def request(workspace, payload):
         return describe(workspace, payload["ref"])
     if action == "features":
         return features(workspace, payload)
+    if action == "categories":
+        from collections import Counter
+
+        file, name = source(workspace, payload["ref"])
+        field = payload.get("field")
+        info = pyogrio.read_info(file, layer=name)
+        if field not in info["fields"]:
+            raise ValueError("请选择图层中的有效分类字段")
+        frame = pyogrio.read_dataframe(file, layer=name, columns=[field], read_geometry=False)
+        values = json.loads(frame[field].to_json(orient="values", date_format="iso", force_ascii=False))
+        counts = Counter(map(category_value, values))
+        return {"classes": [{"value": value, "count": count} for value, count in counts.most_common(120)],
+                "remaining": max(0, len(counts) - 120)}
     if action == "table":
         file, name = source(workspace, payload["ref"])
         page = payload["page"]

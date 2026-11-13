@@ -1,6 +1,6 @@
 import 'ol/ol.css';
 import { MapProcessing, TOOL_GROUPS } from './map-processing.js';
-import { LayerProperties, MxdOpen, symbol } from './map-layer-dialog.js';
+import { LayerProperties, MxdOpen, categoryValue, layerSymbol, symbol } from './map-layer-dialog.js';
 import Map from 'ol/Map.js';
 import View from 'ol/View.js';
 import Projection from 'ol/proj/Projection.js';
@@ -168,7 +168,7 @@ function CoordinateTools({ layer, display, setDisplay, entries, request, onLayer
     const options = [...definitions.map(entry => ({ value: entry.id + '@' + entry.revision, label: entry.title,
         wkt: entry.definition.wkt, units: { degree: 'degrees', metre: 'm', meter: 'm' }[entry.definition.axes?.[0]?.unit] })), ...standard];
     const plans = entries.filter(entry => entry.kind === 'plan');
-    return h('details', { className: 'map-coordinate' }, h('summary', null, '坐标系'),
+    return h('div', { className: 'map-coordinate' },
         h('span', null, layer?.crsName || '尚未添加图层'),
         h(Choice, { showSearch: true, filterOption: false, allowClear: true, onSearch: search,
             placeholder: '地图显示坐标系', 'aria-label': '地图显示坐标系',
@@ -193,6 +193,7 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
     const node = useRef(null);
     const graph = useRef(null);
     const [properties, setProperties] = useState(null);
+    const [coordinatesOpen, setCoordinatesOpen] = useState(false);
     const [document, setDocument] = useState(null);
     const [cursor, setCursor] = useState(null);
     const [scale, setScale] = useState(null);
@@ -204,6 +205,7 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
     const [edit, setEdit] = useState('');
     const [ribbon, setRibbon] = useState('地图');
     const [layerSearch, setLayerSearch] = useState('');
+    const [expandedLegends, setExpandedLegends] = useState({});
     const [analysis, setAnalysis] = useState(null);
     const [lastResult, setLastResult] = useState(null);
     const [count, setCount] = useState(0);
@@ -306,7 +308,19 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
                 drawing.set('key', id);
                 state.ol.addLayer(drawing);
             }
-            if (item.kind !== 'raster') drawing.setStyle(style(palette[index % palette.length], false, item.style));
+            if (item.kind !== 'raster') {
+                const color = palette[index % palette.length];
+                const base = style(color, false, item.style);
+                const classification = item.style?.classification;
+                const field = classification?.field;
+                if (field) {
+                    const classStyle = shade => style(shade, false, { ...item.style, color: shade,
+                        fill: item.style.fill === null ? null : shade });
+                    const byValue = new globalThis.Map(classification.classes.map(entry => [entry.value, classStyle(entry.color)]));
+                    const other = classStyle(classification.other);
+                    drawing.setStyle(feature => byValue.get(categoryValue(feature.get(field))) || other);
+                } else drawing.setStyle(base);
+            }
             drawing.setZIndex(layers.length - index);
             drawing.setVisible(!hidden.includes(id));
             next.set(id, drawing);
@@ -328,7 +342,7 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
                 (entry.plan.source_wkt === item.crs || entry.source_reference === item.crs) &&
                 (entry.plan.target_wkt === target || entry.target_reference === display?.value));
             return api.map({ action: 'features', ref: item.ref, bbox, tolerance: bbox && item.count > 8000 ? state.view.getResolution() * .5 : undefined,
-                target: target || null, plan: displayPlans[id] || (plan && plan.id + '@' + plan.revision) })
+                target: target || null, fields: item.style?.classification ? [item.style.classification.field] : [], plan: displayPlans[id] || (plan && plan.id + '@' + plan.revision) })
                 .then(result => ({ id, drawing, result })).catch(error => ({ id, drawing, error }));
         }).filter(Boolean);
         state.byKey = next;
@@ -604,6 +618,10 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
             }
         } };
     }
+    const coordinateTools = () => h(CoordinateTools, { layer, display,
+        setDisplay: item => { setDisplayPlans({}); setDisplay(item); },
+        displayPlan: displayPlans[active], setDisplayPlan: value => setDisplayPlans(old => ({ ...old, [active]: value })),
+        entries, request: api.map, onLayer: item => { add([item]); setCoordinatesOpen(false); }, fail });
     const commands = {
         地图: [group('导航', command('全图', () => position(false), { disabled: !layers.length }),
             command('定位图层', () => position(true), { disabled: !layer }),
@@ -615,7 +633,7 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
         数据: [group('地图工程', command('打开 MXD', () => mxd(api.mxdRead(), setDocument), { disabled: busy }),
             command('保存 MXD', () => mxd(api.mxdWrite({ crs: target, bounds: graph.current?.view.calculateExtent(graph.current.ol.getSize()),
                 layers: [...layers].reverse().map((item, index) => ({ ref: item.ref, name: item.name, visible: !hidden.includes(key(item)),
-                    style: item.kind === 'raster' ? null : symbol(item.style, palette[(layers.length - index - 1) % palette.length]) })) }),
+                    style: item.kind === 'raster' ? null : layerSymbol(item.style, palette[(layers.length - index - 1) % palette.length]) })) }),
             result => setIoStatus('已保存 MXD 和配套数据 · ' + result.layers + ' 个图层')), { disabled: busy || !layers.length || !viewReady })),
             group('图层管理', command('新建图层', () => openTool('geometry.create_dataset')),
                 command('复制图层', () => openTool('data.copy'), { disabled: !layer?.geometry }),
@@ -627,18 +645,16 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
             group('图层维护', command('添加字段', () => openTool('table.add_field'), { disabled: !layer?.geometry }),
                 command('删除字段', () => openTool('table.delete_field'), { disabled: !layer?.fields?.length }),
                 command('修复几何', () => openTool('geometry.repair'), { disabled: !layer?.geometry }))],
-        分析: TOOL_GROUPS.map(({ title, icon, tools }) => title === '叠加分析'
-            ? group(title, ...tools.slice(0, 2).map(item => command(item.title, () => openTool(item.id),
+        分析: TOOL_GROUPS.map(({ title, icon, tools }) => {
+            const prominent = { '统计与选择': 2, '矢量处理': 2, '叠加分析': 2 }[title] || 0;
+            return prominent ? group(title, ...tools.slice(0, prominent).map(item => command(item.title, () => openTool(item.id),
                 { key: item.id, icon: glyph(item.icon), disabled: busy })),
-                menuGroup('更多', icon, tools.slice(2), openTool))
-            : menuGroup(title, icon, tools, openTool)),
+                menuGroup('更多', icon, tools.slice(prominent), openTool)) : menuGroup(title, icon, tools, openTool);
+        }),
         业务: [...skillGroups.map(([title, ids]) => [title, catalog.filter(item => ids.includes(item.id))]),
             ['自定义业务', customSkills]].filter(([, items]) => items.length)
             .map(([title, items]) => menuGroup(title, 'analysis', items, id => setAnalysis({ skill: items.find(item => item.id === id) }))),
-        坐标系: [group('坐标参考', h(CoordinateTools, { layer, display,
-            setDisplay: item => { setDisplayPlans({}); setDisplay(item); },
-            displayPlan: displayPlans[active], setDisplayPlan: value => setDisplayPlans(old => ({ ...old, [active]: value })),
-            entries, request: api.map, onLayer: item => add([item]), fail }))],
+        坐标系: [group('坐标参考', command('坐标系设置', () => setCoordinatesOpen(true), { disabled: busy }))],
     };
     return h('section', { className: 'workspace-map', 'aria-label': '地图工作区', onDragOver: event => event.preventDefault(),
         onDrop: event => { event.preventDefault(); if (!busy && !edit) void load(api.mapDrop([...event.dataTransfer.files])); } },
@@ -658,7 +674,8 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
                 layers.length > 5 && h(Input, { size: 'small', placeholder: '查找图层', 'aria-label': '查找图层',
                     allowClear: true, value: layerSearch, onChange: event => setLayerSearch(event.target.value) }),
                 ...layers.map((item, index) => (!layerSearch || item.name.toLowerCase().includes(layerSearch.toLowerCase())) &&
-                    h('div', { className: 'map-layer-row', key: key(item) },
+                    h('div', { className: 'map-layer-entry', key: key(item) },
+                    h('div', { className: 'map-layer-row' },
                     h('input', { type: 'checkbox', 'aria-label': '显示 ' + item.name, checked: !hidden.includes(key(item)), disabled: Boolean(edit) || busy,
                         onChange: () => toggle(key(item)) }),
                     h('span', { className: 'map-swatch', 'data-color': index % palette.length,
@@ -669,7 +686,15 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
                             onClick: () => { setPage(0); setEditLayer(null); selectLayer(key(item)); } }, item.name)),
                     h(antd.Dropdown, { trigger: ['click'], menu: layerMenu(item, index) },
                         h(Button, { type: 'text', size: 'small', disabled: Boolean(edit) || busy,
-                            'aria-label': item.name + '菜单', icon: glyph('more', 16) }))))),
+                            'aria-label': item.name + '菜单', icon: glyph('more', 16) }))),
+                    item.style?.classification && h('div', { className: 'map-class-legend' },
+                        h(Button, { type: 'text', size: 'small', 'aria-expanded': Boolean(expandedLegends[key(item)]),
+                            icon: glyph('chevron', 13), onClick: () => setExpandedLegends(old => ({ ...old, [key(item)]: !old[key(item)] })) },
+                        item.style.classification.field),
+                        expandedLegends[key(item)] && h('ul', null, ...[...item.style.classification.classes,
+                            { label: '其他值', color: item.style.classification.other }].map(entry => h('li', { key: JSON.stringify(entry.value) },
+                            h('span', { className: 'map-swatch', ref: node => { if (node) node.style.backgroundColor = entry.color; } }),
+                            entry.label || (entry.value ?? '空值')))))))),
             h('div', { className: 'map-viewport' },
                 h('div', { className: 'geo-map', ref: node, tabIndex: 0, 'aria-label': '交互地图' }),
                 !layers.length && h(Button, { className: 'map-empty', type: 'default', icon: glyph('add', 30),
@@ -695,6 +720,9 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
                 onChange: ids => setSelection({ key: active, ids }) },
             pagination: { current: page + 1, pageSize: 50, total: layer.count,
                 showSizeChanger: false, onChange: value => setPage(value - 1) } })),
+        coordinatesOpen && h(Modal, { open: true, centered: true, title: '坐标系', className: 'gis-dialog', rootClassName: 'gis-modal-root',
+            onCancel: () => setCoordinatesOpen(false), footer: h(Button, { onClick: () => setCoordinatesOpen(false) }, '完成') },
+            coordinateTools()),
         properties && h(LayerProperties, { ...properties, close: () => setProperties(null), glyph,
             save: value => styleLayer(key(properties.item), value) }),
         document && h(MxdOpen, { document, busy, glyph, close: () => setDocument(null),
@@ -703,6 +731,7 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
                     graph.current.fitNeeded = true;
                     graph.current.initialExtent = result.frame.bounds;
                     setDisplayPlans({});
+                    setExpandedLegends({});
                     setTable(null);
                     setLastResult(null);
                     importFrame(result);

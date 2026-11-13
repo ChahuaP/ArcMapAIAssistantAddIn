@@ -57,9 +57,34 @@ namespace ArcMapHarness.ArcMapBridgeExternal
         private static JObject Appearance(ILayer layer)
         {
             var feature = layer as IGeoFeatureLayer;
-            var renderer = feature == null ? null : feature.Renderer as ISimpleRenderer;
-            if (renderer == null) return null;
-            var marker = renderer.Symbol as ISimpleMarkerSymbol;
+            if (feature == null) return null;
+            var single = feature.Renderer as ISimpleRenderer;
+            if (single != null) return Appearance(single.Symbol);
+            var unique = feature.Renderer as IUniqueValueRenderer;
+            if (unique == null || unique.FieldCount != 1 || unique.ValueCount > 120) return null;
+            var other = Appearance(unique.DefaultSymbol);
+            var classes = new JArray();
+            JObject basis = null;
+            for (int i = 0; i < unique.ValueCount; i++)
+            {
+                var value = unique.get_Value(i);
+                var appearance = Appearance(unique.get_Symbol(value));
+                if (appearance == null) continue;
+                if (basis == null) basis = appearance;
+                classes.Add(new JObject {
+                    ["value"] = value == "<Null>" ? null : value, ["label"] = unique.get_Label(value),
+                    ["color"] = appearance["fill"]?.Type == JTokenType.String ? appearance["fill"] : appearance["color"]
+                });
+            }
+            if (basis == null) return other;
+            basis["classification"] = new JObject { ["field"] = unique.get_Field(0), ["classes"] = classes,
+                ["other"] = (string)(other?["fill"]) ?? (string)(other?["color"]) ?? "#7d8999" };
+            return basis;
+        }
+
+        private static JObject Appearance(ISymbol symbol)
+        {
+            var marker = symbol as ISimpleMarkerSymbol;
             if (marker != null)
             {
                 string shape = "circle";
@@ -72,8 +97,8 @@ namespace ArcMapHarness.ArcMapBridgeExternal
                 }
                 return new JObject { ["color"] = Hex(marker.Color), ["shape"] = shape, ["size"] = marker.Size };
             }
-            var fill = renderer.Symbol as ISimpleFillSymbol;
-            var line = fill == null ? renderer.Symbol as ILineSymbol : fill.Outline;
+            var fill = symbol as ISimpleFillSymbol;
+            var line = fill == null ? symbol as ILineSymbol : fill.Outline;
             if (line == null) return null;
             return new JObject { ["color"] = Hex(line.Color), ["pattern"] = LineStyle(line as ISimpleLineSymbol),
                 ["width"] = line.Width, ["fill"] = fill == null || fill.Style == esriSimpleFillStyle.esriSFSHollow ||
@@ -163,10 +188,8 @@ namespace ArcMapHarness.ArcMapBridgeExternal
             return new RgbColorClass { Red = rgb >> 16, Green = rgb >> 8 & 255, Blue = rgb & 255 };
         }
 
-        private static void SetStyle(ILayer layer, JObject style)
+        private static ISymbol MakeSymbol(esriGeometryType geometry, JObject style)
         {
-            var feature = layer as IGeoFeatureLayer;
-            if (feature == null || style == null) return;
             var color = Color((string)style["color"]);
             double width = (double?)style["width"] ?? 1.5;
             ISimpleLineSymbol line = new SimpleLineSymbolClass { Color = color, Width = width };
@@ -176,7 +199,7 @@ namespace ArcMapHarness.ArcMapBridgeExternal
                 case "dot": line.Style = esriSimpleLineStyle.esriSLSDot; break;
             }
             ISymbol symbol = (ISymbol)line;
-            switch (feature.FeatureClass.ShapeType)
+            switch (geometry)
             {
                 case esriGeometryType.esriGeometryPoint:
                 case esriGeometryType.esriGeometryMultipoint:
@@ -203,7 +226,45 @@ namespace ArcMapHarness.ArcMapBridgeExternal
                     symbol = (ISymbol)area;
                     break;
             }
-            feature.Renderer = (IFeatureRenderer)new SimpleRendererClass { Symbol = symbol };
+            return symbol;
+        }
+
+        private static ISymbol ClassSymbol(esriGeometryType geometry, JObject basis, string color)
+        {
+            var style = (JObject)basis.DeepClone();
+            style["color"] = color;
+            if (style["fill"]?.Type == JTokenType.String) style["fill"] = color;
+            return MakeSymbol(geometry, style);
+        }
+
+        private static void SetStyle(ILayer layer, JObject style)
+        {
+            var feature = layer as IGeoFeatureLayer;
+            if (feature == null || style == null) return;
+            var geometry = feature.FeatureClass.ShapeType;
+            var classification = style["classification"] as JObject;
+            if (classification == null)
+            {
+                feature.Renderer = (IFeatureRenderer)new SimpleRendererClass { Symbol = MakeSymbol(geometry, style) };
+                return;
+            }
+            var name = (string)classification["field"];
+            int index = feature.FeatureClass.FindField(name);
+            if (index < 0) throw new ArgumentException("找不到符号化字段 " + name);
+            IUniqueValueRenderer renderer = new UniqueValueRendererClass();
+            renderer.FieldCount = 1;
+            renderer.set_Field(0, name);
+            renderer.set_FieldType(0, feature.FeatureClass.Fields.get_Field(index).Type == esriFieldType.esriFieldTypeString);
+            renderer.DefaultSymbol = ClassSymbol(geometry, style, (string)classification["other"]);
+            renderer.DefaultLabel = "其他值";
+            renderer.UseDefaultSymbol = true;
+            foreach (JObject entry in (JArray)classification["classes"])
+            {
+                var value = (string)entry["value"] ?? "<Null>";
+                renderer.AddValue(value, "", ClassSymbol(geometry, style, (string)entry["color"]));
+                renderer.set_Label(value, (string)entry["label"] ?? (value == "<Null>" ? "空值" : value));
+            }
+            feature.Renderer = (IFeatureRenderer)renderer;
         }
 
         internal static JObject Write(JObject request)

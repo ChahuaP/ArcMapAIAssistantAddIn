@@ -371,7 +371,7 @@ dialog label { display: grid; gap: 5px; }
     border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
 .layer-mentions > .ant-btn { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 
-.map-ribbon { overflow: hidden; }
+.map-ribbon { overflow: hidden; flex: none; }
 .ribbon-tabs {
     display: flex; align-items: center; justify-content: space-between; gap: 10px;
     padding: 7px 10px; background: var(--sub); border-bottom: 1px solid var(--gis-edge);
@@ -380,16 +380,21 @@ dialog label { display: grid; gap: 5px; }
 .ribbon-tabs [role=tab] { flex: none; padding-inline: 10px; border: 1px solid transparent; }
 .ribbon-tabs [aria-selected=true] { background: var(--soft); color: var(--ink); border-color: var(--gis-edge); font-weight: 600; }
 .ribbon-tabs [aria-selected=true] svg, .ribbon-actions .ant-btn:not(:disabled):not(.ant-btn-primary) svg { color: var(--accent); }
-.ribbon-tools { display: flex; gap: 8px; align-items: stretch; overflow-x: auto; padding: 8px 10px; }
+.ribbon-tools {
+    display: flex; gap: 6px; align-items: stretch; overflow-x: auto; overflow-y: hidden;
+    height: 68px; padding: 6px 8px 4px; box-sizing: border-box;
+}
+.ribbon-tools::-webkit-scrollbar { height: 4px; }
+.ribbon-tools::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 .ribbon-group {
-    display: grid; gap: 5px; min-width: max-content; padding: 6px 8px;
+    display: grid; gap: 2px; min-width: max-content; padding: 3px 6px;
     background: var(--sub); border: 1px solid var(--line); border-radius: 6px;
 }
 .ribbon-menu { display: flex; align-items: center; }
-.ribbon-menu .ant-btn { min-height: 32px; }
+.ribbon-menu .ant-btn { min-height: 28px; }
 .ribbon-actions > .ribbon-menu { padding: 0; border: 0; background: transparent; }
 .ribbon-actions > .ribbon-menu .ant-btn { min-height: 28px; }
-.ribbon-group > span { color: var(--muted); font-size: 11px; }
+.ribbon-group > span { color: var(--muted); font-size: 11px; line-height: 14px; }
 .ribbon-actions { display: flex; gap: 6px; align-items: center; }
 .ribbon-actions > .ant-btn, .map-layer-head > .ant-btn, .ribbon-tabs > .ant-btn { min-height: 28px; }
 .map-layer-head {
@@ -411,7 +416,17 @@ dialog label { display: grid; gap: 5px; }
     padding-left: 9px; border-left: 1px solid var(--gis-edge); font-variant-numeric: tabular-nums;
 }
 .map-status-coordinates { min-width: 142px; text-align: right; }
-.ribbon-actions .map-coordinate { display: flex; gap: 8px; align-items: center; padding: 0; min-width: 220px; }
+.gis-dialog .map-coordinate { gap: 10px; margin: 0; padding: 0; }
+.gis-dialog .map-coordinate > :is(span,.ant-select) { margin: 0; }
+.gis-classification { display: grid; gap: 10px; }
+.gis-classes { width: 100%; border-collapse: collapse; }
+.gis-classes :is(th,td) { padding: 5px 8px; border-bottom: 1px solid var(--line); text-align: left; }
+.gis-classes input[type=color] { width: 38px; height: 24px; min-height: 0; padding: 1px; }
+.gis-classes th:last-child { width: 82px; }
+.map-class-legend { padding: 3px 0 3px 19px; font-size: 12px; }
+.map-class-legend ul { list-style: none; padding: 0 6px; margin: 0; max-height: 180px; overflow-y: auto; }
+.map-class-legend li { display: flex; align-items: center; gap: 7px; margin-block: 3px; overflow-wrap: anywhere; }
+.map-class-legend .map-swatch { flex: none; }
 
 .gis-modal-root .gis-dialog .ant-modal-content {
     background: var(--panel); border: 1px solid var(--border); border-radius: 12px;

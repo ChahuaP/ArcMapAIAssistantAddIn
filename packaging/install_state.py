@@ -15,7 +15,7 @@ from uuid import uuid4
 
 VERSION = r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
 RELEASE = r"[a-z0-9][a-z0-9.-]{0,90}"
-OPTIONAL = {"speech", "arcmap"}
+OPTIONAL = {"speech"}
 REQUIRED = (
     "core/src/guizhi/__main__.py", "core/apps/desktop/entry.cjs",
     "runtime/python/python.exe", "runtime/node/node.exe",
@@ -103,10 +103,10 @@ def descriptor(root, entry):
             not release.startswith(manifest["build"] + "-")):
         raise ValueError("安装版本与组件清单不匹配")
     check = set(REQUIRED)
+    if "core/packaging/arcgis/ArcMapBridge.exe" in manifest["files"]:
+        check.update({"core/packaging/arcgis/ArcMapBridge.exe", "core/packaging/arcgis/ArcMapBridge.build"})
     if "speech" in selected:
         check.add("speech/identity.json")
-    if "arcmap" in selected:
-        check.add("arcmap/ArcMapBridge.exe")
     for name in sorted(check):
         if not contained(candidate, *name.split("/")).is_file():
             raise ValueError(f"安装入口缺失 {name}")
@@ -126,8 +126,6 @@ def desktop_command(candidate, user_data, components):
                "--user-data", str(user_data), "--installation-root", str(candidate.parent.parent)]
     if "speech" in components:
         command += ["--bundled-speech", str(candidate / "speech")]
-    if "arcmap" in components:
-        command += ["--bundled-arcmap", str(candidate / "arcmap/ArcMapBridge.exe")]
     return command
 
 

@@ -27,7 +27,7 @@ class Components {
         if (!entry) return undefined;
         const root = this.target(kind, entry);
         if (!fs.existsSync(root) || fs.lstatSync(root).isSymbolicLink()) return undefined;
-        const marker = entry.python ? 'component.json' : kind === 'speech' ? 'identity.json' : 'ArcMapBridge.exe';
+        const marker = entry.python ? 'component.json' : 'identity.json';
         return fs.existsSync(path.join(root, marker)) ? root : undefined;
     }
 
@@ -54,15 +54,17 @@ class Components {
         const temp = path.join(root, randomUUID() + '.download');
         const stop = new AbortController();
         this.active.set(kind, stop);
+        let stage = archive ? 'install' : 'download';
         try {
             this.update(kind, archive ? 'installing' : 0);
             if (!archive) {
                 const url = new URL(entry.file, origin);
                 const signal = AbortSignal.any([stop.signal, AbortSignal.timeout(900_000)]);
                 const response = await fetch(url, { signal, redirect: 'error' });
-                if (!response.ok || Number(response.headers.get('content-length')) !== entry.size || !response.body) {
-                    throw new Error('组件下载失败，请稍后重试或选择离线组件包');
-                }
+                if (response.status === 404) throw new Error('服务器上没有本版本的组件包，请选择同版本离线包');
+                if (!response.ok || !response.body) throw new Error('组件下载失败（HTTP ' + response.status + '），可选择同版本离线包');
+                const length = response.headers.get('content-length');
+                if (length !== null && Number(length) !== entry.size) throw new Error('服务器组件包大小与版本清单不一致');
                 let bytes = 0;
                 let percent = 0;
                 const count = new Transform({ transform: (chunk, _, done) => {
@@ -74,15 +76,20 @@ class Components {
                 } });
                 await pipeline(Readable.fromWeb(response.body), count, fs.createWriteStream(temp, { flags: 'wx' }), { signal });
                 signal.throwIfAborted();
+                if (bytes !== entry.size) throw new Error('组件下载不完整，请重新下载或选择离线包');
                 archive = temp;
+                stage = 'install';
                 this.update(kind, 'installing');
             }
             await exec(this.python, ['-I', '-B', '-X', 'utf8', installer, archive, target, JSON.stringify(entry)],
                 { windowsHide: true, timeout: 300_000 });
         } catch (error) {
             if (stop.signal.aborted) return;
-            throw new Error(String(error.stderr || error.message).trim().match(/组件包校验失败[^\r\n]*/u)?.[0] ||
-                '组件安装失败，请检查网络、磁盘空间和组件包后重试');
+            const detail = String(error.stderr || error.message).trim();
+            if (stage === 'download') throw new Error(/\p{Script=Han}/u.test(detail)
+                ? detail : '无法连接组件服务器，请检查网络连接或选择同版本离线包');
+            throw new Error(detail.match(/组件包校验失败[^\r\n]*/u)?.[0] ||
+                '组件已下载，解包安装失败。请检查磁盘空间及安装目录的访问权限');
         } finally {
             try { fs.rmSync(temp, { force: true }); }
             finally {
