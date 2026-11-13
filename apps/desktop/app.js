@@ -10,7 +10,7 @@
         budget_exhausted: '已保存进度' };
     const active = task => task && ['running', 'cancelling'].includes(task.status);
     const emptyDraft = () => ({ prompt: '', project: null, control: null, skill: null, materials: {}, parameterText: {},
-        unassigned: [], freeMode: false });
+        unassigned: [], images: [], freeMode: false });
     const number = value => value.toLocaleString('zh-CN', { maximumFractionDigits: 2 });
     const { Material, RoleMaterials, materialReady, roleReady, mergeMaterials, intake } = window.GuizhiMaterials;
     const { render, open } = window.GuizhiMarkdown;
@@ -63,6 +63,19 @@
             items: task.progress.map(item => ({ title: item.label, description: item.target || undefined })) });
     }
 
+    function ResultImage({ reference }) {
+        const [url, setUrl] = useState('');
+        const [error, setError] = useState('');
+        useEffect(() => {
+            let mounted = true;
+            api.mapImage(reference).then(value => { if (mounted) setUrl(value); })
+                .catch(issue => { if (mounted) setError(errorText(issue)); });
+            return () => { mounted = false; };
+        }, [reference.run, reference.artifact]);
+        return url ? h('img', { className: 'reply-image', src: url, alt: '规智生成的影像预览' })
+            : error ? h('p', { role: 'alert' }, error) : null;
+    }
+
     function Result({ task, retry, fail, editSkill, parcel, selectParcel, showMap, voiceReply, openComponents }) {
         if (active(task)) return h('article', { className: 'bubble assistant working', role: 'status' },
             task.status === 'cancelling' ? '正在结束任务'
@@ -76,6 +89,7 @@
                 h('div', { className: 'result-head' }, h('img', { src: '/mark.svg', alt: '', width: 29 }),
                     h('strong', null, task.status === 'answered' ? '规智' : '办理结果')),
                 markdown(task.response),
+                ...(task.outputImages || []).map(reference => h(ResultImage, { key: reference.run, reference })),
                 task.progress?.length > 0 && h('details', { className: 'result-progress' },
                     h('summary', null, '办理过程'), h(Progress, { task })),
                 stats?.coverage_ratio !== undefined && h('dl', { className: 'metrics' },
@@ -124,6 +138,30 @@
         const [hiddenLayers, hideLayers] = useState([]);
         const [activeLayer, setActiveLayer] = useState(null);
         const [mapSelection, setMapSelection] = useState(null);
+        const [references, setReferences] = useState([]);
+        const [mention, setMention] = useState(null);
+        const [mentionIndex, setMentionIndex] = useState(0);
+        const composerInput = useRef(null);
+        const mentionItems = mention ? references.filter(item => item.name.toLowerCase().includes(mention.query.toLowerCase())).slice(0, 8) : [];
+        function updateMention(input) {
+            const value = input.value.slice(0, input.selectionStart);
+            const match = value.match(/(?:^|[\s，。；：])[@＠]([^@＠「」\n]*)$/u);
+            setMentionIndex(0);
+            setMention(match ? { from: value.length - match[1].length - 1, to: value.length, query: match[1] } : null);
+        }
+        function insertMention(item) {
+            const { from, to } = mention;
+            const token = '@「' + item.name + '」 ';
+            update('prompt', draft.prompt.slice(0, from) + token + draft.prompt.slice(to));
+            setMention(null);
+            requestAnimationFrame(() => {
+                composerInput.current?.focus();
+                composerInput.current?.setSelectionRange(from + token.length, from + token.length);
+            });
+        }
+        useEffect(() => {
+            if (!launcher) void api.mapCatalog(layers, mapSelection).catch(fail);
+        }, [layers, mapSelection]);
         const mapKey = window.GuizhiMap.key;
         function addLayers(items) {
             if (!items.length) return;
@@ -162,8 +200,9 @@
                 setAppearance(value.appearance);
             }).catch(fail);
             api.readDraft().then(receiveDraft).catch(fail);
+            api.mapReferences().then(setReferences).catch(fail);
             const callbacks = [
-                api.onState(setState), api.onVoiceCaption(setVoiceReply),
+                api.onMapReferences(setReferences), api.onState(setState), api.onVoiceCaption(setVoiceReply),
                 api.onSettings(section => showSettings(section || true)), api.onAppearance(setAppearance), api.onDraft(receiveDraft),
                 api.onLauncherFocus(() => document.querySelector('.launcher textarea')?.focus()),
             ];
@@ -219,7 +258,7 @@
         const fields = skill?.parameters || {};
         const missingComponents = (skill?.components || []).filter(kind => state?.components?.[kind]?.installed === false);
         const openComponents = () => launcher ? api.workbench('components').catch(fail) : showSettings('components');
-        const suggestion = !skill && !draft.freeMode ? matchBusiness(draft.prompt, catalog) : { items: [] };
+        const suggestion = !skill && !draft.freeMode && !references.some(item => draft.prompt.includes(item.name)) ? matchBusiness(draft.prompt, catalog) : { items: [] };
         const canSubmit = materialsReady && !missingComponents.length && parametersReady(fields, draft.parameterText) &&
             (suggestion.items.length < 2 || suggestion.exact);
         async function submit(event) {
@@ -291,12 +330,23 @@
             }, fail); }
             finally { setAdding(false); }
         }
+        async function addImages(job) {
+            try {
+                const items = await job;
+                if (shared.current.images.length + items.length > 4) throw new Error('每轮最多添加 4 张图片');
+                setDraft(current => ({ ...current, images: [...current.images, ...items] }));
+            } catch (error) { fail(error); }
+        }
         function drop(event) {
             event.preventDefault();
             const files = [...event.dataTransfer.files];
+            const pictures = files.filter(file => /\.(png|jpe?g|webp)$/i.test(file.name));
+            if (pictures.length) void addImages(api.imageDrop(pictures));
+            const materials = files.filter(file => !pictures.includes(file));
+            if (!materials.length) return;
             if (!files.length) return;
             if (skill) return fail('请把材料拖到对应的业务角色');
-            void addMaterials(() => api.intakeDropped(files, 'any'));
+            void addMaterials(() => api.intakeDropped(materials, 'any'));
         }
         function freeMaterial(item, index) {
             const roles = skill?.materials.filter(role => !role.resource && role.kind === item.kind &&
@@ -319,15 +369,30 @@
             onDragOver: event => event.preventDefault(), onDrop: drop },
             error && h('p', { role: 'alert', className: 'error' }, error),
             h(window.GuizhiComponentLink, { message: error, open: openComponents }),
-            h('textarea', { 'aria-label': '办理事项', placeholder: launcher
+            h('textarea', { ref: composerInput, 'aria-label': '办理事项', placeholder: launcher
                 ? '说说需要办理什么，也可以把材料拖到这里' : '继续提问或补充办理要求', rows: 2,
-                value: draft.prompt, maxLength: 4000, onChange: event => update('prompt', event.target.value),
+                value: draft.prompt, maxLength: 4000, onChange: event => { update('prompt', event.target.value); updateMention(event.target); },
                 onKeyDown: event => {
+                    if (event.key === 'Escape' && mention) { event.nativeEvent.stopImmediatePropagation(); setMention(null); return; }
+                    if (mentionItems.length && ['ArrowUp', 'ArrowDown'].includes(event.key) && !event.nativeEvent.isComposing) {
+                        event.preventDefault();
+                        setMentionIndex(index => (index + mentionItems.length + (event.key === 'ArrowDown' ? 1 : -1)) % mentionItems.length);
+                        return;
+                    }
+                    if (event.key === 'Enter' && mentionItems.length && !event.nativeEvent.isComposing && !event.shiftKey) {
+                        event.preventDefault(); insertMention(mentionItems[mentionIndex] || mentionItems[0]); return;
+                    }
                     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) {
                         event.preventDefault();
                         event.currentTarget.form.requestSubmit();
                     }
                 } }),
+            draft.images.length > 0 && h('div', { className: 'layer-mentions', 'aria-label': '图片附件' },
+                ...draft.images.map(item => h(antd.Tag, { key: item.id, closable: true,
+                    onClose: () => update('images', draft.images.filter(image => image.id !== item.id)) }, item.name))),
+            mentionItems.length > 0 && h('div', { className: 'layer-mentions', 'aria-label': '引用地图图层' },
+                ...mentionItems.map((item, index) => h(antd.Button, { key: item.id, type: index === mentionIndex ? 'primary' : 'text',
+                    onMouseDown: event => event.preventDefault(), onClick: () => insertMention(item) }, item.name))),
             suggestion.items.length > 0 && h('div', { className: 'business-suggestion' },
                 h('span', null, suggestion.items.length > 1 ? '请选择要办理的业务' : '匹配业务'),
                 ...suggestion.items.map(item => button('layers', item.title,
@@ -357,6 +422,7 @@
                 !skill && button('paperclip', adding ? '正在读取本地材料…' : '添加材料', { type: 'text', loading: adding, onClick: () => addMaterials(() => api.material()) }),
                 !skill && iconButton('folder', '添加材料目录', { disabled: adding, onClick: () => addMaterials(() => api.material('any', true)) }),
                 h(window.GuizhiArcgisMaterials, { host: state?.arcgis.host, disabled: adding || busy, attach: attachArcgis, fail }),
+                iconButton('file', '添加图片', { disabled: busy, onClick: () => addImages(api.addImages()) }),
                 h('span', { className: 'spacer' }),
                 iconButton('mic', '语音对话', { type: 'default', onClick: () => {
                     if (!launcher && state?.speech.asr === 'off') showSettings('voice');
@@ -381,18 +447,24 @@
                 h('span', { className: 'muted' }, ready ? (state.settings.modelConfig.mode === 'local' ? '本地服务' : '在线服务')
                     : '请在工作台完成首次设置'),
                 h('span', null, h('kbd', null, 'Enter'), ' 发送　', h('kbd', null, 'Esc'), ' 收起')));
-        const sidebar = h('aside', { className: 'sidebar' },
-            iconButton('plus', '新的对话', { type: 'primary', disabled: sending || adding || mapEditing, onClick: () => resetConversation() }),
-            h('span', { className: mapOpen ? 'rail-item' : 'rail-current', title: '工作台', 'aria-label': '工作台',
-                'aria-current': mapOpen ? undefined : 'page' }, icon('app')),
-            iconButton('map', '地图工作区', { disabled: !ready || mapOpen, 'aria-current': mapOpen ? 'page' : undefined, onClick: () => openMap() }),
-            iconButton('grid', '业务中心', { disabled: !ready, onClick: () => showBusiness('browse') }),
-            iconButton('settings', '设置', { disabled: mapEditing, onClick: () => showSettings(true) }));
+        const sidebar = expanded => {
+            const nav = (glyph, label, props) => expanded
+                ? button(glyph, label, { type: 'text', title: label, ...props })
+                : iconButton(glyph, label, props);
+            return h('aside', { className: 'sidebar' + (expanded ? ' expanded' : '') },
+            nav('plus', '新的对话', { type: 'primary', disabled: sending || adding || mapEditing, onClick: () => resetConversation() }),
+            nav('app', '工作台', { className: mapOpen ? '' : 'rail-current', 'aria-current': mapOpen ? undefined : 'page',
+                disabled: mapEditing, onClick: () => showMapWorkspace(false) }),
+            nav('map', '地图工作区', { disabled: !ready || mapOpen, 'aria-current': mapOpen ? 'page' : undefined, onClick: () => openMap() }),
+            nav('grid', '业务中心', { disabled: !ready, onClick: () => showBusiness('browse') }),
+            nav('settings', '设置', { disabled: mapEditing, onClick: () => showSettings(true) }));
+        };
         const conversation = h('section', { className: 'conversation' + (task ? '' : ' conversation-empty'), 'aria-label': '办理对话' },
             task && h('div', { className: 'task-head' }, h('h1', null, turns[0].title),
                 h('span', { className: 'status-tag' }, labels[task.status] || '未完成')),
             h('div', { className: 'messages', ref: messages }, task ? turns.flatMap(item => [
-                h('article', { key: item.id + '-question', className: 'bubble user' }, item.prompt),
+                h('article', { key: item.id + '-question', className: 'bubble user' }, item.prompt, item.images?.length > 0 && h('small', { className: 'message-images' },
+                    item.images.map(image => image.name).join('、'))),
                 h(Result, { key: item.id + '-answer', task: item, retry, fail, voiceReply, openComponents,
                     parcel: resultTask?.id === item.id ? parcel : null, selectParcel: id => { viewResult(item.id); selectParcel(id); },
                     showMap: item.map || item.mapLayers?.length ? () => { viewResult(item.id); selectParcel(null); setTab('成果');
@@ -442,14 +514,6 @@
             }
             showMapWorkspace(true);
         }
-        async function bindMapSelection(item, others) {
-            try {
-                const supports = await Promise.all(others.filter(candidate => candidate.kind !== 'raster').slice(0, 29).map(candidate => api.map({ action: 'material', ref: candidate.ref, name: candidate.name })));
-                setDraft(old => ({ ...emptyDraft(), prompt: old.prompt, freeMode: true,
-                    materials: { inputs: [item, ...supports] } }));
-                showMapWorkspace(false);
-            } catch (error) { fail(error); throw error; }
-        }
         function replaceLayer(before, after) {
             const item = { ...after, name: before.name };
             setLayers(old => old.map(layer => mapKey(layer) === mapKey(before) ? item : layer));
@@ -464,7 +528,7 @@
             hidden: hiddenLayers, toggle: id => hideLayers(old => old.includes(id) ? old.filter(value => value !== id) : [...old, id]),
             selectLayer: id => { setActiveLayer(id); setMapSelection(null); },
             entries: coordinates, fail, close: () => showMapWorkspace(false), selection: mapSelection, setSelection: setMapSelection,
-            useSelection: bindMapSelection, replace: replaceLayer, editing: setMapEditing });
+            replace: replaceLayer, editing: setMapEditing });
         async function configure(value) {
             const next = await api.configure(value);
             setState(next);
@@ -476,7 +540,7 @@
             initial: settings, catalog, refresh, plans, initialMarkdown,
             close: () => { setInitialMarkdown(''); showSettings(false); },
             save: configure,
-        }) : h(Workbench, { appearance, saveAppearance, sidebar, conversation: mapWorkspace || conversation, inspector, fail,
+        }) : h(Workbench, { appearance, saveAppearance, sidebar, conversation: mapWorkspace || conversation, inspector: mapOpen ? null : inspector, fail,
             arcgis: () => showSettings('extensions'),
             connected: Boolean(state?.arcgis?.host) });
         return h(Theme, { appearance }, layout,

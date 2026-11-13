@@ -1,5 +1,5 @@
 const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, net, protocol, safeStorage, shell, Tray } = require('electron');
-const { randomBytes } = require('node:crypto');
+const { randomBytes, createHash } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
@@ -73,7 +73,16 @@ async function startDesktop(options) {
     let visual;
     let sync;
     let draft = {};
+    const imageInputs = new Map();
+    let mapLayers = new Map();
+    let mapSelection;
+    let mapCatalogVersion = 0;
+    const mapKey = ref => ref.run + ':' + ref.artifact;
+    const knownLayers = () => [...mapLayers.values()]
+        .map(item => ({ id: mapKey(item.ref), name: item.name }));
     let modelCheck;
+    let verifiedVision;
+    const visionIdentity = (config, key) => JSON.stringify([config, createHash('sha256').update(key).digest('hex')]);
     let voiceReply = null;
     const python = path.join(runtime, 'python', 'python.exe');
     const components = new Components(app.getPath('userData'), version, python, () => {
@@ -195,6 +204,54 @@ async function startDesktop(options) {
         desktop.captureShortcut(enabled);
     }, true);
     bind('readDraft', () => draft);
+    bind('mapReferences', () => knownLayers());
+    bind('addImages', async (surface, paths) => {
+        if (![window, launcher].includes(surface)) throw new Error('请从对话添加图片');
+        const files = paths || (await dialog.showOpenDialog(surface, { properties: ['openFile', 'multiSelections'],
+            filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp'] }] })).filePaths;
+        if (!Array.isArray(files) || files.length > 4) throw new Error('每轮最多添加 4 张图片');
+        const result = [];
+        for (const input of files) {
+            const file = externalPath(input);
+            if (!/\.(png|jpe?g|webp)$/i.test(file) || fs.statSync(file).size > 12 * 1024 * 1024) {
+                throw new Error('请添加不超过 12 MB 的 PNG、JPEG 或 WebP 图片');
+            }
+            let image = nativeImage.createFromPath(file);
+            if (image.isEmpty()) throw new Error('无法读取图片 ' + path.basename(file));
+            const { width, height } = image.getSize();
+            if (Math.max(width, height) > 1500) {
+                image = image.resize(width > height ? { width: 1500 } : { height: 1500 });
+            }
+            const id = randomBytes(16).toString('hex');
+            const png = image.toPNG();
+            const block = png.length <= 1024 * 1024
+                ? { mimeType: 'image/png', data: png.toString('base64') }
+                : { mimeType: 'image/jpeg', data: image.toJPEG(82).toString('base64') };
+            imageInputs.set(id, { type: 'image', ...block, name: path.basename(file) });
+            result.push({ id, name: path.basename(file) });
+        }
+        while (imageInputs.size > 24) imageInputs.delete(imageInputs.keys().next().value);
+        return result;
+    }, true);
+    bind('mapImage', async (surface, ref) => {
+        if (![window, launcher].includes(surface) || !ref || !/^[a-f0-9]{32}$/.test(ref.run) || ref.artifact !== 'raster_preview') {
+            throw new Error('影像引用无效');
+        }
+        const data = await controller.reader.map(controller.settings.workspace, { action: 'raster-preview', ref });
+        return 'data:image/png;base64,' + data;
+    }, true);
+    bind('mapCatalog', async (surface, items, selection) => {
+        if (surface !== window || !Array.isArray(items) || items.length > 256 ||
+            items.some(item => !item || typeof item.name !== 'string' || !item.name.trim() || item.name.length > 255 ||
+                !/^[a-f0-9]{32}$/.test(item.ref?.run) || !['import', 'export', 'boundaries', 'raster_preview'].includes(item.ref.artifact))) {
+            throw new Error('地图图层引用无效');
+        }
+        mapCatalogVersion += 1;
+        mapLayers = new Map(items.map(item => [mapKey(item.ref), item]));
+        mapSelection = selection && mapLayers.has(selection.key) && Array.isArray(selection.ids) && selection.ids.length <= 500
+            && selection.ids.every(Number.isSafeInteger) ? selection : undefined;
+        desktop.notify('mapReferences', knownLayers());
+    }, true);
     bind('saveDraft', (source, next) => {
         if (!next || typeof next !== 'object' || Array.isArray(next)) throw new Error('草稿无效');
         draft = next;
@@ -225,7 +282,7 @@ async function startDesktop(options) {
         if (command === 'reset') { resetConversation({}, true); return { reply: '好，我们开始新的对话。' }; }
         const prompt = command === 'send' ? draft.prompt : text;
         if (!prompt?.trim()) return { reply: '你可以直接告诉我想办理什么。' };
-        if (command !== 'send' && isBusinessRequest(prompt)) {
+        if (command !== 'send' && isBusinessRequest(prompt) && !namedLayers(prompt).length) {
             const current = draft;
             const workspace = controller.settings.workspace;
             const { exact, items } = matchBusiness(prompt, await controller.python('skills'));
@@ -242,14 +299,24 @@ async function startDesktop(options) {
         const values = draft.parameterText || {};
         const skillParameters = draft.skill && Object.keys(fields).length && parametersReady(fields, values)
             ? parameterValues(fields, values) : undefined;
-        const state = submitTask({ ...draft, prompt,
+        const state = await submitTask({ ...draft, prompt,
             skillParameters, dialogue: true });
         return { task: state.tasks[0].id };
     }, true);
     bind('configure', input => {
+        const { config, key } = controller.selectModel(input);
+        if (!controller.settings.modelVision || input.key?.trim() ||
+                JSON.stringify(config) !== JSON.stringify(controller.settings.modelConfig)) {
+            if (verifiedVision !== visionIdentity(config, key)) throw new Error('请先通过所选模型的读图测试');
+        }
         const workspace = controller.settings.workspace;
-        const state = controller.configure(input);
+        const state = controller.configure({ ...input, modelVision: true });
         if (state.settings.workspace !== workspace) {
+            imageInputs.clear();
+            mapLayers.clear();
+            mapCatalogVersion += 1;
+            desktop.notify('mapReferences', []);
+            mapSelection = undefined;
             setVoiceReply(null);
             replaceDraft();
             portrait.webContents.send('guizhi:voiceStop');
@@ -262,11 +329,13 @@ async function startDesktop(options) {
     bind('workspaceReady', input => controller.workspaceReady(input));
     bind('modelList', input => {
         const { config, key } = controller.selectModel(input, false);
-        return listModels(config, key);
+        return listModels(controller.runtime, config, key);
     });
-    bind('modelTest', input => {
+    bind('modelTest', async input => {
         const { config, key } = controller.selectModel(input);
-        return checkModelConnection(controller.runtime, config, key);
+        const result = await checkModelConnection(controller.runtime, config, key);
+        verifiedVision = visionIdentity(config, key);
+        return result;
     });
     bind('diagnostics', async (surface, check) => {
         if (surface !== window || typeof check !== 'boolean') throw new Error('诊断请求无效');
@@ -362,7 +431,7 @@ async function startDesktop(options) {
     });
     bind('materialPaths', (paths, kind) => controller.intake(paths, kind));
     bind('map', async (surface, input) => {
-        if (surface !== window || !input || !['describe', 'features', 'table', 'crs-search', 'raster-preview', 'assign', 'transform', 'edit', 'selection', 'material'].includes(input.action)) {
+        if (surface !== window || !input || !['describe', 'features', 'table', 'crs-search', 'raster-preview', 'assign', 'transform', 'edit', 'analyze'].includes(input.action)) {
             throw new Error('地图请求无效');
         }
         if (!controller.settings.workspace) throw new Error('请先选择成果保存位置');
@@ -424,6 +493,7 @@ async function startDesktop(options) {
     }
     function resetConversation(next = {}, fromVoice = false) {
         const state = controller.resetConversation();
+        imageInputs.clear();
         setVoiceReply(null);
         replaceDraft(next);
         if (!fromVoice) portrait.webContents.send('guizhi:voiceStop');
@@ -434,8 +504,58 @@ async function startDesktop(options) {
         if (!next || typeof next !== 'object' || Array.isArray(next)) throw new Error('草稿无效');
         return resetConversation(next);
     });
-    function submitTask(task) {
-        const state = controller.submit(task);
+    function namedLayers(prompt) {
+        return [...mapLayers.values()].filter(item => prompt.includes(item.name))
+            .filter((item, _, all) => !all.some(other => other.name.length > item.name.length && other.name.includes(item.name)))
+            .sort((a, b) => prompt.indexOf(a.name) - prompt.indexOf(b.name));
+    }
+    async function submitTask(task) {
+        if (controller.active || controller.modelTesting) throw new Error('已有任务在运行');
+        if (!controller.settings.modelVision) {
+            reveal();
+            window.webContents.send('guizhi:settings', 'model');
+            throw new Error('请先在设置中通过模型读图测试');
+        }
+        if (!task.skill) {
+            const explicit = [...task.prompt.matchAll(/[@＠]「([^」]+)」/gu)].map(match => match[1]);
+            const picks = explicit.length ? [...new Set(explicit)].map(name => {
+                const matches = [...mapLayers.values()].filter(item => item.name === name);
+                if (matches.length !== 1) throw new Error('请确认地图图层「' + name + '」存在且名称唯一');
+                return matches[0];
+            }) : namedLayers(task.prompt);
+            if (new Set(picks.map(item => item.name)).size !== picks.length) {
+                throw new Error('地图中有同名图层，请先移除不使用的图层');
+            }
+            const selected = mapSelection && mapLayers.get(mapSelection.key);
+            const asksSelection = /已选|选中|所选|选区|这[几两三四五一]块/u.test(task.prompt);
+            const useSelected = selected && mapSelection.ids.length && asksSelection && (!picks.length || picks.includes(selected));
+            if (asksSelection && !useSelected && (picks.length || /地图|图层/u.test(task.prompt))) {
+                throw new Error('请先在地图中选中对应图层的要素');
+            }
+            if (useSelected && !picks.includes(selected)) picks.unshift(selected);
+            if (picks.length) {
+                const workspace = controller.settings.workspace;
+                const selectedIds = mapSelection?.ids;
+                const version = mapCatalogVersion;
+                const inputs = await Promise.all(picks.map(item => {
+                    const bySelection = useSelected && selected === item;
+                    return controller.request('map', { action: bySelection ? 'selection' : 'material',
+                        ref: item.ref, name: item.name, ...(bySelection ? { revision: item.revision, fids: selectedIds } : {}) });
+                }));
+                if (controller.settings.workspace !== workspace || mapCatalogVersion !== version) {
+                    throw new Error('地图图层或选区已变更，请重新提交');
+                }
+                task = { ...task, materials: { ...task.materials, inputs: [...new Map(
+                    [...(task.materials?.inputs || []), ...inputs].map(item => [item.file + '#' + item.layer, item])).values()] } };
+            }
+        }
+        const imageIds = task.images || [];
+        if (!Array.isArray(imageIds) || imageIds.length > 4) throw new Error('每轮最多使用 4 张图片');
+        const imageBlocks = imageIds.map(item => {
+            if (!imageInputs.has(item?.id)) throw new Error('图片已失效，请重新添加');
+            return imageInputs.get(item.id);
+        });
+        const state = controller.submit({ ...task, imageBlocks });
         if (task.dialogue && speech.state().tts !== 'off') setVoiceReply({ task: state.tasks[0].id, text: '' });
         replaceDraft();
         broadcast(state);

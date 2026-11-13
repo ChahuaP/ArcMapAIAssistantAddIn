@@ -4,7 +4,7 @@
     const api = window.guizhi;
     const { button } = window.GuizhiShell;
     const localAddress = 'http://127.0.0.1:11434/v1';
-    const routes = [['custom', '自定义服务'], ['minimax-cn', 'MiniMax'], ['deepseek', 'DeepSeek'],
+    const routes = [['custom', '自定义服务'], ['minimax-cn', 'MiniMax'],
         ['openai', 'OpenAI'], ['anthropic', 'Anthropic']];
     const protocols = [['openai-completions', 'OpenAI Chat Completions'], ['openai-responses', 'OpenAI Responses'],
         ['anthropic-messages', 'Anthropic Messages']];
@@ -15,10 +15,10 @@
         '服务地址': '填写服务商给的基础地址，例如 https://ai.example.gov.cn/v1。',
         '模型查询地址': '一般留空。服务商另有列表地址时填写，例如 https://ai.example.gov.cn/v1/models。',
         'API 密钥': '粘贴服务商后台生成的密钥，例如 sk-…。无需加引号或 Bearer。',
-        '模型名称': '从查询结果选择模型，例如 MiniMax-M3.1-Flash。',
+        '模型名称': '选择支持图片理解的模型，例如 MiniMax-M3.1-Flash。保存前需要通过一次读图测试。',
     };
     const hint = label => h(antd.Popover, { content: h('span', { className: 'model-help' }, help[label]),
-        trigger: 'click', placement: 'topLeft' }, h(antd.Button, { size: 'small', type: 'text',
+        trigger: 'click', placement: 'topLeft' }, h(antd.Button, { size: 'small', type: 'text', className: 'model-help-trigger',
         'aria-label': label + '说明' }, '?'));
     const field = (label, control) => h('div', { className: 'model-field' },
         h('div', { className: 'model-field-label' }, label, hint(label)), React.cloneElement(control, { 'aria-label': label }));
@@ -43,6 +43,8 @@
         const [loading, setLoading] = useState('');
         const [listed, setListed] = useState([]);
         const [manual, setManual] = useState(false);
+        const [unverified, setUnverified] = useState([]);
+        const [candidate, setCandidate] = useState('');
         const local = config.mode === 'local';
         const custom = config.provider === 'custom';
         const hasSavedKey = current.keyConfigured && scope(current.modelConfig) === scope(config);
@@ -56,30 +58,35 @@
                 next.model = '';
                 setListed([]);
                 setManual(false);
+                setUnverified([]);
+                setCandidate('');
             }
             change({ ...value, modelConfig: next, key: changedRoute ? '' : key });
             setStatus('');
             setError('');
             verified(false);
         }
-        async function run(kind) {
-            setStatus(kind === 'test' ? '正在检查模型服务…' : '正在查询模型…');
+        async function run(kind, selected = config.model) {
+            setStatus(kind === 'test' ? '正在测试模型读图…' : '正在查询模型…');
             setError('');
             setLoading(kind);
             busy(true);
             if (kind === 'test') verified(false);
             try {
                 if (kind === 'list') {
-                    const { models, supported } = await api.modelList(value);
+                    const { models, supported, unverified: candidates } = await api.modelList(value);
+                    setUnverified(candidates || []);
                     setListed(models);
                     setManual(!supported);
                     if (supported && config.model && !models.includes(config.model)) update({ model: '' });
                     setStatus(!supported ? '此服务不提供模型列表，请填写服务商给出的模型名称。'
                         : models.length ? `已查询到 ${models.length} 个模型，请选择`
-                            : '没有查到可选模型，请检查账户权限或本机已安装模型。');
+                            : '没有查到已声明支持读图的模型。');
                 } else {
-                    const result = await api.modelTest(value);
-                    setStatus(result.check === 'catalog' ? '连接正常，已找到所选模型' : '连接正常，模型已响应');
+                    await api.modelTest({ ...value, modelConfig: { ...config, model: selected } });
+                    if (selected !== config.model) update({ model: selected });
+                    setListed(old => [...new Set([...old, selected])]);
+                    setStatus('读图测试通过');
                     verified(true);
                 }
             } catch (error) {
@@ -122,13 +129,20 @@
                 h('div', { className: 'setting-fields' },
                     field('模型名称', manual ? input('model', { placeholder: '例如 my-model' })
                         : select('model', [['', listed.length ? '请选择模型' : '请先读取模型'],
-                            ...modelOptions.map(name => [name, name])], model => update({ model })))),
+                            ...modelOptions.map(name => [name, name])], model => update({ model }))),
+                    custom && !manual && unverified.some(name => !listed.includes(name)) && h('div', { className: 'model-field' },
+                        h('span', { className: 'model-field-label' }, '验证服务中的其他模型'),
+                        h(antd.Select, { 'aria-label': '待验证模型', showSearch: true, value: candidate || undefined,
+                            options: unverified.filter(name => !listed.includes(name)).map(name => ({ value: name, label: name })),
+                            onChange: setCandidate, disabled: Boolean(loading) }),
+                        button('server', '验证读图后使用', { disabled: Boolean(loading) || !canQuery || !candidate,
+                            onClick: () => run('test', candidate) }))),
                 h('div', { className: 'setting-row service-actions' },
                     h('span', { className: error ? 'error' : 'muted', role: error ? 'alert' : 'status' }, error || status),
                     h('div', { className: 'business-actions' },
                         button('layers', '读取模型',
                             { loading: loading === 'list', disabled: Boolean(loading) || !canQuery, onClick: () => run('list') }),
-                        button('server', '测试连接', { loading: loading === 'test',
+                        button('server', '测试读图', { loading: loading === 'test',
                             disabled: Boolean(loading) || !canQuery || !config.model?.trim(), onClick: () => run('test') })))));
 
     }

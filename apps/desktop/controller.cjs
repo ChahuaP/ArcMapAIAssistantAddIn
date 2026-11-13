@@ -94,9 +94,9 @@ class DesktopController {
     }
 
     state() {
-        const { workspace, modelConfig, showOperation, screenHighlight, carrier, encryptedKey } = this.settings;
+        const { workspace, modelConfig, showOperation, screenHighlight, carrier, encryptedKey, modelVision } = this.settings;
         return { settings: { workspace, modelConfig, showOperation, screenHighlight,
-            carrier: carrier || 'none', keyConfigured: Boolean(modelConfig && encryptedKey) },
+            carrier: carrier || 'none', modelVision: Boolean(modelVision), keyConfigured: Boolean(modelConfig && encryptedKey) },
             tasks: this.tasks, busy: Boolean(this.active) };
     }
 
@@ -154,7 +154,7 @@ class DesktopController {
             encryptedKey = this.storage.encryptString(key).toString('base64');
         }
         const settings = { workspace, modelConfig: config, showOperation: input.showOperation !== false,
-            screenHighlight: input.screenHighlight !== false, carrier: this.settings.carrier, encryptedKey };
+            screenHighlight: input.screenHighlight !== false, carrier: this.settings.carrier, modelVision: input.modelVision === true, encryptedKey };
         save(this.file, settings);
         const changedWorkspace = workspace !== this.settings.workspace;
         this.settings = settings;
@@ -218,7 +218,7 @@ class DesktopController {
     }
 
 
-    submit({ prompt, project, control, skill, materials = {}, skillParameters, parameterText, dialogue = false }) {
+    submit({ prompt, project, control, skill, materials = {}, skillParameters, parameterText, images = [], imageBlocks = [], dialogue = false }) {
         if (!this.settings.workspace) throw new Error('请先选择成果保存位置');
         if (this.active || this.modelTesting) throw new Error('已有任务在运行');
         if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 4000) throw new Error('请输入办理事项');
@@ -253,7 +253,7 @@ class DesktopController {
         if (skillParameters && Buffer.byteLength(JSON.stringify(skillParameters)) > 65536) throw new Error('办理参数最多 64 KB');
         const { config, key } = this.selectModel({ modelConfig: this.settings.modelConfig });
         const task = { id: randomUUID(), title: [...prompt.trim()].slice(0, 32).join(''), prompt: prompt.trim(),
-            project, control, skill, materials, parameterText, dialogue, status: 'running', createdAt: new Date().toISOString() };
+            project, control, skill, materials, parameterText, images, dialogue, status: 'running', createdAt: new Date().toISOString() };
         const next = [task, ...this.tasks];
         this.persist(next);
         this.tasks = next;
@@ -261,7 +261,7 @@ class DesktopController {
         const active = { stop, task, config, files: Object.values(bindings).flat().map(item => item.file) };
         this.active = active;
         const options = { workspace: this.settings.workspace, modelConfig: config, apiKey: key,
-            prompt: task.prompt, skill, skillParameters, materials: bindings, layerLabels, previousRun, history, dialogue,
+            prompt: task.prompt, skill, skillParameters, materials: bindings, layerLabels, previousRun, history, dialogue, images: imageBlocks,
             projectPlan: project?.plan || materials.project?.[0]?.plan,
             controlPlan: control?.plan || materials.control?.[0]?.plan };
         active.done = this.dispatch(options, { signal: stop.signal, onEvent: event => {
@@ -343,6 +343,8 @@ class DesktopController {
                 if (map) task.map = JSON.parse(map.bytes);
                 task.mapLayers = record.result.evidence
                     .filter(item => ['export', 'boundaries'].includes(item.step) && path.extname(item.path).toLowerCase() === '.gpkg')
+                    .map(item => ({ run: task.runId, artifact: item.step }));
+                task.outputImages = record.result.evidence.filter(item => item.step === 'raster_preview')
                     .map(item => ({ run: task.runId, artifact: item.step }));
                 task.hasReport = Boolean(checkedArtifact(record, 'report'));
                 const findings = checkedArtifact(record, 'case');

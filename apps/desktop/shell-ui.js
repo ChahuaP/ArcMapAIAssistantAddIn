@@ -59,7 +59,7 @@
             !settings && !onboarding && h('div', { className: 'title-group' },
                 button('link', '第三方扩展', { type: 'text', onClick: arcgis,
                     title: connected ? 'ArcGIS 已连接' : '查看第三方扩展' }),
-                iconButton('right', '折叠或展开材料与成果', { onClick: right, onKeyDown: resize(1) })));
+                right && iconButton('right', '折叠或展开材料与成果', { onClick: right, onKeyDown: resize(1) })));
     }
 
     function Workbench({ appearance, saveAppearance, sidebar, conversation, inspector, arcgis, connected, fail }) {
@@ -77,8 +77,8 @@
             return () => removeEventListener('resize', resize);
         }, []);
         const compact = width < 1040;
-        const left = panels[0] ? 56 : 0;
-        const right = compact || !panels[1] ? 0 : Math.min(panels[1], Math.max(250, width - left - 410));
+        const left = panels[0] >= 160 ? 176 : 56;
+        const right = !inspector || compact || !panels[1] ? 0 : Math.min(panels[1], Math.max(250, width - left - 410));
         function persist(next) {
             setPanels(next);
             next.forEach((size, index) => { if (size > 0) restored.current[index] = size; });
@@ -87,7 +87,7 @@
         function toggle(index) {
             if (index === 1 && compact) return showDrawer(value => !value);
             const next = [...panels];
-            next[index] = next[index] ? 0 : restored.current[index];
+            next[index] = index === 0 ? (left === 56 ? 176 : 56) : next[index] ? 0 : restored.current[index];
             persist(next);
         }
         function resize(index) {
@@ -100,15 +100,15 @@
                 persist(next);
             };
         }
-        const sideSizes = sizes => [left ? Math.round(sizes[0]) : 0, compact ? panels[1] : right ? Math.round(sizes[2]) : 0];
+        const sideSizes = sizes => [left, compact || !inspector ? panels[1] : right ? Math.round(sizes[2]) : 0];
         return h('div', { className: 'desktop-frame' },
-            h(Titlebar, { arcgis, connected, left: () => toggle(0), right: () => toggle(1), resize }),
+            h(Titlebar, { arcgis, connected, left: () => toggle(0), right: inspector && (() => toggle(1)), resize }),
             h(Splitter, { className: 'workbench-panels', lazy: true,
                 onResizeEnd: sizes => persist(sideSizes(sizes)) },
-                h(Splitter.Panel, { size: left, min: left, max: left, resizable: false }, left > 0 && sidebar),
+                h(Splitter.Panel, { size: left, min: left, max: left, resizable: false }, sidebar(left > 56)),
                 h(Splitter.Panel, { min: 400 }, conversation),
                 h(Splitter.Panel, { size: right, min: right ? 250 : 0, max: 520, resizable: Boolean(right) }, right > 0 && inspector)),
-            compact && h(Drawer, { title: '材料与成果', width: 360, getContainer: false,
+            inspector && compact && h(Drawer, { title: '材料与成果', width: 360, getContainer: false,
                 rootStyle: { position: 'absolute' }, open: drawer, onClose: () => showDrawer(false) }, inspector));
     }
     window.GuizhiShell = { Theme, Workbench, Titlebar, brand, button, iconButton, icon, productName };

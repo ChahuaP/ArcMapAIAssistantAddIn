@@ -190,14 +190,44 @@ def request(workspace, payload):
         from pyproj.database import query_crs_info
         query = str(payload.get("query", "")).strip().casefold()
         defaults = {"4490", "4326", "4548", "4550", "3857"}
-        return [{"value": "EPSG:" + item.code, "label": item.name + " · EPSG:" + item.code,
-                 "units": "degrees" if item.type.name.startswith("GEOGRAPHIC") else "m"}
-                for item in query_crs_info(auth_name="EPSG", allow_deprecated=False)
-                if (query and (query in item.name.casefold() or query.removeprefix("epsg:") == item.code)
-                    or not query and item.code in defaults)][:30]
+        entries = [item for item in query_crs_info(auth_name="EPSG", allow_deprecated=False)
+                   if (query and (query in item.name.casefold() or query.removeprefix("epsg:") == item.code)
+                       or not query and item.code in defaults)][:30]
+        result = []
+        for item in entries:
+            crs = CRS.from_epsg(item.code)
+            if not (crs.is_geographic or crs.is_projected) or len(crs.axis_info) != 2:
+                continue
+            units = "degrees" if crs.is_geographic else "m" if crs.axis_info[0].unit_conversion_factor == 1 else None
+            result.append({"value": "EPSG:" + item.code, "label": item.name + " · EPSG:" + item.code, "units": units})
+        return result
+    if action == "material" and payload["ref"].get("artifact") == "raster_preview":
+        run = payload["ref"]["run"]
+        refs = workspace.read(run)["result"]["evidence"]
+        evidence = next(item for item in refs if item["step"] == "raster-1")
+        file = read_artifact(workspace, run, evidence["step"])
+        return {"file": str(file), "layer": None, "layers": [], "kind": "raster",
+                "name": payload["name"], "revision": evidence["sha256"]}
     file, name = source(workspace, payload["ref"])
     if action == "material":
         return {**material(file, name), "layers": [name], "kind": "vector", "name": payload.get("name", name)}
+    if action == "analyze":
+        kind = payload["kind"]
+        operations = {"area": "vector.area", "buffer": "vector.buffer", "clip": "vector.clip"}
+        if kind == "count":
+            return {"feature_count": describe(workspace, payload["ref"], file, name)["count"]}
+        if kind not in operations:
+            raise ValueError("地图分析工具无效")
+        items = [material(file, name)]
+        if kind == "clip":
+            mask, layer = source(workspace, payload["mask"])
+            items.append(material(mask, layer))
+        parameters = {"distance": payload["distance"], "unit": "meters"} if kind == "buffer" else {}
+        record = successful(run_operation(workspace.root, {"operation": operations[kind], "inputs": items, "parameters": parameters}))
+        if kind == "area":
+            return record["result"]["statistics"]
+        return {"layer": describe(workspace, {"run": record["id"], "artifact": "export"}),
+                "title": "缓冲" if kind == "buffer" else "裁切"}
     if action == "export":
         return package_layer(workspace, file, payload["output"], name)
     if action == "assign":

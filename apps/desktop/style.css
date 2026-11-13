@@ -306,21 +306,34 @@ dialog label { display: grid; gap: 5px; }
 .result-progress[open] > summary { margin-bottom: 12px; }
 
 
-.workspace-map { height: 100%; min-height: 0; display: flex; flex-direction: column; background: var(--panel); }
-.workspace-map > .map-head { padding: 10px 14px; border-bottom: 1px solid var(--line); }
-.workspace-map > .map-head h2 { margin-right: auto; }
-.map-workspace-body { display: grid; grid-template-columns: clamp(136px, 23%, 220px) minmax(0, 1fr); min-height: 0; flex: 1; }
-.map-layers { padding: 8px; display: flex; flex-direction: column; gap: 6px; overflow: auto; border-right: 1px solid var(--line); }
-.map-layer-row { display: grid; grid-template-columns: 16px 9px minmax(0, 1fr) 24px; align-items: center; gap: 6px; }
-.map-layer-row .ant-btn { min-width: 0; padding-inline: 6px; justify-content: flex-start; }
+.workspace-map {
+    --gis-bg: #e8eef5; --gis-edge: #b4c4d7; --gis-map: #e4edf6;
+    height: 100%; min-height: 0; min-width: 0; display: flex; flex-direction: column;
+    gap: 8px; padding: 8px; background: var(--gis-bg);
+}
+[data-theme="dark"] .workspace-map { --gis-bg: #101a28; --gis-edge: #41566f; --gis-map: #182a3d; }
+.map-workspace-body {
+    display: grid; grid-template-columns: clamp(184px, 23%, 240px) minmax(0, 1fr);
+    gap: 8px; min-height: 0; flex: 1;
+}
+.map-layers, .map-viewport, .map-attribute-panel, .map-ribbon {
+    min-width: 0; background: var(--panel); border: 1px solid var(--gis-edge); border-radius: 8px;
+}
+.map-layers { padding: 8px; display: flex; flex-direction: column; gap: 6px; overflow: auto; }
+.map-layer-row {
+    display: grid; grid-template-columns: 16px 9px minmax(0, 1fr) 26px;
+    align-items: center; gap: 6px; padding: 3px 5px; border: 1px solid var(--line); border-radius: 6px;
+}
+.map-layer-row:has(.map-layer-active) { background: var(--soft); border-color: var(--gis-edge); }
+.map-layer-row .ant-btn { min-width: 0; padding-inline: 5px; justify-content: flex-start; }
 .map-layer-row .ant-btn span { overflow: hidden; text-overflow: ellipsis; }
 .map-swatch { width: 8px; height: 8px; border-radius: 3px; background: #1785db; }
 .map-swatch[data-color="1"] { background: #bf6f2b; }
 .map-swatch[data-color="2"] { background: #17a489; }
 .map-swatch[data-color="3"] { background: #8263ca; }
 .map-swatch[data-color="4"] { background: #cc5785; }
-.map-viewport { display: flex; flex-direction: column; min-height: 0; min-width: 0; position: relative; }
-.map-viewport .geo-map { position: relative; }
+.map-viewport { display: flex; flex-direction: column; min-height: 0; position: relative; overflow: hidden; }
+.map-viewport .geo-map { position: relative; background: var(--gis-map); }
 .map-notice, .map-empty { position: absolute; inset: 12px 12px auto; padding: 8px 12px; border-radius: 8px; background: var(--panel); color: var(--ink); pointer-events: none; }
 .map-empty { inset: 45% 10% auto; text-align: center; }
 .map-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 7px 10px; background: var(--sub); }
@@ -328,7 +341,80 @@ dialog label { display: grid; gap: 5px; }
 .map-coordinate { display: grid; margin-top: auto; padding: 6px; }
 .map-coordinate > :is(span,.ant-select), .map-coordinate-actions > .ant-select { width: 100%; margin-top: 6px; }
 .map-coordinate-actions { display: grid; gap: 6px; }
-.map-attributes { border-top: 1px solid var(--line); max-height: 240px; overflow: auto; }
+.map-attribute-panel { overflow: hidden; flex: none; }
+.map-attribute-head {
+    display: flex; gap: 10px; align-items: center; min-height: 36px; padding: 4px 9px 4px 12px;
+    border-bottom: 1px solid var(--gis-edge); background: var(--sub);
+}
+.map-attribute-head > span { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.map-attribute-head > button { margin-left: auto; }
+.map-attributes { max-height: min(210px, 32vh); overflow: auto; }
+.map-attributes .ant-table-pagination.ant-pagination { margin: 6px 10px; }
+.map-attributes .ant-table-thead > tr > th { background: var(--sub); }
 
 .map-field-editor { display: grid; gap: 8px; max-height: 55vh; overflow: auto; }
 .map-field-editor > label { display: grid; gap: 4px; }
+
+.sidebar.expanded { align-items: stretch; padding-inline: 10px; }
+.sidebar.expanded > .ant-btn { width: 100%; display: flex; justify-content: flex-start; gap: 10px; }
+.model-field-label { gap: 10px; }
+.model-field-label .model-help-trigger.ant-btn { width: 19px; height: 19px; border: 1px solid var(--border);
+    color: var(--muted); border-radius: 50%; font-size: 11px; display: inline-grid; place-items: center; }
+.model-field-label .model-help-trigger.ant-btn:hover { color: var(--accent); border-color: currentColor; }
+
+.layer-mentions { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 10px 6px; padding: 5px;
+    border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.layer-mentions > .ant-btn { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+
+.map-ribbon { overflow: hidden; }
+.ribbon-tabs {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 7px 10px; background: var(--sub); border-bottom: 1px solid var(--gis-edge);
+}
+.ribbon-tabs [role=tablist] { display: flex; gap: 4px; min-width: 0; overflow-x: auto; }
+.ribbon-tabs [role=tab] { flex: none; padding-inline: 10px; border: 1px solid transparent; }
+.ribbon-tabs [aria-selected=true] { background: var(--soft); color: var(--ink); border-color: var(--gis-edge); font-weight: 600; }
+.ribbon-tabs [aria-selected=true] svg, .ribbon-actions .ant-btn:not(:disabled):not(.ant-btn-primary) svg { color: var(--accent); }
+.ribbon-tools { display: flex; gap: 8px; align-items: stretch; overflow-x: auto; padding: 8px 10px; }
+.ribbon-group {
+    display: grid; gap: 5px; min-width: max-content; padding: 6px 8px;
+    background: var(--sub); border: 1px solid var(--line); border-radius: 6px;
+}
+.ribbon-group > span { color: var(--muted); font-size: 11px; }
+.ribbon-actions { display: flex; gap: 6px; align-items: center; }
+.ribbon-actions > .ant-btn, .map-layer-head > .ant-btn, .ribbon-tabs > .ant-btn { min-height: 28px; }
+.map-layer-head {
+    display: flex; gap: 6px; align-items: center; justify-content: space-between;
+    padding: 2px 0 8px; border-bottom: 1px solid var(--line);
+}
+.map-layer-head strong, .map-attribute-head strong, .map-status-crs, .gis-dialog-title {
+    display: inline-flex; align-items: center; gap: 7px; white-space: nowrap;
+}
+.map-layer-head strong svg, .map-attribute-head strong svg, .gis-dialog-title svg { color: var(--accent); flex: none; }
+.map-status {
+    order: 9; display: flex; gap: 12px; align-items: center; overflow: hidden;
+    padding: 3px 9px; color: var(--muted); font-size: 12px;
+}
+.map-status > span { white-space: nowrap; }
+.map-status-crs { margin-left: auto; min-width: 0; }
+.map-status-crs > span { overflow: hidden; text-overflow: ellipsis; }
+.ribbon-actions .map-coordinate { display: flex; gap: 8px; align-items: center; padding: 0; min-width: 220px; }
+
+.gis-modal-root .gis-dialog .ant-modal-content {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    padding: 18px 20px; box-shadow: 0 14px 48px var(--shadow);
+}
+.gis-modal-root .gis-dialog .ant-modal-header { background: transparent; margin-bottom: 12px; }
+.gis-modal-root .gis-dialog .ant-modal-title { color: var(--ink); }
+.gis-modal-root .gis-dialog .ant-modal-footer { margin-top: 16px; }
+.gis-input-layer, .gis-analysis-result {
+    padding: 9px 11px; border: 1px solid var(--line); border-radius: 7px; background: var(--sub);
+}
+.gis-input-layer { display: flex; align-items: center; gap: 9px; }
+.gis-input-layer > svg { color: var(--accent); flex: none; }
+.gis-input-layer > div { display: grid; gap: 2px; overflow-wrap: anywhere; }
+.gis-input-layer small { color: var(--muted); }
+.gis-analysis-result { margin: 0; font-weight: 600; }
+
+.reply-image { display: block; max-width: 100%; max-height: 440px; object-fit: contain; border-radius: 8px; }
+.message-images { display: block; margin-top: 5px; color: var(--muted); }

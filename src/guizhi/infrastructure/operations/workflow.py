@@ -183,7 +183,7 @@ def execute(ctx, specification: dict):
     outputs = {}
     for record in records.values():
         for ref in record["result"]["evidence"]:
-            if ref["step"] in {"export", "report", "map", "table", "view", "selection", "case", "package", "boundaries"}:
+            if ref["step"] in {"export", "report", "map", "table", "view", "selection", "case", "package", "boundaries", "raster_preview"}:
                 outputs[ref["step"]] = (record["id"], ref["sha256"])
     for kind, (run_id, checksum) in outputs.items():
         src = read_artifact(ctx.workspace, run_id, kind)

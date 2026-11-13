@@ -37,6 +37,7 @@ function verifiedResponse(receipt, dialogue) {
             if (findings.length) parts.push(findings.join('、') + '。');
         }
     }
+    if (receipt.steps?.some(step => step.operation === 'map_raster.preview')) parts.push('影像预览已生成。');
     if (stats.area_m2 !== undefined) parts.push(`合并范围面积 ${area(stats.area_m2)} m²。`);
     if (stats.feature_count !== undefined) parts.push(`共 ${stats.feature_count} 个要素。`);
     if (stats.geometry_types && !dialogue) parts.push(Object.entries(stats.geometry_types)
@@ -137,10 +138,11 @@ export async function dispatch(options, { signal, onEvent = () => {}, getService
     const schema = ['capabilities', 'skills', 'semantics', 'knowledge']
         .map(name => readFileSync(join(source, 'src', 'guizhi', 'domain', name + '.py')));
     const history = options.history || [];
+    const images = options.images || [];
     const request = history.length || options.dialogue
         ? JSON.stringify({ prompt: options.prompt, history, dialogue: Boolean(options.dialogue) }) : options.prompt;
     const provenance = { provider, model, route_sha256: hash(JSON.stringify(modelConfig)),
-        profile_sha256: hash(readFileSync(profile)), request_sha256: hash(request),
+        profile_sha256: hash(readFileSync(profile)), request_sha256: hash(images.length ? JSON.stringify([request, images.map(image => hash(image.data))]) : request),
         schema_sha256: hash(Buffer.concat(schema)), retrieval_version: '1.0.0' };
     const deadline = AbortSignal.timeout(timeoutMs);
     const stop = signal ? AbortSignal.any([signal, deadline]) : deadline;
@@ -150,12 +152,19 @@ export async function dispatch(options, { signal, onEvent = () => {}, getService
     const materials = { ...options.materials };
     if (options.input && options.layer) materials.project = [{ file: resolve(options.input), layer: options.layer }];
     if (options.control && options.controlLayer) materials.control = [{ file: resolve(options.control), layer: options.controlLayer }];
+    const imageRecords = images.map(({ name, mimeType, data }, index) => {
+        const bytes = Buffer.from(data, 'base64');
+        const artifact = 'input-image-' + (index + 1) + (mimeType === 'image/png' ? '.png' : '.jpg');
+        writeFileSync(join(directory, artifact), bytes, { flag: 'wx' });
+        return { name, mimeType, artifact, sha256: hash(bytes) };
+    });
     const requestFile = join(directory, 'replay-input.json');
     const operationPath = join(directory, 'operation.json');
     const budgetPath = join(directory, 'budget.json');
     writeFileSync(requestFile, JSON.stringify({ materials, provenance,
         skill: options.skill ?? null, previous_run: options.previousRun ?? null, project_plan: options.projectPlan ?? null,
         control_plan: options.controlPlan ?? null, skill_parameters: options.skillParameters ?? null,
+        image_inputs: imageRecords,
         dsh: versions['@deepseek-ai/dsh'] }));
     const usage = new Map();
     function event(item) {
@@ -207,10 +216,12 @@ export async function dispatch(options, { signal, onEvent = () => {}, getService
             ]));
             const selection = prepared.selected ? `已选技能和本轮材料摘要：${JSON.stringify(prepared.selected)}。`
                 : `本轮材料图层清单（键为 material. 后的引用）：${JSON.stringify(layers)}。已选技能无。`;
-            const context = `${selection}${bound}有已选历史成果：${Boolean(options.previousRun)}。\n`;
+            const visualContext = images.length ? '本轮用户消息有图片附件。图片内容问题直接看图回答。\n' : '';
+            const context = `${visualContext}${selection}${bound}有已选历史成果：${Boolean(options.previousRun)}。\n`;
             const conversation = history.length ? '最近对话记录（每项为用户提问与规智答复）：' + JSON.stringify(history) + '\n' : '';
             const speech = options.dialogue ? '本轮使用语音输入。先实际办理，再用简洁口语回答，不用 Markdown。\n' : '';
-            const run = prompt => harness.run(prompt, {
+            const run = (prompt, includeImages = false) => harness.run(includeImages && images.length
+                ? [{ type: 'text', text: prompt }, ...images] : prompt, {
                 sessionId: id,
                 onNotification(note) {
                     if (note.method === 'session.status') {
@@ -231,7 +242,7 @@ export async function dispatch(options, { signal, onEvent = () => {}, getService
                     event(item);
                 },
             });
-            let response = await run(context + conversation + speech + '用户请求：' + options.prompt);
+            let response = await run(context + conversation + speech + '用户请求：' + options.prompt, true);
             ran = true;
             const needsSelectedWorkflow = options.skill && roles.length > 0 && /^请办理/u.test(options.prompt.trim());
             const needsMeasurement = roles.length > 0 &&

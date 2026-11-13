@@ -58,7 +58,7 @@ function modelKey(config, value) {
 
 function route(config) {
     const id = config.provider !== 'custom' ? config.provider : 'guizhi-' + config.mode;
-    const settings = { apiKeyEnv: 'GUIZHI_MODEL_KEY', models: [{ id: config.model }] };
+    const settings = { apiKeyEnv: 'GUIZHI_MODEL_KEY', models: [{ id: config.model, input: ['text', 'image'] }] };
     if (config.provider === 'custom') {
         Object.assign(settings, { api: config.api, baseURL: config.baseUrl,
             defaultContextWindow: config.mode === 'local' ? 8192 : 32768, defaultMaxTokens: 2048 });

@@ -17,11 +17,11 @@ function createShell({ userData, icon, verifyStartup }) {
         shortcut: shortcutPattern.test(stored.shortcut) ? stored.shortcut : 'Ctrl+G',
         panels: [0, 1].map(index => {
             const size = stored.panels?.[index];
-            return Number.isFinite(size) ? size === 0 ? 0 : (index === 0 ? 56 : clamp(size, 250, 520)) : [56, 362][index];
+            return Number.isFinite(size) ? size === 0 && index === 1 ? 0 : (index === 0 ? (size >= 160 ? 176 : 56) : clamp(size, 250, 520)) : [56, 362][index];
         }),
         expandedPanels: [0, 1].map(index => {
             const size = stored.expandedPanels?.[index] || stored.panels?.[index];
-            return Number.isFinite(size) && size > 0 ? (index === 0 ? 56 : clamp(size, 250, 520)) : [56, 362][index];
+            return Number.isFinite(size) && size > 0 ? (index === 0 ? (size >= 160 ? 176 : 56) : clamp(size, 250, 520)) : [56, 362][index];
         }),
         positions: stored.positions || {},
         displayId: stored.displayId,
