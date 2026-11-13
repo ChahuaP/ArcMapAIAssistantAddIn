@@ -1,6 +1,6 @@
 import 'ol/ol.css';
 import { MapProcessing, TOOL_GROUPS } from './map-processing.js';
-import { LayerProperties, MxdOpen, categoryValue, layerSymbol, opacity, symbol } from './map-layer-dialog.js';
+import { LayerProperties, MapProperties, MxdOpen, categoryValue, defaultMapBackground, layerSymbol, opacity, symbol } from './map-layer-dialog.js';
 import Map from 'ol/Map.js';
 import View from 'ol/View.js';
 import Projection from 'ol/proj/Projection.js';
@@ -58,7 +58,7 @@ const glyphs = {
 };
 const commandIcons = {
     全图: 'extent', 定位图层: 'target', 放大: 'zoomIn', 缩小: 'zoomOut', 清除选择: 'clear', 按属性选择: 'select', 按位置选择: 'target', 选中要素另存为图层: 'download',
-    属性表: 'table', 添加图层: 'add', 导出属性表: 'table', 最近成果: 'table', 添加字段: 'add', 删除字段: 'trash', 修复几何: 'pencil', 新建图层: 'add', 复制图层: 'layers', 合并图层: 'layers', '导出 SHP': 'download', 坐标系设置: 'globe', '打开 MXD': 'map', '保存 MXD': 'save',
+    属性表: 'table', 添加图层: 'add', 导出属性表: 'table', 最近成果: 'table', 添加字段: 'add', 删除字段: 'trash', 修复几何: 'pencil', 新建图层: 'add', 复制图层: 'layers', 合并图层: 'layers', '导出 SHP': 'download', 坐标系设置: 'globe', 地图属性: 'map', '打开 MXD': 'map', '保存 MXD': 'save',
     编辑图层: 'pencil', 选择: 'select', 绘制: 'pencil', 编辑顶点: 'node', 移动: 'move',
     完成绘制: 'check', 撤销绘制点: 'undo', 编辑属性: 'table', 删除要素: 'trash',
     撤销: 'undo', 保存新版本: 'save', 退出编辑: 'close', 面积汇总: 'area', 缓冲分析: 'buffer',
@@ -74,10 +74,8 @@ function glyph(name, size = 17) {
 const roles = { project: '项目范围', coverage: '重叠范围' };
 const key = item => item.ref.run + ':' + item.ref.artifact;
 const projection = (code, units) => new Projection({ code: code || 'local', units: units || 'm' });
-const colorHex = value => {
-    const rgb = value.match(/^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/);
-    return rgb ? '#' + rgb.slice(1).map(channel => Number(channel).toString(16).padStart(2, '0')).join('') : null;
-};
+const fillColor = (color, percent) => color + Math.round(percent * 255 / 100).toString(16).padStart(2, '0');
+const classFill = (settings, color, fill) => settings.fill === null || fill === null ? null : fill || color;
 const feature = item => format.readFeature({ type: 'Feature', ...item });
 const style = (color, selected, settings) => {
     const appearance = symbol(settings, color);
@@ -85,7 +83,7 @@ const style = (color, selected, settings) => {
     const stroke = !appearance.noOutline || selected ? new Stroke({ color: selected ? '#f7be49' : appearance.color,
         width: selected ? 3 : appearance.width, lineDash: selected ? undefined : lineDash }) : undefined;
     const fill = appearance.fill || selected
-        ? new Fill({ color: selected ? '#f7be494e' : appearance.fill + Math.round(appearance.fillOpacity * 255 / 100).toString(16).padStart(2, '0') }) : undefined;
+        ? new Fill({ color: selected ? '#f7be494e' : fillColor(appearance.fill, appearance.fillOpacity) }) : undefined;
     const point = { radius: selected ? 6 : appearance.size / 2,
         fill: new Fill({ color: selected ? '#f7be49' : appearance.color }),
         stroke: new Stroke({ color: selected ? '#522d0c' : appearance.color, width: 1 }) };
@@ -97,6 +95,12 @@ const style = (color, selected, settings) => {
 const layerFor = (items, color) => new VectorLayer({
     source: new VectorSource({ features: items.map(feature) }), style: style(color, false),
 });
+function classSwatch(item, entry) {
+    if (!/Polygon$/.test(item.geometry)) return { backgroundColor: entry.color };
+    const fill = classFill(item.style, entry.color, entry.fillColor);
+    return { backgroundColor: fill ? fillColor(fill, opacity(item.style.fillOpacity, 19)) : 'transparent',
+        borderColor: item.style.noOutline ? 'transparent' : entry.color };
+}
 
 function attach(node, view, layers) {
     return new Map({ target: node, view, layers, controls: [], pixelRatio: Math.min(devicePixelRatio, 2) });
@@ -193,10 +197,11 @@ function CoordinateTools({ layer, display, setDisplay, entries, request, onLayer
 }
 
 function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle, entries, catalog, components,
-    openComponents, display, setDisplay, styleLayer, importFrame, fail, close, selection, setSelection, replace, editing }) {
+    openComponents, display, setDisplay, background, setBackground, styleLayer, importFrame, fail, close, selection, setSelection, replace, editing }) {
     const node = useRef(null);
     const graph = useRef(null);
     const [properties, setProperties] = useState(null);
+    const [mapProperties, setMapProperties] = useState(false);
     const [coordinatesOpen, setCoordinatesOpen] = useState(false);
     const [document, setDocument] = useState(null);
     const [cursor, setCursor] = useState(null);
@@ -236,6 +241,7 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
     const units = display ? display.units : native?.units;
     const metresPerUnit = display ? display.metresPerUnit : native?.metresPerUnit;
     const initialExtent = display?.bounds;
+    const backgroundColor = background || defaultMapBackground;
     const activeRef = useRef(active);
     activeRef.current = active;
 
@@ -264,10 +270,6 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
             setIoStatus('地图工程操作失败。' + text);
         } finally { setBusy(false); }
     }
-
-    useEffect(() => {
-        node.current.style.backgroundColor = /^#[0-9a-f]{6}$/i.test(display?.background || '') ? display.background : '';
-    }, [display?.background]);
 
     useEffect(() => {
         const view = new View({ projection: projection(target, units), center: [0, 0], zoom: 0 });
@@ -334,7 +336,7 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
                 const render = settings => {
                     if (!field) return style(color, false, settings);
                     const classStyle = (shade, fill) => style(shade, false, { ...settings, color: shade,
-                        fill: settings.fill === null || fill === null ? null : fill || shade });
+                        fill: classFill(settings, shade, fill) });
                     const byValue = new globalThis.Map(classification.classes.map(entry =>
                         [entry.value, classStyle(entry.color, entry.fillColor)]));
                     const other = classStyle(classification.other, classification.otherFill);
@@ -670,7 +672,7 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
         if (message && !notices.has(message)) notices.set(message, []);
     }
     const coordinateTools = () => h(CoordinateTools, { layer, display,
-        setDisplay: item => { setDisplayPlans({}); setDisplay(item ? { ...item, background: display?.background } : null); },
+        setDisplay: item => { setDisplayPlans({}); setDisplay(item); },
         displayPlan: displayPlans[active], setDisplayPlan: value => setDisplayPlans(old => ({ ...old, [active]: value })),
         entries, request: api.map, onLayer: item => { add([item]); setCoordinatesOpen(false); }, fail });
     const commands = {
@@ -680,10 +682,11 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
             group('选择', command('清除选择', clear, { disabled: !picked.length }),
                 command('属性表', () => { setPage(0); setTable(table ? null : []); }, { disabled: !layer || layer.kind === 'raster' }),
                 command('按属性选择', () => openTool('data.select_by_attribute'), { disabled: !layer?.fields?.length }),
-                command('按位置选择', () => openTool('data.select_by_location'), { disabled: !layer?.geometry || layers.filter(item => item.geometry).length < 2 }))],
+                command('按位置选择', () => openTool('data.select_by_location'), { disabled: !layer?.geometry || layers.filter(item => item.geometry).length < 2 })),
+            group('显示', command('地图属性', () => setMapProperties(true), { disabled: busy }))],
         数据: [group('地图工程', command('打开 MXD', () => mxd(api.mxdRead(), value => { setLocateMxd(null); setDocument(value); }), { disabled: busy }),
             command('保存 MXD', () => mxd(api.mxdWrite({ crs: target, bounds: graph.current?.view.calculateExtent(graph.current.ol.getSize()),
-                background: display?.background || colorHex(getComputedStyle(node.current).backgroundColor),
+                background: backgroundColor,
                 layers: [...layers].reverse().map((item, index) => ({ ref: item.ref, name: item.name, visible: !hidden.includes(key(item)), opacity: opacity(item.opacity),
                     style: item.kind === 'raster' ? null : layerSymbol(item.style, palette[(layers.length - index - 1) % palette.length]) })) }),
             result => setIoStatus('已保存 MXD 和配套数据 · ' + result.layers + ' 个图层')), { disabled: busy || !layers.length || !viewReady })),
@@ -744,11 +747,11 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
                             icon: glyph('chevron', 13), onClick: () => setExpandedLegends(old => ({ ...old, [key(item)]: !old[key(item)] })) },
                         item.style.classification.field),
                         expandedLegends[key(item)] && h('ul', null, ...[...item.style.classification.classes,
-                            { label: '其他值', color: item.style.classification.other }].map(entry => h('li', { key: JSON.stringify(entry.value) },
-                            h('span', { className: 'map-swatch', ref: node => { if (node) node.style.backgroundColor = entry.color; } }),
+                            { label: '其他值', color: item.style.classification.other, fillColor: item.style.classification.otherFill }].map(entry => h('li', { key: JSON.stringify(entry.value) },
+                            h('span', { className: 'map-swatch', style: classSwatch(item, entry) }),
                             entry.label || (entry.value ?? '空值')))))))),
             h('div', { className: 'map-viewport' },
-                h('div', { className: 'geo-map', ref: node, tabIndex: 0, 'aria-label': '交互地图' }),
+                h('div', { className: 'geo-map', ref: node, tabIndex: 0, 'aria-label': '交互地图', style: { backgroundColor } }),
                 !layers.length && h(Button, { className: 'map-empty', type: 'default', icon: glyph('add', 30),
                     title: '添加或拖入空间数据', 'aria-label': '添加或拖入空间数据', disabled: busy, onClick: () => load(api.mapImport()) }),
                 (notices.size > 0 || limited.length > 0 || busy) && h('div', { className: 'map-notice', role: 'status' },
@@ -780,6 +783,8 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
             coordinateTools()),
         properties && h(LayerProperties, { ...properties, close: () => setProperties(null), glyph,
             save: value => styleLayer(key(properties.item), value) }),
+        mapProperties && h(MapProperties, { background: backgroundColor, save: setBackground,
+            close: () => setMapProperties(false), glyph }),
         document && h(MxdOpen, { document, busy, glyph, locateAvailable: locateMxd, close: () => setDocument(null),
             open: (frame, locate) => mxd(api.mxdImport(frame, locate), result => {
                 if (result.layers.length) {

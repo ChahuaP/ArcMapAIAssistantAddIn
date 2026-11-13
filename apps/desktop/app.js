@@ -135,6 +135,7 @@
         const [mapOpen, showMapWorkspace] = useState(false);
         const [mapEditing, setMapEditing] = useState(false);
         const [mapDisplay, setMapDisplay] = useState(null);
+        const [mapBackground, setMapBackground] = useState(null);
         const [layers, setLayers] = useState([]);
         const [hiddenLayers, hideLayers] = useState([]);
         const [activeLayer, setActiveLayer] = useState(null);
@@ -176,6 +177,7 @@
             setActiveLayer(null);
             setMapSelection(null);
             setMapDisplay(null);
+            setMapBackground(null);
             showMapWorkspace(Boolean(state?.settings.workspace && !state.settings.modelConfig));
         }, [state?.settings.workspace]);
         const [initialMarkdown, setInitialMarkdown] = useState('');
@@ -535,7 +537,7 @@
             hidden: hiddenLayers, toggle: id => hideLayers(old => old.includes(id) ? old.filter(value => value !== id) : [...old, id]),
             selectLayer: id => { setActiveLayer(id); setMapSelection(null); },
             entries: coordinates, catalog, components: state.components, openComponents,
-            display: mapDisplay, setDisplay: setMapDisplay,
+            display: mapDisplay, setDisplay: setMapDisplay, background: mapBackground, setBackground: setMapBackground,
             styleLayer: (id, style) => setLayers(old => old.map(item => mapKey(item) === id ? { ...item, style } : item)),
             importFrame: ({ layers: items, frame }) => {
                 setLayers(items);
@@ -543,7 +545,8 @@
                 setMapSelection(null);
                 hideLayers(items.filter(item => !item.visible).map(mapKey));
                 setMapDisplay(frame.crs ? { wkt: frame.crs, units: frame.units, metresPerUnit: frame.metresPerUnit,
-                    label: frame.crsName || frame.name, bounds: frame.bounds, background: frame.background } : null);
+                    label: frame.crsName || frame.name, bounds: frame.bounds } : null);
+                setMapBackground(frame.background);
             },
             fail, close: () => showMapWorkspace(false), selection: mapSelection, setSelection: setMapSelection,
             replace: replaceLayer, editing: setMapEditing });

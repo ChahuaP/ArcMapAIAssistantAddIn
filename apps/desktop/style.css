@@ -307,11 +307,11 @@ dialog label { display: grid; gap: 5px; }
 
 
 .workspace-map {
-    --gis-bg: #e8eef5; --gis-edge: #b4c4d7; --gis-map: #e4edf6;
+    --gis-bg: #e8eef5; --gis-edge: #b4c4d7;
     height: 100%; min-height: 0; min-width: 0; display: flex; flex-direction: column;
     gap: 8px; padding: 8px; background: var(--gis-bg);
 }
-[data-theme="dark"] .workspace-map { --gis-bg: #101a28; --gis-edge: #41566f; --gis-map: #182a3d; }
+[data-theme="dark"] .workspace-map { --gis-bg: #101a28; --gis-edge: #41566f; }
 .map-workspace-body {
     display: grid; grid-template-columns: clamp(184px, 23%, 240px) minmax(0, 1fr);
     gap: 8px; min-height: 0; flex: 1;
@@ -333,7 +333,7 @@ dialog label { display: grid; gap: 5px; }
 .map-swatch[data-color="3"] { background: #8263ca; }
 .map-swatch[data-color="4"] { background: #cc5785; }
 .map-viewport { display: flex; flex-direction: column; min-height: 0; position: relative; overflow: hidden; }
-.map-viewport .geo-map { position: relative; background: var(--gis-map); }
+.map-viewport .geo-map { position: relative; }
 .map-notice { position: absolute; inset: 12px 12px auto; padding: 8px 12px; border-radius: 8px; background: var(--panel); color: var(--ink); pointer-events: none; }
 .map-empty.ant-btn {
     position: absolute; inset: 50% auto auto 50%; transform: translate(-50%, -50%);
@@ -418,15 +418,32 @@ dialog label { display: grid; gap: 5px; }
 .map-status-coordinates { min-width: 142px; text-align: right; }
 .gis-dialog .map-coordinate { gap: 10px; margin: 0; padding: 0; }
 .gis-dialog .map-coordinate > :is(span,.ant-select) { margin: 0; }
+.gis-symbol-editor { display: grid; gap: 12px; max-height: calc(100vh - 210px); overflow: auto; padding: 2px; }
+.gis-symbol-editor > .ant-segmented { justify-self: start; }
 .gis-classification { display: grid; gap: 10px; }
-.gis-classes { width: 100%; border-collapse: collapse; }
-.gis-classes :is(th,td) { padding: 5px 8px; border-bottom: 1px solid var(--line); text-align: left; }
-.gis-classes input[type=color] { width: 38px; height: 24px; min-height: 0; padding: 1px; }
-.gis-classes th:last-child { width: 82px; }
+.gis-class-list { max-height: 220px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+.gis-classes { width: 100%; border-spacing: 0; }
+.gis-classes :is(th,td) { padding: 6px 10px; border-bottom: 1px solid var(--line); text-align: left; }
+.gis-classes th { position: sticky; top: 0; z-index: 1; background: var(--sub); white-space: nowrap; }
+.gis-classes td:first-child { width: 100%; overflow-wrap: anywhere; }
+.gis-classes tr:last-child td { border-bottom: 0; }
+.gis-classes :is(th,td):last-child { text-align: right; font-variant-numeric: tabular-nums; }
+.gis-symbol-group { display: grid; gap: 8px; margin: 0; padding: 8px 12px 12px; min-width: 0;
+    border: 1px solid var(--line); border-radius: 8px; }
+.gis-symbol-group legend { padding: 0 4px; font-weight: 600; }
+.gis-polygon-symbol { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; align-items: start; }
+.gis-polygon-symbol .gis-skill-parameters { grid-template-columns: minmax(0, 1fr); }
+.gis-polygon-symbol fieldset:last-child .gis-skill-parameters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.gis-polygon-symbol fieldset:last-child .gis-tool-field:has(.gis-color-input) { grid-column: 1 / -1; }
+.gis-symbol-group .ant-input-number { width: 100%; }
+.gis-color-input.ant-btn { display: inline-flex; align-items: center; justify-content: flex-start; gap: 8px; }
+.gis-color-chip { display: inline-block; width: 20px; height: 14px; border: 1px solid var(--border); border-radius: 3px; }
+.gis-color-input:disabled .gis-color-chip { opacity: .45; }
+.gis-map-background { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 10px; }
 .map-class-legend { padding: 3px 0 3px 19px; font-size: 12px; }
 .map-class-legend ul { list-style: none; padding: 0 6px; margin: 0; max-height: 180px; overflow-y: auto; }
 .map-class-legend li { display: flex; align-items: center; gap: 7px; margin-block: 3px; overflow-wrap: anywhere; }
-.map-class-legend .map-swatch { flex: none; }
+.map-class-legend .map-swatch { flex: none; width: 13px; height: 10px; border: 1px solid transparent; }
 
 .gis-modal-root .gis-dialog .ant-modal-content {
     background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
@@ -445,7 +462,6 @@ dialog label { display: grid; gap: 5px; }
 .gis-layer-properties dt { color: var(--muted); }
 .gis-layer-properties dd { margin: 0; overflow-wrap: anywhere; user-select: text; }
 .gis-layer-extent { font-variant-numeric: tabular-nums; }
-.gis-tool-field input[type=color] { min-height: 34px; width: 100%; padding: 3px 6px; cursor: pointer; }
 .gis-tool-fields, .gis-tool-field, .gis-mapping { display: grid; gap: 6px; min-width: 0; }
 .gis-tool-fields { margin: 0; padding: 0; border: 0; gap: 12px; }
 .gis-tool-field > span:first-child { font-weight: 600; }

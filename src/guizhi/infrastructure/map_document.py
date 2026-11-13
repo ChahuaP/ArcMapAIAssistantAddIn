@@ -149,7 +149,7 @@ def verify_mxd_symbols(expected, actual):
             return False
     if "shape" in actual:
         return expected["shape"] == actual["shape"] and abs(expected["size"] - actual["size"]) < 1e-7
-    return expected["pattern"] == actual["pattern"] and abs(expected["width"] - actual["width"]) < 1e-7
+    return (expected.get("noOutline", False) or expected["pattern"] == actual["pattern"]) and abs(expected["width"] - actual["width"]) < 1e-7
 
 
 def write_document(workspace, payload):
