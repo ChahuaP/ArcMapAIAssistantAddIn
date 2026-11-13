@@ -133,14 +133,14 @@ namespace ArcMapHarness.ArcMapBridgeExternal
 
         private static JObject PolygonAppearance(ICompositeLayer group)
         {
-            if (group.Count != 2) throw new InvalidOperationException("规智面符号图层缺少填充或边线。");
+            if (group.Count != 2) throw new InvalidOperationException("小六面符号图层缺少填充或边线。");
             var stroke = Layer(group.get_Layer(0));
             var fill = Layer(group.get_Layer(1));
             if ((string)stroke["name"] != "边线" || (string)fill["name"] != "填充")
-                throw new InvalidOperationException("规智面符号的子图层无法识别。");
+                throw new InvalidOperationException("小六面符号的子图层无法识别。");
             if (!JToken.DeepEquals(stroke["workspace"], fill["workspace"]) ||
                 !JToken.DeepEquals(stroke["dataset"], fill["dataset"]))
-                throw new InvalidOperationException("规智面符号的边线和填充引用了不同的数据。");
+                throw new InvalidOperationException("小六面符号的边线和填充引用了不同的数据。");
             var style = (JObject)stroke["style"];
             var fillStyle = (JObject)fill["style"];
             style["fill"] = fillStyle["fill"];
@@ -150,11 +150,11 @@ namespace ArcMapHarness.ArcMapBridgeExternal
                 var entries = (JArray)classification["classes"];
                 var fillEntries = (JArray)fillClassification["classes"];
                 if (entries.Count != fillEntries.Count)
-                    throw new InvalidOperationException("规智面符号的边线和填充分类不一致。");
+                    throw new InvalidOperationException("小六面符号的边线和填充分类不一致。");
                 for (int i = 0; i < entries.Count; i++)
                 {
                     if (!JToken.DeepEquals(entries[i]["value"], fillEntries[i]["value"]))
-                        throw new InvalidOperationException("规智面符号的边线和填充分类不一致。");
+                        throw new InvalidOperationException("小六面符号的边线和填充分类不一致。");
                     entries[i]["fillColor"] = fillEntries[i]["fillColor"];
                 }
                 classification["otherFill"] = fillClassification["otherFill"];

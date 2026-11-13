@@ -44,7 +44,7 @@ def local_source(item, folder):
 def layer_file(item, document, search):
     source_file, name = local_source(item, document.parent)
     if source_file is None:
-        raise ValueError("此图层的数据源类型无法在规智中打开")
+        raise ValueError("此图层的数据源类型无法在小六中打开")
     if not source_file.exists():
         candidates = [document.parent / source_file.name, document.parent / (document.stem + "_data") / source_file.name]
         if search is not None:

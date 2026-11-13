@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { parseArgs } = require('node:util');
 const { startDesktop } = require('./main.cjs');
+const { productName } = require('./brand.js');
 
 let probe;
 async function main() {
@@ -49,7 +50,7 @@ async function main() {
             })`),
             desktop.portrait.webContents.executeJavaScript("Boolean(window.guizhi && document.getElementById('open'))"),
         ]);
-        if (!workbench || !launcher || !portrait) throw new Error('规智界面启动检查失败');
+        if (!workbench || !launcher || !portrait) throw new Error('小六界面启动检查失败');
         fs.writeFileSync(probe, JSON.stringify({ workbench, portrait }), { flag: 'wx' });
         app.exit(0);
     }
@@ -57,6 +58,6 @@ async function main() {
 
 main().catch(error => {
     if (probe) process.stderr.write(error.message + '\n');
-    else dialog.showErrorBox('规智', error.message);
+    else dialog.showErrorBox(productName, error.message);
     app.exit(1);
 });

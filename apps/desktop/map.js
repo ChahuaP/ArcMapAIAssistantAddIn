@@ -917,7 +917,7 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
             save: value => styleLayer(key(properties.item), value) }),
         mapProperties && h(MapProperties, { background: backgroundColor, save: setBackground, coordinates: coordinateTools(),
             close: () => setMapProperties(false), glyph }),
-        layout && h(MapLayout, { initial: { ...layoutDefaults, title: layer?.name || '规智地图' },
+        layout && h(MapLayout, { initial: { ...layoutDefaults, title: layer?.name || '小六地图' },
             busy, close: () => setLayout(false), exportImage }),
         document && h(MxdOpen, { document, busy, glyph, locateAvailable: locateMxd, close: () => setDocument(null),
             open: (frame, locate) => mxd(api.mxdImport(frame, locate), result => {

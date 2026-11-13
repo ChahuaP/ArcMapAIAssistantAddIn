@@ -5,14 +5,18 @@
 #ifndef Stage
   #error Stage is required
 #endif
+#define ProductName "小六-南京市规划和自然资源局六合分局业务智慧治理系统"
 
 [Setup]
 AppId={{43CA251E-39B7-43E8-9E28-95465414C772}
-AppName=规智
+AppName={#ProductName}
 AppVersion={#Version}
-AppPublisher=规智
+AppPublisher=于佳民
+VersionInfoProductName={#ProductName}
+VersionInfoDescription={#ProductName}
 DefaultDirName={localappdata}\Programs\Guizhi
-DefaultGroupName=规智
+DefaultGroupName={#ProductName}
+UsePreviousGroup=no
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64os
@@ -27,7 +31,7 @@ SetupIconFile={#Stage}\bootstrap\guizhi.ico
 Compression=lzma2/fast
 SolidCompression=yes
 WizardStyle=modern
-UninstallDisplayName=规智
+UninstallDisplayName={#ProductName}
 UninstallDisplayIcon={app}\bootstrap\guizhi.ico
 
 [Languages]
@@ -44,11 +48,11 @@ Source: "{#Stage}\payload\renderer\*"; DestDir: "{code:ReleaseDirectory}\rendere
 Source: "{#Stage}\payload\installation.json"; DestDir: "{code:ReleaseDirectory}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\规智"; Filename: "{app}\bootstrap\pythonw.exe"; Parameters: "-I -B ""{app}\bootstrap\install_state.py"" --root ""{app}"" launch --user-data ""{localappdata}\Guizhi\Desktop"""; IconFilename: "{app}\bootstrap\guizhi.ico"
-Name: "{userdesktop}\规智"; Filename: "{app}\bootstrap\pythonw.exe"; Parameters: "-I -B ""{app}\bootstrap\install_state.py"" --root ""{app}"" launch --user-data ""{localappdata}\Guizhi\Desktop"""; IconFilename: "{app}\bootstrap\guizhi.ico"; Check: InstallDesktopIcon
+Name: "{group}\{#ProductName}"; Filename: "{app}\bootstrap\pythonw.exe"; Parameters: "-I -B ""{app}\bootstrap\install_state.py"" --root ""{app}"" launch --user-data ""{localappdata}\Guizhi\Desktop"""; IconFilename: "{app}\bootstrap\guizhi.ico"
+Name: "{userdesktop}\{#ProductName}"; Filename: "{app}\bootstrap\pythonw.exe"; Parameters: "-I -B ""{app}\bootstrap\install_state.py"" --root ""{app}"" launch --user-data ""{localappdata}\Guizhi\Desktop"""; IconFilename: "{app}\bootstrap\guizhi.ico"; Check: InstallDesktopIcon
 
 [Run]
-Filename: "{app}\bootstrap\pythonw.exe"; Parameters: "-I -B ""{app}\bootstrap\install_state.py"" --root ""{app}"" launch --user-data ""{localappdata}\Guizhi\Desktop"""; Description: "打开规智"; Flags: postinstall nowait skipifsilent unchecked
+Filename: "{app}\bootstrap\pythonw.exe"; Parameters: "-I -B ""{app}\bootstrap\install_state.py"" --root ""{app}"" launch --user-data ""{localappdata}\Guizhi\Desktop"""; Description: "打开{#ProductName}"; Flags: postinstall nowait skipifsilent unchecked
 
 [UninstallDelete]
 Type: files; Name: "{app}\active.json"
@@ -61,14 +65,12 @@ var
   Attempt: String;
   RemoveSettings: Boolean;
 
-function InstallDesktopIcon: Boolean;
+function IsProductShortcut(Shortcut: String): Boolean;
 var
-  Shortcut, Target: String;
+  Target: String;
   Shell, Link: Variant;
 begin
-  Result := WizardIsTaskSelected('desktopicon');
-  if Result then Exit;
-  Shortcut := ExpandConstant('{userdesktop}\规智.lnk');
+  Result := False;
   if not FileExists(Shortcut) then Exit;
   try
     Shell := CreateOleObject('WScript.Shell');
@@ -78,6 +80,13 @@ begin
   except
     Result := False;
   end;
+end;
+
+function InstallDesktopIcon: Boolean;
+begin
+  Result := WizardIsTaskSelected('desktopicon') or
+    IsProductShortcut(ExpandConstant('{userdesktop}\{#ProductName}.lnk')) or
+    IsProductShortcut(ExpandConstant('{userdesktop}\规智.lnk'));
 end;
 
 function ReleaseDirectory(Param: String): String;
@@ -112,6 +121,13 @@ begin
       RaiseException('无法切换到新版本。');
     if Code <> 0 then
       RaiseException('未能切换到新版本。详情见安装目录中的 last-install-error.txt。');
+    if IsProductShortcut(ExpandConstant('{userdesktop}\规智.lnk')) then
+      DeleteFile(ExpandConstant('{userdesktop}\规智.lnk'));
+    if IsProductShortcut(ExpandConstant('{userprograms}\规智\规智.lnk')) then
+    begin
+      DeleteFile(ExpandConstant('{userprograms}\规智\规智.lnk'));
+      RemoveDir(ExpandConstant('{userprograms}\规智'));
+    end;
   end;
 end;
 
@@ -119,7 +135,7 @@ function InitializeUninstall: Boolean;
 begin
   RemoveSettings := False;
   if not UninstallSilent then
-    RemoveSettings := MsgBox('是否同时清除规智的本机设置和凭据？已保存的业务材料、成果和办理记录会保留。',
+    RemoveSettings := MsgBox('是否同时清除「{#ProductName}」的本机设置和凭据？已保存的业务材料、成果和办理记录会保留。',
       mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES;
   Result := True;
 end;

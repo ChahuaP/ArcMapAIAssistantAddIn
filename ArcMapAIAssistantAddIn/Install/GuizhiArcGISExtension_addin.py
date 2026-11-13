@@ -291,7 +291,7 @@ class GuizhiArcGISExtension(object):
             return self._snapshot(layers, request)
         if request["action"] == "publish":
             if not self.publish_ready:
-                return {"status": "deferred", "message": u"等待规智数据视图重新启动"}
+                return {"status": "deferred", "message": u"等待小六数据视图重新启动"}
             return self._publish(document, frame, layers, request)
         raise ValueError(u"未知 ArcGIS 请求")
 
@@ -341,7 +341,7 @@ class GuizhiArcGISExtension(object):
             raise ValueError(u"ArcGIS 未能添加唯一的成果图层")
         if len(old) == 1:
             old[0].visible = False
-        if request.get("persist") and os.path.basename(document.filePath) == u"规智数据视图.mxd":
+        if request.get("persist") and os.path.basename(document.filePath) == u"小六数据视图.mxd":
             document.save()
         arcpy.RefreshTOC()
         arcpy.RefreshActiveView()
@@ -355,7 +355,7 @@ class ConnectGuizhiButton(object):
 
     def onClick(self):
         if not extension:
-            pythonaddins.MessageBox(u"请在自定义菜单的扩展模块中启用规智 ArcGIS 扩展。", u"规智", 0)
+            pythonaddins.MessageBox(u"请在自定义菜单的扩展模块中启用小六 ArcGIS 扩展。", u"小六", 0)
             return
         extension.startup()
         extension.attached = True

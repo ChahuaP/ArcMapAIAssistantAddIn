@@ -2,6 +2,7 @@ const { BrowserWindow, globalShortcut, nativeTheme, powerMonitor, screen } = req
 const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
+const { productName } = require('./brand.js');
 
 const launcherBaseHeight = 560;
 const launcherBusinessHeight = 680;
@@ -32,14 +33,14 @@ function createShell({ userData, icon, verifyStartup }) {
         : { color: '#f1f5f9', symbolColor: '#152235', height: 50 };
     nativeTheme.themeSource = settings.theme;
     const workbench = new BrowserWindow({ width: 1376, height: 824, minWidth: 790, minHeight: 530,
-        show: false, title: '规智', titleBarStyle: 'hidden', titleBarOverlay: overlay(), autoHideMenuBar: true,
+        show: false, title: productName, titleBarStyle: 'hidden', titleBarOverlay: overlay(), autoHideMenuBar: true,
         backgroundColor: overlay().color, icon, webPreferences });
     const launcher = new BrowserWindow({ width: 944, height: launcherBaseHeight, frame: false,
-        show: false, title: '规智快捷面板', skipTaskbar: true,
+        show: false, title: '小六快捷面板', skipTaskbar: true,
         backgroundColor: overlay().color, icon, webPreferences });
     const portrait = new BrowserWindow({ width: 312, height: 244, frame: false, transparent: true,
         backgroundColor: '#00000000', resizable: false, skipTaskbar: true, alwaysOnTop: true,
-        show: false, hasShadow: false, title: '规智数字形象',
+        show: false, hasShadow: false, title: '小六数字形象',
         webPreferences: { ...webPreferences, autoplayPolicy: 'no-user-gesture-required' } });
     const windows = [workbench, launcher, portrait];
     let shortcutRegistered = false;

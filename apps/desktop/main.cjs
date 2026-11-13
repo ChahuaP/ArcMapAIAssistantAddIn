@@ -7,6 +7,7 @@ const { DesktopController } = require('./controller.cjs');
 const { SpeechController } = require('./speech.cjs');
 const { LocalSpeechRuntime } = require('./local-speech.cjs');
 const { createShell } = require('./shell.cjs');
+const { productName } = require('./brand.js');
 const { listModels, checkModelConnection, testModel } = require('./model-service.cjs');
 const { formats, materialBindings } = require('./materials.cjs');
 const { printReport } = require('./report-export.cjs');
@@ -20,7 +21,7 @@ protocol.registerSchemesAsPrivileged([{ scheme: 'guizhi', privileges: { standard
 
 async function startDesktop(options) {
     const { externalPath } = await import('../../src/guizhi/infrastructure/dsh/sdk.mjs');
-    app.setName('规智');
+    app.setName(productName);
     if (options.userData) app.setPath('userData', externalPath(options.userData));
     if (!app.requestSingleInstanceLock()) {
         app.quit();
@@ -32,7 +33,7 @@ async function startDesktop(options) {
         if (!item || !path.isAbsolute(item)) throw new Error('请选择有效的运行目录');
     }
     const vendor = path.join(rendererRuntime, 'node_modules');
-    const localFiles = ['index.html', 'app.js', 'shell-ui.js', 'settings.js', 'coordinates.js', 'skills.js',
+    const localFiles = ['index.html', 'app.js', 'brand.js', 'shell-ui.js', 'settings.js', 'coordinates.js', 'skills.js',
         'materials-ui.js', 'skill-editor.js',
         'style.css', 'theme.css', 'mark.svg', 'luhe-banner.png', 'model-form.js', 'onboarding.js',
         'portrait.html', 'portrait.css', 'portrait.js', 'task-commands.js', 'speech-settings.js',
@@ -130,7 +131,7 @@ async function startDesktop(options) {
         [portrait.webContents, window.webContents].includes(source) && requestingOrigin === origin &&
         (permission === 'speaker-selection' || (permission === 'media' && details.mediaType !== 'video')));
     const tray = new Tray(nativeImage.createFromPath(path.join(__dirname, 'mark.png')).resize({ width: 24, height: 24 }));
-    tray.setToolTip('规智');
+    tray.setToolTip(productName);
     tray.setContextMenu(Menu.buildFromTemplate([
         { label: '打开工作台', click: reveal },
         { label: '快捷面板', click: desktop.openLauncher },
@@ -397,7 +398,7 @@ async function startDesktop(options) {
         let archive;
         if (method === 'offline') {
             const pick = await dialog.showOpenDialog(window, { properties: ['openFile'],
-                filters: [{ name: '规智组件包', extensions: ['zip'] }] });
+                filters: [{ name: '小六组件包', extensions: ['zip'] }] });
             if (pick.canceled) return;
             archive = pick.filePaths[0];
         }
@@ -410,7 +411,7 @@ async function startDesktop(options) {
     bind('arcgisInstall', async () => {
         const source = bridge();
         const file = source && path.join(path.dirname(source), 'Guizhi.esriaddin');
-        if (!file || !fs.existsSync(file)) throw new Error('请先安装规智的 ArcGIS 组件');
+        if (!file || !fs.existsSync(file)) throw new Error('请先安装小六的 ArcGIS 组件');
         if (await shell.openPath(file)) throw new Error('无法打开 ArcGIS 扩展安装程序');
     });
     bind('arcgisConfigure', carrier => sync.configure(carrier));
@@ -452,7 +453,7 @@ async function startDesktop(options) {
         if (surface !== window || !item) throw new Error('请从地图工作区打开成果');
         const source = await controller.request('map', { action: 'delivery', run: item.run, kind: item.kind });
         const extension = item.kind === 'report' ? '.pdf' : path.extname(source).toLowerCase();
-        const pick = await dialog.showSaveDialog(window, { defaultPath: '规智-' + path.basename(source, path.extname(source)) + extension,
+        const pick = await dialog.showSaveDialog(window, { defaultPath: '小六-' + path.basename(source, path.extname(source)) + extension,
             filters: [{ name: extension.slice(1).toUpperCase(), extensions: [extension.slice(1)] }] });
         if (pick.canceled) return;
         const output = externalPath(pick.filePath);
@@ -466,7 +467,7 @@ async function startDesktop(options) {
     let currentMxd;
     function requireMxdBridge() {
         const executable = bridge();
-        if (!executable) throw new Error('本版缺少 MXD 桥接程序，请使用完整的规智发行包');
+        if (!executable) throw new Error('本版缺少 MXD 桥接程序，请使用完整的小六发行包');
         return executable;
     }
     bind('mxdRead', async surface => {
@@ -500,7 +501,7 @@ async function startDesktop(options) {
         if (surface !== window || !Array.isArray(input?.layers) || input.layers.length > 256 ||
                 input.layers.some(item => !mapLayers.has(mapKey(item.ref)))) throw new Error('请从地图工作区保存有效图层');
         const executable = requireMxdBridge();
-        const pick = await dialog.showSaveDialog(window, { defaultPath: '规智地图.mxd',
+        const pick = await dialog.showSaveDialog(window, { defaultPath: '小六地图.mxd',
             filters: [{ name: 'ArcGIS 地图工程', extensions: ['mxd'] }] });
         if (pick.canceled) return null;
         const output = externalPath(pick.filePath);
@@ -551,7 +552,7 @@ async function startDesktop(options) {
             : raster ? [{ name: 'GeoTIFF', extensions: ['tif'] }, { name: 'JPEG 影像', extensions: ['jpg'] }]
                 : [{ name: 'SHP 成果包', extensions: ['zip'] }, { name: 'GeoPackage', extensions: ['gpkg'] },
                     { name: 'GeoJSON', extensions: ['geojson'] }];
-        const pick = await dialog.showSaveDialog(window, { defaultPath: '规智-图层.' + filters[0].extensions[0], filters });
+        const pick = await dialog.showSaveDialog(window, { defaultPath: '小六-图层.' + filters[0].extensions[0], filters });
         if (pick.canceled) return;
         const output = externalPath(pick.filePath);
         const extension = path.extname(output).slice(1).toLowerCase();
@@ -580,7 +581,7 @@ async function startDesktop(options) {
             broadcast(controller.state());
             return true;
         }
-        const pick = await dialog.showSaveDialog(window, { defaultPath: '规智地图.' + format,
+        const pick = await dialog.showSaveDialog(window, { defaultPath: '小六地图.' + format,
             filters: [{ name: '地图图片', extensions: [format] }] });
         if (pick.canceled) return false;
         const output = externalPath(pick.filePath);
@@ -612,7 +613,7 @@ async function startDesktop(options) {
         }
         const source = kind === 'report' ? await controller.report(id) : await controller.delivery(id, kind);
         const extension = format === 'shp' ? '.zip' : format === 'pdf' ? '.pdf' : path.extname(source);
-        const pick = await dialog.showSaveDialog(window, { defaultPath: '规智-' + path.basename(source, path.extname(source)) + extension,
+        const pick = await dialog.showSaveDialog(window, { defaultPath: '小六-' + path.basename(source, path.extname(source)) + extension,
             filters: [{ name: format === 'shp' ? 'SHP 成果包' : extension.slice(1).toUpperCase(), extensions: [extension.slice(1)] }] });
         if (pick.canceled) return;
         const output = externalPath(pick.filePath);

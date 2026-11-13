@@ -34,9 +34,9 @@
     function iconButton(glyph, label, props = {}) {
         return button(glyph, null, { type: 'text', title: label, 'aria-label': label, ...props });
     }
-    const productName = '南京市规划和自然资源局六合分局智慧治理系统';
+    const { productName, agentName } = window.GuizhiBrand;
     const brand = (full = false) => h('span', { className: 'brand' + (full ? ' brand-full' : ''), title: full ? productName : undefined },
-        h('img', { src: '/mark.svg', alt: '', width: 28 }), h('span', null, full ? productName : '规智'));
+        h('img', { src: '/mark.svg', alt: '', width: 28 }), h('span', null, full ? productName : agentName));
     function Theme({ appearance, children }) {
         const dark = appearance.dark;
         useEffect(() => { document.documentElement.dataset.theme = dark ? 'dark' : 'light'; }, [dark]);

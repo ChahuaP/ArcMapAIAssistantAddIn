@@ -175,7 +175,7 @@ def register(server, job=None):
 
     @server.tool
     def list_capabilities(domain: str | None = None, operation: str | None = None) -> dict:
-        """列出规智操作；domain 按领域筛选。填写确切 operation ID 可查看参数合同。"""
+        """列出小六操作；domain 按领域筛选。填写确切 operation ID 可查看参数合同。"""
         (dispatch / "discovery").touch()
         if operation:
             if operation not in skills.OPERATIONS:

@@ -1,28 +1,28 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ESRI.Configuration xmlns="http://schemas.esri.com/Desktop/AddIns" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-  <Name>规智 ArcGIS 扩展</Name>
+  <Name>小六 ArcGIS 扩展</Name>
   <AddInID>{7f42eea1-1f17-4cf4-9d4f-c0c8d28c0a23}</AddInID>
-  <Description>在当前工程显示规智成果并连接已保存的编辑。</Description>
+  <Description>在当前工程显示小六成果并连接已保存的编辑。</Description>
   <Version>__HARNESS_VERSION__</Version>
   <Image />
-  <Author>规智</Author>
+  <Author>小六</Author>
   <Company />
   <Date>11/09/2026</Date>
   <Targets><Target name="Desktop" version="10.2" /></Targets>
   <AddIn language="PYTHON" library="GuizhiArcGISExtension_addin.py" namespace="GuizhiArcGISExtension_addin">
     <ArcMap>
       <Commands>
-        <Button id="GuizhiArcGISExtension_addin.connect" class="ConnectGuizhiButton" category="规智"
-                caption="连接规智" message="连接当前工程" tip="连接当前工程到规智" />
+        <Button id="GuizhiArcGISExtension_addin.connect" class="ConnectGuizhiButton" category="小六"
+                caption="连接小六" message="连接当前工程" tip="连接当前工程到小六" />
       </Commands>
       <Extensions>
         <Extension id="GuizhiArcGISExtension_addin.sync" class="GuizhiArcGISExtension" autoLoad="true"
-                   showInExtensionDialog="true" name="规智 ArcGIS 扩展" productName="规智">
+                   showInExtensionDialog="true" name="小六 ArcGIS 扩展" productName="小六">
           <Description>同步当前工程的成果图层和已保存编辑。</Description>
         </Extension>
       </Extensions>
       <Toolbars>
-        <Toolbar id="GuizhiArcGISExtension_addin.toolbar" caption="规智 ArcGIS 扩展" showInitially="true">
+        <Toolbar id="GuizhiArcGISExtension_addin.toolbar" caption="小六 ArcGIS 扩展" showInitially="true">
           <Items><Button refID="GuizhiArcGISExtension_addin.connect" /></Items>
         </Toolbar>
       </Toolbars>

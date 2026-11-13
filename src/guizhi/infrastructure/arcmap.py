@@ -21,7 +21,7 @@ def json_file(path, value):
 def bridge(bridge_exe, directory, name, request, timeout=23):
     bridge_exe = bridge_exe.resolve(strict=True)
     if bridge_exe.name.casefold() != "arcmapbridge.exe" or not bridge_exe.is_file():
-        raise ValueError("请选择规智提供的 ArcGIS 连接组件")
+        raise ValueError("请选择小六提供的 ArcGIS 连接组件")
     identity = bridge_exe.with_name("ArcMapBridge.build")
     facts = dict(line.split("=", 1) for line in identity.read_text(encoding="utf-8-sig").splitlines() if "=" in line)
     if facts.get("binary_sha256") != digest(bridge_exe):

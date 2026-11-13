@@ -515,7 +515,7 @@ class SpeechController {
                 output = await adapter.recognize(readPcmWav(audio), signal, () => {});
                 if (!output.trim() || output.length > 4000) throw new Error('没有识别到可用的文字');
             } else {
-                output = wavBuffer(await adapter.synthesize('你好，我是规智。我们可以开始对话了。', selectedVoice(input), signal));
+                output = wavBuffer(await adapter.synthesize('你好，我是小六。我们可以开始对话了。', selectedVoice(input), signal));
             }
             if (same) this.status[kind] = { state: 'verified', at: new Date().toISOString() };
             return output;

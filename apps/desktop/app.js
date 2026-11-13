@@ -72,7 +72,7 @@
                 .catch(issue => { if (mounted) setError(errorText(issue)); });
             return () => { mounted = false; };
         }, [reference.run, reference.artifact]);
-        return url ? h('img', { className: 'reply-image', src: url, alt: '规智生成的影像预览' })
+        return url ? h('img', { className: 'reply-image', src: url, alt: '小六生成的影像预览' })
             : error ? h('p', { role: 'alert' }, error) : null;
     }
 
@@ -82,12 +82,12 @@
                 : task.progress?.length ? h(Progress, { task }) : '正在准备本轮任务');
         if (voiceReply?.task === task.id) return h('article', { className: 'bubble assistant' },
             voiceReply.text ? h('p', { className: 'voice-caption' }, voiceReply.text)
-                : h('span', { role: 'status' }, h('i', { className: 'pulse' }), '规智正在准备语音'));
+                : h('span', { role: 'status' }, h('i', { className: 'pulse' }), '小六正在准备语音'));
         if (task.status === 'succeeded' || task.status === 'answered') {
             const stats = task.statistics;
             return h('article', { className: 'bubble assistant' },
                 h('div', { className: 'result-head' }, h('img', { src: '/mark.svg', alt: '', width: 29 }),
-                    h('strong', null, task.status === 'answered' ? '规智' : '办理结果')),
+                    h('strong', null, task.status === 'answered' ? '小六' : '办理结果')),
                 markdown(task.response),
                 ...(task.outputImages || []).map(reference => h(ResultImage, { key: reference.run, reference })),
                 task.progress?.length > 0 && h('details', { className: 'result-progress' },

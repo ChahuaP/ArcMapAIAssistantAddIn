@@ -156,7 +156,7 @@ def restore(root):
 def launch(root, user_data):
     state = active(root)
     if not state:
-        raise ValueError("未找到当前规智安装")
+        raise ValueError("未找到当前小六安装")
     if user_data.is_relative_to(root) or root.is_relative_to(user_data):
         raise ValueError("用户设置应与安装目录分开")
     entry = state["current"]
@@ -191,7 +191,7 @@ def main():
         if args.command == "launch":
             import ctypes
 
-            ctypes.windll.user32.MessageBoxW(None, message, "规智", 0x10)
+            ctypes.windll.user32.MessageBoxW(None, message, "小六-南京市规划和自然资源局六合分局业务智慧治理系统", 0x10)
         elif args.command == "activate":
             error = args.root / "last-install-error.txt"
             if args.root.is_dir() and error.resolve() == error and args.root.resolve() == args.root:
