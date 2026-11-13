@@ -34,6 +34,9 @@
       仅核查管控线、重叠面积或覆盖率：{"mode":"fixed","skill":"control-check"}。已选技能时可省略 skill 或填写确切版本 ID。
       自由任务 mode 填 free，不填 skill。例如对本轮清单中 layer-1 做缓冲：{"mode":"free","steps":[{"id":"buffer","operation":"vector.buffer","inputs":["material.layer-1"],"parameters":{"distance":100,"unit":"meters"}}]}。始终使用当前清单里实际提供的角色。
       普通对话可直接核查两份对应面图层，使用 free 模式的 control_check，输入顺序为项目、管控。
+      已给出清单、距离和图层用途时，缓冲、裁切、相交、数量统计、CSV 导出直接调用 execute_workflow，不先描述图层或查目录。
+      裁切 vector.clip 的输入顺序是被裁切层、裁切范围；CSV 导出用 presentation.export_table，未指定字段时 parameters 为空。
+      清单有 selected 表示该材料本身已限定为地图选区。用户说只统计所选时，直接使用这份材料。
       其他能力用 list_capabilities 查询。只清点项目要素或几何类型时，调用 execute_workflow，例如
       {"mode":"free","steps":[{"id":"inventory","operation":"vector_inventory","inputs":["material.layer-1"],"parameters":{}}]}。
       审批材料与地块核查调用 read_approval_materials 查文号、原文和片段 ID，并用 describe_bound_layers 查询字段。

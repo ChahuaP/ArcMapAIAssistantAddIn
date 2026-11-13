@@ -87,7 +87,7 @@ async function checkModelConnection(runtime, config, key) {
         }
         for await (const event of stream) {
             if (event.type === 'error') throw responseError(event.error.errorMessage);
-            if ((event.type === 'text_delta' || event.type === 'thinking_delta') && event.delta.trim()) {
+            if (event.type === 'text_delta' && event.delta.trim()) {
                 return { model: config.model, check: 'response' };
             }
         }

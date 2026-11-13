@@ -172,7 +172,12 @@ def serve(requests, output):
         request = json.loads(line)
         try:
             workspace = Workspace(Path(request["workspace"]), create=True)
-            result = {"result": intake(workspace, request["paths"], request["kind"])}
+            if "map" in request:
+                from guizhi.infrastructure.map_workspace import request as map_request
+
+                result = {"result": map_request(workspace, request["map"])}
+            else:
+                result = {"result": intake(workspace, request["paths"], request["kind"])}
         except Exception as error:
             result = {"error": str(error)}
         print(json.dumps({"id": request["id"], **result}), file=output, flush=True)

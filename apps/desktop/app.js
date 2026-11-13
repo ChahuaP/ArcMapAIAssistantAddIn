@@ -119,6 +119,7 @@
         const [business, showBusiness] = useState('');
         const [tab, setTab] = useState('成果');
         const [mapOpen, showMapWorkspace] = useState(false);
+        const [mapEditing, setMapEditing] = useState(false);
         const [layers, setLayers] = useState([]);
         const [hiddenLayers, hideLayers] = useState([]);
         const [activeLayer, setActiveLayer] = useState(null);
@@ -381,11 +382,12 @@
                     : '请在工作台完成首次设置'),
                 h('span', null, h('kbd', null, 'Enter'), ' 发送　', h('kbd', null, 'Esc'), ' 收起')));
         const sidebar = h('aside', { className: 'sidebar' },
-            iconButton('plus', '新的对话', { type: 'primary', disabled: sending || adding, onClick: () => resetConversation() }),
-            iconButton('app', '工作台', { className: mapOpen ? undefined : 'rail-current', onClick: () => showMapWorkspace(false) }),
-            iconButton('map', '地图工作区', { disabled: !ready, onClick: () => openMap() }),
+            iconButton('plus', '新的对话', { type: 'primary', disabled: sending || adding || mapEditing, onClick: () => resetConversation() }),
+            h('span', { className: mapOpen ? 'rail-item' : 'rail-current', title: '工作台', 'aria-label': '工作台',
+                'aria-current': mapOpen ? undefined : 'page' }, icon('app')),
+            iconButton('map', '地图工作区', { disabled: !ready || mapOpen, 'aria-current': mapOpen ? 'page' : undefined, onClick: () => openMap() }),
             iconButton('grid', '业务中心', { disabled: !ready, onClick: () => showBusiness('browse') }),
-            iconButton('settings', '设置', { onClick: () => showSettings(true) }));
+            iconButton('settings', '设置', { disabled: mapEditing, onClick: () => showSettings(true) }));
         const conversation = h('section', { className: 'conversation' + (task ? '' : ' conversation-empty'), 'aria-label': '办理对话' },
             task && h('div', { className: 'task-head' }, h('h1', null, turns[0].title),
                 h('span', { className: 'status-tag' }, labels[task.status] || '未完成')),
@@ -433,15 +435,36 @@
             if (item?.mapLayers?.length) {
                 try {
                     const results = await Promise.all(item.mapLayers.map(ref => api.map({ action: 'describe', ref })));
-                    addLayers(results);
+                    const inputs = layers.length ? [] : await api.mapTaskInputs(item.id);
+                    addLayers([...inputs, ...results.map((entry, index) =>
+                        ({ ...entry, name: index ? '边界成果' : '办理成果' }))]);
                 } catch (error) { fail(error); return; }
             }
             showMapWorkspace(true);
         }
+        async function bindMapSelection(item, others) {
+            try {
+                const supports = await Promise.all(others.filter(candidate => candidate.kind !== 'raster').slice(0, 29).map(candidate => api.map({ action: 'material', ref: candidate.ref, name: candidate.name })));
+                setDraft(old => ({ ...emptyDraft(), prompt: old.prompt, freeMode: true,
+                    materials: { inputs: [item, ...supports] } }));
+                showMapWorkspace(false);
+            } catch (error) { fail(error); throw error; }
+        }
+        function replaceLayer(before, after) {
+            const item = { ...after, name: before.name };
+            setLayers(old => old.map(layer => mapKey(layer) === mapKey(before) ? item : layer));
+            setActiveLayer(mapKey(item));
+            setMapSelection(null);
+        }
         const mapWorkspace = mapOpen && h(window.GuizhiMap.WorkspaceMap, { layers, add: addLayers, active: activeLayer,
+            remove: id => {
+                setLayers(old => old.filter(item => mapKey(item) !== id));
+                if (activeLayer === id) { setActiveLayer(null); setMapSelection(null); }
+            },
             hidden: hiddenLayers, toggle: id => hideLayers(old => old.includes(id) ? old.filter(value => value !== id) : [...old, id]),
             selectLayer: id => { setActiveLayer(id); setMapSelection(null); },
-            entries: coordinates, fail, close: () => showMapWorkspace(false), selection: mapSelection, setSelection: setMapSelection });
+            entries: coordinates, fail, close: () => showMapWorkspace(false), selection: mapSelection, setSelection: setMapSelection,
+            useSelection: bindMapSelection, replace: replaceLayer, editing: setMapEditing });
         async function configure(value) {
             const next = await api.configure(value);
             setState(next);

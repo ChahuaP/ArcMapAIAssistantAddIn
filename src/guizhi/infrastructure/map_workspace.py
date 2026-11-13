@@ -1,11 +1,13 @@
 """Read and version the layers used by the desktop map."""
+from base64 import b64encode
 import json
 import math
 import re
+from uuid import uuid4
 
 import pyogrio
 import shapely
-from pyproj import CRS
+from pyproj import CRS, network
 from pyproj.aoi import AreaOfInterest
 from pyproj.transformer import TransformerGroup
 
@@ -79,6 +81,7 @@ def bounds(value):
 
 
 def projection(source_crs, target_crs, extent):
+    network.set_network_enabled(False)
     group = TransformerGroup(source_crs, target_crs, always_xy=True, allow_ballpark=False)
     if not group.best_available or not group.transformers:
         raise ValueError("当前图层缺少可靠的坐标转换或所需格网，请在设置中选择已验证的转换方案")
@@ -151,6 +154,25 @@ def request(workspace, payload):
             record = successful(run_operation(workspace.root, {"operation": "data.describe", "inputs": [item]}))
             result.append(describe(workspace, {"run": record["id"], "artifact": "import"}))
         return result
+    if action == "task-inputs":
+        record = successful(workspace.read(payload["run"]))
+        groups = record["result"]["workflow"]["material_runs"]
+        refs = dict.fromkeys(item for group in groups.values() for item in group if isinstance(item, str))
+        return [describe(workspace, {"run": run, "artifact": "import"}) for run in refs]
+    if action == "raster-import":
+        if not isinstance(payload["items"], list) or not 1 <= len(payload["items"]) <= 32:
+            raise ValueError("一次请选择 1 至 32 个影像")
+        result = []
+        for item in payload["items"]:
+            record = successful(run_operation(workspace.root, {"operation": "map_raster.preview", "inputs": [
+                {name: item[name] for name in ("file", "layer")}]}))
+            ref = {"run": record["id"], "artifact": "raster_preview"}
+            result.append({**record["result"]["raster_preview"], "kind": "raster", "ref": ref, "name": item["name"]})
+        return result
+    if action == "raster-preview":
+        ref = payload["ref"]
+        image = read_artifact(workspace, ref["run"], "raster_preview")
+        return b64encode(image.read_bytes()).decode("ascii")
     if action == "describe":
         return describe(workspace, payload["ref"])
     if action == "features":
@@ -168,11 +190,14 @@ def request(workspace, payload):
         from pyproj.database import query_crs_info
         query = str(payload.get("query", "")).strip().casefold()
         defaults = {"4490", "4326", "4548", "4550", "3857"}
-        return [{"value": "EPSG:" + item.code, "label": item.name + " · EPSG:" + item.code}
+        return [{"value": "EPSG:" + item.code, "label": item.name + " · EPSG:" + item.code,
+                 "units": "degrees" if item.type.name.startswith("GEOGRAPHIC") else "m"}
                 for item in query_crs_info(auth_name="EPSG", allow_deprecated=False)
                 if (query and (query in item.name.casefold() or query.removeprefix("epsg:") == item.code)
                     or not query and item.code in defaults)][:30]
     file, name = source(workspace, payload["ref"])
+    if action == "material":
+        return {**material(file, name), "layers": [name], "kind": "vector", "name": payload.get("name", name)}
     if action == "export":
         return package_layer(workspace, file, payload["output"], name)
     if action == "assign":
@@ -182,10 +207,25 @@ def request(workspace, payload):
         return produce(workspace, "crs.assign", file, name, {"definition": code})
     if action == "transform":
         return produce(workspace, "crs.transform", file, name, {"plan": payload["plan"]})
+    if action in {"edit", "selection"}:
+        item = material(file, name)
+        if item["revision"] != payload.get("revision"):
+            raise ValueError("图层版本已变化，请重新打开图层")
+        if action == "edit":
+            return produce(workspace, "edit.changes", file, name, {"changes": payload["changes"]})
+        fids = payload["fids"]
+        if not isinstance(fids, list) or not 1 <= len(fids) <= 500 or any(type(fid) is not int for fid in fids):
+            raise ValueError("请选择 1 至 500 个地图要素")
+        record = successful(run_operation(workspace.root, {"operation": "data.export_selection", "inputs": [item],
+            "parameters": {"selection": {"layer": name, "revision": item["revision"], "fids": fids}}}))
+        out = read_artifact(workspace, record["id"], "export")
+        result = material(out, record["result"]["export_layer"])
+        return {**result, "layers": [result["layer"]], "kind": "vector", "name": payload.get("name", name),
+                "mapSelection": {"source": payload["ref"], "revision": item["revision"], "fids": fids}}
     raise ValueError("未知地图操作")
 
 
 def produce(workspace, operation, file, name, parameters):
     record = successful(run_operation(workspace.root, {"operation": operation,
-        "inputs": [material(file, name)], "parameters": parameters}))
+        "inputs": [material(file, name)], "parameters": parameters, "idempotency_key": uuid4().hex}))
     return describe(workspace, {"run": record["id"], "artifact": "export"})

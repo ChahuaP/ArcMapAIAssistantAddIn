@@ -233,8 +233,12 @@ class DesktopController {
                     ...(control ? { control: [control] } : {}) });
             }
         }
+        let layerLabels;
         if (!skill && bindings.inputs) {
             const { inputs, ...named } = bindings;
+            layerLabels = Object.fromEntries((materials.inputs || []).map((item, index) => ['layer-' + (index + 1), {
+                name: item.name || item.layer, ...(item.mapSelection ? { selected: item.mapSelection.fids.length } : {}),
+            }]));
             bindings = { ...named, ...Object.fromEntries(inputs.map((item, index) => ['layer-' + (index + 1), [item]])) };
         }
         const history = [];
@@ -257,7 +261,7 @@ class DesktopController {
         const active = { stop, task, config, files: Object.values(bindings).flat().map(item => item.file) };
         this.active = active;
         const options = { workspace: this.settings.workspace, modelConfig: config, apiKey: key,
-            prompt: task.prompt, skill, skillParameters, materials: bindings, previousRun, history, dialogue,
+            prompt: task.prompt, skill, skillParameters, materials: bindings, layerLabels, previousRun, history, dialogue,
             projectPlan: project?.plan || materials.project?.[0]?.plan,
             controlPlan: control?.plan || materials.control?.[0]?.plan };
         active.done = this.dispatch(options, { signal: stop.signal, onEvent: event => {

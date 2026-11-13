@@ -201,8 +201,11 @@ export async function dispatch(options, { signal, onEvent = () => {}, getService
             const { harness } = service;
             const roles = Object.keys(prepared.materials);
             const bound = options.skillParameters !== undefined ? '办理参数已在本机绑定，执行技能时省略 skill_parameters。' : '';
+            const layers = Object.fromEntries(Object.entries(prepared.layers || {}).map(([role, items]) => [
+                role, items.map(item => ({ ...item, ...options.layerLabels?.[role] })),
+            ]));
             const selection = prepared.selected ? `已选技能和本轮材料摘要：${JSON.stringify(prepared.selected)}。`
-                : `本轮材料图层清单（键为 material. 后的引用）：${JSON.stringify(prepared.layers)}。已选技能无。`;
+                : `本轮材料图层清单（键为 material. 后的引用）：${JSON.stringify(layers)}。已选技能无。`;
             const context = `${selection}${bound}有已选历史成果：${Boolean(options.previousRun)}。\n`;
             const conversation = history.length ? '最近对话记录（每项为用户提问与规智答复）：' + JSON.stringify(history) + '\n' : '';
             const speech = options.dialogue ? '本轮使用语音输入。先实际办理，再用简洁口语回答，不用 Markdown。\n' : '';

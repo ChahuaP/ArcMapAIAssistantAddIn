@@ -3,7 +3,7 @@ const { contextBridge, ipcRenderer, webUtils } = require('electron');
 const api = {};
 for (const name of ['state', 'configure', 'workspace', 'material', 'submit', 'cancel', 'report',
     'skills', 'capabilities', 'capability', 'skillShow', 'skillPreview', 'skillTrial', 'skillPublish', 'skillOpen', 'skillTemplate', 'delivery',
-    'exportDelivery', 'map', 'mapImport', 'mapExport', 'diagnostics', 'diagnosticsUpload',
+    'exportDelivery', 'map', 'mapImport', 'mapTaskInputs', 'mapExport', 'diagnostics', 'diagnosticsUpload',
     'coordinates', 'coordinateFile', 'importCoordinate', 'coordinateRename', 'coordinateRemove', 'coordinateSolve', 'coordinateApply',
     'resetConversation', 'approvalSource', 'workbench',
     'appearance', 'shortcutCapture', 'readDraft', 'saveDraft', 'openLauncher', 'fitLauncher', 'hideLauncher', 'portraitVoice', 'voiceTurn',

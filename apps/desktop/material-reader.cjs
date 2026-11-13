@@ -31,6 +31,14 @@ class MaterialReader {
     }
 
     read(workspace, paths, kind) {
+        return this.request(workspace, { paths, kind });
+    }
+
+    map(workspace, map) {
+        return this.request(workspace, { map });
+    }
+
+    request(workspace, payload) {
         this.start();
         return new Promise((resolve, reject) => {
             const id = randomUUID();
@@ -41,7 +49,7 @@ class MaterialReader {
                 if (error) reject(error);
                 else resolve(result);
             } });
-            this.process.stdin.write(JSON.stringify({ id, workspace, paths, kind }) + '\n');
+            this.process.stdin.write(JSON.stringify({ id, workspace, ...payload }) + '\n');
         });
     }
 

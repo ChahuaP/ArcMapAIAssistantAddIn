@@ -362,20 +362,34 @@ async function startDesktop(options) {
     });
     bind('materialPaths', (paths, kind) => controller.intake(paths, kind));
     bind('map', async (surface, input) => {
-        if (surface !== window || !input || !['describe', 'features', 'table', 'crs-search', 'assign', 'transform'].includes(input.action)) {
+        if (surface !== window || !input || !['describe', 'features', 'table', 'crs-search', 'raster-preview', 'assign', 'transform', 'edit', 'selection', 'material'].includes(input.action)) {
             throw new Error('地图请求无效');
         }
-        return controller.request('map', input);
+        if (!controller.settings.workspace) throw new Error('请先选择成果保存位置');
+        return ['describe', 'features', 'table', 'crs-search', 'raster-preview'].includes(input.action)
+            ? controller.reader.map(controller.settings.workspace, input) : controller.request('map', input);
     }, true);
     bind('mapImport', async (surface, paths) => {
         if (surface !== window) throw new Error('请从工作台添加图层');
         const files = paths || (await dialog.showOpenDialog(window, { properties: ['openFile', 'multiSelections'],
-            filters: [{ name: '空间数据', extensions: [...formats.vector.extensions, 'zip'] }] })).filePaths;
+            filters: [{ name: '空间数据', extensions: [...formats.vector.extensions, ...formats.raster.extensions, 'zip'] }] })).filePaths;
         if (!files.length) return { layers: [], issues: [] };
-        const intake = await controller.intake(files, 'vector');
-        const items = intake.items.flatMap(item => item.layers.map(layer => ({ file: item.file, layer, revision: null })));
-        return { layers: items.length ? await controller.request('map', { action: 'import', items }) : [],
-            issues: intake.issues };
+        const intake = await controller.intake(files, 'any');
+        const items = intake.items.filter(item => item.kind === 'vector')
+            .flatMap(item => item.layers.map(layer => ({ file: item.file, layer, revision: null })));
+        const images = intake.items.filter(item => item.kind === 'raster');
+        const layers = items.length ? await controller.request('map', { action: 'import', items }) : [];
+        if (images.length) layers.push(...await controller.request('map', { action: 'raster-import', items: images }));
+        for (const item of intake.items) if (!['vector', 'raster'].includes(item.kind)) {
+            intake.issues.push({ name: item.name, message: '地图支持矢量和影像图层' });
+        }
+        return { layers, issues: intake.issues };
+    }, true);
+    bind('mapTaskInputs', async (surface, id) => {
+        if (surface !== window) throw new Error('请从工作台查看材料');
+        const task = controller.tasks.find(item => item.id === id && item.status === 'succeeded');
+        if (!task?.runId) throw new Error('办理成果尚未发布');
+        return controller.request('map', { action: 'task-inputs', run: task.runId });
     }, true);
     bind('mapExport', async (surface, ref) => {
         if (surface !== window) throw new Error('请从工作台导出图层');
