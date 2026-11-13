@@ -1,9 +1,12 @@
 """Versioned dataset and selection operations."""
 from typing import Literal
 
+from typing import Annotated, Any
+
 import numpy as np
 import pandas as pd
 from shapely import STRtree
+from pydantic import BaseModel, ConfigDict, Field
 
 from guizhi.infrastructure.operations.common import (
     Mode, Selection, Unit, compatible, concatenate, condition, distance_in_crs,
@@ -65,9 +68,20 @@ def append(ctx, schema: Literal["strict", "map"] = "strict"):
     return {"changeset": {"target_revision": ctx.selection_hashes[0], "appended": len(result) - len(base)}}
 
 
-def select_by_attribute(ctx, where: dict, mode: Mode = "new_selection", previous: Selection | None = None):
+class AttributeFilter(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    op: Literal["and", "or", "not", "eq", "ne", "gt", "gte", "lt", "lte", "is_null", "is_not_null", "like", "in", "between"]
+    field: str | None = None
+    value: str | int | float | bool | None = None
+    value_field: str | None = None
+    values: list[Any] | None = None
+    conditions: Annotated[list["AttributeFilter"], Field(min_length=1, max_length=32)] | None = None
+    condition: "AttributeFilter | None" = None
+
+
+def select_by_attribute(ctx, where: AttributeFilter, mode: Mode = "new_selection", previous: Selection | None = None):
     frame = ctx.frames[0]
-    chosen = set(map(int, frame.index[condition(frame, where)]))
+    chosen = set(map(int, frame.index[condition(frame, where.model_dump(exclude_none=True))]))
     return select(ctx, chosen, mode, previous)
 
 
