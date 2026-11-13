@@ -1,6 +1,6 @@
 (() => {
     const h = React.createElement;
-    const { useState } = React;
+    const { useEffect, useState } = React;
     const api = window.guizhi;
     const { Titlebar } = window.GuizhiShell;
     const { ModelForm, Workspace, initial, errorText } = window.GuizhiModel;
@@ -18,6 +18,12 @@
         const [error, setError] = useState('');
         const fail = issue => setError(errorText(issue));
         const blocked = testing || saving;
+        useEffect(() => {
+            if (step < 2) return;
+            const image = new Image();
+            image.src = '/luhe-banner.png';
+            void image.decode().catch(issue => console.error('首页背景预加载失败', issue));
+        }, [step]);
         const currentVoice = { ...savedVoice, localAvailable: state.speech.localAvailable, component: state.speech.component };
         const needsLocal = window.GuizhiSpeechNeedsLocal(voice, currentVoice);
 

@@ -66,7 +66,7 @@
         const [width, setWidth] = useState(innerWidth);
         const [panels, setPanels] = useState(appearance.panels);
         const [drawer, showDrawer] = useState(false);
-        const restored = useRef(appearance.expandedPanels || [222, 362]);
+        const restored = useRef(appearance.expandedPanels || [56, 362]);
         useEffect(() => { setPanels(appearance.panels); }, [appearance.panels]);
         useEffect(() => {
             if (appearance.expandedPanels) restored.current = appearance.expandedPanels;
@@ -77,7 +77,7 @@
             return () => removeEventListener('resize', resize);
         }, []);
         const compact = width < 1040;
-        const left = panels[0] ? Math.min(panels[0], width < 900 ? 180 : 300) : 0;
+        const left = panels[0] ? 56 : 0;
         const right = compact || !panels[1] ? 0 : Math.min(panels[1], Math.max(250, width - left - 410));
         function persist(next) {
             setPanels(next);
@@ -92,12 +92,11 @@
         }
         function resize(index) {
             return event => {
-                if (!['ArrowLeft', 'ArrowRight'].includes(event.key) || (index === 1 && compact)) return;
+                if (index === 0 || compact || !['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
                 event.preventDefault();
                 const next = [...panels];
                 const direction = (event.key === 'ArrowRight' ? 1 : -1) * (index === 0 ? 1 : -1);
-                const min = index === 0 ? 160 : 250;
-                next[index] = Math.min(index === 0 ? 300 : 520, Math.max(min, (next[index] || min) + direction * 16));
+                next[index] = Math.min(520, Math.max(250, (next[index] || 250) + direction * 16));
                 persist(next);
             };
         }
@@ -106,7 +105,7 @@
             h(Titlebar, { arcgis, connected, left: () => toggle(0), right: () => toggle(1), resize }),
             h(Splitter, { className: 'workbench-panels', lazy: true,
                 onResizeEnd: sizes => persist(sideSizes(sizes)) },
-                h(Splitter.Panel, { size: left, min: left ? 160 : 0, max: 300, resizable: Boolean(left) }, left > 0 && sidebar),
+                h(Splitter.Panel, { size: left, min: left, max: left, resizable: false }, left > 0 && sidebar),
                 h(Splitter.Panel, { min: 400 }, conversation),
                 h(Splitter.Panel, { size: right, min: right ? 250 : 0, max: 520, resizable: Boolean(right) }, right > 0 && inspector)),
             compact && h(Drawer, { title: '材料与成果', width: 360, getContainer: false,

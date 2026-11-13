@@ -17,11 +17,11 @@ function createShell({ userData, icon, verifyStartup }) {
         shortcut: shortcutPattern.test(stored.shortcut) ? stored.shortcut : 'Ctrl+G',
         panels: [0, 1].map(index => {
             const size = stored.panels?.[index];
-            return Number.isFinite(size) ? size === 0 ? 0 : clamp(size, 160, 520) : [222, 362][index];
+            return Number.isFinite(size) ? size === 0 ? 0 : (index === 0 ? 56 : clamp(size, 250, 520)) : [56, 362][index];
         }),
         expandedPanels: [0, 1].map(index => {
             const size = stored.expandedPanels?.[index] || stored.panels?.[index];
-            return Number.isFinite(size) && size > 0 ? clamp(size, 160, 520) : [222, 362][index];
+            return Number.isFinite(size) && size > 0 ? (index === 0 ? 56 : clamp(size, 250, 520)) : [56, 362][index];
         }),
         positions: stored.positions || {},
         displayId: stored.displayId,
@@ -35,7 +35,7 @@ function createShell({ userData, icon, verifyStartup }) {
         show: false, title: '规智', titleBarStyle: 'hidden', titleBarOverlay: overlay(), autoHideMenuBar: true,
         backgroundColor: overlay().color, icon, webPreferences });
     const launcher = new BrowserWindow({ width: 944, height: launcherBaseHeight, frame: false,
-        show: false, title: '规智快捷面板', skipTaskbar: true, alwaysOnTop: true,
+        show: false, title: '规智快捷面板', skipTaskbar: true,
         backgroundColor: overlay().color, icon, webPreferences });
     const portrait = new BrowserWindow({ width: 312, height: 244, frame: false, transparent: true,
         backgroundColor: '#00000000', resizable: false, skipTaskbar: true, alwaysOnTop: true,

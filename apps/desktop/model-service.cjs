@@ -35,10 +35,12 @@ async function readModels(config, key, signal, allowUnsupported = false) {
 }
 
 async function listModels(config, key) {
-    const ids = await readModels(config, key, AbortSignal.timeout(connectionTimeout));
+    const ids = await readModels(config, key, AbortSignal.timeout(connectionTimeout), config.provider === 'custom');
+    if (ids === null) return { supported: false, models: [] };
     // OpenAI's list also includes voice, embedding, image and moderation models.
-    return config.provider === 'openai' ? ids.filter(id => /^(?:gpt-|chatgpt-|o\d|ft:)/i.test(id) &&
+    const models = config.provider === 'openai' ? ids.filter(id => /^(?:gpt-|chatgpt-|o\d|ft:)/i.test(id) &&
         !/(?:audio|realtime|transcrib|tts|image|moderation|embedding|search)/i.test(id)) : ids;
+    return { supported: true, models };
 }
 
 function responseError(reason = '') {

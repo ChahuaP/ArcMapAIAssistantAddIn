@@ -352,10 +352,10 @@
                     : '请在工作台完成首次设置'),
                 h('span', null, h('kbd', null, 'Enter'), ' 发送　', h('kbd', null, 'Esc'), ' 收起')));
         const sidebar = h('aside', { className: 'sidebar' },
-            button('plus', '新的对话', { type: 'primary', className: 'new-task', disabled: sending || adding, onClick: () => resetConversation() }),
-            h('div', { className: 'nav-item selected' }, icon('app'), '工作台'),
-            h('button', { className: 'nav-item', disabled: !ready, onClick: () => showBusiness('browse') }, icon('grid'), '业务中心'),
-            h('button', { className: 'nav-item', onClick: () => showSettings(true) }, icon('settings'), '设置'));
+            iconButton('plus', '新的对话', { type: 'primary', disabled: sending || adding, onClick: () => resetConversation() }),
+            h('span', { className: 'rail-current', title: '工作台', 'aria-label': '工作台', 'aria-current': 'page' }, icon('app')),
+            iconButton('grid', '业务中心', { disabled: !ready, onClick: () => showBusiness('browse') }),
+            iconButton('settings', '设置', { onClick: () => showSettings(true) }));
         const conversation = h('section', { className: 'conversation' + (task ? '' : ' conversation-empty'), 'aria-label': '办理对话' },
             task && h('div', { className: 'task-head' }, h('h1', null, turns[0].title),
                 h('span', { className: 'status-tag' }, labels[task.status] || '未完成')),

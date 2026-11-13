@@ -54,9 +54,14 @@ svg { flex: none; vertical-align: middle; }
 .title-path { border-left: 1px solid var(--line); padding-left: 11px; color: var(--muted); font-size: 13px; }
 .workbench-panels, .workbench-panels > .ant-splitter-panel { min-height: 0; overflow: hidden; }
 .sidebar, .settings-nav { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-4) var(--space-3); background: var(--rail); min-height: 0; }
-.sidebar { height: 100%; }
-.sidebar > .nav-item:last-child { margin-top: auto; }
-.new-task { width: 100%; margin-bottom: var(--space-2); }
+.sidebar { height: 100%; align-items: center; padding-inline: 6px; }
+.sidebar > .ant-btn, .rail-current { width: 40px; height: 40px; display: grid; place-items: center; flex: none; }
+.rail-current { border-radius: 8px; color: var(--accent); background: var(--soft); }
+.sidebar > .ant-btn:last-child { margin-top: auto; }
+.model-field { min-width: 0; display: grid; gap: var(--space-2); }
+.model-field > :is(input, select) { width: 100%; }
+.model-field-label { display: flex; align-items: center; gap: 6px; font-weight: 600; }
+.model-field-label .ant-btn { width: 24px; height: 24px; padding: 0; }
 .nav-item { display: flex; align-items: center; gap: var(--space-2); min-height: var(--control-height); padding: var(--space-2) var(--space-3); text-align: left; border-radius: 8px; border-color: transparent; background: transparent; }
 .nav-item.selected { background: var(--soft); color: var(--accent); font-weight: 650; }
 .conversation { display: flex; flex-direction: column; height: 100%; min-width: 0;
@@ -296,3 +301,5 @@ dialog label { display: grid; gap: 5px; }
     .launcher-head kbd { display: none; }
     .business-tiles { grid-template-columns: 1fr; }
 }
+
+.model-help { display: block; max-width: 280px; }
