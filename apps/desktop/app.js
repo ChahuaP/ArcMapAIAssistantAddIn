@@ -55,9 +55,18 @@
                         : h('small', { key: index }, locator(ref)))))));
     }
 
+    function Progress({ task }) {
+        if (!task.progress?.length) return null;
+        return h(antd.Steps, { className: 'task-progress', size: 'small', direction: 'vertical',
+            current: task.progress.length - Number(active(task) && task.status !== 'cancelling'),
+            status: !active(task) && !['answered', 'succeeded'].includes(task.status) ? 'error' : 'process',
+            items: task.progress.map(item => ({ title: item.label, description: item.target || undefined })) });
+    }
+
     function Result({ task, retry, fail, editSkill, parcel, selectParcel, showMap, voiceReply, openComponents }) {
         if (active(task)) return h('article', { className: 'bubble assistant working', role: 'status' },
-            h('i', { className: 'pulse' }), task.status === 'cancelling' ? '正在结束任务' : task.step || '正在理解任务');
+            task.status === 'cancelling' ? '正在结束任务'
+                : task.progress?.length ? h(Progress, { task }) : '正在准备本轮任务');
         if (voiceReply?.task === task.id) return h('article', { className: 'bubble assistant' },
             voiceReply.text ? h('p', { className: 'voice-caption' }, voiceReply.text)
                 : h('span', { role: 'status' }, h('i', { className: 'pulse' }), '规智正在准备语音'));
@@ -66,8 +75,9 @@
             return h('article', { className: 'bubble assistant' },
                 h('div', { className: 'result-head' }, h('img', { src: '/mark.svg', alt: '', width: 29 }),
                     h('strong', null, task.status === 'answered' ? '规智' : '办理结果')),
-                stats?.coverage_ratio !== undefined && !task.dialogue
-                    ? h('p', null, `项目范围 ${number(stats.project_area_m2)} m²`) : markdown(task.response),
+                markdown(task.response),
+                task.progress?.length > 0 && h('details', { className: 'result-progress' },
+                    h('summary', null, '办理过程'), h(Progress, { task })),
                 stats?.coverage_ratio !== undefined && h('dl', { className: 'metrics' },
                     h('div', null, h('dt', null, '重叠面积'), h('dd', null, number(stats.covered_area_m2), h('small', null, ' m²'))),
                     h('div', null, h('dt', null, '覆盖率'), h('dd', null, (stats.coverage_ratio * 100).toFixed(2), h('small', null, '%')))),
@@ -96,7 +106,7 @@
         const [draft, renderDraft] = useState(emptyDraft);
         const shared = useRef(draft);
         const [appearance, setAppearance] = useState({
-            theme: 'system', dark: matchMedia('(prefers-color-scheme: dark)').matches, panels: [222, 362],
+            theme: 'system', dark: matchMedia('(prefers-color-scheme: dark)').matches, panels: [56, 362],
             shortcut: 'Ctrl+G',
         });
         const [viewed, viewResult] = useState(null);
@@ -199,7 +209,7 @@
             if (command === 'reset') return resetConversation();
             if (busy || adding || !draft.prompt.trim()) return;
             if (!ready) return api.workbench().catch(fail);
-            if (suggestion.exact) return choose(suggestion.items[0], true);
+            if (suggestion.exact && !picked.length) return choose(suggestion.items[0], true);
             if (!canSubmit) return;
             setError('');
             setSending(true);

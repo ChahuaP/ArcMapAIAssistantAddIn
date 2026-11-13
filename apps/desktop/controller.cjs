@@ -233,6 +233,10 @@ class DesktopController {
                     ...(control ? { control: [control] } : {}) });
             }
         }
+        if (!skill && bindings.inputs) {
+            const { inputs, ...named } = bindings;
+            bindings = { ...named, ...Object.fromEntries(inputs.map((item, index) => ['layer-' + (index + 1), [item]])) };
+        }
         const history = [];
         let previousRun;
         for (const prior of this.tasks.slice(0, 4)) {
@@ -261,7 +265,10 @@ class DesktopController {
             const visual = visualRecipe(event);
             if (visual) {
                 task.visual = visual;
-                task.step = visual.label;
+                const progress = task.progress || [];
+                if (progress.at(-1)?.label !== visual.label || progress.at(-1)?.target !== visual.target) {
+                    task.progress = [...progress.slice(-31), visual];
+                }
                 this.onChange(this.state());
             }
         } }).then(receipt => this.complete(task, receipt), error => this.complete(task, {

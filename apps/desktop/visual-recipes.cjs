@@ -1,12 +1,18 @@
 const recipe = (kind, label, target = '') => ({ kind, label, target });
 
 function visualRecipe(event) {
+    if (event.kind === 'dispatch_preparing') return recipe('read', '规智正在准备材料');
     if (event.kind === 'dispatch') return recipe('think', '规智正在分析任务');
     if (event.kind === 'plan_reused') return recipe('reuse', '规智正在复用已验证流程');
     if (event.kind !== 'operation_progress') return null;
     const { phase, details: item } = event;
     if (phase === 'material_reading') return recipe('read', item.layer ? '规智正在读取图层' : '规智正在读取材料', item.layer);
-    if (phase === 'material_resolved') return item.reused ? recipe('reuse', '规智正在复用已读取材料') : null;
+    if (phase === 'material_resolved' && item.status === 'succeeded') {
+        return recipe(item.reused ? 'reuse' : 'read', item.reused ? '规智已复用材料' : '规智已读取图层', item.layer);
+    }
+    if (phase === 'control_coordinates') return recipe('transform', '规智正在核对坐标系');
+    if (phase === 'control_overlay') return recipe('calculate', '规智正在计算重叠面积');
+    if (phase === 'control_export') return recipe('publish', '规智正在整理地块结果');
     if (phase === 'operation_verified') return recipe('check', '规智已校验成果');
     if (phase === 'workflow_publishing') return recipe('publish', '规智正在保存成果');
     if (phase === 'workflow_step_finished') {

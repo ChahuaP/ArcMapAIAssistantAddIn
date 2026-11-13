@@ -3,7 +3,7 @@ import { join, relative } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
 const visualSteps = ['material_reading', 'material_resolved', 'workflow_step_started',
-    'workflow_step_finished', 'operation_verified', 'workflow_publishing'];
+    'workflow_step_finished', 'operation_verified', 'workflow_publishing', 'control_coordinates', 'control_overlay', 'control_export'];
 
 export function watchRun(workspace, requestId, emit) {
     const file = join(workspace, 'workspace.sqlite');

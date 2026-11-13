@@ -57,6 +57,16 @@ def remember_plan(workspace, key, record):
 
 def selected_context(workspace, reference, materials):
     skill = skills.get_skill(workspace, reference)
+    layers = layer_context(materials)
+    return {"reference": f"{skill['id']}@{skill['revision']}", "title": skill["title"],
+            "roles": [{key: role[key] for key in ("id", "label", "kind", "geometry", "coordinate", "minimum", "maximum", "resource")}
+                      for role in skill["materials"]],
+            "parameters": skill.get("parameters", {}),
+            "steps": [{"id": step["id"], "operation": step["operation"]} for step in skill["steps"]],
+            "layers": layers}
+
+
+def layer_context(materials):
     layers = bound_layer_metadata(materials)
     for group in layers.values():
         for item in group:
@@ -64,12 +74,7 @@ def selected_context(workspace, reference, materials):
                 item["field_count"] = len(item.pop("fields"))
             if item.get("crs") and len(item["crs"]) > 160:
                 item["crs"] = "已定义的自定义坐标系"
-    return {"reference": f"{skill['id']}@{skill['revision']}", "title": skill["title"],
-            "roles": [{key: role[key] for key in ("id", "label", "kind", "geometry", "coordinate", "minimum", "maximum", "resource")}
-                      for role in skill["materials"]],
-            "parameters": skill.get("parameters", {}),
-            "steps": [{"id": step["id"], "operation": step["operation"]} for step in skill["steps"]],
-            "layers": layers}
+    return layers
 
 
 def replay(root, request_path):
@@ -85,6 +90,8 @@ def replay(root, request_path):
         result = {"key": key, "operation": None, "materials": materials}
         if request["skill"]:
             result["selected"] = selected_context(workspace, request["skill"], materials)
+        else:
+            result["layers"] = layer_context(materials)
         return result
     previous = workspace.read(entry["run_id"])
     plan = previous["task"]["request"]["parameters"]["specification"]

@@ -72,13 +72,29 @@ def worker(workspace: Workspace, run_id: str) -> dict:
         raise
 
 
-def supervise(workspace: Workspace, run_id: str, cancel_requested: Callable[[], bool] | None):
+def supervise(workspace: Workspace, run_id: str, cancel_requested: Callable[[], bool] | None, progress=None):
     workflow = workspace.read(run_id)["task"]["operation"] == "workflow.execute"
     cancel_deadline = None
     command = [
         sys.executable, "-I", "-B", str(Path(__file__).resolve().parents[1] / "__main__.py"),
         "--workspace", str(workspace.root), "_worker", run_id,
     ]
+    cursor = 0
+
+    def relay():
+        nonlocal cursor
+        if progress is None or workspace.status(run_id) != "running":
+            return
+        with workspace.connect() as db:
+            events = db.execute("SELECT seq, step FROM events WHERE run_id = ? AND seq > ? ORDER BY seq",
+                                (run_id, cursor)).fetchall()
+        stages = {"coordinates": "control_coordinates", "overlay_started": "control_overlay",
+                  "export_started": "control_export"}
+        for sequence, step in events:
+            cursor = sequence
+            if step in stages:
+                progress(stages[step])
+
     with subprocess.Popen(
         command, cwd=workspace.directory(run_id),
         stdin=subprocess.DEVNULL,
@@ -86,6 +102,7 @@ def supervise(workspace: Workspace, run_id: str, cancel_requested: Callable[[], 
     ) as process:
         try:
             while True:
+                relay()
                 if cancel_requested is not None and cancel_requested():
                     workspace.request_cancel(run_id)
                 if workspace.status(run_id) == "cancelling":
@@ -103,6 +120,7 @@ def supervise(workspace: Workspace, run_id: str, cancel_requested: Callable[[], 
                     continue
             if cancel_requested is not None and cancel_requested():
                 workspace.request_cancel(run_id)
+            relay()
             if process.returncode:
                     message = error.strip() or f"Worker exited {process.returncode}"
                     try:
@@ -122,7 +140,7 @@ def supervise(workspace: Workspace, run_id: str, cancel_requested: Callable[[], 
 def run_vector(root: Path, source: Path, layer: str, object_id: str | None,
                cancel_requested: Callable[[], bool] | None = None, *,
                operation: str = "vector_inventory", control: tuple[Path, str] | None = None,
-               project_plan: str | None = None, control_plan: str | None = None) -> dict:
+               project_plan: str | None = None, control_plan: str | None = None, progress=None) -> dict:
     definition = OPERATIONS[operation]
     source = source.resolve(strict=True)
     if not source.is_file() or source.suffix.lower() not in {".gpkg", ".shp", ".geojson"}:
@@ -148,7 +166,7 @@ def run_vector(root: Path, source: Path, layer: str, object_id: str | None,
     task = TaskSpec(uuid4().hex, 1, str(source), layer, object_id or uuid4().hex,
                     operation, definition.version, definition.rule, control_source, control_layer,
                     project_plan, control_plan)
-    return submit(workspace, task, cancel_requested)
+    return submit(workspace, task, cancel_requested, progress=progress)
 
 
 def run_operation(root, payload, cancel_requested=None):
@@ -175,7 +193,7 @@ def run_operation(root, payload, cancel_requested=None):
                   key=request.idempotency_key, fingerprint=fingerprint)
 
 
-def submit(workspace, task, cancel_requested, *, key=None, fingerprint=None):
+def submit(workspace, task, cancel_requested, *, key=None, fingerprint=None, progress=None):
     run = Run(uuid4().hex, task.id, task.revision, product_version())
     job = Job(uuid4().hex, run.id, task.operation)
     directory = workspace.directory(run.id)
@@ -190,7 +208,7 @@ def submit(workspace, task, cancel_requested, *, key=None, fingerprint=None):
             published = workspace.start(task, run, job, key=key, fingerprint=fingerprint)
             if published == run.id:
                 try:
-                    supervise(workspace, run.id, cancel_requested)
+                    supervise(workspace, run.id, cancel_requested, progress)
                 except KeyboardInterrupt:
                     workspace.request_cancel(run.id)
                     workspace.finish(run.id, "cancelled")

@@ -46,7 +46,7 @@
         const local = config.mode === 'local';
         const custom = config.provider === 'custom';
         const hasSavedKey = current.keyConfigured && scope(current.modelConfig) === scope(config);
-        const anonymous = local && /^http:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?=[:/]|$)/i.test(config.baseUrl);
+        const anonymous = local && /^https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?=[:/]|$)/i.test(config.baseUrl);
         const canQuery = Boolean(config.provider && (!custom || config.baseUrl?.trim()) &&
             (anonymous || value.key?.trim() || hasSavedKey));
         function update(patch, key = value.key) {

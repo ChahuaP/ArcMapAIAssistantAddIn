@@ -106,6 +106,7 @@ def check_control(task: dict, job: dict, directory: Path, progress, ensure_super
         progress("transformed", role=role, plan_id=plan["id"], revision=plan["revision"])
         return converted
 
+    progress("coordinates")
     project = transform_role(project, "project", project_rev)
     control = transform_role(control, "control", control_rev)
     crs = project.crs
@@ -114,6 +115,7 @@ def check_control(task: dict, job: dict, directory: Path, progress, ensure_super
     if not crs.is_projected or len(crs.axis_info) != 2 or any(
             not isclose(axis.unit_conversion_factor, 1.0, abs_tol=1e-12) for axis in crs.axis_info):
         raise ValueError("Area analysis requires a projected CRS with metre axes")
+    progress("overlay_started")
     project_geom, control_geom = polygons(project, "Project"), polygons(control, "Control")
     project_union = shapely.union_all(project_geom)
     control_union = shapely.union_all(control_geom)
@@ -135,6 +137,7 @@ def check_control(task: dict, job: dict, directory: Path, progress, ensure_super
              "coverage_ratio": min(1.0, area / project_area),
              "relations": dict(Counter(row["relation"] for row in rows))}
     progress("overlaid", **stats)
+    progress("export_started")
     artifacts = directory / "artifacts"
     result = artifacts / "result.gpkg"
     frame = geopandas.GeoDataFrame(rows, geometry=project_geom.to_list(), crs=crs)

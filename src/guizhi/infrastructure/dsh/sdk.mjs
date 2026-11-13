@@ -24,22 +24,33 @@ function verifiedResponse(receipt, dialogue) {
     const stats = receipt.statistics;
     const area = value => value.toLocaleString('zh-CN', { maximumFractionDigits: 2 });
     const parts = [];
-    if (receipt.mode && !dialogue) parts.push(`已完成 ${stats.step_count} 个步骤。`);
     if (stats.reused_steps) parts.push(`其中复用 ${stats.reused_steps} 个步骤。`);
     if (stats.changed_parcels) parts.push(`更新涉及 ${stats.changed_parcels} 宗地。`);
     for (const item of receipt.steps ?? [{ statistics: stats }]) {
         const fact = item.statistics;
         if (fact.coverage_ratio !== undefined) {
-            parts.push(`项目范围 ${area(fact.project_area_m2)} m²，重叠 ${area(fact.covered_area_m2)} m²，覆盖率 ${(fact.coverage_ratio * 100).toFixed(2)}%。结果反映空间关系，审批依据请查阅适用规则。`);
+            const counts = fact.relations || {};
+            const findings = [['inside', '完全覆盖'], ['overlap', '部分重叠'], ['touch_line', '线接触'],
+                ['touch_point', '点接触'], ['disjoint', '不相交']]
+                .filter(([key]) => counts[key]).map(([key, label]) => `${label} ${counts[key]} 宗`);
+            parts.push(`项目范围 ${area(fact.project_area_m2)} m²，重叠 ${area(fact.covered_area_m2)} m²，覆盖率 ${(fact.coverage_ratio * 100).toFixed(2)}%。`);
+            if (findings.length) parts.push(findings.join('、') + '。');
         }
     }
     if (stats.feature_count !== undefined) parts.push(`共 ${stats.feature_count} 个要素。`);
     if (stats.geometry_types && !dialogue) parts.push(Object.entries(stats.geometry_types)
         .map(([name, count]) => `${name} ${count} 个`).join('，') + '。');
+    if (stats.selected_count !== undefined) parts.push(`已选中 ${stats.selected_count} 个要素。`);
     if (stats.row_count !== undefined) parts.push(`共 ${stats.row_count} 行。`);
     if (stats.changed_area_m2 !== undefined && stats.evaluation) {
         if (stats.evaluation === 'simulation') parts.push('本轮使用模拟样本。');
         parts.push(`变化面积 ${area(stats.changed_area_m2)} m²，另有 ${area(stats.unknown_pixels)} 个未知像元和 ${area(stats.nodata_pixels)} 个缺测像元。`);
+    }
+    if (receipt.mode === 'free' && stats.feature_count !== undefined) {
+        const operation = receipt.steps?.at(-1)?.operation;
+        const title = { 'vector.buffer': '缓冲分析', 'vector.clip': '裁切', 'vector.intersect': '相交',
+            'vector.dissolve': '融合', 'vector.spatial_join': '空间连接', 'data.export_selection': '导出选区' }[operation];
+        if (title) parts.unshift(title + '已完成。');
     }
     const answer = parts.join('') || '已完成办理，成果和证据已保存。';
     return dialogue ? answer.replaceAll(' m²', '平方米') : answer;
@@ -158,7 +169,7 @@ export async function dispatch(options, { signal, onEvent = () => {}, getService
     let result;
     let attempted = false;
     try {
-        event({ kind: 'dispatch', id, provider, model });
+        event({ kind: 'dispatch_preparing', id });
         const cancelled = join(directory, 'cancelled');
         stopListener = addAbortListener(stop, () => writeFileSync(cancelled, ''));
         const { stdout } = await exec(options.python, ['-I', '-B', join(source, 'src/guizhi/__main__.py'),
@@ -174,6 +185,7 @@ export async function dispatch(options, { signal, onEvent = () => {}, getService
             result = { status: deadline.aborted ? 'timed_out' : 'cancelled' };
         } else {
             stopProgress = watchRun(workspace, id, event);
+            event({ kind: 'dispatch', id, provider, model });
             const service = getService ? await getService() :
                 (owned = new (await import('./service.mjs')).DispatchService(options));
             await service.ready;
@@ -187,10 +199,10 @@ export async function dispatch(options, { signal, onEvent = () => {}, getService
             boundService = service;
             event({ kind: 'runtime_bound', runtime_id: service.id });
             const { harness } = service;
-            const roles = Object.fromEntries(Object.entries(materials).map(([role, items]) => [role, items.length]));
+            const roles = Object.keys(prepared.materials);
             const bound = options.skillParameters !== undefined ? '办理参数已在本机绑定，执行技能时省略 skill_parameters。' : '';
             const selection = prepared.selected ? `已选技能和本轮材料摘要：${JSON.stringify(prepared.selected)}。`
-                : `已绑定材料数量 ${JSON.stringify(roles)}。已选技能无。`;
+                : `本轮材料图层清单（键为 material. 后的引用）：${JSON.stringify(prepared.layers)}。已选技能无。`;
             const context = `${selection}${bound}有已选历史成果：${Boolean(options.previousRun)}。\n`;
             const conversation = history.length ? '最近对话记录（每项为用户提问与规智答复）：' + JSON.stringify(history) + '\n' : '';
             const speech = options.dialogue ? '本轮使用语音输入。先实际办理，再用简洁口语回答，不用 Markdown。\n' : '';
@@ -217,14 +229,16 @@ export async function dispatch(options, { signal, onEvent = () => {}, getService
             });
             let response = await run(context + conversation + speech + '用户请求：' + options.prompt);
             ran = true;
-            const needsSelectedWorkflow = options.skill && Object.keys(roles).length > 0 && /^请办理/u.test(options.prompt.trim());
-            const needsMeasurement = options.dialogue && Object.keys(roles).length > 0 &&
-                /统计|计算|清点|多少|数量|覆盖率|重叠面积/u.test(options.prompt);
+            const needsSelectedWorkflow = options.skill && roles.length > 0 && /^请办理/u.test(options.prompt.trim());
+            const needsMeasurement = roles.length > 0 &&
+                /统计|计算|清点|多少|数量|覆盖率|重叠面积|核查|缓冲|裁切|相交|导出|筛选|叠加/u.test(options.prompt);
+            const firstAnswer = assistantAnswer(response.finalResponse);
+            const asks = /[？?]|请(?:提供|补充|确认|指定|选择|告诉)/u.test(firstAnswer);
             if ((needsSelectedWorkflow || needsMeasurement) && response?.finishReason === 'completed' &&
-                    !attempted && !stop.aborted && !existsSync(operationPath) &&
+                    !attempted && (needsSelectedWorkflow || !asks) && !stop.aborted && !existsSync(operationPath) &&
                     !existsSync(join(directory, 'discovery')) && !existsSync(join(directory, 'input-issue.json'))) {
-                event({ kind: 'workflow_retry', reason: needsSelectedWorkflow ? 'selected_workflow_without_tool' : 'voice_measurement_without_tool' });
-                response = await run('请调用 execute_workflow，按本轮已选业务和已绑定的材料实际办理，取得作业回执后再回答。' +
+                event({ kind: 'workflow_retry', reason: needsSelectedWorkflow ? 'selected_workflow_without_tool' : 'spatial_request_without_tool' });
+                response = await run('请调用 execute_workflow，按本轮图层引用和用户要求实际办理，取得作业回执后再回答。' +
                     context + '用户请求：' + options.prompt);
             }
             if (stop.aborted) {
@@ -238,9 +252,9 @@ export async function dispatch(options, { signal, onEvent = () => {}, getService
                 const stopped = existsSync(budgetPath) && readJson(budgetPath).status === 'exhausted';
                 const answer = assistantAnswer(response.finalResponse);
                 const status = receipt?.status ?? (stopped ? 'budget_exhausted' : response.finishReason !== 'completed' ? 'failed' : issue?.status ??
-                    (attempted ? 'no_result' : existsSync(join(directory, 'discovery')) ||
-                        (!Object.keys(roles).length && !options.skill && answer) ? 'answered'
-                        : Object.keys(roles).length ? 'no_result' : 'missing_materials'));
+                    (attempted ? 'no_result' : answer && (!needsSelectedWorkflow && (!needsMeasurement ||
+                        /[？?]|请(?:提供|补充|确认|指定|选择|告诉)/u.test(answer))) ? 'answered'
+                        : roles.length ? 'no_result' : 'missing_materials'));
                 const terminal = response.events.findLast(fact => fact.type === 'turn/end');
                 const failure = terminal?.data.reason.error;
                 const candidatePath = join(directory, 'candidate.json');

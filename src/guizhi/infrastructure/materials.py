@@ -61,7 +61,7 @@ def bound_layer_metadata(materials):
     for role, group in materials.items():
         for item in group:
             kind = material_kind(item["file"])
-            description = {"kind": kind}
+            description = {"kind": kind, "name": Path(item["file"]).name, "layer": item["layer"]}
             if kind == "vector":
                 info = pyogrio.read_info(item["file"], layer=item["layer"], force_feature_count=False)
                 description.update(fields=info["fields"].tolist(), geometry=info["geometry_type"], crs=info["crs"])

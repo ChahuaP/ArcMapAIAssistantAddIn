@@ -103,7 +103,7 @@ def execute(ctx, specification: dict):
             record, reused = reuse_job(ctx.workspace, "data.describe", [item], {},
                                        lambda: run_operation(ctx.workspace.root, {
                                            "operation": "data.describe", "inputs": [item]}, cancelled), check=ctx.check)
-            ctx.progress("material_resolved", role=role, child_run_id=record["id"], status=record["status"], reused=reused)
+            ctx.progress("material_resolved", role=role, layer=item["layer"], child_run_id=record["id"], status=record["status"], reused=reused)
             ctx.check()
             data = committed(record)
             requirement = roles.get(role, {})
@@ -153,7 +153,7 @@ def execute(ctx, specification: dict):
                 raise ValueError("Unexpected business operation parameters")
             record, reused = reuse_job(ctx.workspace, step.operation, inputs, plans, lambda: run_vector(
                 ctx.workspace.root, Path(inputs[0]["file"]), inputs[0]["layer"], None, cancelled,
-                operation=step.operation, control=(Path(inputs[1]["file"]), inputs[1]["layer"])
+                operation=step.operation, progress=ctx.progress, control=(Path(inputs[1]["file"]), inputs[1]["layer"])
                 if expected == 2 else None, **plans), check=ctx.check)
         else:
             record, reused = reuse_job(ctx.workspace, step.operation, inputs, parameters, lambda: run_operation(
