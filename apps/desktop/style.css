@@ -209,6 +209,8 @@ kbd { display: inline-block; color: var(--muted); font: 12px "Segoe UI",sans-ser
 .speech-form > p { grid-column: 1 / -1; }
 .speech-channel { grid-template-rows: auto 1fr auto; }
 .speech-channel .setting-fields { grid-template-columns: minmax(0, 1fr); align-content: start; }
+.speech-component { display: grid; gap: var(--space-2); }
+.speech-component .business-actions { flex-wrap: wrap; }
 .speech-channel > button { min-width: 120px; }
 .settings-scroll, .onboarding-scroll { container-type: inline-size; }
 @container (max-width: 600px) {

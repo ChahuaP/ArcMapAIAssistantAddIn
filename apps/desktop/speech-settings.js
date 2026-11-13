@@ -10,6 +10,8 @@
     window.GuizhiSpeechNames = names;
     const format = entries => entries.map(entry => entry.heard + '=' + entry.correct).join('\n');
     const errorText = window.GuizhiErrorText;
+    const needsLocal = (value, current) => !current.localAvailable && (value.asr === 'local' || value.tts === 'local');
+    window.GuizhiSpeechNeedsLocal = needsLocal;
 
     function SpeechForm({ value, change, current, busy = () => {} }) {
         const [devices, setDevices] = useState([]);
@@ -75,8 +77,8 @@
             ? [[selected, '原设备不可用']] : []), ...devices
             .filter(device => device.kind === kind && device.deviceId && device.deviceId !== 'default')
             .map((device, index) => [device.deviceId, device.label || '设备 ' + (index + 1)])];
-        const select = (label, selected, options, onChange) => h('label', null, label,
-            h('select', { disabled: Boolean(testing), value: selected, onChange: event => onChange(event.target.value) },
+        const select = (label, selected, options, onChange, disabled = false) => h('label', null, label,
+            h('select', { disabled: Boolean(testing) || disabled, value: selected, onChange: event => onChange(event.target.value) },
                 ...options.map(([id, title]) => h('option', { key: id, value: id }, title))));
         const field = (label, selected, onChange, props = {}) => h('label', null, label,
             h('input', { ...props, disabled: Boolean(testing), value: selected || '',
@@ -89,7 +91,8 @@
             const profile = value[name] || {};
             const provider = value[kind];
             const remote = !['off', 'local'].includes(provider);
-            const choices = ['off', ...(current.localAvailable ? ['local'] : []), ...current.providers[kind]]
+            const missing = provider === 'local' && !current.localAvailable;
+            const choices = ['off', ...(current.localAvailable || current.component ? ['local'] : []), ...current.providers[kind]]
                 .map(id => [id, names[id]]);
             const saved = current[name];
             const configured = provider === current[kind] &&
@@ -102,7 +105,11 @@
                 h('div', { className: 'setting-fields' },
                     select('语音服务', provider, choices, next => change({ ...value, [kind]: next,
                         [name]: next === current[kind] ? current[name] : {},
-                        ...(asr ? {} : { voice: next === current.tts ? current.voice : '' }) })),
+                        ...(asr ? {} : { voice: next === current.tts ? current.voice : '' }) }),
+                        current.component?.progress !== undefined),
+                    missing && (asr || value.asr !== 'local') && h('div', { className: 'speech-component' },
+                        h('p', { className: 'muted' }, '使用本机语音前，请先安装语音组件。'),
+                        h(window.GuizhiComponentActions, { kind: 'speech', component: current.component })),
                     select(asr ? '麦克风' : '播放设备', value[device], byKind(asr ? 'audioinput' : 'audiooutput', value[device]),
                         next => update(device, next)),
                     provider === 'custom' && field(title + '地址', profile.baseUrl, next => updateProfile('baseUrl', next),
@@ -125,13 +132,11 @@
                             aliyun: 'longanyang', minimax: 'female-shaonv', surf: 'huayan',
                             volc: profile.model === 'seed-icl-2.0' ? '控制台中的音色 ID' : '使用默认音色' }[provider] })),
                 asr ? button('mic', testing === 'recording' ? '结束录音' : '录音测试',
-                    { disabled: provider === 'off' || Boolean(testing && testing !== 'recording'), onClick: record })
-                    : button('speaker', '声音试听', { disabled: provider === 'off' || Boolean(testing),
+                    { disabled: provider === 'off' || missing || Boolean(testing && testing !== 'recording'), onClick: record })
+                    : button('speaker', '声音试听', { disabled: provider === 'off' || missing || Boolean(testing),
                         loading: testing === 'tts', onClick: listen }));
         }
         return h('div', { className: 'speech-form' },
-            !current.localAvailable && current.component && h('section', { className: 'settings-card' },
-                h('h2', null, '本机语音'), h(window.GuizhiComponentActions, { kind: 'speech', component: current.component })),
             section('asr'), section('tts'),
             testing === 'recording' && h('p', { role: 'status', className: 'muted' }, '正在录音'),
             testing === 'asr' && h('p', { role: 'status', className: 'muted' }, '正在识别'),
@@ -175,6 +180,6 @@
             h('div', { className: 'setting-row' },
                 h('div', null, message && h('p', { role: 'status' }, message),
                     error && h('p', { role: 'alert', className: 'error' }, error)),
-                h(antd.Button, { type: 'primary', disabled: testing, loading: saving, onClick: save }, '保存设置')));
+                h(antd.Button, { type: 'primary', disabled: testing || needsLocal(value, current), loading: saving, onClick: save }, '保存设置')));
     };
 })();

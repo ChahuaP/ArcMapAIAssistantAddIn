@@ -18,6 +18,8 @@
         const [error, setError] = useState('');
         const fail = issue => setError(errorText(issue));
         const blocked = testing || saving;
+        const currentVoice = { ...savedVoice, localAvailable: state.speech.localAvailable, component: state.speech.component };
+        const needsLocal = window.GuizhiSpeechNeedsLocal(voice, currentVoice);
 
         async function advance(skip = false) {
             setError('');
@@ -50,7 +52,7 @@
             () => h('section', { className: 'settings-card' }, h('h2', null, '成果保存位置'),
                 h(Workspace, { value: value.workspace, change: workspace => change({ ...value, workspace }), fail, disabled: blocked })),
             () => h(ModelForm, { value, change, current: state.settings, verified: setVerified, busy: setTesting }),
-            () => h(window.GuizhiSpeechForm, { current: savedVoice, value: voice, change: setVoice, busy: setTesting }),
+            () => h(window.GuizhiSpeechForm, { current: currentVoice, value: voice, change: setVoice, busy: setTesting }),
             () => h('dl', { className: 'settings-card onboarding-summary' }, ...review.map(([label, text]) =>
                 h('div', { key: label }, h('dt', null, label), h('dd', null, text)))),
         ];
@@ -68,7 +70,7 @@
                     h('div', { className: 'business-actions' },
                         error && h('span', { className: 'error', role: 'alert' }, error),
                         h(antd.Button, { type: 'primary', disabled: blocked || (step === 0 && !value.workspace.trim()) ||
-                            (step === 1 && !verified), loading: saving, onClick: () => advance() },
+                            (step === 1 && !verified) || (step === 2 && needsLocal), loading: saving, onClick: () => advance() },
                         step === 3 ? '开始使用' : '下一步'))))));
     };
 })();
