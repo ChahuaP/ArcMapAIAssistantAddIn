@@ -27,7 +27,7 @@
                 sync.available && !sync.installed && button('plus', '安装扩展', {
                     disabled: busy, onClick: () => void perform(api.arcgisInstall),
                 }),
-                !sync.available && h('p', { className: 'muted' }, '当前安装缺少 ArcGIS 扩展组件。'),
+                !sync.available && h(window.GuizhiComponentActions, { kind: 'arcmap', component: sync.component }),
                 sync.carrier === 'arcgis' && h('p', { role: 'status', className: 'muted' },
                     sync.starting ? '正在启动数据视图' : sync.host ? '数据视图已连接' : '有空间数据时自动启动'),
                 sync.carrier === 'arcgis' && sync.jobs.length > 0 && h('section', { className: 'arcgis-jobs' },

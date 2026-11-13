@@ -46,10 +46,12 @@ if ($StageOnly) {
 [IO.Directory]::CreateDirectory($out) | Out-Null
 $exe = Join-Path $out "GuizhiSetup-$($summary.build).exe"
 if (Test-Path -LiteralPath $exe) { throw 'Installer already exists' }
-$speech = [int]($summary.components -contains 'speech')
-$arcmap = [int]($summary.components -contains 'arcmap')
-& $compiler /Qp "/DStage=$stage" "/DOutputDir=$out" "/DVersion=$($summary.version)" "/DBuild=$($summary.build)" "/DHasSpeech=$speech" "/DHasArcmap=$arcmap" (Join-Path $PSScriptRoot 'GuizhiSetup.iss')
+& $compiler /Qp "/DStage=$stage" "/DOutputDir=$out" "/DVersion=$($summary.version)" "/DBuild=$($summary.build)" (Join-Path $PSScriptRoot 'GuizhiSetup.iss')
 if ($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'Installer compilation failed' }
 $summary | Add-Member -NotePropertyName installer -NotePropertyValue $exe
 $summary | Add-Member -NotePropertyName installer_sha256 -NotePropertyValue ((Get-FileHash -LiteralPath $exe).Hash.ToLowerInvariant())
+foreach ($property in $summary.components.PSObject.Properties) {
+    $component = $property.Value
+    Copy-Item -LiteralPath (Join-Path $stage "components/$($component.file)") -Destination $out
+}
 $summary | ConvertTo-Json -Depth 8

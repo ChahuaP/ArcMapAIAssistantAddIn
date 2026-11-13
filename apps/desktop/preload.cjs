@@ -9,7 +9,7 @@ for (const name of ['state', 'configure', 'workspace', 'material', 'submit', 'ca
     'appearance', 'shortcutCapture', 'readDraft', 'saveDraft', 'openLauncher', 'fitLauncher', 'hideLauncher', 'portraitVoice', 'voiceTurn',
     'workspaceReady', 'modelList', 'modelTest',
     'portraitHit', 'portraitDrag', 'speechConfigure', 'speechRecognize', 'speechSynthesize', 'speechCancel', 'speechTest', 'voiceCaption',
-    'arcgisInstall', 'arcgisConfigure', 'arcgisRetry', 'arcgisCapture', 'openLink']) {
+    'arcgisInstall', 'arcgisConfigure', 'arcgisRetry', 'arcgisCapture', 'componentInstall', 'componentCancel', 'openLink']) {
     api[name] = (...args) => ipcRenderer.invoke('guizhi:' + name, ...args);
 }
 api.intakeDropped = (files, kind) => ipcRenderer.invoke('guizhi:materialPaths',

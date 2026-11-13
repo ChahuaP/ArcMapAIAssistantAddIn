@@ -9,6 +9,8 @@ import shutil
 import subprocess
 
 from install_state import VERSION, absolute, checksum, files
+from component_archive import create
+from dsh_payload import cli_manifest, retained, runtime_file
 
 SOURCE = Path(__file__).resolve().parents[1]
 BOOTSTRAP_FILES = {"python.exe", "pythonw.exe", "python311._pth", "python311.zip", "LICENSE.txt", "python.cat"}
@@ -18,9 +20,11 @@ def json_file(path):
     return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
-def copy_tree(source, target):
+def copy_tree(source, target, include=None):
     target.mkdir(parents=True, exist_ok=False)
     for name, file in files(source):
+        if include is not None and not include(name):
+            continue
         destination = target.joinpath(*name.split("/"))
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(file, destination)
@@ -88,9 +92,15 @@ def build(stage, runtime, desktop, dsh, speech, arcmap, addin, tree, commit):
     for name in ("src/guizhi", "apps/desktop", "resources/skills"):
         copy_tree(SOURCE / name, core / name)
     for name in ("VERSION", "LICENSE", "requirements.lock", "packaging/runtime.lock.json",
-                 "packaging/dsh-runtime/package.json", "packaging/local-speech/models.lock.json"):
+                 "packaging/dsh-runtime/package.json", "packaging/local-speech/models.lock.json",
+                 "packaging/component_archive.py"):
         copy_file(SOURCE / name, core / name)
-    for source, name in ((runtime / "python", "runtime/python"), (runtime / "node", "runtime/node"), (dsh, "runtime/dsh"),
+    selected = retained(json_file(dsh / "package-lock.json"))
+    dsh_target = payload / "runtime/dsh"
+    copy_tree(dsh, dsh_target, lambda name: runtime_file(name, selected))
+    cli = dsh_target / "node_modules/@deepseek-ai/dsh/package.json"
+    cli.write_text(json.dumps(cli_manifest(json_file(cli)), indent=2), encoding="utf-8")
+    for source, name in ((runtime / "python", "runtime/python"), (runtime / "node", "runtime/node"),
                          (desktop / "node_modules/electron/dist", "renderer/node_modules/electron/dist"),
                          (desktop / "node_modules/react", "renderer/node_modules/react"),
                          (desktop / "node_modules/react-dom", "renderer/node_modules/react-dom")):
@@ -111,7 +121,9 @@ def build(stage, runtime, desktop, dsh, speech, arcmap, addin, tree, commit):
     copy_file(SOURCE / "packaging/install_state.py", bootstrap / "install_state.py")
     copy_file(SOURCE / "packaging/guizhi.ico", bootstrap / "guizhi.ico")
 
-    components = []
+    components = {}
+    archives = stage / "components"
+    archives.mkdir()
     if speech:
         speech_identity = json_file(speech / "identity.json")
         spec = json_file(SOURCE / "packaging/local-speech/models.lock.json")
@@ -121,23 +133,22 @@ def build(stage, runtime, desktop, dsh, speech, arcmap, addin, tree, commit):
             for item in model["files"]:
                 if checksum(speech / "models" / mode / item["file"]) != item["sha256"]:
                     raise ValueError("Local speech asset differs from its pinned checksum")
-        copy_tree(speech, payload / "speech")
-        components.append("speech")
+        components["speech"] = create(speech, archives / f"Guizhi-{version}-speech.zip")
     if arcmap:
-        if not all((arcmap / name).is_file() for name in ("ArcMapBridge.exe", "ArcMapBridge.build")):
-            raise ValueError("The ArcGIS component requires the verified x86 Bridge")
+        if not addin or not all((arcmap / name).is_file() for name in ("ArcMapBridge.exe", "ArcMapBridge.build")):
+            raise ValueError("The ArcGIS component requires the verified x86 Bridge and add-in")
         for file in arcmap.iterdir():
             if file.is_file() and (file.suffix.lower() in {".exe", ".dll"} or
                                    file.name in {"ArcMapBridge.exe.config", "ArcMapBridge.build"}):
-                copy_file(file, payload / "arcmap" / file.name)
-        if addin:
-            copy_file(addin, payload / "arcmap/Guizhi.esriaddin")
-        components.append("arcmap")
+                copy_file(file, stage / "arcmap" / file.name)
+        copy_file(addin, stage / "arcmap/Guizhi.esriaddin")
+        components["arcmap"] = create(stage / "arcmap", archives / f"Guizhi-{version}-arcgis.zip")
     elif addin:
         raise ValueError("The ArcGIS extension requires the optional Bridge component")
+    (core / "packaging/components.json").write_text(json.dumps(components, sort_keys=True), encoding="utf-8")
     hashes = {name: checksum(file) for name, file in files(payload)}
     boot = {name: checksum(file) for name, file in files(bootstrap)}
-    manifest = {"schema": 1, "version": version, "components": components, "source_tree": tree,
+    manifest = {"schema": 1, "version": version, "components": [], "source_tree": tree,
                 "source_commit": commit, "dependencies": dependencies, "files": hashes, "bootstrap": boot}
     identity = sha256(json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()).hexdigest()[:16]
     manifest["build"] = f"{version}-{identity}"

@@ -39,7 +39,7 @@ class ArcGisSync {
 
     close() { this.closed = true; clearInterval(this.timer); }
 
-    get carrier() { return this.controller.settings.carrier || 'none'; }
+    get carrier() { return this.bridge ? this.controller.settings.carrier || 'none' : 'none'; }
     get bridge() { return this.controller.bundledArcmap; }
     get view() { return this.file ? path.join(path.dirname(this.file), 'host-exchanges', '规智数据视图.mxd') : ''; }
 

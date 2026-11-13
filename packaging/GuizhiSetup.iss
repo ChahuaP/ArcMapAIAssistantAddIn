@@ -33,26 +33,6 @@ UninstallDisplayIcon={app}\bootstrap\guizhi.ico
 [Languages]
 Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
 
-[Types]
-Name: "light"; Description: "轻客户端"
-#if (HasSpeech == "1") || (HasArcmap == "1")
-Name: "standard"; Description: "标准桌面"
-Name: "custom"; Description: "自定义安装"; Flags: iscustom
-#endif
-
-[Components]
-#if (HasSpeech == "1") || (HasArcmap == "1")
-Name: "core"; Description: "规智桌面与本机 GIS"; Flags: fixed; Types: light standard custom
-#else
-Name: "core"; Description: "规智桌面与本机 GIS"; Flags: fixed; Types: light
-#endif
-#if HasSpeech == "1"
-Name: "speech"; Description: "本地语音"; Types: standard
-#endif
-#if HasArcmap == "1"
-Name: "arcmap"; Description: "ArcGIS 扩展"; Types: standard
-#endif
-
 [Tasks]
 Name: "desktopicon"; Description: "创建桌面快捷方式"; Flags: unchecked
 
@@ -62,12 +42,6 @@ Source: "{#Stage}\payload\core\*"; DestDir: "{code:ReleaseDirectory}\core"; Flag
 Source: "{#Stage}\payload\runtime\*"; DestDir: "{code:ReleaseDirectory}\runtime"; Flags: recursesubdirs ignoreversion
 Source: "{#Stage}\payload\renderer\*"; DestDir: "{code:ReleaseDirectory}\renderer"; Flags: recursesubdirs ignoreversion
 Source: "{#Stage}\payload\installation.json"; DestDir: "{code:ReleaseDirectory}"; Flags: ignoreversion
-#if HasSpeech == "1"
-Source: "{#Stage}\payload\speech\*"; DestDir: "{code:ReleaseDirectory}\speech"; Flags: recursesubdirs ignoreversion; Components: speech
-#endif
-#if HasArcmap == "1"
-Source: "{#Stage}\payload\arcmap\*"; DestDir: "{code:ReleaseDirectory}\arcmap"; Flags: recursesubdirs ignoreversion; Components: arcmap
-#endif
 
 [Icons]
 Name: "{group}\规智"; Filename: "{app}\bootstrap\pythonw.exe"; Parameters: "-I -B ""{app}\bootstrap\install_state.py"" --root ""{app}"" launch --user-data ""{localappdata}\Guizhi\Desktop"""; IconFilename: "{app}\bootstrap\guizhi.ico"
@@ -132,12 +106,6 @@ begin
     Root := ExpandConstant('{app}');
     Parameters := '-I -B "' + Root + '\bootstrap\install_state.py" --root "' + Root +
       '" activate --release "' + Attempt + '"';
-#if HasSpeech == "1"
-    if WizardIsComponentSelected('speech') then Parameters := Parameters + ' --component speech';
-#endif
-#if HasArcmap == "1"
-    if WizardIsComponentSelected('arcmap') then Parameters := Parameters + ' --component arcmap';
-#endif
     WizardForm.StatusLabel.Caption := '正在切换到新版本';
     if not Exec(Root + '\bootstrap\pythonw.exe', Parameters, Root, SW_HIDE, ewWaitUntilTerminated, Code) then
       RaiseException('无法切换到新版本。');

@@ -129,7 +129,10 @@
                     : button('speaker', '声音试听', { disabled: provider === 'off' || Boolean(testing),
                         loading: testing === 'tts', onClick: listen }));
         }
-        return h('div', { className: 'speech-form' }, section('asr'), section('tts'),
+        return h('div', { className: 'speech-form' },
+            !current.localAvailable && current.component && h('section', { className: 'settings-card' },
+                h('h2', null, '本机语音'), h(window.GuizhiComponentActions, { kind: 'speech', component: current.component })),
+            section('asr'), section('tts'),
             testing === 'recording' && h('p', { role: 'status', className: 'muted' }, '正在录音'),
             testing === 'asr' && h('p', { role: 'status', className: 'muted' }, '正在识别'),
             message && h('p', { role: 'status', className: 'muted' }, message),

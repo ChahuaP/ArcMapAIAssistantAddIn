@@ -13,6 +13,7 @@ const { formats, materialBindings } = require('./materials.cjs');
 const { printReport } = require('./report-export.cjs');
 const { ArcGisSync } = require('./arcgis-sync.cjs');
 const { DiagnosticsUpload } = require('./diagnostics-upload.cjs');
+const { Components } = require('./components.cjs');
 const { action, parameterValues, parametersReady, isBusinessRequest, matchBusiness, reference } = require('./task-commands.js');
 
 const origin = 'guizhi://app';
@@ -36,7 +37,8 @@ async function startDesktop(options) {
         'materials-ui.js', 'skill-editor.js',
         'style.css', 'theme.css', 'mark.svg', 'luhe-banner.png', 'model-form.js', 'onboarding.js',
         'portrait.html', 'portrait.css', 'portrait.js', 'task-commands.js', 'speech-settings.js',
-        'speech-audio.js', 'voice-input.js', 'visual.html', 'visual.css', 'visual.js', 'arcgis-extension.js', 'markdown.js', 'messages.js'];
+        'speech-audio.js', 'voice-input.js', 'visual.html', 'visual.css', 'visual.js', 'arcgis-extension.js', 'markdown.js', 'messages.js',
+        'component-actions.js'];
     const files = new Map(localFiles.map(name => ['/' + name, path.join(__dirname, name)]));
     files.set('/react.js', path.join(vendor, 'react', 'umd', 'react.production.min.js'));
     files.set('/react-dom.js', path.join(vendor, 'react-dom', 'umd', 'react-dom.production.min.js'));
@@ -71,12 +73,23 @@ async function startDesktop(options) {
     let draft = {};
     let modelCheck;
     let voiceReply = null;
+    const python = path.join(runtime, 'python', 'python.exe');
+    const components = new Components(app.getPath('userData'), version, python, () => {
+        speech.bundledLocalRoot = options.bundledSpeech || components.installed('speech');
+        controller.bundledArcmap = bridge();
+        sync.refresh();
+        broadcast(controller.state());
+    });
+    function bridge() {
+        const root = components.installed('arcmap');
+        return options.bundledArcmap || (root && path.join(root, 'ArcMapBridge.exe'));
+    }
     const speech = new SpeechController({ userData: app.getPath('userData'), storage: safeStorage,
-        local: new LocalSpeechRuntime(path.join(runtime, 'python', 'python.exe'), externalPath),
-        bundledLocalRoot: options.bundledSpeech,
+        local: new LocalSpeechRuntime(python, externalPath),
+        bundledLocalRoot: options.bundledSpeech || components.installed('speech'),
         websocket: () => require(path.join(dsh || path.join(runtime, 'dsh'), 'node_modules', 'ws')) });
-    const withSpeech = state => ({ ...state, speech: speech.state(), voiceReply,
-        appearance: desktop.appearance(), arcgis: sync?.state(), version });
+    const withSpeech = state => ({ ...state, speech: { ...speech.state(), component: components.state().speech }, voiceReply,
+        appearance: desktop.appearance(), arcgis: { ...sync?.state(), component: components.state().arcmap }, version });
     function setVoiceReply(value) {
         if (!voiceReply && !value) return;
         voiceReply = value;
@@ -87,7 +100,7 @@ async function startDesktop(options) {
         desktop.notify('state', withSpeech(state));
     }
     const controller = new DesktopController({ userData: app.getPath('userData'), runtime, dsh,
-        safeStorage, externalPath, onChange: broadcast, bundledArcmap: options.bundledArcmap,
+        safeStorage, externalPath, onChange: broadcast, bundledArcmap: bridge(),
         installationRoot: options.installationRoot, diagnostics });
     if (!options.verifyStartup) {
         controller.reader.start();
@@ -304,9 +317,27 @@ async function startDesktop(options) {
         const pick = await dialog.showOpenDialog(window, { properties: ['openDirectory', 'createDirectory'] });
         return pick.canceled ? null : pick.filePaths[0];
     });
+    bind('componentInstall', async (surface, kind, method) => {
+        if (surface !== window || !['speech', 'arcmap'].includes(kind) || !['download', 'offline'].includes(method)) {
+            throw new Error('组件安装请求无效');
+        }
+        let archive;
+        if (method === 'offline') {
+            const pick = await dialog.showOpenDialog(window, { properties: ['openFile'],
+                filters: [{ name: '规智组件包', extensions: ['zip'] }] });
+            if (pick.canceled) return;
+            archive = pick.filePaths[0];
+        }
+        await components.install(kind, archive);
+    }, true);
+    bind('componentCancel', (surface, kind) => {
+        if (surface !== window || !['speech', 'arcmap'].includes(kind)) throw new Error('组件安装请求无效');
+        components.cancel(kind);
+    }, true);
     bind('arcgisInstall', async () => {
-        const file = options.bundledArcmap && path.join(path.dirname(options.bundledArcmap), 'Guizhi.esriaddin');
-        if (!file || !fs.existsSync(file)) throw new Error('请从规智交付目录安装 Guizhi.esriaddin');
+        const source = bridge();
+        const file = source && path.join(path.dirname(source), 'Guizhi.esriaddin');
+        if (!file || !fs.existsSync(file)) throw new Error('请先安装规智的 ArcGIS 组件');
         if (await shell.openPath(file)) throw new Error('无法打开 ArcGIS 扩展安装程序');
     });
     bind('arcgisConfigure', carrier => sync.configure(carrier));
@@ -434,7 +465,7 @@ async function startDesktop(options) {
         if (!controller.settings.workspace || !controller.settings.modelConfig) reveal();
         desktop.showPortrait();
     }
-    return { window, launcher, portrait, tray, controller, speech, visual, arcgis: sync };
+    return { window, launcher, portrait, tray, controller, speech, visual, arcgis: sync, components };
 }
 
 module.exports = { startDesktop };

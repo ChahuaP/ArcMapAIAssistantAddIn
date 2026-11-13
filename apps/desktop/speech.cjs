@@ -333,7 +333,8 @@ class SpeechController {
             return { baseUrl, model, region, workspace, keyConfigured: Boolean(encryptedKey) };
         };
         const { asr, tts, voice, microphone, speaker, dictionary, pronunciation } = this.settings;
-        return { asr, tts, voice, microphone, speaker, dictionary, pronunciation,
+        const available = provider => provider === 'local' && !this.bundledLocalRoot ? 'off' : provider;
+        return { asr: available(asr), tts: available(tts), voice, microphone, speaker, dictionary, pronunciation,
             asrProfile: publicProfile('asr'), ttsProfile: publicProfile('tts'),
             providers: { asr: ['volc', 'minimax', 'azure', 'custom'], tts: ['volc', 'surf', 'minimax', 'azure', 'aliyun', 'custom'] },
             localAvailable: Boolean(this.bundledLocalRoot) };
