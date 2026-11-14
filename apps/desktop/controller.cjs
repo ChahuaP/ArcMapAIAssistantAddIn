@@ -1,3 +1,5 @@
+const { BusinessLog, describeMaterials, operator, statusLabel } = require('./business-log.cjs');
+const { publishReport } = require('./report-export.cjs');
 const { execFile } = require('node:child_process');
 const { createHash, randomUUID } = require('node:crypto');
 const fs = require('node:fs');
@@ -23,7 +25,7 @@ function save(file, value) {
     fs.renameSync(pending, file);
 }
 
-function checkedArtifact(record, step) {
+function checkedArtifact(record, step, parse = false) {
     const item = record.result?.evidence.find(ref => ref.step === step);
     if (!item) return null;
     const root = fs.realpathSync(record.directory);
@@ -32,7 +34,7 @@ function checkedArtifact(record, step) {
     if (path.isAbsolute(relative) || relative.split(path.sep)[0] === '..') throw new Error('成果路径无效');
     const bytes = fs.readFileSync(file);
     if (createHash('sha256').update(bytes).digest('hex') !== item.sha256) throw new Error('成果内容已变更');
-    return { file, bytes };
+    return parse ? JSON.parse(bytes) : { file, bytes };
 }
 
 class DesktopController {
@@ -96,7 +98,7 @@ class DesktopController {
     state() {
         const { workspace, modelConfig, showOperation, screenHighlight, carrier, encryptedKey, modelVision } = this.settings;
         return { settings: { workspace, modelConfig, showOperation, screenHighlight,
-            carrier: carrier || 'none', modelVision: Boolean(modelVision), keyConfigured: Boolean(modelConfig && encryptedKey) },
+            operator: operator(this.settings), carrier: carrier || 'none', modelVision: Boolean(modelVision), keyConfigured: Boolean(modelConfig && encryptedKey) },
             tasks: this.tasks, busy: Boolean(this.active) };
     }
 
@@ -153,7 +155,9 @@ class DesktopController {
             if (!this.storage.isEncryptionAvailable()) throw new Error('系统凭据加密不可用');
             encryptedKey = this.storage.encryptString(key).toString('base64');
         }
-        const settings = { workspace, modelConfig: config, showOperation: input.showOperation !== false,
+        const name = typeof input.operator === 'string' ? input.operator.trim() : '';
+        if (name.length > 60 || /[\r\n]/.test(name)) throw new Error('办理人姓名最多填写 60 个字');
+        const settings = { workspace, operator: name || this.settings.operator, modelConfig: config, showOperation: input.showOperation !== false,
             screenHighlight: input.screenHighlight !== false, carrier: this.settings.carrier, modelVision: input.modelVision === true, encryptedKey };
         save(this.file, settings);
         const changedWorkspace = workspace !== this.settings.workspace;
@@ -253,7 +257,7 @@ class DesktopController {
         if (skillParameters && Buffer.byteLength(JSON.stringify(skillParameters)) > 65536) throw new Error('办理参数最多 64 KB');
         const { config, key } = this.selectModel({ modelConfig: this.settings.modelConfig });
         const task = { id: randomUUID(), title: [...prompt.trim()].slice(0, 32).join(''), prompt: prompt.trim(),
-            project, control, skill, materials, parameterText, images, dialogue, status: 'running', createdAt: new Date().toISOString() };
+            project, control, skill, materials, parameterText, images, dialogue, operator: operator(this.settings), status: 'running', createdAt: new Date().toISOString() };
         const next = [task, ...this.tasks];
         this.persist(next);
         this.tasks = next;
@@ -332,6 +336,7 @@ class DesktopController {
         active.settling = true;
         let status = receipt.status;
         let stage = 'dispatch';
+        let record;
         try {
             task.runId = receipt.operation?.run_id;
             task.response = ['succeeded', 'answered'].includes(status) ? receipt.response
@@ -340,7 +345,7 @@ class DesktopController {
             task.statistics = receipt.operation?.statistics;
             task.candidate = receipt.candidate?.markdown;
             if (status === 'succeeded' && this.tasks.includes(task)) {
-                const record = await this.python('inspect', task.runId);
+                record = await this.python('inspect', task.runId);
                 if (record.status !== 'succeeded') throw new Error('成果未发布');
                 const map = checkedArtifact(record, 'map');
                 if (map) task.map = JSON.parse(map.bytes);
@@ -353,12 +358,17 @@ class DesktopController {
                     .map(item => ({ run: task.runId, artifact: item.step }));
                 task.outputImages = record.result.evidence.filter(item => item.step === 'raster_preview')
                     .map(item => ({ run: task.runId, artifact: item.step }));
-                task.hasReport = Boolean(checkedArtifact(record, 'report'));
                 const findings = checkedArtifact(record, 'case');
                 if (findings) task.approval = JSON.parse(findings.bytes);
-                const deliveries = record.result.evidence.filter(item => ['export', 'table', 'workflow', 'package', 'boundaries'].includes(item.step));
-                task.deliveries = deliveries.map(item => item.step);
-                task.deliveryFormats = Object.fromEntries(deliveries.map(item => [item.step, path.extname(item.path).toLowerCase()]));
+                const definition = record.result.workflow?.skill;
+                const report = checkedArtifact(record, 'report', true);
+                if (definition || task.skill || report) {
+                    const groups = { ...task.materials, ...(task.project && { project: [task.project] }),
+                        ...(task.control && { control: [task.control] }) };
+                    task.business = await this.recordBusiness({ id: task.id, startedAt: task.createdAt, operator: task.operator,
+                        materials: describeMaterials(groups, definition), record, report, response: task.response });
+                    task.hasReport = Boolean(task.business.reportDigest);
+                }
             }
         } catch {
             status = 'failed';
@@ -375,9 +385,17 @@ class DesktopController {
                 config: active.config, skill: task.skill, files: active.files });
             task.status = status;
             delete task.visual;
-            this.active = null;
             const current = this.tasks.includes(task);
-            if (current) this.persist();
+            if (current && !['succeeded', 'answered'].includes(status) && task.skill) {
+                try {
+                    const definition = await this.python('skill-show', task.skill);
+                    await this.recordBusiness({ id: task.id, startedAt: task.createdAt, operator: task.operator,
+                        materials: describeMaterials(task.materials, definition), type: definition.title, status,
+                        response: task.response });
+                } catch (error) { console.error('业务日志写入失败：', error.message); }
+            }
+            this.active = null;
+            if (this.tasks.includes(task)) this.persist();
             this.onChange(this.state());
             if (current && status === 'succeeded') {
                 try { this.onCompleted?.(task, this.tasks[1]?.id); }
@@ -396,17 +414,34 @@ class DesktopController {
         return this.state();
     }
 
-    async report(id) {
-        const task = this.tasks.find(item => item.id === id);
-        if (!task?.hasReport || task.status !== 'succeeded') throw new Error('报告尚未生成');
-        const record = await this.python('inspect', task.runId);
-        return checkedArtifact(record, 'report').file;
+    businessLog() {
+        if (!this.settings.workspace) throw new Error('请先选择成果保存位置');
+        return new BusinessLog(this.settings.workspace, load, save);
     }
 
-    async delivery(id, kind) {
-        const task = this.tasks.find(item => item.id === id);
-        if (!task?.deliveries?.includes(kind) || task.status !== 'succeeded') throw new Error('成果尚未发布');
-        return checkedArtifact(await this.python('inspect', task.runId), kind).file;
+    async recordBusiness({ id, startedAt, operator: name, materials, record, report, type, status = 'succeeded', response }) {
+        const log = this.businessLog();
+        const item = { id, startedAt, finishedAt: new Date().toISOString(), operator: name, materials,
+            type: type || record?.result.workflow?.skill?.title || report?.title || '空间分析',
+            status, statusLabel: statusLabel(status), response, runId: record?.id,
+            statistics: record?.result.statistics };
+        if (report) item.reportDigest = await publishReport(record.directory, item, report);
+        log.add(item);
+        return item;
+    }
+
+    async mapBusiness({ id, startedAt, materials, output, type }) {
+        const record = await this.python('inspect', output.run);
+        const definition = record.result.workflow?.skill;
+        const report = checkedArtifact(record, 'report', true);
+        return this.recordBusiness({ id, startedAt, operator: operator(this.settings),
+            materials: describeMaterials(materials, definition), type, record, report });
+    }
+
+    reportPage(id, page) {
+        const item = this.tasks.find(task => task.id === id)?.business || this.businessLog().get(id);
+        if (!item?.reportDigest || !Number.isInteger(page)) throw new Error('报告尚未生成');
+        return this.python('_report-page', item.runId, item.reportDigest, String(page));
     }
 
     async approvalSource(id, claimId, evidenceIndex) {

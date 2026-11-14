@@ -9,7 +9,7 @@ export const opacity = (value, defaultValue = 100) => Number.isFinite(value)
 export function symbol(value, color) {
     return { color: hex.test(value?.color) ? value.color : color,
         fill: value?.fill === null ? null : hex.test(value?.fill) ? value.fill : color,
-        fillOpacity: opacity(value?.fillOpacity, 19),
+        fillOpacity: opacity(value?.fillOpacity),
         opacity: opacity(value?.opacity),
         noOutline: value?.noOutline === true,
         shape: ['circle', 'square', 'diamond', 'cross'].includes(value?.shape) ? value.shape : 'circle',
@@ -94,7 +94,7 @@ function Classification({ item, style, update, polygon, points, setLoading }) {
 
 export function LayerProperties({ item, color, close, save, glyph, start = 'info' }) {
     const [tab, setTab] = useState(start);
-    const [style, setStyle] = useState(() => layerSymbol(item.style, color));
+    const [style, setStyle] = useState(() => layerSymbol({ ...item.style, opacity: item.style?.opacity ?? item.opacity }, color));
     const [fill, setFill] = useState(() => symbol(item.style, color).fill || color);
     const [classificationBusy, setClassificationBusy] = useState(false);
     const image = item.kind === 'raster';
@@ -129,7 +129,7 @@ export function LayerProperties({ item, color, close, save, glyph, start = 'info
             'X ' + format(bounds[0]) + ' 至 ' + format(bounds[2]),
             h('br'), 'Y ' + format(bounds[1]) + ' 至 ' + format(bounds[3])) : '无有效范围'],
     ];
-    const formatTab = tab === 'style' && !image;
+    const formatTab = tab === 'style';
     return h(Modal, { open: true, centered: true, width: 520, className: 'gis-dialog', rootClassName: 'gis-modal-root',
         title: h('span', { className: 'gis-dialog-title' }, glyph('layers'), item.name),
         onCancel: close, footer: formatTab ? [h(Button, { key: 'cancel', onClick: close }, '取消'),
@@ -137,22 +137,23 @@ export function LayerProperties({ item, color, close, save, glyph, start = 'info
                 (style.classification && !style.classification.classes.length),
                 onClick: () => { save(layerSymbol(style, color)); close(); } }, '应用')]
             : h(Button, { onClick: close }, '关闭') },
-        !image && h(Segmented, { className: 'gis-layer-tabs', value: tab, onChange: setTab, disabled: classificationBusy,
-            options: [{ value: 'info', label: '图层属性' }, { value: 'style', label: '符号化' }] }),
+        h(Segmented, { className: 'gis-layer-tabs', value: tab, onChange: setTab, disabled: classificationBusy,
+            options: [{ value: 'info', label: '图层属性' }, { value: 'style', label: image ? '显示' : '符号化' }] }),
         formatTab ? h('div', { className: 'gis-symbol-editor' },
-            item.fields?.length > 0 && h(Segmented, { value: classified ? 'unique' : 'single',
+            measure('opacity', '图层不透明度（%）', 0, 100, 1),
+            !image && item.fields?.length > 0 && h(Segmented, { value: classified ? 'unique' : 'single',
                 'aria-label': '符号类型', disabled: classificationBusy, options: [{ value: 'single', label: '单一符号' },
                     { value: 'unique', label: '唯一值分类' }],
                 onChange: mode => update('classification', mode === 'unique'
                     ? { field: '', classes: [], other: '#7d8999', otherFill: '#7d8999' } : undefined) }),
             classified && h(Classification, { item, style, update, polygon, points, setLoading: setClassificationBusy }),
-            h('div', { className: polygon ? 'gis-polygon-symbol' : undefined },
+            !image && h('div', { className: polygon ? 'gis-polygon-symbol' : undefined },
             polygon && h('fieldset', { className: 'gis-symbol-group' },
                 h('legend', null, '填充'),
                 h(Checkbox, { checked: noFill, onChange: event => update('fill', event.target.checked ? null : fill) }, '无填充'),
                 h('div', { className: 'gis-skill-parameters' },
                     !classified && styleColor('fill', '填充颜色', fill, noFill),
-                    measure('fillOpacity', '不透明度（%）', 0, 100, 1, noFill))),
+                    measure('fillOpacity', '填充不透明度（%）', 0, 100, 1, noFill))),
             h('fieldset', { className: 'gis-symbol-group' },
                 h('legend', null, points ? '点符号' : polygon ? '边线' : '线符号'),
                 polygon && h(Checkbox, { checked: style.noOutline, onChange: event => update('noOutline', event.target.checked) }, '无边线'),

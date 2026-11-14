@@ -15,7 +15,7 @@
     const { Material, RoleMaterials, materialReady, roleReady, mergeMaterials, intake } = window.GuizhiMaterials;
     const { render, open } = window.GuizhiMarkdown;
     const errorText = window.GuizhiErrorText;
-    const { deliverables } = window.GuizhiSkillEditor;
+    const { BusinessLog, ReportPanel } = window.GuizhiBusinessLog;
     const markdown = text => h('div', { className: 'answer-markdown', onClick: open,
         dangerouslySetInnerHTML: { __html: render(text) } });
 
@@ -76,7 +76,7 @@
             : error ? h('p', { role: 'alert' }, error) : null;
     }
 
-    function Result({ task, retry, fail, editSkill, parcel, selectParcel, showMap, voiceReply, openComponents }) {
+    function Result({ task, retry, fail, editSkill, parcel, selectParcel, voiceReply, openComponents }) {
         if (active(task)) return h('article', { className: 'bubble assistant working', role: 'status' },
             task.status === 'cancelling' ? '正在结束任务'
                 : task.progress?.length ? h(Progress, { task }) : '正在准备本轮任务');
@@ -96,13 +96,8 @@
                     h('div', null, h('dt', null, '重叠面积'), h('dd', null, number(stats.covered_area_m2), h('small', null, ' m²'))),
                     h('div', null, h('dt', null, '覆盖率'), h('dd', null, (stats.coverage_ratio * 100).toFixed(2), h('small', null, '%')))),
                 task.approval && h(Approval, { task, parcel, selectParcel, fail }),
-                h('div', { className: 'delivery-actions' },
-                    showMap && h('button', { className: 'report', onClick: showMap }, '查看成果地图'),
-                    task.candidate && h('button', { className: 'report', onClick: () => editSkill(task.candidate) }, '编辑技能草稿 ↗'),
-                    task.hasReport && h('button', { className: 'report', onClick: () => api.report(task.id).catch(fail) }, '查看报告 ↗'),
-                    ...(task.deliveries || []).map(kind => h('button', { key: kind, className: 'report',
-                        onClick: () => api.delivery(task.id, kind).catch(fail) },
-                        (deliverables[kind] || '业务成果') + ' ↗'))));
+                task.candidate && h('button', { className: 'report', onClick: () => editSkill(task.candidate) }, '编辑技能草稿 ↗'),
+                task.hasReport && task.business && h(ReportPanel, { id: task.id }));
         }
         const detail = { missing_materials: '请按业务要求补齐材料。',
             invalid_materials: '请确认材料、图层和办理参数。', no_result: '请补充办理要求或从业务能力中选择。',
@@ -128,6 +123,7 @@
         const [viewed, viewResult] = useState(null);
         const [parcel, selectParcel] = useState(null);
         const [settings, showSettings] = useState(false);
+        const [showLog, setShowLog] = useState(false);
         const [error, setError] = useState('');
         const [sending, setSending] = useState(false);
         const [coordinates, setCoordinates] = useState([]);
@@ -138,6 +134,7 @@
         const [mapMounted, setMapMounted] = useState(false);
         const mapOpen = mapMode !== 'chat';
         function showMapWorkspace(show) {
+            setShowLog(false);
             if (show) setMapMounted(true);
             setMapMode(show ? 'split' : 'chat');
         }
@@ -272,7 +269,7 @@
         }, [task?.progress]);
         const [layoutReady, setLayoutReady] = useState(null);
         useEffect(() => {
-            if (launcher || task?.status !== 'succeeded' || !(task.mapLayers?.length || task.layout || task.mapActions) || shownMapRuns.current.has(task.id)) return;
+            if (launcher || showLog || task?.status !== 'succeeded' || !(task.map || task.mapLayers?.length || task.layout || task.mapActions) || shownMapRuns.current.has(task.id)) return;
             shownMapRuns.current.add(task.id);
             void openMap(task).then(() => {
                 if (task.layout && !task.layoutImage && !task.layoutError) setLayoutReady(task.id);
@@ -280,7 +277,7 @@
             });
         }, [task?.id, task?.status]);
         const resultTask = turns.find(item => item.id === viewed) ||
-            turns.findLast(item => item.map || item.hasReport || item.deliveries?.length) || task;
+            turns.findLast(item => item.map || item.hasReport || item.mapLayers?.length) || task;
         useEffect(() => { viewResult(null); selectParcel(null); }, [task?.id]);
         useEffect(() => {
             if (messages.current) messages.current.scrollTop = messages.current.scrollHeight;
@@ -350,6 +347,7 @@
             } else setDraft({ ...next, skillDefinition: restored });
         }
         async function resetConversation(next = {}) {
+            setShowLog(false);
             setError('');
             setSending(true);
             try {
@@ -504,7 +502,7 @@
                 !skill && ready && h('section', { className: 'quick-section' }, h('div', { className: 'section-head' },
                     h('h2', null, '常用业务'), h(antd.Button, { type: 'link', onClick: () => showBusiness('browse') }, '全部业务')), tiles))),
             h('footer', { className: 'launcher-footer' },
-                h('span', { className: 'muted' }, ready ? (state.settings.modelConfig?.mode === 'local' ? '本地模型' : state.settings.modelConfig ? '在线模型' : '地图模式')
+                h('span', { className: 'muted' }, ready ? (state.settings.modelConfig?.mode === 'local' ? '本地模型' : state.settings.modelConfig ? '在线模型' : '未配置模型')
                     : '请在工作台完成首次设置'),
                 h('span', null, h('kbd', null, 'Enter'), ' 发送　', h('kbd', null, 'Esc'), ' 收起')));
         const sidebar = expanded => {
@@ -513,10 +511,12 @@
                 : iconButton(glyph, label, props);
             return h('aside', { className: 'sidebar' + (expanded ? ' expanded' : '') },
             nav('plus', '新的对话', { type: 'primary', disabled: sending || adding || mapEditing, onClick: () => resetConversation() }),
-            nav('app', '工作台', { className: mapOpen ? '' : 'rail-current', 'aria-current': mapOpen ? undefined : 'page',
+            nav('app', '工作台', { className: mapOpen || showLog ? '' : 'rail-current', 'aria-current': mapOpen || showLog ? undefined : 'page',
                 disabled: mapEditing, onClick: () => showMapWorkspace(false) }),
-            nav('map', '地图工作区', { disabled: !ready || mapOpen, 'aria-current': mapOpen ? 'page' : undefined, onClick: () => openMap() }),
+            nav('map', '地图工作区', { disabled: !ready || (mapOpen && !showLog), 'aria-current': mapOpen && !showLog ? 'page' : undefined, onClick: () => openMap() }),
             nav('grid', '业务中心', { disabled: !ready || mapEditing, onClick: () => showBusiness('browse') }),
+            nav('clock', '业务办理日志', { disabled: mapEditing, className: showLog ? 'rail-current' : '',
+                'aria-current': showLog ? 'page' : undefined, onClick: () => setShowLog(true) }),
             nav('settings', '设置', { disabled: mapEditing, onClick: () => showSettings(true) }));
         };
         const conversation = h('section', { className: 'conversation' + (task ? '' : ' conversation-empty'), 'aria-label': '办理对话' },
@@ -527,8 +527,6 @@
                     item.images.map(image => image.name).join('、'))),
                 h(Result, { key: item.id + '-answer', task: item, retry, fail, voiceReply, openComponents,
                     parcel: resultTask?.id === item.id ? parcel : null, selectParcel: id => { viewResult(item.id); selectParcel(id); },
-                    showMap: item.map || item.mapLayers?.length ? () => { viewResult(item.id); selectParcel(null); setTab('成果');
-                        void openMap(item); } : undefined,
                     editSkill: text => { setInitialMarkdown(text); showSettings('skills'); } }),
                 item.layout && h('div', { key: item.id + '-layout', className: 'map-layout-result' },
                     item.layoutImage ? button('map', '打开地图图片', { onClick: () => api.openMapLayout(item.id).catch(fail) })
@@ -541,7 +539,7 @@
             h('div', { className: 'inspector-tabs' }, ...['材料', '成果'].map(name =>
                 h('button', { key: name, className: 'inspector-tab' + (tab === name ? ' selected' : ''),
                     'aria-pressed': tab === name, onClick: () => setTab(name) }, name,
-                    h('small', null, name === '材料' ? materials.length : (resultTask?.deliveries?.length || 0) + Number(Boolean(resultTask?.hasReport)))))),
+                    h('small', null, name === '材料' ? materials.length : Number(Boolean(resultTask?.hasReport)) + Number(Boolean(resultTask?.map || resultTask?.mapLayers?.length)))))),
             h('div', { className: 'inspector-body' }, tab === '材料'
                 ? materials.length ? materials.map((item, index) => h('div', { key: index, className: 'artifact-row' },
                     icon('file'), h('span', null, item.name || item.file?.split(/[\\/]/).at(-1)),
@@ -549,31 +547,17 @@
                 : h(React.Fragment, null,
                     h(window.GuizhiMap.Preview, { key: resultTask?.id || 'empty', map: resultTask?.map, selected: parcel,
                         hasLayers: Boolean(resultTask?.mapLayers?.length), open: () => openMap(resultTask), choose: item => selectParcel(item.id) }),
-                    (resultTask?.hasReport || resultTask?.deliveries?.length > 0) && h('section', { className: 'artifact-list' },
-                        h('h2', null, '成果文件'),
-                        resultTask.hasReport && h('div', { className: 'delivery-row' },
-                            button('file', '办理报告', { type: 'text', onClick: () => api.report(resultTask.id).catch(fail) }),
-                            button('file', '导出 PDF', { onClick: () => api.exportDelivery(resultTask.id, 'report', 'pdf').catch(fail) })),
-                        ...(resultTask.deliveries || []).map(kind => {
-                            const extension = resultTask.deliveryFormats?.[kind];
-                            const name = extension === '.tif' ? 'GeoTIFF' : extension === '.xlsx' ? 'Excel' : null;
-                            const title = deliverables[kind] || '业务成果';
-                            return h('div', { key: kind, className: 'delivery-row' },
-                                button('file', title, { type: 'text', onClick: () => api.delivery(resultTask.id, kind).catch(fail) }),
-                                extension === '.gpkg' && button('file', '下载 SHP 成果包', { type: 'primary',
-                                    onClick: () => api.exportDelivery(resultTask.id, kind, 'shp').catch(fail) }),
-                                extension && button('folder', name ? '导出 ' + name : '另存原格式', {
-                                    'aria-label': name ? '导出 ' + name + ' · ' + title : '另存原格式 · ' + title,
-                                    onClick: () => api.exportDelivery(resultTask.id, kind, 'original').catch(fail) }));;
-                        })))));
+                    resultTask?.hasReport && resultTask.business && h(ReportPanel, { id: resultTask.id }))));
         async function openMap(item) {
-            if (item?.mapLayers?.length) {
+            setShowLog(false);
+            if (item?.map || item?.mapLayers?.length) {
                 try {
                     const stepRuns = new Set(item.progress?.filter(step => step.kind !== 'stop' && step.childRun).map(step => step.childRun));
                     const stepOutputs = (await Promise.all([...stepRuns].map(run => pendingStepLayers.current.get(run)))).flat().filter(Boolean);
-                    const results = stepOutputs.length ? [] : await Promise.all(item.mapLayers.map(ref => api.map({ action: 'describe', ref })));
-                    const inputs = layers.length ? [] : await api.mapTaskInputs(item.id);
-                    addLayers([...inputs, ...results.map((entry, index) =>
+                    const results = stepOutputs.length ? [] : await Promise.all((item.mapLayers || []).map(ref => api.map({ action: 'describe', ref })));
+                    const inputs = item.map ? await api.mapTaskInputs(item.id) : [];
+                    const current = new Set(layers.map(mapKey));
+                    addLayers([...inputs.filter(input => !current.has(mapKey(input))), ...results.map((entry, index) =>
                         ({ ...entry, name: index ? '边界成果' : '办理成果' }))]);
                 } catch (error) { fail(error); if (item.layout) await api.mapLayoutError(item.id, window.GuizhiErrorText(error)); return; }
             }
@@ -626,7 +610,8 @@
             initial: settings, catalog, refresh, plans, initialMarkdown,
             close: () => { setInitialMarkdown(''); showSettings(false); },
             save: configure,
-        }) : h(Workbench, { appearance, saveAppearance, sidebar, conversation, inspector, map: mapWorkspace, composer,
+        }) : h(Workbench, { appearance, saveAppearance, sidebar, conversation, inspector: showLog ? null : inspector, map: mapWorkspace, composer,
+            page: showLog ? h(BusinessLog, { revision: state }) : null,
             mode: mapMode, setMode: mode => { if (mode !== 'chat') setMapMounted(true); setMapMode(mode); },
             activity, onCancel: () => api.cancel().then(setState).catch(fail), fail,
             arcgis: () => { if (!mapEditing) showSettings('extensions'); },

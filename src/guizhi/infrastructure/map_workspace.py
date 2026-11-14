@@ -38,8 +38,6 @@ MANUAL_OPERATIONS = {
     "presentation.export_table", "raster.statistics", "raster.clip", "raster.reproject", "raster.mosaic",
     "table.calculate_field",
 }
-MAP_DELIVERIES = {"export", "report", "table", "workflow", "package", "boundaries", "classification",
-                  "balance", "permit_history", "raster", "bands", "drawing", "selection"}
 
 
 def raster_layer(workspace, ref, name):
@@ -84,13 +82,6 @@ def map_result(workspace, record, title, *, include_steps=False):
         records = [(successful(workspace.read(step["run_id"])), title if len(steps) == 1 else
                     title + " · " + step_title(step["operation"])) for step in steps]
     layers = [layer for child, label in records for layer in output_layers(workspace, child, label)]
-    deliveries = []
-    for child, label in records:
-        deliveries.extend({"run": child["id"], "kind": ref["step"], "label": label if len(records) > 1 else "",
-                           "extension": read_artifact(workspace, child["id"], ref["step"]).suffix.lower()}
-                          for ref in child["result"]["evidence"] if ref["step"] in MAP_DELIVERIES)
-    if include_steps:
-        deliveries.append({"run": record["id"], "kind": "workflow", "label": "", "extension": ".json"})
     map_data = next((json.loads(read_artifact(workspace, child["id"], "map").read_text(encoding="utf-8"))
                      for child, _ in reversed(records) if any(ref["step"] == "map" for ref in child["result"]["evidence"])), None)
     statistics = {}
@@ -98,7 +89,7 @@ def map_result(workspace, record, title, *, include_steps=False):
         statistics.update(child["result"].get("statistics", {}))
     statistics.update(data.get("statistics", {}))
     return {"run": record["id"], "layers": layers, "statistics": statistics,
-            "selection": data.get("selection"), "map": map_data, "deliveries": deliveries}
+            "selection": data.get("selection"), "map": map_data}
 
 
 def step_title(operation):
@@ -340,12 +331,7 @@ def request(workspace, payload):
         return manual_skill(workspace, payload)
     if action == "step-layers":
         record = successful(workspace.read(payload["run"]))
-        return output_layers(workspace, record, step_title(record["task"]["operation"]))
-    if action == "delivery":
-        kind = payload["kind"]
-        if kind not in MAP_DELIVERIES:
-            raise ValueError("成果类型无效")
-        return str(read_artifact(workspace, payload["run"], kind))
+        return output_layers(workspace, record, payload.get("title") or step_title(record["task"]["operation"]))
     if action == "import":
         items = payload["items"]
         if not isinstance(items, list) or not 1 <= len(items) <= 32:
@@ -357,9 +343,23 @@ def request(workspace, payload):
         return result
     if action == "task-inputs":
         record = successful(workspace.read(payload["run"]))
-        groups = record["result"]["workflow"]["material_runs"]
-        refs = dict.fromkeys(item for group in groups.values() for item in group if isinstance(item, str))
-        return [describe(workspace, {"run": run, "artifact": "import"}) for run in refs]
+        groups = record["result"].get("workflow", {}).get("material_runs", {})
+        existing = payload.get("existing", {})
+        refs = {}
+        for role, group in groups.items():
+            for index, run in enumerate(group):
+                if not isinstance(run, str):
+                    continue
+                ref = {"run": run, "artifact": "import"}
+                candidates = existing.get(role, [])
+                original = candidates[index] if index < len(candidates) else None
+                if original:
+                    source_file, source_layer = source(workspace, original)
+                    saved_file, saved_layer = source(workspace, ref)
+                    if source_layer == saved_layer and data_revision(source_file) == data_revision(saved_file):
+                        ref = original
+                refs[(ref["run"], ref["artifact"])] = ref
+        return [describe(workspace, ref) for ref in refs.values()]
     if action == "raster-import":
         if not isinstance(payload["items"], list) or not 1 <= len(payload["items"]) <= 32:
             raise ValueError("一次请选择 1 至 32 个影像")

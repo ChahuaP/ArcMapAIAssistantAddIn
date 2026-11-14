@@ -29,12 +29,17 @@ def main() -> int:
     check.add_argument("--object-id")
     check.add_argument("--project-plan")
     check.add_argument("--control-plan")
+    check.add_argument("--output-layer", action="store_true")
     for command in ("inspect", "cancel", "_worker"):
         commands.add_parser(command).add_argument("run_id")
     commands.add_parser("layers").add_argument("file", type=Path)
     commands.add_parser("material-describe").add_argument("file", type=Path)
     commands.add_parser("material-intake").add_argument("request", type=Path)
     commands.add_parser("_material-reader")
+    report_page = commands.add_parser("_report-page")
+    report_page.add_argument("run_id")
+    report_page.add_argument("digest")
+    report_page.add_argument("page", type=int)
     commands.add_parser("map").add_argument("request", type=Path)
     shapefile = commands.add_parser("export-shp")
     shapefile.add_argument("run_id")
@@ -107,6 +112,13 @@ def main() -> int:
             from guizhi.infrastructure.materials import serve
 
             serve(sys.stdin.buffer, sys.stdout)
+            return 0
+        if args.command == "_report-page":
+            from guizhi.infrastructure.report_preview import preview
+
+            workspace = Workspace(args.workspace)
+            record = workspace.read(args.run_id)
+            print(json.dumps(preview(Path(record["directory"]) / "business-report.pdf", args.digest, args.page)))
             return 0
         if args.command == "map":
             from guizhi.infrastructure.map_workspace import request
@@ -269,7 +281,8 @@ def main() -> int:
                                 operation="control_check" if checking else "vector_inventory",
                                 control=(args.control, args.control_layer) if checking else None,
                                 project_plan=args.project_plan if checking else None,
-                                control_plan=args.control_plan if checking else None)
+                                control_plan=args.control_plan if checking else None,
+                                output_layer=checking and args.output_layer)
             print(json.dumps(result))
             return {"succeeded": 0, "cancelled": 130}.get(result["status"], 1)
         workspace = Workspace(args.workspace)

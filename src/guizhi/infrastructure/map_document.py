@@ -143,7 +143,7 @@ def verify_mxd_symbols(expected, actual):
     elif color(expected["color"]) != color(actual.get("color")):
         return False
     if actual.get("fill") is not None:
-        if expected.get("fill") is None or expected.get("fillOpacity", 19) != actual["fillOpacity"]:
+        if expected.get("fill") is None or expected.get("fillOpacity", 100) != actual["fillOpacity"]:
             return False
         if not expected.get("classification") and color(expected["fill"]) != color(actual["fill"]):
             return False

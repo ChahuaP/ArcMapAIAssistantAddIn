@@ -223,7 +223,8 @@ def register(server, job=None):
                       "facts": [item.model_dump(mode="json") for item in facts], "spatial_run": "$run.check",
                       "as_of": as_of.isoformat() if as_of else None}
         steps = [
-            {"id": "check", "operation": "control_check", "inputs": ["material.project", "material.control"]},
+            {"id": "check", "operation": "control_check", "inputs": ["material.project", "material.control"],
+             "parameters": {"output_layer": True}},
             {"id": "approval", "operation": "semantics.approval_case", "inputs": ["material.project"],
              "parameters": parameters},
         ]

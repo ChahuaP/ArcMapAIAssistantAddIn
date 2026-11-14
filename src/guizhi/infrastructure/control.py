@@ -62,23 +62,20 @@ def map_payload(project, coverage, crs):
     return {"crs": crs.to_string(), "bounds": project.bounds, "features": features}
 
 
-def write_report(path, stats):
+def write_report(path, stats, rows, crs):
     names = {"inside": "完全覆盖", "overlap": "部分重叠", "touch_line": "线接触",
              "touch_point": "点接触", "disjoint": "不相交"}
-    rows = "".join(f"<tr><td>{label}</td><td>{stats['relations'].get(key, 0)}</td></tr>"
-                   for key, label in names.items())
-    ratio = stats["coverage_ratio"] * 100
-    path.write_text(
-        "<!doctype html><html lang='zh-CN'><meta charset='utf-8'><title>管控线核查</title>"
-        "<style>body{font:16px system-ui;max-width:720px;margin:48px auto;color:#17363b}"
-        "td{padding:8px 32px 8px 0}progress{width:100%;accent-color:#087e74}</style>"
-        "<h1>管控线核查</h1>"
-        f"<p>项目面积 {stats['project_area_m2']:,.2f} m² · 重叠面积 {stats['covered_area_m2']:,.2f} m²</p>"
-        f"<progress max='100' value='{ratio}' aria-label='覆盖比例'></progress><p>覆盖率 {ratio:.2f}%</p>"
-        "<p>覆盖面积按合并后的项目范围和管控范围计算。点、线接触单独计数。</p>"
-        f"<table><thead><tr><th>空间关系</th><th>项目要素</th></tr></thead><tbody>{rows}</tbody></table></html>",
-        encoding="utf-8",
-    )
+    path.write_text(json.dumps({
+        "title": "管控线核查", "note": f"分析坐标系：{crs.name}。面积按合并后的项目范围和管控范围计算；点、线接触单独计数。",
+        "tables": [
+            {"title": "核查摘要", "columns": ["核查指标", "核查结果"], "rows": [
+                ["项目面积", f"{stats['project_area_m2']:,.2f} 平方米"],
+                ["重叠面积", f"{stats['covered_area_m2']:,.2f} 平方米"],
+                ["覆盖率", f"{stats['coverage_ratio']:.2%}"],
+                *[[label, stats["relations"].get(key, 0)] for key, label in names.items()]]},
+            {"title": "地块明细", "columns": ["源要素编号", "空间关系", "重叠面积（平方米）"], "rows": [
+                [row["source_fid"], names[row["relation"]], f"{row['overlap_m2']:,.2f}"] for row in rows]}
+        ]}, ensure_ascii=False), encoding="utf-8")
 
 
 def check_control(task: dict, job: dict, directory: Path, progress, ensure_supervised, workspace_root: Path) -> dict:
@@ -139,29 +136,33 @@ def check_control(task: dict, job: dict, directory: Path, progress, ensure_super
     progress("overlaid", **stats)
     progress("export_started")
     artifacts = directory / "artifacts"
-    result = artifacts / "result.gpkg"
-    frame = geopandas.GeoDataFrame(rows, geometry=project_geom.to_list(), crs=crs)
-    pyogrio.write_dataframe(frame, result, layer="control_check", driver="GPKG")
-    reread = pyogrio.read_dataframe(result, layer="control_check")
-    if (reread.crs != crs or reread.drop(columns="geometry").to_dict("records") != rows
-            or shapely.to_wkb(reread.geometry).tolist() != shapely.to_wkb(frame.geometry).tolist()):
-        raise ValueError("Control export does not match the verified overlay")
-    report = artifacts / "report.html"
-    write_report(report, stats)
+    outputs = []
+    checks = {"coverage_union_verified": True}
+    if task.get("output_layer"):
+        result = artifacts / "result.gpkg"
+        frame = geopandas.GeoDataFrame(rows, geometry=project_geom.to_list(), crs=crs)
+        pyogrio.write_dataframe(frame, result, layer="control_check", driver="GPKG")
+        reread = pyogrio.read_dataframe(result, layer="control_check")
+        if (reread.crs != crs or reread.drop(columns="geometry").to_dict("records") != rows
+                or shapely.to_wkb(reread.geometry).tolist() != shapely.to_wkb(frame.geometry).tolist()):
+            raise ValueError("Control export does not match the verified overlay")
+        outputs.append(("export", result))
+        checks["export_verified"] = True
+    report = artifacts / "report.json"
+    write_report(report, stats, rows, crs)
     map_file = artifacts / "map.json"
     map_file.write_text(json.dumps(map_payload(project_union, coverage, crs)), encoding="utf-8")
-    for step, path in (("export", result), ("report", report), ("map", map_file)):
+    for step, path in (*outputs, ("report", report), ("map", map_file)):
         evidence.append(EvidenceRef(uuid4().hex, project_rev.id, job["id"], step,
                                     path.relative_to(directory).as_posix(), digest(path)))
     obj = ObjectRevision(uuid4().hex, task["object_id"], project_rev.id)
     claim = ClaimRevision(uuid4().hex, obj.id, job["id"], "covered_area", area,
                           "m²", tuple(ref.id for ref in evidence))
-    checks = {"coverage_union_verified": True, "export_verified": True}
     progress("export_verified", **checks)
     return {"dataset_revision": asdict(project_rev), "control_revision": asdict(control_rev),
             "object_revision": asdict(obj), "claim_revision": asdict(claim),
             "evidence": [asdict(ref) for ref in evidence], "statistics": stats,
-            "validation": checks, "export_layer": "control_check",
+            "validation": checks, **({"export_layer": "control_check"} if outputs else {}),
             "analysis_crs_wkt": crs.to_wkt(),
             "execution": {"reused_parcels": reused, "computed_parcels": len(rows) - reused, "aggregate_recomputed": True},
             "runtime": {"gdal": pyogrio.__gdal_version_string__, "geos": shapely.geos_version_string}}

@@ -151,7 +151,10 @@ def execute(ctx, specification: dict):
             if len(inputs) != expected:
                 raise ValueError(f"{step.operation} requires {expected} input(s)")
             plans = {**(specification["coordinate_plans"] if expected == 2 else {}), **parameters}
-            if set(plans) - {"project_plan", "control_plan"} or (expected == 1 and plans):
+            if expected == 2 and any(f"step.{step.id}" in later.inputs for later in steps):
+                plans["output_layer"] = True
+            if (set(plans) - {"project_plan", "control_plan", "output_layer"} or (expected == 1 and plans)
+                    or not isinstance(plans.get("output_layer", False), bool)):
                 raise ValueError("Unexpected business operation parameters")
             record, reused = reuse_job(ctx.workspace, step.operation, inputs, plans, lambda: run_vector(
                 ctx.workspace.root, Path(inputs[0]["file"]), inputs[0]["layer"], None, cancelled,

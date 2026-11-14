@@ -66,6 +66,7 @@
         const api = window.guizhi;
         const { button } = window.GuizhiShell;
         const [pending, setPending] = useState('');
+        const [sourceRole, setSourceRole] = useState('');
         return roles.filter(role => !role.resource).map(role => {
             const items = materials[role.id] || [];
             const append = next => {
@@ -80,6 +81,11 @@
                 try { await intake(source(), append, fail); }
                 finally { setPending(''); onPending?.(''); }
             };
+            const addLocal = () => { setSourceRole(''); return add(() => api.material(role.kind)); };
+            const mapPicker = picker?.(role, items, next => { append(next); setSourceRole(''); }, Boolean(pending));
+            const addButton = button('plus', pending === role.id ? '正在读取材料…' : '添加' + role.label, {
+                disabled: disabled || Boolean(pending), loading: pending === role.id, onClick: picker ? undefined : addLocal,
+            });
             return h('section', { key: role.id, className: 'role-material',
                 onDragOver: event => { event.preventDefault(); event.stopPropagation(); }, onDrop: event => {
                     event.preventDefault(); event.stopPropagation();
@@ -98,10 +104,12 @@
                         else group.splice(index, 1);
                         change({ ...materials, [role.id]: group });
                     } })),
-                items.length < role.maximum && picker?.(role, items, append, Boolean(pending)),
-                items.length < role.maximum && button('paperclip', pending === role.id ? '正在读取本地材料…' : '添加' + role.label, {
-                    disabled: disabled || Boolean(pending), loading: pending === role.id, onClick: () => add(() => api.material(role.kind)),
-                }));
+                items.length < role.maximum && h('div', { className: 'role-picker' },
+                    h('div', null, picker ? h(antd.Dropdown, { trigger: ['click'], menu: { items: [
+                        { key: 'local', label: '从本地选择', icon: window.GuizhiShell.icon('folder') },
+                        { key: 'map', label: '从地图图层选择', icon: window.GuizhiShell.icon('layers'), disabled: !mapPicker },
+                    ], onClick: ({ key }) => key === 'local' ? addLocal() : setSourceRole(role.id) } }, addButton) : addButton),
+                    sourceRole === role.id && mapPicker));
         });
     }
 

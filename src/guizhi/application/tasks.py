@@ -140,7 +140,7 @@ def supervise(workspace: Workspace, run_id: str, cancel_requested: Callable[[], 
 def run_vector(root: Path, source: Path, layer: str, object_id: str | None,
                cancel_requested: Callable[[], bool] | None = None, *,
                operation: str = "vector_inventory", control: tuple[Path, str] | None = None,
-               project_plan: str | None = None, control_plan: str | None = None, progress=None) -> dict:
+               project_plan: str | None = None, control_plan: str | None = None, output_layer: bool = False, progress=None) -> dict:
     definition = OPERATIONS[operation]
     source = source.resolve(strict=True)
     if not source.is_file() or source.suffix.lower() not in {".gpkg", ".shp", ".geojson"}:
@@ -165,7 +165,7 @@ def run_vector(root: Path, source: Path, layer: str, object_id: str | None,
         control_plan = get_plan(workspace, control_plan) if control_plan else None
     task = TaskSpec(uuid4().hex, 1, str(source), layer, object_id or uuid4().hex,
                     operation, definition.version, definition.rule, control_source, control_layer,
-                    project_plan, control_plan)
+                    project_plan, control_plan, output_layer=output_layer)
     return submit(workspace, task, cancel_requested, progress=progress)
 
 

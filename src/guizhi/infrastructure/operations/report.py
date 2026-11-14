@@ -1,5 +1,4 @@
 """Produce a matched workbook and compact report from one verified set of rows."""
-from html import escape
 from math import isfinite
 
 from openpyxl import Workbook, load_workbook
@@ -39,14 +38,5 @@ def publish_report(ctx, title, columns, rows, *, measure=None, note=""):
     finally:
         checked.close()
     ctx.record("table", xlsx)
-    html = ctx.path("report.html")
-    heading = "".join(f"<th>{escape(str(value))}</th>" for value in columns)
-    body = "".join("<tr>" + "".join(f"<td>{escape(str(value if value is not None else ''))}</td>" for value in row)
-                   + "</tr>" for row in rows)
-    html.write_text(
-        "<!doctype html><html lang='zh-CN'><meta charset='utf-8'>"
-        f"<title>{escape(title)}</title><style>body{{max-width:850px;margin:45px auto;font:16px system-ui;color:#18363b}}"
-        "table{border-collapse:collapse}th,td{border-bottom:1px solid #d8e4df;padding:9px 14px;text-align:left}</style>"
-        f"<h1>{escape(title)}</h1><p>{escape(note)}</p><table><thead><tr>{heading}</tr></thead>"
-        f"<tbody>{body}</tbody></table></html>", encoding="utf-8")
-    ctx.record("report", html)
+    ctx.json("report.json", {"title": title, "note": note,
+                            "tables": [{"title": "办理明细", "columns": columns, "rows": rows}]}, "report")

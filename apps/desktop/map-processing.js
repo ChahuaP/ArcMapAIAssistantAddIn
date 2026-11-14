@@ -81,7 +81,7 @@ const stats = {
     uncovered_area_m2: '未覆盖面积（平方米）', changed_area_m2: '变化面积（平方米）',
     common_coverage_m2: '共同覆盖面积（平方米）', band_count: '波段数', width: '宽度（像元）', height: '高度（像元）',
 };
-const deliveryLabels = { drawing: '图纸清单', raster: '栅格统计', selection: '选择记录', bands: '波段统计' };
+
 
 function toolForm(definition, layers, refs, setRefs, values, update, picked) {
     const { id, accepts, multiple } = definition;
@@ -325,13 +325,7 @@ export function MapProcessing({ tool: id, skill, layers, active, picked, entries
                     ...metrics.map(([name, value]) => h('div', { key: name }, h('dt', null, stats[name]), h('dd', null, metric(name, value))))),
                 result.layers.length > 0 && h('p', { role: 'status', className: 'gis-added-layers' }, '已加入地图 ' + result.layers.length + ' 个图层'),
                 result.map && h(Preview, { map: result.map }),
-                ...result.deliveries.map(item => {
-                    const label = (window.GuizhiSkillEditor.deliverables[item.kind] || deliveryLabels[item.kind] || '业务成果') + (item.label ? ' · ' + item.label : '');
-                    return h('div', { className: 'gis-delivery', key: item.run + item.kind },
-                        h('span', null, glyph('table', 15), label),
-                        h(Button, { size: 'small', icon: glyph('download', 15), 'aria-label': '另存' + label,
-                            onClick: () => api.mapDelivery(item).catch(fail) }, '另存'));
-                })) : skill ? h(window.React.Fragment, null,
+                result.business?.reportDigest && h(window.GuizhiBusinessLog.ReportPanel, { id: result.business.id })) : skill ? h(window.React.Fragment, null,
                 h(RoleMaterials, { roles, materials, change: setMaterials, plans: entries.filter(item => item.kind === 'plan'),
                     fail, disabled: busy || missing.length > 0, picker, onPending: setPendingMaterial }),
                 pendingMaterial && h('p', { role: 'status', className: 'muted' }, '正在读取材料…'),

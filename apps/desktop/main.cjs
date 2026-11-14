@@ -1,8 +1,9 @@
 const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, net, protocol, safeStorage, shell, Tray } = require('electron');
-const { randomBytes, createHash } = require('node:crypto');
+const { randomBytes, randomUUID, createHash } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
+const { inputReferences } = require('./business-log.cjs');
 const { DesktopController } = require('./controller.cjs');
 const { SpeechController } = require('./speech.cjs');
 const { LocalSpeechRuntime } = require('./local-speech.cjs');
@@ -10,7 +11,6 @@ const { createShell } = require('./shell.cjs');
 const { productName } = require('./brand.js');
 const { listModels, checkModelConnection, testModel } = require('./model-service.cjs');
 const { formats, materialBindings } = require('./materials.cjs');
-const { printReport } = require('./report-export.cjs');
 const { ArcGisSync } = require('./arcgis-sync.cjs');
 const { DiagnosticsUpload } = require('./diagnostics-upload.cjs');
 const { Components } = require('./components.cjs');
@@ -38,7 +38,7 @@ async function startDesktop(options) {
         'style.css', 'theme.css', 'mark.svg', 'luhe-banner.png', 'model-form.js', 'onboarding.js',
         'portrait.html', 'portrait.css', 'portrait.js', 'task-commands.js', 'speech-settings.js',
         'speech-audio.js', 'voice-input.js', 'arcgis-extension.js', 'markdown.js', 'messages.js',
-        'component-actions.js'];
+        'component-actions.js', 'business-log.js', 'business-log.css'];
     const files = new Map(localFiles.map(name => ['/' + name, path.join(__dirname, name)]));
     files.set('/map.js', path.join(rendererRuntime, 'map.js'));
     files.set('/map.css', path.join(rendererRuntime, 'map.css'));
@@ -446,23 +446,14 @@ async function startDesktop(options) {
                 }
                 return materialBindings({ input: [{ ...item, file: externalPath(item.file) }] }).input[0];
             })]));
-        return controller.request('map', { action: 'skill', skill: input.skill, materials,
+        const id = randomUUID(), startedAt = new Date().toISOString();
+        const display = Object.fromEntries(Object.entries(input.materials).map(([role, group]) => [role,
+            group.map(item => item.ref ? { ...item, name: mapLayers.get(mapKey(item.ref)).name } : item)]));
+        const output = await controller.request('map', { action: 'skill', skill: input.skill, materials,
             parameters: input.parameters, coordinatePlans: input.coordinatePlans });
-    }, true);
-    bind('mapDelivery', async (surface, item) => {
-        if (surface !== window || !item) throw new Error('请从地图工作区打开成果');
-        const source = await controller.request('map', { action: 'delivery', run: item.run, kind: item.kind });
-        const extension = item.kind === 'report' ? '.pdf' : path.extname(source).toLowerCase();
-        const pick = await dialog.showSaveDialog(window, { defaultPath: '小六-' + path.basename(source, path.extname(source)) + extension,
-            filters: [{ name: extension.slice(1).toUpperCase(), extensions: [extension.slice(1)] }] });
-        if (pick.canceled) return;
-        const output = externalPath(pick.filePath);
-        const relative = path.relative(path.join(controller.settings.workspace, 'runs'), output);
-        if (path.extname(output).toLowerCase() !== extension || relative === '' ||
-                (!path.isAbsolute(relative) && relative.split(path.sep)[0] !== '..')) throw new Error('请选择独立的成果保存位置');
-        if (item.kind === 'report') await fs.promises.writeFile(output, await printReport(source));
-        else await fs.promises.copyFile(source, output);
-        shell.showItemInFolder(output);
+        const business = await controller.mapBusiness({ id, startedAt, materials: display, output });
+        broadcast(controller.state());
+        return { ...output, business };
     }, true);
     let currentMxd;
     function requireMxdBridge() {
@@ -541,7 +532,10 @@ async function startDesktop(options) {
         if (surface !== window) throw new Error('请从工作台查看材料');
         const task = controller.tasks.find(item => item.id === id && item.status === 'succeeded');
         if (!task?.runId) throw new Error('办理成果尚未发布');
-        return controller.request('map', { action: 'task-inputs', run: task.runId });
+        const groups = { ...task.materials, ...(task.project && { project: [task.project] }),
+            ...(task.control && { control: [task.control] }) };
+        return controller.request('map', { action: 'task-inputs', run: task.runId,
+            existing: inputReferences(groups, task.skill) });
     }, true);
     bind('mapExport', async (surface, ref, table) => {
         if (surface !== window) throw new Error('请从工作台导出图层');
@@ -607,26 +601,6 @@ async function startDesktop(options) {
         const error = await shell.openPath(file);
         if (error) throw new Error('无法打开地图图片');
     });
-    bind('exportDelivery', async (id, kind, format) => {
-        if (!['shp', 'pdf', 'original'].includes(format) || (format === 'pdf') !== (kind === 'report')) {
-            throw new Error('成果导出格式无效');
-        }
-        const source = kind === 'report' ? await controller.report(id) : await controller.delivery(id, kind);
-        const extension = format === 'shp' ? '.zip' : format === 'pdf' ? '.pdf' : path.extname(source);
-        const pick = await dialog.showSaveDialog(window, { defaultPath: '小六-' + path.basename(source, path.extname(source)) + extension,
-            filters: [{ name: format === 'shp' ? 'SHP 成果包' : extension.slice(1).toUpperCase(), extensions: [extension.slice(1)] }] });
-        if (pick.canceled) return;
-        const output = externalPath(pick.filePath);
-        const relative = path.relative(path.join(controller.settings.workspace, 'runs'), output);
-        if (path.extname(output).toLowerCase() !== extension || relative === '' ||
-                (!path.isAbsolute(relative) && relative.split(path.sep)[0] !== '..')) throw new Error('请选择独立的成果保存位置');
-        if (format === 'shp') {
-            const task = controller.tasks.find(item => item.id === id);
-            await controller.python('export-shp', task.runId, kind, output);
-        } else if (format === 'pdf') fs.writeFileSync(output, await printReport(source));
-        else fs.copyFileSync(source, output);
-        shell.showItemInFolder(output);
-    });
     function replaceDraft(next = {}) {
         draft = next;
         desktop.notify('draft', draft);
@@ -665,7 +639,7 @@ async function startDesktop(options) {
                     const layer = mapLayers.get(mapKey(item.ref));
                     if (!layer) throw new Error('业务所选图层已移除');
                     const material = await controller.reader.map(workspace, { action: 'material', ref: layer.ref, name: layer.name });
-                    return { ...material, plan: item.plan };
+                    return { ...material, ref: layer.ref, plan: item.plan };
                 }))]));
             if (workspace !== controller.settings.workspace || version !== mapCatalogVersion) throw new Error('地图图层已变更，请重新提交');
             task = { ...task, materials: Object.fromEntries(materials) };
@@ -743,9 +717,6 @@ async function startDesktop(options) {
         const pick = await dialog.showSaveDialog(window, { defaultPath: '业务技能模板.md', filters: [skillFile] });
         if (!pick.canceled) fs.copyFileSync(path.join(__dirname, '../../resources/skills/template.md'), externalPath(pick.filePath));
     });
-    bind('delivery', async (id, kind) => {
-        shell.showItemInFolder(await controller.delivery(id, kind));
-    });
     bind('approvalSource', async (...args) => {
         if (await shell.openPath(await controller.approvalSource(...args))) throw new Error('无法打开依据');
     });
@@ -775,9 +746,16 @@ async function startDesktop(options) {
         ...Object.fromEntries(['source_points', 'target_points'].map(key => [key, {
             file: externalPath(input[key].file), layer: input[key].layer,
         }])) }));
-    bind('report', async id => {
-        const error = await shell.openPath(await controller.report(id));
-        if (error) throw new Error('无法打开报告');
+    bind('reportPage', (id, page) => controller.reportPage(id, page));
+    bind('businessLog', page => controller.businessLog().page(page));
+    bind('businessDetail', id => {
+        const item = controller.businessLog().get(id);
+        if (!item) throw new Error('办理记录不存在');
+        return item;
+    });
+    bind('businessDelete', (id, phrase) => {
+        controller.businessLog().remove(id, phrase);
+        broadcast(controller.state());
     });
     await Promise.all([...pages].map(([surface, url]) => surface.loadURL(url)));
     desktop.registerShortcut();

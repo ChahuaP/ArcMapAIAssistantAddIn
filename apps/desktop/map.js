@@ -99,7 +99,7 @@ const layerFor = (items, color) => new VectorLayer({
 function classSwatch(item, entry) {
     if (!/Polygon$/.test(item.geometry)) return { backgroundColor: entry.color };
     const fill = classFill(item.style, entry.color, entry.fillColor);
-    return { backgroundColor: fill ? fillColor(fill, opacity(item.style.fillOpacity, 19)) : 'transparent',
+    return { backgroundColor: fill ? fillColor(fill, opacity(item.style.fillOpacity)) : 'transparent',
         borderColor: item.style.noOutline ? 'transparent' : entry.color };
 }
 
@@ -752,7 +752,7 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
             { key: 'fit', label: '缩放至图层', icon: glyph('target') },
             { key: 'table', label: '打开属性表', icon: glyph('table'), disabled: raster },
             { key: 'properties', label: '图层属性', icon: glyph('layers') },
-            { key: 'style', label: '符号化', icon: glyph('pencil'), disabled: raster },
+            { key: 'style', label: raster ? '显示' : '符号化', icon: glyph('pencil') },
             { key: 'export', label: '导出', icon: glyph('download'), children: [
                 { key: 'export-data', label: '导出为…' },
                 ...(!raster ? [{ key: 'export-table', label: '导出属性表' }] : []),
@@ -808,7 +808,7 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
             { disabled: busy, 'aria-label': '打开地图工程' }),
             command('保存', () => mxd(api.mxdWrite({ crs: target, bounds: graph.current?.view.calculateExtent(graph.current.ol.getSize()),
                 background: backgroundColor,
-                layers: [...layers].reverse().map((item, index) => ({ ref: item.ref, name: item.name, visible: !hidden.includes(key(item)), opacity: opacity(item.opacity),
+                layers: [...layers].reverse().map((item, index) => ({ ref: item.ref, name: item.name, visible: !hidden.includes(key(item)), opacity: opacity(item.style?.opacity ?? item.opacity),
                     style: item.kind === 'raster' ? null : layerSymbol(item.style, palette[(layers.length - index - 1) % palette.length]) })) }),
             result => setIoStatus('已保存 MXD 和配套数据 · ' + result.layers + ' 个图层')),
             { disabled: busy || !layers.length || !viewReady, 'aria-label': '保存地图工程' })),

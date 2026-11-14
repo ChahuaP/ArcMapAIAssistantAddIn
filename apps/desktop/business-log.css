@@ -1,0 +1,30 @@
+.business-log{min-width:0;overflow:auto;height:100%;padding:clamp(20px,3vw,44px);color:var(--ink);background:var(--page)}
+.business-log h1{margin:0 0 22px;font-size:26px;line-height:1.35}
+.business-log h2{margin:0 0 12px;font-size:16px}
+.business-dashboard{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:0 0 18px}
+.business-dashboard>div,.business-types,.business-records{border:1px solid var(--line);border-radius:12px;padding:16px;background:var(--panel)}
+.business-dashboard dd{margin:5px 0 0;font-size:28px;font-weight:650;font-variant-numeric:tabular-nums}
+.business-dashboard small{font-size:12px;font-weight:400;margin-inline-start:6px}
+.business-types{margin-bottom:18px}
+.business-types ul{list-style:none;display:flex;flex-wrap:wrap;gap:8px;margin:0;padding:0}
+.business-types li{padding:5px 10px;border:1px solid var(--line);border-radius:8px}
+.business-types strong{margin-inline-start:9px;font-variant-numeric:tabular-nums}
+.business-records .ant-pagination{justify-content:flex-end;margin-top:14px}
+.business-pdf .ant-pagination{justify-content:flex-end;margin-bottom:10px}
+.business-detail-dialog .ant-modal-body{max-height:calc(100vh - 166px);overflow:auto;overscroll-behavior:contain;padding-inline-end:6px}
+.business-row-actions{display:flex;gap:2px}
+.business-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(195px,1fr));gap:12px;margin:12px 0 18px}
+.business-facts dt{font-size:12px;color:var(--muted)}
+.business-facts dd{margin:3px 0 0;overflow-wrap:anywhere}
+.business-materials{list-style:none;padding:0;margin:0 0 14px}
+.business-materials li{display:flex;flex-wrap:wrap;gap:4px 10px;padding:5px 0}
+.business-materials small{color:var(--muted)}
+.business-confirm,.business-operator{display:grid;gap:8px;margin:10px 0}
+.business-report-panel{margin-top:12px;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.business-report-panel summary{cursor:pointer;padding:9px 12px;font-weight:600}
+.business-report-panel summary span{font-size:11px;font-weight:400;margin-inline-start:8px;color:var(--muted)}
+.business-pdf{padding:12px;background:var(--page);border-top:1px solid var(--line)}
+.business-pdf img{display:block;width:100%;max-width:760px;margin:auto;background:white}
+.business-pdf-loading{display:flex;align-items:center;justify-content:center;gap:8px;min-height:60px}
+.role-picker{display:grid;gap:8px;margin-top:6px}
+.role-picker .ant-select{width:100%}

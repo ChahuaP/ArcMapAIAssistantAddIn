@@ -17,6 +17,7 @@ class TaskSpec:
     project_plan: dict | None = None
     control_plan: dict | None = None
     request: dict | None = None
+    output_layer: bool = False
 
 
 @dataclass(frozen=True)

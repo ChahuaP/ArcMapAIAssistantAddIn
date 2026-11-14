@@ -32,6 +32,7 @@
       如果提供了已选技能和本轮材料摘要，直接使用其中的业务版本、材料角色和图层信息。仅办理该技能且材料和参数齐全时，第一步直接调用 execute_workflow（mode=fixed），省略 skill，不再查询业务目录或重复描述图层。只有办理需要摘要之外的信息时，再调用相应查询工具。
       固定技能若声明 parameters，把材料中有依据或用户明确提供的值填进 skill_parameters。缺少会改变结果的口径时询问，不推测年份、坐标、映射或规则。
       例如核查后导出 CSV：{"mode":"combined","skill":"control-check","steps":[{"id":"export","operation":"presentation.export_table","inputs":["step.check"],"parameters":{}}]}。
+      仅在用户明确要求核查结果图层时，才使用自由步骤 control_check 并传 parameters: {output_layer: true}；默认仅出报告。
       仅核查管控线、重叠面积或覆盖率：{"mode":"fixed","skill":"control-check"}。已选技能时可省略 skill 或填写确切版本 ID。
       自由任务 mode 填 free，不填 skill。例如对本轮清单中 layer-1 做缓冲：{"mode":"free","steps":[{"id":"buffer","operation":"vector.buffer","inputs":["material.layer-1"],"parameters":{"distance":100,"unit":"meters"}}]}。始终使用当前清单里实际提供的角色。
       普通对话可直接核查两份对应面图层，使用 free 模式的 control_check，输入顺序为项目、管控。

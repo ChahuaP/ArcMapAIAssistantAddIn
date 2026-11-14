@@ -9,7 +9,7 @@
     window.GuizhiOnboarding = function Onboarding({ state, save }) {
         const [step, setStep] = useState(0);
         const [value, change] = useState({ workspace: state.settings.workspace,
-            modelConfig: state.settings.modelConfig || initial(), key: '' });
+            modelConfig: state.settings.modelConfig || initial(), operator: state.settings.operator, key: '' });
         const [voice, setVoice] = useState(state.speech);
         const [savedVoice, setSavedVoice] = useState(state.speech);
         const [verified, setVerified] = useState(false);
@@ -56,7 +56,10 @@
         ];
         const content = [
             () => h('section', { className: 'settings-card' }, h('h2', null, '成果保存位置'),
-                h(Workspace, { value: value.workspace, change: workspace => change({ ...value, workspace }), fail, disabled: blocked })),
+                h(Workspace, { value: value.workspace, change: workspace => change({ ...value, workspace }), fail, disabled: blocked }),
+                h('label', { className: 'business-operator' }, h('span', null, '办理人'),
+                    h(antd.Input, { value: value.operator, maxLength: 60, disabled: blocked, 'aria-label': '办理人',
+                        onChange: event => change({ ...value, operator: event.target.value }) }))),
             () => h(ModelForm, { value, change, current: state.settings, verified: setVerified, busy: setTesting }),
             () => h(window.GuizhiSpeechForm, { current: currentVoice, value: voice, change: setVoice, busy: setTesting }),
             () => h('dl', { className: 'settings-card onboarding-summary' }, ...review.map(([label, text]) =>
@@ -72,12 +75,6 @@
                 h('footer', { className: 'onboarding-footer' }, h('div', { className: 'onboarding-content setting-row' },
                     h('div', { className: 'business-actions' },
                         step > 0 && h(antd.Button, { disabled: blocked, onClick: () => { setError(''); setStep(step - 1); } }, '上一步'),
-                        step === 1 && h(antd.Button, { disabled: blocked, onClick: async () => {
-                            setSaving(true);
-                            try { await save({ workspace: value.workspace }); }
-                            catch (issue) { fail(issue); }
-                            finally { setSaving(false); }
-                        } }, '仅使用地图'),
                         step === 2 && h(antd.Button, { type: 'text', disabled: blocked, onClick: () => advance(true) }, '跳过语音')),
                     h('div', { className: 'business-actions' },
                         error && h('span', { className: 'error', role: 'alert' }, error),

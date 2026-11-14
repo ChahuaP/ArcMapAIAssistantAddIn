@@ -159,7 +159,10 @@
                     value.showOperation !== false && checkbox('screenHighlight', '高亮工作区中的工具和图层')),
             ],
             storage: () => card('成果保存位置', h(Workspace, { value: value.workspace,
-                change: workspace => update('workspace', workspace), fail, disabled: saving })),
+                change: workspace => update('workspace', workspace), fail, disabled: saving }),
+                h('label', { className: 'setting-field business-operator' }, h('span', null, '办理人'),
+                    h(antd.Input, { value: value.operator || '', maxLength: 60, 'aria-label': '办理人',
+                        onChange: event => update('operator', event.target.value) }))),
             skills: () => h(window.GuizhiBusiness.Business, { catalog, refresh, plans, initialMarkdown, manage: true }),
             components: () => {
                 const available = state.components || {};

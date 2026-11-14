@@ -63,7 +63,7 @@
     }
 
     function Workbench({ appearance, saveAppearance, sidebar, conversation, inspector, map, composer,
-        mode, setMode, activity, onCancel, arcgis, connected, fail }) {
+        mode, setMode, activity, onCancel, arcgis, connected, fail, page }) {
         const [width, setWidth] = useState(innerWidth);
         const [panels, setPanels] = useState(appearance.panels);
         const [drawer, showDrawer] = useState(false);
@@ -116,7 +116,7 @@
             h(Splitter, { className: 'workbench-panels', lazy: true,
                 onResizeEnd: sizes => persist(sideSizes(sizes)) },
                 h(Splitter.Panel, { size: left, min: left, max: left, resizable: false }, sidebar(left > 56)),
-                h(Splitter.Panel, { min: 0 }, h('div', { className: 'workbench-center' },
+                h(Splitter.Panel, { min: 0 }, page || h('div', { className: 'workbench-center' },
                     h('div', { className: 'workbench-modes', 'aria-label': '工作区布局' }, ...modeButtons),
                     h(Splitter, { className: 'workbench-content', lazy: true,
                         onResizeEnd: ([a, b]) => { if (a && b) setSplit(a / (a + b) * 100); } },
