@@ -133,7 +133,7 @@ async function startDesktop(options) {
     const tray = new Tray(nativeImage.createFromPath(path.join(__dirname, 'mark.png')).resize({ width: 24, height: 24 }));
     tray.setToolTip(productName);
     tray.setContextMenu(Menu.buildFromTemplate([
-        { label: '打开工作台', click: reveal },
+        { label: '工作台', click: reveal },
         { label: '快捷面板', click: desktop.openLauncher },
         { label: '显示数字形象', click: desktop.showPortrait },
         { label: '隐藏数字形象', click: () => {
@@ -142,7 +142,6 @@ async function startDesktop(options) {
             portrait.hide();
         } },
         { label: '设置', click: () => { reveal(); window.webContents.send('guizhi:settings'); } },
-        { label: '接管', click: () => broadcast(controller.cancel()) },
         { type: 'separator' }, { label: '退出', click: () => app.quit() },
     ]));
     tray.on('double-click', reveal);
