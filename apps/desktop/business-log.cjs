@@ -1,6 +1,5 @@
 const fs = require('node:fs');
 const path = require('node:path');
-const { userInfo } = require('node:os');
 
 const roles = { project: '项目范围', control: '管控范围', input: '输入材料', inputs: '输入图层' };
 const materialName = item => item.name || item.file?.split(/[\\/]/).at(-1) || item.layer || '地图图层';
@@ -26,7 +25,7 @@ const statuses = { succeeded: '已完成', failed: '未完成', interrupted: '�
     cancelled: '已取消', no_result: '未生成结果', missing_materials: '待补充材料',
     invalid_materials: '材料不符合要求', budget_exhausted: '超过办理限额' };
 const statusLabel = value => statuses[value] || '未完成';
-const operator = settings => settings.operator || userInfo().username;
+const operator = settings => settings.operator || '未填写';
 const confirmation = id => '删除 ' + id.slice(0, 8).toUpperCase();
 
 class BusinessLog {

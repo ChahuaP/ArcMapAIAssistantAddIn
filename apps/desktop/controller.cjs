@@ -98,7 +98,7 @@ class DesktopController {
     state() {
         const { workspace, modelConfig, showOperation, screenHighlight, carrier, encryptedKey, modelVision } = this.settings;
         return { settings: { workspace, modelConfig, showOperation, screenHighlight,
-            operator: operator(this.settings), carrier: carrier || 'none', modelVision: Boolean(modelVision), keyConfigured: Boolean(modelConfig && encryptedKey) },
+            operator: this.settings.operator || '', carrier: carrier || 'none', modelVision: Boolean(modelVision), keyConfigured: Boolean(modelConfig && encryptedKey) },
             tasks: this.tasks, busy: Boolean(this.active) };
     }
 
@@ -148,6 +148,9 @@ class DesktopController {
 
     configure(input) {
         if (this.active || this.modelTesting || this.skillBusy || this.hostBusy) throw new Error('请先结束当前任务');
+        const name = typeof input.operator === 'string' ? input.operator.trim() : '';
+        if (!this.settings.workspace && !name) throw new Error('请输入姓名');
+        if (name.length > 60 || /[\r\n]/.test(name)) throw new Error('姓名最多填写 60 个字');
         const { config, key, encrypted } = input.modelConfig ? this.selectModel(input) : {};
         const workspace = this.workspaceReady(input.workspace);
         let encryptedKey = encrypted;
@@ -155,8 +158,6 @@ class DesktopController {
             if (!this.storage.isEncryptionAvailable()) throw new Error('系统凭据加密不可用');
             encryptedKey = this.storage.encryptString(key).toString('base64');
         }
-        const name = typeof input.operator === 'string' ? input.operator.trim() : '';
-        if (name.length > 60 || /[\r\n]/.test(name)) throw new Error('办理人姓名最多填写 60 个字');
         const settings = { workspace, operator: name || this.settings.operator, modelConfig: config, showOperation: input.showOperation !== false,
             screenHighlight: input.screenHighlight !== false, carrier: this.settings.carrier, modelVision: input.modelVision === true, encryptedKey };
         save(this.file, settings);

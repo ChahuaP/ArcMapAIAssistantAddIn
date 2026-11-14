@@ -160,8 +160,8 @@
             ],
             storage: () => card('成果保存位置', h(Workspace, { value: value.workspace,
                 change: workspace => update('workspace', workspace), fail, disabled: saving }),
-                h('label', { className: 'setting-field business-operator' }, h('span', null, '办理人'),
-                    h(antd.Input, { value: value.operator || '', maxLength: 60, 'aria-label': '办理人',
+                h('label', { className: 'setting-field business-operator' }, h('span', null, '姓名'),
+                    h(antd.Input, { value: value.operator || '', maxLength: 60, 'aria-label': '姓名',
                         onChange: event => update('operator', event.target.value) }))),
             skills: () => h(window.GuizhiBusiness.Business, { catalog, refresh, plans, initialMarkdown, manage: true }),
             components: () => {

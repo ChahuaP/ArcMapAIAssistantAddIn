@@ -196,6 +196,7 @@ kbd { display: inline-block; color: var(--muted); font: 12px "Segoe UI",sans-ser
 .onboarding-scroll { overflow: auto; scrollbar-gutter: stable both-edges; padding: var(--space-5) var(--content-inset); }
 .onboarding-footer { overflow-y: hidden; scrollbar-gutter: stable both-edges; padding: var(--space-3) var(--content-inset); background: var(--panel); border-top: 1px solid var(--line); }
 .onboarding-footer .business-actions { flex-wrap: wrap; }
+.onboarding-name { display: grid; gap: var(--space-3); width: min(100%, 360px); }
 .onboarding-summary { justify-items: stretch; gap: 0; margin: 0; }
 .onboarding-summary div + div { border-top: 1px solid var(--line); }
 .onboarding-summary div { display: grid; grid-template-columns: minmax(112px, 1fr) minmax(0, 4fr); gap: var(--space-4); padding: var(--space-2) 0; }
