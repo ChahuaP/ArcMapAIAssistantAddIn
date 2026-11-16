@@ -221,8 +221,8 @@ def write_field(ctx, field, values, *, create=False):
             db.execute(f"ALTER TABLE {table} ADD COLUMN {column} DOUBLE")
         elif field == fid_name or field not in fields or field == ctx.info[0]["geometry_name"]:
             raise ValueError("请选择可编辑的属性字段")
-        elif create and not re.search(r"INT|DOUBLE|REAL|FLOAT|NUMERIC", fields[field][2], re.I):
-            raise ValueError("面积只能写入数值字段")
+        elif create and not re.search(r"DOUBLE|REAL|FLOAT", fields[field][2], re.I):
+            raise ValueError("面积需要小数字段，请选择小数字段或填写新字段名称")
         data = []
         for key, value in values.items():
             ctx.check()
@@ -230,8 +230,11 @@ def write_field(ctx, field, values, *, create=False):
                 value = None
             elif hasattr(value, "item"):
                 value = value.item()
-            if type(value) is float and not isfinite(value):
-                raise ValueError("计算结果包含无效数值")
+            if type(value) is float:
+                if not isfinite(value):
+                    raise ValueError("计算结果包含无效数值")
+                if not create and "INT" in fields[field][2].upper() and not value.is_integer():
+                    raise ValueError("目标字段为整数，请使用 ROUND 等 SQL 函数取整或选择小数字段")
             data.append((value, int(key)))
         db.executemany(f"UPDATE {table} SET {column}=? WHERE {fid}=?", data)
         if len(data) == len(ctx.frames[0]):

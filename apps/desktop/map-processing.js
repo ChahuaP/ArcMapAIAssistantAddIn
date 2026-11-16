@@ -21,7 +21,7 @@ const count = tool('data.describe', '要素计数', 'count', vector);
 const selectAttr = tool('data.select_by_attribute', '按属性选择', 'select', vector);
 const selectLocation = tool('data.select_by_location', '按位置选择', 'target', vector, vector);
 const tools = [
-    { title: '统计与选择', icon: 'analysis', tools: [area, count, selectAttr, selectLocation] },
+    { title: '统计', icon: 'analysis', tools: [area, count] },
     { title: '矢量处理', icon: 'layers', tools: [
         tool('vector.buffer', '缓冲分析', 'buffer', vector),
         tool('vector.dissolve', '融合', 'layers', vector),
@@ -44,7 +44,7 @@ const tools = [
     ] },
 ];
 export const TOOL_GROUPS = tools;
-const definitions = Object.fromEntries([...tools.flatMap(group => group.tools),
+const definitions = Object.fromEntries([...tools.flatMap(group => group.tools), selectAttr, selectLocation,
     tool('data.copy', '复制图层', 'layers', vector),
     { ...tool('data.merge', '合并图层', 'layers', vector), multiple: true },
     tool('data.export_selection', '选中要素另存为图层', 'select', vector),

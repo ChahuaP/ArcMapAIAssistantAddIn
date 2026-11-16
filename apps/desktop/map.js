@@ -851,9 +851,6 @@ function WorkspaceMap({ layers, add, remove, moveLayer, selectLayer, active, hid
         地图: [group('导航', command('全图', () => position(false), { disabled: !layers.length }),
             command('定位图层', () => position(true), { disabled: !layer }),
             command('放大', () => graph.current.view.adjustZoom(1)), command('缩小', () => graph.current.view.adjustZoom(-1))),
-            group('选择', command('清除选择', clear, { disabled: !picked.length }),
-                command('按属性选择', () => openTool('data.select_by_attribute'), { disabled: !layer?.fields?.length }),
-                command('按位置选择', () => openTool('data.select_by_location'), { disabled: !layer?.geometry || layers.filter(item => item.geometry).length < 2 })),
             group('显示', command('地图属性', () => setMapProperties(true), { disabled: busy }))],
         数据: [group('地图工程', command('打开', () => mxd(api.mxdRead(), value => { setLocateMxd(null); setDocument(value); }),
             { disabled: busy, 'aria-label': '打开地图工程' }),
@@ -870,14 +867,20 @@ function WorkspaceMap({ layers, add, remove, moveLayer, selectLayer, active, hid
                 command('复制图层', () => openTool('data.copy'), { disabled: !layer?.geometry }),
                 command('合并图层', () => openTool('data.merge'), { disabled: layers.filter(item => item.geometry).length < 2 })),
             group('成果', command('最近成果', () => setAnalysis(lastResult), { disabled: !lastResult }))],
-        编辑: editCommands,
+        编辑: [group('选择',
+            command('按属性选择', () => openTool('data.select_by_attribute'), { disabled: busy || Boolean(edit) || !layer?.geometry }),
+            command('按位置选择', () => openTool('data.select_by_location'),
+                { disabled: busy || Boolean(edit) || !layer?.geometry || layers.filter(item => item.geometry).length < 2 }),
+            command('清除选择', clear, { disabled: busy || !picked.length })),
+            ...editCommands],
         制图: [group('出图', command('导出地图', () => setLayout(true), { icon: glyph('download'), disabled: busy || !viewReady }))],
         分析: TOOL_GROUPS.map(({ title, icon, tools }) => {
-            const prominent = { '统计与选择': 2, '矢量处理': 2, '叠加分析': 2 }[title] || 0;
+            const prominent = { '统计': 2, '矢量处理': 2, '叠加分析': 2 }[title] || 0;
             return prominent ? group(title, ...tools.slice(0, prominent).map(item => command(item.title, () => openTool(item.id),
                 { key: item.id, icon: glyph(item.icon), disabled: busy,
                     'data-ai-focus': activity?.operation === item.id ? 'true' : undefined })),
-                menuGroup('更多', icon, tools.slice(prominent), openTool)) : menuGroup(title, icon, tools, openTool);
+                ...(tools.length > prominent ? [menuGroup('更多', icon, tools.slice(prominent), openTool)] : []))
+                : menuGroup(title, icon, tools, openTool);
         }),
         业务: [...skillGroups.map(([title, ids]) => [title, catalog.filter(item => ids.includes(item.id))]),
             ['自定义业务', customSkills]].filter(([, items]) => items.length)
@@ -951,7 +954,6 @@ function WorkspaceMap({ layers, add, remove, moveLayer, selectLayer, active, hid
         table && layer && layer.kind !== 'raster' && h('section', { className: 'map-attribute-panel', 'aria-label': '属性表' },
             h('header', { className: 'map-attribute-head' }, h('strong', null, glyph('table'), '属性表'),
                 h('span', null, layer.name),
-                command('按属性选择', () => openTool('data.select_by_attribute'), { disabled: busy || Boolean(edit) }),
                 command('添加字段', () => openTool('table.add_field'), { disabled: busy || Boolean(edit) }),
                 command('删除字段', () => openTool('table.delete_field'), { disabled: busy || Boolean(edit) || !layer.fields?.length }),
                 command('字段计算器', () => openTool('table.calculate_field'), { icon: glyph('analysis'), disabled: busy || Boolean(edit) || !layer.fields?.length }),
