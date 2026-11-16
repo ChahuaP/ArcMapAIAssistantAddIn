@@ -1,4 +1,5 @@
 import { attributeFilter, fieldCalculation, geometryCalculation, geometryProperties } from './map-attribute-tools.js';
+import { AttributePreview, TokenPicker } from './map-pickers.js';
 
 const h = window.React.createElement;
 const { useState } = window.React;
@@ -126,9 +127,9 @@ const stats = {
 };
 
 
-function toolForm(definition, layers, refs, setRefs, values, update, picked) {
+function toolForm(definition, layers, refs, setRefs, values, update, picked, connected) {
     const { id, accepts, multiple } = definition;
-    const input = layers.find(item => key(item) === refs[0]);
+    const input = connected ? connected[0] : layers.find(item => key(item) === refs[0]);
     const names = input?.fields?.map(item => item.name) || [];
     const fields = names.map(name => ({ value: name, label: name }));
     const select = (name, label, choices, extra = {}) => field(label, dropdown(values[name], options(choices),
@@ -143,13 +144,18 @@ function toolForm(definition, layers, refs, setRefs, values, update, picked) {
         value => setRefs(isMultiple ? [...refs.slice(0, index), ...value] : Object.assign([...refs], { [index]: value }),
             index === 0), { showSearch: true, optionFilterProp: 'label', ...(isMultiple ? { mode: 'multiple' } : {}) }));
     const location = id === 'data.select_by_location';
-    const controls = accepts.map((predicate, index) => layerSelect(index,
-        location ? (index === 0 ? '目标图层' : '参照图层') : index === 0 ? '输入图层' : id.endsWith('.clip') ? '裁切范围' : '叠加图层',
+    const compact = location || id === 'data.select_by_attribute' || id.startsWith('table.calculate_');
+    const controls = connected ? [] : accepts.map((predicate, index) => compact ? h(TokenPicker, {
+        label: location ? index === 0 ? '目标图层' : '参照图层' : '输入图层', selected: refs[index],
+        items: layerOptions(layers.filter(item => predicate(item) && (index === 0 || key(item) !== refs[0]))),
+        onPick: value => setRefs(Object.assign([...refs], { [index]: value }), index === 0),
+    }) : layerSelect(index,
+        index === 0 ? '输入图层' : id.endsWith('.clip') ? '裁切范围' : '叠加图层',
         predicate, multiple && index > 0));
     if (multiple && accepts.length === 1) controls.push(layerSelect(1, '其他图层', accepts[0], true));
-    if (namedResult(id)) controls.push(text('resultName', '输出图层名（选填）', definition.title));
+    if (!connected && namedResult(id)) controls.push(text('resultName', '输出图层名（选填）', definition.title));
     let parameters = {};
-    let valid = refs.length >= accepts.length && (!multiple || refs.length > 1) && refs.every((ref, index) =>
+    let valid = connected ? accepts.every((accept, index) => accept(connected[index])) : refs.length >= accepts.length && (!multiple || refs.length > 1) && refs.every((ref, index) =>
         (accepts[index] || accepts.at(-1))?.(layers.find(item => key(item) === ref)));
     const attributeTools = { 'data.select_by_attribute': attributeFilter, 'table.calculate_field': fieldCalculation,
         'table.calculate_geometry': geometryCalculation };
@@ -172,8 +178,8 @@ function toolForm(definition, layers, refs, setRefs, values, update, picked) {
             join: values.join || 'round', dissolve: values.dissolve === 'all' };
         valid &&= Number.isFinite(parameters.distance) && parameters.distance > 0;
     } else if (id === 'data.select_by_location') {
-        controls.push(select('predicate', '空间关系', { intersect: '相交', contain: '包含', within: '位于范围内', touch: '接触',
-            overlap: '重叠', cross: '穿越', within_a_distance: '距离范围内' }));
+        controls.push(h(TokenPicker, { label: '空间关系', selected: values.predicate, items: options({ intersect: '相交', contain: '包含', within: '位于范围内', touch: '接触',
+            overlap: '重叠', cross: '穿越', within_a_distance: '距离范围内' }), onPick: value => update('predicate', value) }));
         controls.push(h(SpatialExample, { predicate: values.predicate }));
         parameters = { predicate: values.predicate };
         valid &&= Boolean(values.predicate);
@@ -207,6 +213,13 @@ function toolForm(definition, layers, refs, setRefs, values, update, picked) {
         valid &&= Boolean(parameters.target_crs && parameters.resampling);
     }
     return { controls, valid, parameters };
+}
+
+export function flowForm(operation, inputs, values, update) {
+    const definition = definitions[operation];
+    if (!definition) return { controls: [], parameters: {}, valid: false };
+    const settings = operation === 'data.select_by_location' ? { predicate: 'intersect', ...values } : values;
+    return toolForm(definition, [], [], null, settings, update, [], inputs);
 }
 
 function parseMapping(text) {
@@ -306,13 +319,15 @@ export function MapProcessing({ tool: id, skill, layers, active, picked, entries
         predicate: 'intersect', mode: 'one_to_one', resampling: 'nearest', epsg: activeLayer?.crs?.match(/^EPSG:(\d+)$/)?.[1] }));
     const [materials, setMaterials] = useState({});
     const [result, setResult] = useState(initialResult || null);
+    const [preview, setPreview] = useState(null);
     const [error, setError] = useState('');
     const [pendingMaterial, setPendingMaterial] = useState('');
     const update = (name, value) => setValues(old => ({ ...old, [name]: value }));
     const fail = issue => setError(window.GuizhiErrorText(issue));
     const title = skill?.title || definition.title;
+    const needsPreview = ['table.calculate_field', 'table.calculate_geometry'].includes(id);
     const submit = ({ 'geometry.create_dataset': '确定', 'table.add_field': '确定', 'table.delete_field': '删除',
-        'table.calculate_field': '计算', 'table.calculate_geometry': '计算',
+        'table.calculate_field': '预览', 'table.calculate_geometry': '预览',
         'data.select_by_attribute': '确定', 'data.select_by_location': '确定' })[id] || '运行';
     const missing = (skill?.components || (id?.startsWith('raster.') ? ['raster'] : []))
         .filter(kind => components?.[kind]?.installed === false);
@@ -336,8 +351,11 @@ export function MapProcessing({ tool: id, skill, layers, active, picked, entries
                     .map(role => [role + '_plan', materials[role][0].plan])) })
                 : await api.map({ action: 'tool', operation: id, refs: refs.map(ref => layers.find(item => key(item) === ref).ref),
                     parameters, name: id === 'geometry.create_dataset' ? values.name.trim() : values.resultName?.trim() || undefined });
-            onResult({ ...output, input: refs[0] });
-            setResult(output);
+            if (needsPreview) setPreview(output);
+            else {
+                onResult({ ...output, input: refs[0] });
+                setResult(output);
+            }
         } catch (issue) { fail(issue); }
         finally { setBusy(false); }
     }
@@ -350,8 +368,12 @@ export function MapProcessing({ tool: id, skill, layers, active, picked, entries
     return h(Modal, { open: true, centered: true, width: skill || result?.map ? 640 : 460, className: 'gis-dialog',
         rootClassName: 'gis-modal-root', closable: !busy, keyboard: !busy, maskClosable: false,
         title: h('span', { className: 'gis-dialog-title' }, glyph(definition?.icon || 'analysis'), title),
-        onCancel: dismiss, onOk: result ? dismiss : run, okText: result ? '完成' : submit,
-        cancelText: '取消', confirmLoading: busy, okButtonProps: { disabled: !result && !valid },
+        onCancel: preview ? () => setPreview(null) : dismiss, onOk: result ? dismiss : preview ? () => {
+            onResult({ ...preview, input: refs[0] });
+            setResult(preview);
+            setPreview(null);
+        } : run, okText: result ? '完成' : preview ? '应用' : submit,
+        cancelText: preview ? '返回' : '取消', confirmLoading: busy, okButtonProps: { disabled: !result && !valid },
         cancelButtonProps: { disabled: busy, className: result ? 'gis-result-cancel' : undefined } },
         h('div', { className: 'map-field-editor', 'aria-busy': busy },
             missing.length > 0 && h('div', { className: 'gis-component-message', role: 'status' },
@@ -363,7 +385,8 @@ export function MapProcessing({ tool: id, skill, layers, active, picked, entries
                 result.layers.length > 0 && h('p', { role: 'status', className: 'gis-added-layers' },
                     id?.startsWith('table.') ? '已更新属性表' : '已加入地图 ' + result.layers.length + ' 个图层'),
                 result.map && h(Preview, { map: result.map }),
-                result.business?.reportDigest && h(window.GuizhiBusinessLog.ReportPanel, { id: result.business.id })) : skill ? h(window.React.Fragment, null,
+                result.business?.reportDigest && h(window.GuizhiBusinessLog.ReportPanel, { id: result.business.id })) :
+                preview ? h(AttributePreview, { layer: preview.layers[0], field: parameters.field }) : skill ? h(window.React.Fragment, null,
                 skillHints[skill.id] && h('details', { className: 'gis-tool-guide' },
                     h('summary', null, '适用条件'), skill.id === 'control-check'
                         ? h('div', { className: 'gis-tool-help' }, h('div', { className: 'gis-spatial-example overlap', 'aria-hidden': true },

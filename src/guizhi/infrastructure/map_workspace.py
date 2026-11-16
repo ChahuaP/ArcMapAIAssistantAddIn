@@ -327,6 +327,19 @@ def features(workspace, payload):
 
 def request(workspace, payload):
     action = payload["action"]
+    if action.startswith("flow-"):
+        from guizhi.infrastructure import map_flow
+
+        if action == "flow-tools":
+            return map_flow.catalog()
+        if action == "flow-run":
+            return map_flow.run(workspace, payload)
+        if action == "flow-progress":
+            return map_flow.progress(workspace, payload)
+        if action in {"flow-templates", "flow-save"}:
+            return map_flow.template(workspace, payload)
+        if action == "flow-export-table":
+            return map_flow.export_table(workspace, payload)
     if action in {"mxd-read", "mxd-import", "mxd-write"}:
         from guizhi.infrastructure import map_document
 

@@ -130,6 +130,20 @@ def clear_selection(ctx):
 
 
 def export_selection(ctx, selection: Selection):
+    from guizhi.infrastructure.operations.table import identifier, table_copy
+
     frame = ctx.frames[0]
     ids = selection_fids(ctx, selection)
-    ctx.publish(frame.loc[frame.index.isin(ids)], geometry_type=ctx.info[0]["geometry_type"])
+    remaining = frame.loc[frame.index.isin(ids)]
+    index = identifier(ctx.info[0]["fid_column"])
+
+    def keep(db, table, _):
+        db.execute("CREATE TEMP TABLE selected (id INTEGER PRIMARY KEY)")
+        db.executemany("INSERT INTO selected VALUES (?)", ((fid,) for fid in sorted(ids)))
+        db.execute(f"DELETE FROM {table} WHERE {index} NOT IN (SELECT id FROM selected)")
+        bounds = [None] * 4 if remaining.empty or remaining.geometry.is_empty.all() else remaining.total_bounds.tolist()
+        db.execute("UPDATE gpkg_contents SET min_x=?, min_y=?, max_x=?, max_y=? WHERE table_name=?",
+                   (*bounds, ctx.request.inputs[0].layer))
+        return {"deleted": len(frame) - len(remaining)}
+
+    return table_copy(ctx, keep)

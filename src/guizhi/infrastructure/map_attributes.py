@@ -71,16 +71,23 @@ def statistics(file, name, payload):
 
 def unique_values(file, name, payload):
     field = payload.get("field")
+    term = payload.get("query", "")
+    page = payload.get("page", 0)
+    if not isinstance(term, str) or len(term) > 200 or type(page) is not int or not 0 <= page <= 100_000:
+        raise ValueError("唯一值搜索参数无效")
     with attribute_table(file, name) as (db, table, _, fields):
         if not isinstance(field, str) or field not in fields:
             raise ValueError("请选择有效的属性字段")
         column = identifier(field)
-        rows = db.execute(f"SELECT DISTINCT {column} FROM {table} ORDER BY {column} LIMIT 201").fetchall()
-    values = [row[0] for row in rows[:200]]
+        filters = f"WHERE instr(lower(CAST({column} AS TEXT)), lower(?)) > 0 OR ({column} IS NULL AND ?)" if term else ""
+        params = (term, int(term.casefold() in {"空值", "null"})) if term else ()
+        rows = db.execute(f"SELECT DISTINCT {column} FROM {table} {filters} ORDER BY {column} LIMIT 51 OFFSET ?",
+                          (*params, page * 50)).fetchall()
+    values = [row[0] for row in rows[:50]]
     if any(isinstance(value, bytes) for value in values):
         raise ValueError("二进制字段不支持获取唯一值")
     return {"values": [str(value) if type(value) is int and abs(value) > 2**53 - 1 else value for value in values],
-            "limited": len(rows) > 200}
+            "more": len(rows) > 50}
 
 
 def feature_attributes(file, name, payload):

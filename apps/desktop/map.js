@@ -1,5 +1,6 @@
 import 'ol/ol.css';
 import { MapProcessing, TOOL_GROUPS, roleLayerPicker, layerMatches, mapLayerMaterial } from './map-processing.js';
+import { MapFlow } from './map-flow.js';
 import { geometryProperties } from './map-attribute-tools.js';
 import { AttributeSort, AttributeStatistics, AttributeCell } from './map-table-ui.js';
 import { MapLayout, layoutDefaults, mapImage } from './map-layout.js';
@@ -271,6 +272,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
     const mapBasis = useRef(null);
     const [expandedLegends, setExpandedLegends] = useState({});
     const [analysis, setAnalysis] = useState(null);
+    const [flowOpen, setFlowOpen] = useState(null);
     const [lastResult, setLastResult] = useState(null);
     const [count, setCount] = useState(0);
     const [fieldEdit, setFieldEdit] = useState(null);
@@ -1205,14 +1207,16 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 command('粘贴到图层…', openPaste, { disabled: busy || !targets.length, title: 'Ctrl+V', 'aria-keyshortcuts': 'Control+V' }))] : []),
             ...editCommands],
         制图: [group('出图', command('导出地图', () => setLayout(true), { icon: glyph('download'), disabled: busy || !viewReady }))],
-        分析: TOOL_GROUPS.map(({ title, icon, tools }) => {
+        分析: [group('流程', command('流程编辑器', () => setFlowOpen(true), {
+            icon: glyph('analysis'), disabled: busy || Boolean(edit),
+        })), ...TOOL_GROUPS.map(({ title, icon, tools }) => {
             const prominent = { '统计': 2, '矢量处理': 2, '叠加分析': 2 }[title] || 0;
             return prominent ? group(title, ...tools.slice(0, prominent).map(item => command(item.title, () => openTool(item.id),
                 { key: item.id, icon: glyph(item.icon), disabled: busy,
                     'data-ai-focus': activity?.operation === item.id ? 'true' : undefined })),
                 ...(tools.length > prominent ? [menuGroup('更多', icon, tools.slice(prominent), openTool)] : []))
                 : menuGroup(title, icon, tools, openTool);
-        }),
+        })],
         业务: [...skillGroups.map(([title, ids]) => [title, catalog.filter(item => ids.includes(item.id))]),
             ['自定义业务', customSkills]].filter(([, items]) => items.length)
             .map(([title, items]) => menuGroup(title, 'analysis', items, id => setAnalysis({ skill: items.find(item => item.id === id) }))),
@@ -1367,6 +1371,17 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 onClick: () => setImportIssues([]), type: 'primary' }, '关闭') },
             h('ul', { className: 'map-field-editor' }, ...importIssues.map((item, index) =>
                 h('li', { key: index }, item.name + '：' + window.GuizhiErrorText(item.message))))),
+        flowOpen !== null && h(MapFlow, { open: flowOpen, layers, busy, setBusy, glyph, close: () => setFlowOpen(false),
+            onLayers: async (items, highlight) => {
+                const layer = items[0];
+                const ids = highlight ? await api.map({ action: 'table-complement', ref: layer.ref, fids: [] }) : [];
+                graph.current.fitNeeded = true;
+                add(items.filter(item => !layers.some(existing => key(existing) === key(item))));
+                if (highlight) {
+                    selectLayer(key(layer));
+                    setSelection({ key: key(layer), ids });
+                }
+            } }),
         analysis && h(MapProcessing, { ...analysis, layers, active, picked, entries, components, openComponents, glyph, busy,
             setBusy, close: () => setAnalysis(null), Preview, onResult: result => {
                 setLastResult({ tool: analysis.tool, skill: analysis.skill, initialResult: result });

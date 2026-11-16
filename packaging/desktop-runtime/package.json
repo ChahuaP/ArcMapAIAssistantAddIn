@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "dependencies": {
+    "@xyflow/react": "12.12.1",
     "antd": "5.29.3",
     "dayjs": "1.11.19",
     "electron": "45.2.3",
