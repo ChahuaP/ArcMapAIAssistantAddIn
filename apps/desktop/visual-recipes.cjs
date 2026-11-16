@@ -1,8 +1,16 @@
 const recipe = (kind, label, target = '') => ({ kind, label, target });
 
 function visualRecipe(event) {
-    if (event.kind === 'dispatch_preparing') return recipe('read', '正在准备材料');
-    if (event.kind === 'dispatch') return recipe('think', '正在分析任务');
+    if (event.kind === 'session_event' && event.type === 'tool/call') {
+        const labels = {
+            inspect_current_map: '正在核对当前地图',
+            read_current_map_image: '正在查看当前地图画面',
+            describe_bound_layers: '正在读取图层信息',
+            lookup_layer_field: '正在查询属性值',
+        };
+        const label = labels[event.tool?.replace(/^mcp__guizhi__/, '')];
+        return label ? recipe('read', label) : null;
+    }
     if (event.kind === 'plan_reused') return recipe('reuse', '正在复用已验证流程');
     if (event.kind !== 'operation_progress') return null;
     const { phase, details: item } = event;
@@ -15,10 +23,7 @@ function visualRecipe(event) {
     if (phase === 'control_export') return recipe('publish', '正在整理地块结果');
     if (phase === 'operation_verified') return recipe('check', '已校验成果');
     if (phase === 'workflow_publishing') return recipe('publish', '正在保存成果');
-    if (phase === 'workflow_step_finished') {
-        if (item.status !== 'succeeded') return recipe('stop', '工具步骤未完成');
-        return item.reused ? recipe('reuse', '正在复用已验证步骤') : recipe('check', '正在核对步骤成果');
-    }
+    if (phase === 'workflow_step_finished' && item.status !== 'succeeded') return recipe('stop', '工具步骤未完成');
     if (phase !== 'workflow_step_started') return null;
     const { operation, title, layer } = item;
     const domain = operation.split('.')[0];

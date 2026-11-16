@@ -77,6 +77,15 @@ async function startDesktop(options) {
     let imageSequence = 0;
     let mapLayers = new Map();
     let mapSelection;
+    let mapActive;
+    let mapHidden = new Set();
+    let mapSnapshot;
+    let sceneCapture;
+    function finishSceneCapture() {
+        if (!sceneCapture) return;
+        fs.rmSync(sceneCapture.file, { force: true });
+        sceneCapture = undefined;
+    }
     let mapCatalogVersion = 0;
     const mapKey = ref => ref.run + ':' + ref.artifact;
     const knownLayers = () => [...mapLayers.values()]
@@ -297,7 +306,7 @@ async function startDesktop(options) {
         const data = await controller.reader.map(controller.settings.workspace, { action: 'raster-preview', ref });
         return 'data:image/png;base64,' + data;
     }, true);
-    bind('mapCatalog', async (surface, items, selection) => {
+    bind('mapCatalog', async (surface, items, selection, active, hidden) => {
         if (surface !== window || !Array.isArray(items) || items.length > 256 ||
             items.some(item => !item || typeof item.name !== 'string' || !item.name.trim() || item.name.length > 255 ||
                 !/^[a-f0-9]{32}$/.test(item.ref?.run) ||
@@ -308,7 +317,22 @@ async function startDesktop(options) {
         mapLayers = new Map(items.map(item => [mapKey(item.ref), item]));
         mapSelection = selection && mapLayers.has(selection.key) && Array.isArray(selection.ids) && selection.ids.length <= 500
             && selection.ids.every(Number.isSafeInteger) ? selection : undefined;
+        mapActive = mapLayers.has(active) ? active : null;
+        mapHidden = new Set(Array.isArray(hidden) ? hidden.filter(id => mapLayers.has(id)) : []);
         desktop.notify('mapReferences', knownLayers());
+    }, true);
+    bind('mapSnapshot', (surface, snapshot) => {
+        if (surface !== window) throw new Error('地图画面来源无效');
+        if (snapshot === null) { mapSnapshot = undefined; return; }
+        if (!Array.isArray(snapshot.keys) || snapshot.keys.length > 256 ||
+                !Array.isArray(snapshot.bounds) || snapshot.bounds.length !== 4 || !snapshot.bounds.every(Number.isFinite) ||
+                typeof snapshot.image !== 'string' || snapshot.image.length > 1_000_000 ||
+                !/^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/u.test(snapshot.image)) throw new Error('地图画面无效');
+        mapSnapshot = snapshot;
+        if (sceneCapture && !sceneCapture.saved && sceneCapture.keys === JSON.stringify(snapshot.keys)) {
+            fs.writeFileSync(sceneCapture.file, JSON.stringify(mapScene(snapshot)), { flag: 'wx' });
+            sceneCapture.saved = true;
+        }
     }, true);
     bind('saveDraft', (source, next) => {
         if (!next || typeof next !== 'object' || Array.isArray(next)) throw new Error('草稿无效');
@@ -376,6 +400,7 @@ async function startDesktop(options) {
         if (state.settings.workspace !== workspace) {
             clearImages();
             mapLayers.clear();
+            mapSnapshot = undefined;
             mapCatalogVersion += 1;
             desktop.notify('mapReferences', []);
             mapSelection = undefined;
@@ -509,7 +534,7 @@ async function startDesktop(options) {
         'crs-search', 'raster-preview', 'raster-display', 'categories', 'flow-check']);
     bind('map', async (surface, input) => {
         if (surface !== window || !input || !mapReads.has(input.action) &&
-                !['assign', 'reproject', 'transform', 'edit', 'edit-sketch', 'edit-transfer-plan', 'tool', 'step-layers',
+                !['assign', 'reproject', 'transform', 'edit', 'edit-sketch', 'edit-transfer-plan', 'tool',
                     'flow-tools', 'flow-list', 'flow-save', 'flow-delete'].includes(input.action)) {
             throw new Error('地图请求无效');
         }
@@ -670,19 +695,52 @@ async function startDesktop(options) {
         shell.showItemInFolder(output);
         return result;
     }, true);
-    bind('mapLayout', async (surface, { format, data, name, taskId }) => {
-        if (surface !== window || !['png', 'jpg'].includes(format) || typeof data !== 'string' || data.length > 24 << 20) {
+    bind('mapLayoutDraft', (surface, value) => {
+        if (surface !== window || !controller.settings.workspace) throw new Error('请从地图工作区编辑版面');
+        const file = path.join(controller.settings.workspace, 'map-layout.json');
+        if (value === undefined) return fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : null;
+        if (!value || typeof value !== 'object' || !value.frames?.frame || !value.positions?.frame) throw new Error('地图版面无效');
+        const contents = JSON.stringify(value);
+        if (Buffer.byteLength(contents) > 32_768) throw new Error('地图版面过大');
+        const temporary = file + '.' + randomUUID() + '.pending';
+        try {
+            fs.writeFileSync(temporary, contents, { flag: 'wx' });
+            fs.renameSync(temporary, file);
+        } finally { fs.rmSync(temporary, { force: true }); }
+    }, true);
+    bind('mapLayoutReady', (surface, id) => {
+        const task = controller.tasks.find(item => item.id === id && item.layout);
+        if (surface !== window || !task) throw new Error('地图版面已失效');
+        task.layoutReady = true;
+        controller.persist();
+        broadcast(controller.state());
+    }, true);
+    bind('mapLayout', async (surface, { format, paper, orientation, data, name, taskId }) => {
+        if (surface !== window || !['png', 'jpg', 'pdf'].includes(format) || typeof data !== 'string' || data.length > 24 << 20) {
             throw new Error('地图图片无效');
         }
         const prefix = 'data:image/' + (format === 'jpg' ? 'jpeg' : 'png') + ';base64,';
         if (!data.startsWith(prefix)) throw new Error('地图图片格式无效');
-        const bytes = Buffer.from(data.slice(prefix.length), 'base64');
+        let bytes = Buffer.from(data.slice(prefix.length), 'base64');
         if (nativeImage.createFromBuffer(bytes).isEmpty()) throw new Error('地图图片无法读取');
+        if (format === 'pdf') {
+            if (!['a3', 'a4'].includes(paper) || !['landscape', 'portrait'].includes(orientation)) throw new Error('地图版面尺寸无效');
+            const page = new BrowserWindow({ show: false, webPreferences: { javascript: false, sandbox: true } });
+            try {
+                const html = '<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" ' +
+                    'content="default-src \'none\'; img-src data:; style-src \'unsafe-inline\'"><style>@page{size:' +
+                    paper.toUpperCase() + ' ' + orientation + ';margin:0}body{margin:0}img{display:block;width:100vw;height:100vh}</style>' +
+                    '<img alt="地图" src="data:image/png;base64,' + bytes.toString('base64') + '">';
+                await page.loadURL('data:text/html;charset=utf-8;base64,' + Buffer.from(html).toString('base64'));
+                bytes = await page.webContents.printToPDF({ preferCSSPageSize: true, printBackground: true });
+            } finally { page.destroy(); }
+        }
         if (taskId) {
-            const task = controller.tasks.find(item => item.id === taskId && item.status === 'succeeded' && item.layout?.format === format);
+            const task = controller.tasks.find(item => item.id === taskId && item.status === 'succeeded' && item.layout?.export);
             if (!task || !/^[a-f0-9]{32}$/.test(task.runId)) throw new Error('制图任务已经失效');
             const file = path.join(controller.settings.workspace, 'runs', task.runId, 'map-layout.' + format);
             fs.writeFileSync(file, bytes, { flag: 'wx' });
+            task.layout.format = format;
             task.layoutImage = createHash('sha256').update(bytes).digest('hex');
             controller.persist();
             broadcast(controller.state());
@@ -709,7 +767,7 @@ async function startDesktop(options) {
     }, true);
     bind('openMapLayout', async id => {
         const task = controller.tasks.find(item => item.id === id && item.layoutImage);
-        if (!task || !/^[a-f0-9]{32}$/.test(task.runId) || !['png', 'jpg'].includes(task.layout?.format)) throw new Error('地图图片尚未生成');
+        if (!task || !/^[a-f0-9]{32}$/.test(task.runId) || !['png', 'jpg', 'pdf'].includes(task.layout?.format)) throw new Error('地图图片尚未生成');
         const file = path.join(controller.settings.workspace, 'runs', task.runId, 'map-layout.' + task.layout.format);
         if (createHash('sha256').update(fs.readFileSync(file)).digest('hex') !== task.layoutImage) throw new Error('地图图片已变化');
         const error = await shell.openPath(file);
@@ -732,6 +790,10 @@ async function startDesktop(options) {
         if (!next || typeof next !== 'object' || Array.isArray(next)) throw new Error('草稿无效');
         return resetConversation(next);
     });
+    function mapScene(snapshot) {
+        return { image: snapshot.image.split(',')[1], bounds: snapshot.bounds, crs: snapshot.crs,
+            scale: snapshot.scale, limited: snapshot.limited };
+    }
     function namedLayers(prompt) {
         const layers = [...mapLayers.values()];
         const alias = item => item.name.replace(/^项目/u, '');
@@ -784,9 +846,6 @@ async function startDesktop(options) {
             const selected = mapSelection && mapLayers.get(mapSelection.key);
             const asksSelection = /已选|选中|所选|选区|这[几两三四五一]块/u.test(task.prompt);
             const useSelected = selected && mapSelection.ids.length && asksSelection && (!picks.length || picks.includes(selected));
-            if (asksSelection && !useSelected && (picks.length || /地图|图层/u.test(task.prompt))) {
-                throw new Error('请先在地图中选中对应图层的要素');
-            }
             if (useSelected && !picks.includes(selected)) picks.unshift(selected);
             if (picks.length) {
                 const workspace = controller.settings.workspace;
@@ -795,7 +854,8 @@ async function startDesktop(options) {
                 const inputs = await Promise.all(picks.map(item => {
                     const bySelection = useSelected && selected === item;
                     return controller.request('map', { action: bySelection ? 'selection' : 'material',
-                        ref: item.ref, name: item.name, ...(bySelection ? { revision: item.revision, fids: selectedIds } : {}) });
+                        ref: item.ref, name: item.name, ...(bySelection ? { revision: item.revision, fids: selectedIds } : {}) })
+                        .then(material => ({ ...material, ...(!bySelection && { ref: item.ref }) }));
                 }));
                 if (controller.settings.workspace !== workspace || mapCatalogVersion !== version) {
                     throw new Error('地图图层或选区已变更，请重新提交');
@@ -811,7 +871,28 @@ async function startDesktop(options) {
             return imageInputs.get(item.id).block;
         });
         const images = imageIds.map(item => imageInputs.get(item.id).reference);
-        const state = controller.submit({ ...task, images, imageBlocks });
+        const layers = [...mapLayers.values()].map((item, index) => ({
+            id: 'map-' + (index + 1), ref: item.ref, name: item.name, kind: item.kind || 'vector',
+            geometry: item.geometry, crs: item.crs, count: item.count, bounds: item.bounds, revision: item.revision,
+            style: item.style, visible: !mapHidden.has(mapKey(item.ref)), active: mapActive === mapKey(item.ref),
+            fields: item.fields,
+            fids: mapSelection?.key === mapKey(item.ref) ? mapSelection.ids : undefined,
+        }));
+        const visible = layers.filter(item => item.visible).map(item => mapKey(item.ref));
+        const visibleKeys = JSON.stringify(visible);
+        const scene = mapSnapshot && visible.length && JSON.stringify(mapSnapshot.keys) === visibleKeys
+            ? mapScene(mapSnapshot) : undefined;
+        finishSceneCapture();
+        if (!scene && visible.length) sceneCapture = { keys: visibleKeys,
+            file: path.join(app.getPath('temp'), 'guizhi-map-' + randomUUID() + '.json') };
+        const layoutFile = controller.settings.workspace && path.join(controller.settings.workspace, 'map-layout.json');
+        const layout = layoutFile && fs.existsSync(layoutFile) ? JSON.parse(fs.readFileSync(layoutFile, 'utf8')) : undefined;
+        const state = controller.submit({ ...task, images, imageBlocks,
+            mapContext: { layers, scene, sceneFile: sceneCapture?.file, layout } });
+        const capture = sceneCapture;
+        if (capture) void controller.active.done.finally(() => {
+            if (sceneCapture === capture) finishSceneCapture();
+        });
         if (task.dialogue && speech.state().tts !== 'off') setVoiceReply({ task: state.tasks[0].id, text: '' });
         replaceDraft();
         broadcast(state);

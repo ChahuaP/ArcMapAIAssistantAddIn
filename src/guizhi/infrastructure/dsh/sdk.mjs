@@ -29,15 +29,17 @@ function verifiedResponse(receipt, dialogue) {
     for (const item of receipt.steps ?? [{ statistics: stats }]) {
         const fact = item.statistics;
         if (fact.lookup) {
-            const { fields, rows, count } = fact.lookup;
+            const { fields, rows, count, layer, filter } = fact.lookup;
+            const label = field => /(?:^|_)M2$/i.test(field) ? field + '（平方米）' : field;
             if (!count) parts.push('没有找到匹配的要素。');
-            else if (count === 1) parts.push(fields.map(field => field + '为' + (rows[0][field] ?? '空值')).join('，') + '。');
+            else if (count === 1) parts.push(fields.map(field => label(field) + '为' + (rows[0][field] ?? '空值')).join('，') + '。');
             else {
                 const labels = rows.map((row, index) => (index + 1) + '. ' +
                     fields.map(field => field + '为' + (row[field] ?? '空值')).join('，'));
                 parts.push('共匹配 ' + count + ' 个要素' + (count > rows.length ? '，以下为前 ' + rows.length + ' 个' : '') + '。\n\n' +
                     labels.join('\n') + '\n\n');
             }
+            if (layer) parts.push('\n\n来源：' + layer + (filter?.op === 'eq' ? ' · ' + filter.field + ' = ' + String(filter.value) : '') + '。');
         }
         if (fact.coverage_ratio !== undefined) {
             const counts = fact.relations || {};
@@ -68,7 +70,9 @@ function verifiedResponse(receipt, dialogue) {
             'vector.dissolve': '融合', 'vector.spatial_join': '空间连接', 'data.export_selection': '导出选区' }[operation];
         if (title) parts.unshift(title + '已完成。');
     }
-    const answer = parts.join('') || '已完成办理，成果和证据已保存。';
+    if (receipt.steps?.some(step => step.operation === 'presentation.map_layout')) parts.push('版面设置已提交。');
+    if (receipt.steps?.some(step => step.operation === 'presentation.map_view')) parts.push('地图操作已提交。');
+    const answer = parts.join('') || '已完成处理。';
     return dialogue ? answer.replaceAll(' m²', '平方米') : answer;
 }
 
@@ -193,12 +197,14 @@ export async function dispatch(options, { signal, onEvent = () => {}, getService
     let result;
     let attempted = false;
     try {
-        event({ kind: 'dispatch_preparing', id });
         const cancelled = join(directory, 'cancelled');
         stopListener = addAbortListener(stop, () => writeFileSync(cancelled, ''));
-        const { stdout } = await exec(options.python, ['-I', '-B', join(source, 'src/guizhi/__main__.py'),
-            '--workspace', workspace, '_dispatch-replay', requestFile], { windowsHide: true, maxBuffer: 4 << 20 });
-        const prepared = JSON.parse(stdout);
+        let prepared = { key: null, materials };
+        if (options.skill || Object.values(materials).some(group => group.length)) {
+            const { stdout } = await exec(options.python, ['-I', '-B', join(source, 'src/guizhi/__main__.py'),
+                '--workspace', workspace, '_dispatch-replay', requestFile], { windowsHide: true, maxBuffer: 4 << 20 });
+            prepared = JSON.parse(stdout);
+        }
         if (prepared.operation) {
             event({ kind: 'plan_reused', run_id: prepared.operation.run_id });
             writeFileSync(operationPath, JSON.stringify(prepared.operation));
@@ -217,7 +223,8 @@ export async function dispatch(options, { signal, onEvent = () => {}, getService
             service.bind({ id, workspace, cancelled, materials: prepared.materials,
                 skill: prepared.selected?.reference ?? null, parameters: options.skillParameters ?? null,
                 plans: { project_plan: options.projectPlan, control_plan: options.controlPlan },
-                previousRun: options.previousRun ?? null, provenance, planKey: prepared.key,
+                previousRun: options.previousRun ?? null, provenance, planKey: prepared.key, mapContext: options.mapContext,
+                selectionRoles: Object.entries(options.layerLabels || {}).filter(([, layer]) => layer.selected).map(([role]) => role),
                 flushRequest: join(directory, 'flush.request'), flushReceipt: join(directory, 'flush.receipt'),
                 budget: { tokens, calls, checkpoint: budgetPath, operation: operationPath } });
             boundService = service;
@@ -231,9 +238,9 @@ export async function dispatch(options, { signal, onEvent = () => {}, getService
             const selection = prepared.selected ? `已选技能和本轮材料摘要：${JSON.stringify(prepared.selected)}。`
                 : `本轮材料图层清单（键为 material. 后的引用）：${JSON.stringify(layers)}。已选技能无。`;
             const visualContext = images.length ? '本轮用户消息有图片附件。图片内容问题直接看图回答。\n' : '';
-            const context = `${visualContext}${selection}${bound}有已选历史成果：${Boolean(options.previousRun)}。\n`;
+            const context = `${visualContext}${selection}${bound}有已选历史成果：${Boolean(options.previousRun)}。当前地图图层数：${options.mapContext?.layers.length ?? 0}。\n`;
             const conversation = history.length ? '最近对话记录（每项为用户提问与智能体答复）：' + JSON.stringify(history) + '\n' : '';
-            const speech = options.dialogue ? '本轮使用语音输入。先实际办理，再用简洁口语回答，不用 Markdown。\n' : '';
+            const speech = options.dialogue ? '本轮使用语音输入，用简洁口语回答。\n' : '';
             const run = (prompt, includeImages = false) => harness.run(includeImages && images.length
                 ? [{ type: 'text', text: prompt }, ...images] : prompt, {
                 sessionId: id,

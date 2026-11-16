@@ -6,24 +6,28 @@ from pathlib import Path
 import re
 import sys
 from threading import Lock
+from time import monotonic, sleep
 from typing import Literal
 from uuid import UUID
 
 from fastmcp import FastMCP
 from fastmcp.server.middleware import Middleware
+from mcp.types import ImageContent
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from guizhi.application import skills
 from guizhi.application.dispatch import format_operation, remember_plan
 from guizhi.application.tasks import run_operation
+from guizhi.domain.capabilities import CAPABILITIES
 from guizhi.domain.semantics import Fact
 from guizhi.domain.skills import Step
 from guizhi.infrastructure.cache import reuse_job, verified_run
 from guizhi.infrastructure.materials import bound_layer_metadata
+from guizhi.infrastructure.map_workspace import map_material, selection_material
 from guizhi.infrastructure.operations.evidence import read_artifact
 # Load the native GIS dependencies before the stdio server starts its tool threads.
-from guizhi.infrastructure.operations.runner import capability
+from guizhi.infrastructure.operations.runner import capability, handler, parameter_model
 from guizhi.infrastructure.operations.semantics import artifact_json, find_fragments, validate_material_facts
 from guizhi.infrastructure.workspace import Workspace
 
@@ -127,6 +131,67 @@ def register(server, job=None):
         return {"status": "indexed", "document_run": record["id"], "reused": reused,
                 "fragments": find_fragments(index, (terms or [])[:12])}
 
+    def current_map():
+        return (job or {}).get("mapContext") or {}
+
+    def current_scene(*, wait=False):
+        context = current_map()
+        if context.get("scene") or not context.get("sceneFile"):
+            return context.get("scene")
+        file = Path(context["sceneFile"])
+        until = monotonic() + (4 if wait else 0)
+        while True:
+            try:
+                return json.loads(file.read_text(encoding="utf-8"))
+            except (FileNotFoundError, json.JSONDecodeError):
+                if cancelled.exists() or monotonic() >= until:
+                    return None
+                sleep(.06)
+
+    def map_inputs(roles):
+        data = {**materials}
+        layers = {layer["id"]: layer for layer in current_map().get("layers", [])}
+        for role in roles - data.keys():
+            selected = role.startswith("selection-")
+            layer = layers.get(role.removeprefix("selection-"))
+            if layer is None:
+                continue
+            if selected and not layer.get("fids"):
+                raise ValueError("地图中没有已选要素")
+            loaded = selection_material(workspace, layer["ref"], layer["revision"], layer["fids"]) if selected                 else map_material(workspace, layer["ref"])
+            data[role] = [{key: loaded[key] for key in ("file", "layer", "revision")}]
+        return data
+
+    @server.tool
+    def inspect_current_map() -> dict:
+        """读取当前地图图层、可见状态、符号、坐标系、当前视野和选区。要查询或编辑该图层，使用返回的 id 作为材料角色。"""
+        context = current_map()
+        scene = {key: value for key, value in (current_scene() or {}).items() if key != "image"}
+        visible = []
+        for layer in context.get("layers", []):
+            public = {key: value for key, value in layer.items() if key not in {"ref", "revision", "fids"}}
+            if layer.get("fids"):
+                public.update(selected_count=len(layer["fids"]), selection_role="selection-" + layer["id"])
+            visible.append(public)
+        (dispatch / "discovery").touch()
+        layout = context.get("layout")
+        if layout:
+            layer_ids = {layer["ref"]["run"] + ":" + layer["ref"]["artifact"]: layer["id"]
+                         for layer in context.get("layers", [])}
+            layout = {**layout, "frames": {name: {**frame, "layers": [
+                layer_ids.get(item, "已移除图层") for item in frame.get("layers", [])]}
+                for name, frame in layout["frames"].items()}}
+        return {"layers": visible, "view": scene, "layout": layout}
+
+    @server.tool
+    def read_current_map_image():
+        """读取本轮当前地图的实际地图画面。在视觉检查图形、色彩或版面时使用。精确字段、面积和坐标仍须查询数据。"""
+        scene = current_scene(wait=True)
+        (dispatch / "discovery").touch()
+        if not scene:
+            return "本轮没有可读的地图画面。可查看图层资料，或请用户打开地图。"
+        return ImageContent(type="image", mimeType="image/jpeg", data=scene["image"])
+
     @server.tool
     def describe_bound_layers() -> dict:
         """查看已绑定材料类型、矢量字段或栅格的坐标系、波段与分辨率。"""
@@ -189,7 +254,10 @@ def register(server, job=None):
 
     def run_plan(mode, selected, extra, bound=None, coordinate_plans=None, skill_parameters=None):
         try:
-            plan = skills.specification(workspace, materials if bound is None else bound, skill=selected,
+            roles = {reference.split(".", 1)[1] for step in extra for reference in step["inputs"]
+                     if reference.startswith("material.")}
+            inputs = map_inputs(roles) if bound is None else bound
+            plan = skills.specification(workspace, inputs, skill=selected,
                                         steps=extra, coordinate_plans=plans if coordinate_plans is None else coordinate_plans,
                                         skill_parameters=skill_parameters)
             if mode != plan["mode"]:
@@ -205,11 +273,14 @@ def register(server, job=None):
     @server.tool
     def lookup_layer_field(role: str, field: str, match_field: str | None = None,
                            match_value: str | int | float | bool | None = None) -> dict:
-        """读取已绑定矢量图层中匹配要素的实际字段值。role 是材料角色，例如 layer-1。field 是要读的字段，match_field 和 match_value 是筛选字段和值。"""
-        if job["skill"] or len(materials.get(role, ())) != 1:
-            return input_issue("invalid_materials", "请选择一份已绑定的矢量图层并填写其材料角色")
-        if match_field is None and match_value is not None:
-            return input_issue("invalid_materials", "请指定匹配值所在的字段")
+        """读取匹配要素的实际属性值。role 使用材料清单或地图返回的 id。field 是所求字段；match_field 和 match_value 定位要素。已限定为地图选区的材料可以省略筛选条件。"""
+        if job["skill"]:
+            return input_issue("invalid_materials", "请使用本轮所选业务")
+        role = role.removeprefix("material.")
+        selected_roles = job.get("selectionRoles", [])
+        if match_field is None and (match_value is not None or
+                                    role not in selected_roles and not role.startswith("selection-map-")):
+            return {"status": "needs_filter", "message": "请补上条件字段和匹配值。查整列时用 table.lookup 流程，探查取值用 flow.unique_values。"}
         params = {"field": field}
         if match_field:
             params["where"] = {"field": match_field, "op": "is_null" if match_value is None else "eq", "value": match_value}
@@ -219,8 +290,9 @@ def register(server, job=None):
     @server.tool
     def define_crs_from_layer(target_role: str, reference_role: str) -> dict:
         """采用参照图层的坐标系定义更新未定义坐标系的目标矢量图层。使用已绑定的材料角色。保留原几何坐标。"""
-        if (job["skill"] or target_role == reference_role or
-                any(len(materials.get(role, ())) != 1 for role in (target_role, reference_role))):
+        target_role = target_role.removeprefix("material.")
+        reference_role = reference_role.removeprefix("material.")
+        if job["skill"] or target_role == reference_role:
             return input_issue("invalid_materials", "请选择两份已绑定的矢量图层作为目标与参照")
         return run_plan("free", None, [{"id": "define-crs", "operation": "crs.assign_from",
                                        "inputs": ["material." + target_role, "material." + reference_role],
@@ -303,11 +375,23 @@ def register(server, job=None):
 
     @server.tool
     def execute_workflow(mode: Literal["fixed", "free", "combined"], skill: str | None = None,
-                         steps: list[Step] | None = None, skill_parameters: dict | None = None) -> dict:
+                         steps_json: str | None = None, skill_parameters: dict | None = None) -> dict:
         """整项任务一次提交。fixed=已发布技能；free=步骤；combined=已发布技能和附加步骤。
-        步骤 inputs 必须是字符串数组，如 ["material.project"]、["step.check"]，parameters 为对象。
-        已绑定办理参数时省略 skill_parameters；否则只填写技能声明的参数。坐标、年份、分类和阈值必须有依据。
+        steps_json 传 JSON 数组的字符串，保留 JSON 的方括号和数字类型。每个步骤有 id、operation、inputs、parameters。
+        inputs 为字符串数组，如 ["material.project"] 或 ["step.check"]；parameters 为对象。固定业务可省略 steps_json。
+        已在工作台绑定办理参数时省略 skill_parameters。坐标、年份、分类和阈值必须有依据。
         """
+        try:
+            raw = json.loads(steps_json) if steps_json is not None else []
+            if not isinstance(raw, list) or len(raw) > 32:
+                raise ValueError("步骤须为至多 32 项的 JSON 数组")
+            steps = [Step.model_validate(value) for value in raw]
+            for step in steps:
+                if step.operation in CAPABILITIES and "$" not in json.dumps(step.parameters):
+                    parameter_model(handler(step.operation)).model_validate(step.parameters)
+        except ValueError as exc:
+            return {"status": "invalid_parameters", "message": str(exc).splitlines()[0],
+                    "next": "检查步骤和参数结构后重新调用。缺少实际办理信息时，向用户询问。"}
         selected = job["skill"]
         if selected and skill and skill not in {selected, selected.partition("@")[0]}:
             return input_issue("invalid_materials", "请使用已选技能 " + selected,

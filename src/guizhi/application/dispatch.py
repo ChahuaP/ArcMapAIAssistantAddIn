@@ -66,12 +66,16 @@ def selected_context(workspace, reference, materials):
             "layers": layers}
 
 
-def layer_context(materials):
+def layer_context(materials, *, include_fields=False):
     layers = bound_layer_metadata(materials)
     for group in layers.values():
         for item in group:
             if "fields" in item:
-                item["field_count"] = len(item.pop("fields"))
+                item["field_count"] = len(item["fields"])
+                if include_fields:
+                    item["fields"] = item["fields"][:120]
+                else:
+                    del item["fields"]
             if item.get("crs") and len(item["crs"]) > 160:
                 item["crs"] = "已定义的自定义坐标系"
     return layers
@@ -91,7 +95,7 @@ def replay(root, request_path):
         if request["skill"]:
             result["selected"] = selected_context(workspace, request["skill"], materials)
         else:
-            result["layers"] = layer_context(materials)
+            result["layers"] = layer_context(materials, include_fields=True)
         return result
     previous = workspace.read(entry["run_id"])
     plan = previous["task"]["request"]["parameters"]["specification"]

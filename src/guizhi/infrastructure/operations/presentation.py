@@ -46,16 +46,35 @@ class LayoutPosition(BaseModel):
         return self
 
 
-def map_layout(ctx, title: str, format: Literal["png", "jpg"] = "png",
-               legend: bool = True, scale: bool = True, border: bool = True,
-               paper: Literal["a4", "a3"] = "a4", orientation: Literal["landscape", "portrait"] = "landscape",
-               positions: dict[Literal["frame", "title", "legend", "scale"], LayoutPosition] | None = None):
-    if not 1 <= len(title.strip()) <= 80:
+class MapFrame(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    layers: list[str] | None = Field(default=None, min_length=1, max_length=32)
+    extent: Literal["current", "layers"] = "current"
+    caption: str = Field(default="", max_length=80)
+    legend: bool = True
+    scale: bool = True
+    north: bool = False
+
+
+def map_layout(ctx, title: str | None = None, format: Literal["png", "jpg", "pdf"] | None = None,
+               legend: bool | None = None, scale: bool | None = None, border: bool | None = None,
+               paper: Literal["a4", "a3"] | None = None, orientation: Literal["landscape", "portrait"] | None = None,
+               positions: dict[Literal["frame", "frame2", "title", "legend", "scale", "north", "note"], LayoutPosition] | None = None,
+               frames: dict[Literal["frame", "frame2"], MapFrame] | None = None,
+               note: Annotated[str, Field(max_length=160)] | None = None,
+               monochrome: bool | None = None, update: bool = False, export: bool = False):
+    if title is not None and not 1 <= len(title.strip()) <= 80:
         raise ValueError("图名应为 1 至 80 字")
-    layout = {"title": title.strip(), "format": format, "legend": legend, "scale": scale, "border": border,
-              "paper": paper, "orientation": orientation}
+    layout = {key: value for key, value in {"title": title.strip() if title else None, "format": format,
+              "legend": legend, "scale": scale, "border": border, "paper": paper, "orientation": orientation,
+              "note": note, "monochrome": monochrome}.items() if value is not None}
+    layout.update(update=update, export=export)
     if positions:
         layout["positions"] = {name: box.model_dump(mode="json") for name, box in positions.items()}
+    if frames is not None:
+        if "frame" not in frames:
+            raise ValueError("版面需要主地图框")
+        layout["frames"] = {name: frame.model_dump(mode="json") for name, frame in frames.items()}
     ctx.json("layout.json", layout, "layout")
     return {"presentation": layout}
 
@@ -65,7 +84,7 @@ Color = Annotated[str, StringConstraints(pattern=r"^#[0-9a-fA-F]{6}$")]
 
 class MapAction(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    action: Literal["zoom", "visibility", "symbol", "table", "background"]
+    action: Literal["zoom", "visibility", "symbol", "classify", "table", "background"]
     layer: Annotated[str, StringConstraints(min_length=1, max_length=255)] | None = None
     color: Color | None = None
     fill: Color | None = None
@@ -75,11 +94,12 @@ class MapAction(BaseModel):
     direction: Literal["ascending", "descending"] = "ascending"
 
 
-def map_view(ctx, action: Literal["zoom", "visibility", "symbol", "table", "background"],
+def map_view(ctx, action: Literal["zoom", "visibility", "symbol", "classify", "table", "background"],
              layer: str | None = None, color: Color | None = None, fill: Color | None = None,
              fill_opacity: int | None = None, visible: bool | None = None, field: str | None = None,
              direction: Literal["ascending", "descending"] = "ascending"):
-    if (action == "background" and not color or action in {"visibility", "symbol", "table"} and not layer or
+    if (action == "background" and not color or action in {"visibility", "symbol", "classify", "table"} and not layer or
+            action == "classify" and not field or
             action == "visibility" and visible is None or
             action == "symbol" and color is None and fill is None and fill_opacity is None):
         raise ValueError("请提供地图操作所需的图层和参数")

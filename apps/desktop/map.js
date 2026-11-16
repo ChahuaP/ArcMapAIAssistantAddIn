@@ -3,8 +3,8 @@ import { MapProcessing, TOOL_GROUPS, toolIcon, roleLayerPicker, layerMatches, ma
 import { MapFlow } from './map-flow.js';
 import { geometryProperties } from './map-attribute-tools.js';
 import { AttributeSort, AttributeStatistics, AttributeCell } from './map-table-ui.js';
-import { MapLayout, layoutDefaults, mapCanvas, mapImage } from './map-layout.js';
-import { LayerProperties, MapProperties, MxdOpen, categoryValue, defaultMapBackground, layerSymbol, opacity, symbol } from './map-layer-dialog.js';
+import { MapLayout, amendLayout, drawMapLayers, layoutDefaults, mapCanvas, mapImage, sheetSize } from './map-layout.js';
+import { LayerProperties, MapProperties, MxdOpen, categoryValue, classifyLayer, defaultMapBackground, layerSymbol, opacity, symbol } from './map-layer-dialog.js';
 import Map from 'ol/Map.js';
 import Overlay from 'ol/Overlay.js';
 import View from 'ol/View.js';
@@ -196,12 +196,12 @@ function CoordinateTools({ layer, display, setDisplay, entries, request, onLayer
 
 function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer, active, hidden, toggle, entries, catalog, components,
     openComponents, display, setDisplay, background, setBackground, styleLayer, importFrame, fail, activity,
-    requestedLayout, onLayout, mapActions, onMapActions, selection, setSelection, replace, replaceLayers, editing }) {
+    requestedLayout, openLayout, onLayout, mapActions, onMapActions, selection, setSelection, replace, replaceLayers, editing }) {
     const node = useRef(null);
     const graph = useRef(null);
     const [properties, setProperties] = useState(null);
     const [mapProperties, setMapProperties] = useState(false);
-    const [layout, setLayout] = useState(false);
+    const [layout, setLayout] = useState(null);
     const [layoutDraft, setLayoutDraft] = useState(null);
     const [document, setDocument] = useState(null);
     const [cursor, setCursor] = useState(null);
@@ -295,10 +295,34 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
     }, [layers, hidden, identified]);
     const activeRef = useRef(active);
     activeRef.current = active;
-    function drawLayout(config) {
-        const legend = layers.flatMap((item, index) => {
-            if (hidden.includes(key(item))) return [];
-            const appearance = symbol(item.style, palette[index % palette.length]);
+    const frameCache = useRef(new globalThis.Map());
+    const mapRoles = Object.fromEntries(layers.map((item, index) => ['map-' + (index + 1), key(item)]));
+    const layoutSource = JSON.stringify([layers, hidden, target, backgroundColor, displayPlans]);
+    useEffect(() => { frameCache.current.clear(); }, [layoutSource]);
+
+    function frameLayer(identifier) {
+        const stable = layers.find(item => key(item) === identifier || key(item) === mapRoles[identifier]);
+        if (stable) return stable;
+        const matches = layers.filter(item => item.name === identifier);
+        if (matches.length !== 1) throw new Error('请确认地图框所用图层：' + identifier);
+        return matches[0];
+    }
+
+    useEffect(() => {
+        if (openLayout && layoutDraft) setLayout({ key: openLayout, config: layoutDraft });
+    }, [openLayout]);
+
+    function prepareLayout(config) {
+        const size = graph.current.ol.getSize();
+        if (!size?.every(value => value > 0)) throw new Error('请打开地图并等待图层显示');
+        return { ...config, viewBounds: config.viewBounds || graph.current.view.calculateExtent(size),
+            frames: Object.fromEntries(Object.entries(config.frames).map(([id, frame]) =>
+                [id, { ...frame, layers: frame.layers?.map(layer => key(frameLayer(layer))) }])) };
+    }
+
+    function frameLegend(items) {
+        return items.flatMap(item => {
+            const appearance = symbol(item.style, palette[layers.indexOf(item) % palette.length]);
             const classification = item.style?.classification;
             if (classification) return classification.classes.map(entry => ({
                 name: entry.label || entry.value || '空值', color: entry.color,
@@ -307,39 +331,148 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
             return [{ name: item.name, color: appearance.color,
                 fill: /Polygon/.test(item.geometry || '') ? appearance.fill : appearance.color }];
         });
-        return mapCanvas(graph.current.ol, node.current, backgroundColor, legend, config);
     }
+
+    async function renderFrame(items, bounds, size) {
+        if (!items.length) throw new Error('请为地图框选择图层');
+        const view = new View({ projection: projection(target, units), center: [0, 0], zoom: 0 });
+        const offscreen = globalThis.document.createElement('div');
+        Object.assign(offscreen.style, { position: 'fixed', left: '-20000px', top: '0',
+            width: size[0] + 'px', height: size[1] + 'px', pointerEvents: 'none' });
+        globalThis.document.body.append(offscreen);
+        const ol = new Map({ target: offscreen, view, controls: [], interactions: [], pixelRatio: 1 });
+        ol.setSize(size);
+        try {
+            const drawings = await Promise.all(items.map(async item => {
+                const previous = graph.current?.byKey.get(key(item));
+                const appearance = symbol(item.style, palette[layers.indexOf(item) % palette.length]);
+                const options = { opacity: opacity(item.style?.opacity ?? item.opacity) / 100 };
+                if (item.kind === 'raster') {
+                    const oldSource = previous?.getSource();
+                    if (oldSource) return [new ImageLayer({ ...options, source: oldSource })];
+                    const image = !target || target === item.crs
+                        ? { image: await api.map({ action: 'raster-preview', ref: item.ref }), bounds: item.bounds }
+                        : await api.map({ action: 'raster-display', ref: item.ref, target });
+                    return [new ImageLayer({ ...options, source: new Static({
+                        url: 'data:image/png;base64,' + image.image, imageExtent: image.bounds, projection: view.getProjection(),
+                    }) })];
+                }
+                if (!item.crs && target) throw new Error('请先定义图层坐标系：' + item.name);
+                const plan = entries.find(entry => entry.kind === 'plan' &&
+                    (entry.plan.source_wkt === item.crs || entry.source_reference === item.crs) &&
+                    (entry.plan.target_wkt === target || entry.target_reference === display?.value));
+                const reply = await api.map({ action: 'features', ref: item.ref, bbox: bounds, target: target || null,
+                    fields: item.style?.classification ? [item.style.classification.field] : [],
+                    plan: displayPlans[key(item)] || (plan && plan.id + '@' + plan.revision) });
+                const source = new VectorSource({ features: reply.features.map(feature) });
+                const fillLayer = previous?.get('fillLayer');
+                const layersForItem = fillLayer ? [new VectorLayer({ source, opacity: fillLayer.getOpacity(),
+                    style: fillLayer.getStyle() })] : [];
+                const drawing = new VectorLayer({ ...options, source, style: previous?.getStyle() || style(appearance.color, appearance) });
+                drawing.set('dataExtent', reply.bounds);
+                drawing.set('limited', reply.limited);
+                return [...layersForItem, drawing];
+            }));
+            const draw = drawings.reverse().flat();
+            draw.forEach(layer => {
+                if (layer instanceof ImageLayer) layer.set('dataExtent', layer.getSource().getImageExtent());
+                ol.addLayer(layer);
+            });
+            if (bounds) view.fit(bounds, { size, maxZoom: 25 });
+            else fit(view, draw, size);
+            await new Promise((resolve, reject) => {
+                const timer = setTimeout(() => reject(new Error('等待地图框渲染超时')), 10000);
+                ol.once('rendercomplete', () => { clearTimeout(timer); resolve(); });
+                ol.renderSync();
+            });
+            const image = globalThis.document.createElement('canvas');
+            [image.width, image.height] = size;
+            const context = image.getContext('2d');
+            context.fillStyle = backgroundColor;
+            context.fillRect(0, 0, ...size);
+            drawMapLayers(context, offscreen);
+            const resolution = view.getResolution();
+            const metresPerPixel = units === 'degrees'
+                ? getPointResolution(view.getProjection(), resolution, view.getCenter(), 'm')
+                : resolution * (metresPerUnit || (units === 'm' ? 1 : NaN));
+            return { image, metresPerPixel, legend: frameLegend(items), limited: draw.some(item => item.get('limited')) };
+        } finally { ol.dispose(); offscreen.remove(); }
+    }
+
+    async function drawLayout(config) {
+        const [width, height] = sheetSize(config);
+        const entries = await Promise.all(Object.entries(config.frames).map(async ([id, frame]) => {
+            const items = frame.layers?.map(frameLayer) || layers.filter(item => !hidden.includes(key(item)));
+            const position = config.positions[id];
+            const size = [Math.round(width * position.width), Math.round(height * position.height)];
+            const bounds = frame.extent === 'layers' ? null : config.viewBounds;
+            const stamp = JSON.stringify([items.map(key), bounds, size]);
+            let rendering = frameCache.current.get(stamp);
+            if (!rendering) {
+                if (frameCache.current.size >= 12) frameCache.current.delete(frameCache.current.keys().next().value);
+                rendering = renderFrame(items, bounds, size);
+                frameCache.current.set(stamp, rendering);
+                void rendering.catch(() => { if (frameCache.current.get(stamp) === rendering) frameCache.current.delete(stamp); });
+            }
+            return [id, await rendering];
+        }));
+        return mapCanvas(Object.fromEntries(entries), config);
+    }
+
     async function exportImage(config, taskId) {
         setBusy(true);
         try {
-            await api.mapLayout({ format: config.format,
-                data: mapImage(drawLayout(config), config.format), name: config.fileName || config.title, taskId });
+            const image = await drawLayout(config);
+            await api.mapLayout({ format: config.format, paper: config.paper, orientation: config.orientation,
+                data: mapImage(image, config.format), name: config.fileName || config.title, taskId });
         } catch (error) { if (taskId) await onLayout(taskId, window.GuizhiErrorText(error)); else fail(error); }
         finally { setBusy(false); }
     }
+
+    function saveLayout(config) {
+        setLayoutDraft(config);
+        void api.mapLayoutDraft(config).catch(fail);
+    }
+    useEffect(() => {
+        let mounted = true;
+        api.mapLayoutDraft().then(draft => { if (mounted) setLayoutDraft(draft); }).catch(fail);
+        return () => { mounted = false; };
+    }, []);
     useEffect(() => {
         if (!requestedLayout || mapActions || !viewReady || busy || !node.current?.clientWidth ||
                 exportedLayout.current === requestedLayout.taskId) return;
         exportedLayout.current = requestedLayout.taskId;
-        void exportImage(requestedLayout.layout, requestedLayout.taskId);
+        try {
+            const config = prepareLayout(amendLayout(layoutDraft, requestedLayout.layout));
+            saveLayout(config);
+            if (requestedLayout.layout.export) void exportImage(config, requestedLayout.taskId);
+            else {
+                setLayout({ key: requestedLayout.taskId, taskId: requestedLayout.taskId, config });
+            }
+        } catch (error) { void onLayout(requestedLayout.taskId, window.GuizhiErrorText(error)); }
     }, [requestedLayout, mapActions, viewReady, busy, layers]);
     useEffect(() => {
         if (!mapActions || !viewReady || busy || edit || !node.current?.clientWidth || appliedActions.current === mapActions.id) return;
         appliedActions.current = mapActions.id;
         const map = graph.current;
-        try {
-            const actions = mapActions.actions.map(action => {
-                const matches = action.layer ? layers.filter(item => item.name === action.layer) : [];
+        async function apply() {
+            const actions = await Promise.all(mapActions.actions.map(async action => {
+                const matches = action.layer ? layers.filter(item => action.layerRef
+                    ? key(item) === key({ ref: action.layerRef }) : item.name === action.layer) : [];
                 if (action.layer && matches.length !== 1) throw new Error('请确认地图中的图层名称唯一：' + action.layer);
                 const item = matches[0];
                 if (action.action === 'table' && (item.kind === 'raster' || action.field && !item.fields.some(field => field.name === action.field))) {
                     throw new Error('图层或排序字段没有可用的属性表：' + action.layer);
                 }
-                if (action.action === 'symbol' && item.kind === 'raster') throw new Error('影像图层不能使用矢量符号');
-                return { action, item };
-            });
+                if (['symbol', 'classify'].includes(action.action) && item.kind === 'raster') throw new Error('影像图层不能使用矢量符号');
+                if (action.action === 'classify' && !item.fields?.some(field => field.name === action.field)) {
+                    throw new Error('分类字段不存在：' + action.field);
+                }
+                return { action, item, classification: action.action === 'classify'
+                    ? await classifyLayer(item, action.field, item.style?.classification) : null };
+            }));
             const visibility = new Set(hidden);
-            for (const { action, item } of actions) {
+            for (const { action, item, classification } of actions) {
                 const id = item && key(item);
                 switch (action.action) {
                     case 'background': setBackground(action.color); break;
@@ -362,6 +495,9 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                             ...(action.fill && { fill: action.fill }), ...(action.fill_opacity !== undefined && { fillOpacity: action.fill_opacity }) });
                         break;
                     }
+                    case 'classify':
+                        styleLayer(id, { ...layerSymbol(item.style, palette[layers.indexOf(item) % palette.length]), classification });
+                        break;
                     case 'table':
                         selectLayer(id);
                         setPage(0);
@@ -379,8 +515,8 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                     }
                 }
             }
-        } catch (error) { fail(error); }
-        finally { onMapActions(); }
+        }
+        void apply().catch(fail).finally(onMapActions);
     }, [mapActions, viewReady, busy, edit, layers]);
 
     async function load(job) {
@@ -509,7 +645,14 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         const moved = () => { if (!graph.current?.fitNeeded) updateScale(); setViewRevision(value => value + 1); };
         ol.on('moveend', moved);
         const viewport = node.current;
-        return () => { identification.current += 1; viewport.removeEventListener('pointerleave', clearCursor); observer.disconnect(); ol.dispose(); graph.current = null; };
+        return () => {
+            identification.current += 1;
+            viewport.removeEventListener('pointerleave', clearCursor);
+            observer.disconnect();
+            ol.dispose();
+            graph.current = null;
+            void api.mapSnapshot(null).catch(fail);
+        };
     }, [target, units, metresPerUnit, initialExtent]);
 
     useEffect(() => {
@@ -641,9 +784,25 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 setViewReady(true);
             }
             restoreSelection(state, selectionRef.current);
+            const size = state.ol.getSize();
+            if (!size?.every(value => value > 0) || !items.length) return;
+            state.ol.renderSync();
+            const factor = Math.min(1, 880 / Math.max(...size));
+            const canvas = globalThis.document.createElement('canvas');
+            canvas.width = Math.round(size[0] * factor);
+            canvas.height = Math.round(size[1] * factor);
+            const context = canvas.getContext('2d');
+            context.fillStyle = backgroundColor;
+            context.fillRect(0, 0, canvas.width, canvas.height);
+            context.scale(factor, factor);
+            drawMapLayers(context, node.current);
+            void api.mapSnapshot({ keys: layerKeys.filter(id => !hidden.includes(id)),
+                bounds: state.view.calculateExtent(size), crs: target, limited: items.some(item => item.result?.limited),
+                scale: node.current.querySelector('.ol-scale-line-inner')?.textContent,
+                image: canvas.toDataURL('image/jpeg', .78) }).catch(fail);
         });
         return () => { alive = false; };
-    }, [layers, hidden, target, units, initialExtent, viewRevision, entries, displayPlans, Boolean(edit)]);
+    }, [layers, hidden, target, units, initialExtent, viewRevision, entries, displayPlans, backgroundColor, Boolean(edit)]);
 
     function restoreSelection(state, selected) {
         const drawing = selected && state.byKey.get(selected.key);
@@ -1234,7 +1393,9 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                     title: clipboard ? '编辑兼容图层后按 Ctrl+V 粘贴' : '请先复制或剪切要素', 'aria-keyshortcuts': 'Control+V' }),
                 clipboard && command('清空剪贴板', cancelClipboard, { icon: glyph('close'), disabled: busy })),
             ...editCommands],
-        制图: [group('图件', command('版面布局', () => setLayout(true), { icon: glyph('layout'), disabled: busy || !viewReady || !layers.length }))],
+        制图: [group('图件', command('版面布局', () => setLayout({ key: 'manual', config: prepareLayout(
+            layoutDraft || { ...layoutDefaults, title: layer?.name || '地图' }) }),
+        { icon: glyph('layout'), disabled: busy || !viewReady || !layers.length }))],
         分析: [group('流程', command('流程编辑器', () => setFlowOpen(true), {
             icon: glyph('workflow'), disabled: Boolean(edit),
         })), ...TOOL_GROUPS.map(({ title, icon, tools }) => {
@@ -1373,9 +1534,14 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
             save: value => styleLayer(key(properties.item), value) }),
         mapProperties && h(MapProperties, { background: backgroundColor, save: setBackground, coordinates: coordinateTools(),
             close: () => setMapProperties(false), glyph }),
-        layout && h(MapLayout, { initial: layoutDraft || { ...layoutDefaults, title: layer?.name || '地图' },
-            change: setLayoutDraft, draw: drawLayout,
-            busy, close: () => setLayout(false), exportImage }),
+        layout && h(MapLayout, { key: layout.key, initial: layout.config,
+            change: saveLayout, draw: drawLayout, layerChoices: layers.map(item => ({ value: key(item), label: item.name })),
+            onRendered: layout.taskId ? issue => {
+                const jobId = layout.taskId;
+                setLayout(previous => previous?.taskId === jobId ? { ...previous, taskId: null } : previous);
+                void (issue ? onLayout(jobId, issue) : api.mapLayoutReady(jobId)).catch(fail);
+            } : undefined,
+            busy, close: () => setLayout(null), exportImage }),
         document && h(MxdOpen, { document, busy, glyph, locateAvailable: locateMxd, close: () => setDocument(null),
             open: (frame, locate) => mxd(api.mxdImport(frame, locate), result => {
                 if (result.layers.length) {

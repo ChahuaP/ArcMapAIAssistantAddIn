@@ -28,7 +28,7 @@ export class DispatchService {
         const { id: provider } = models.route(config);
         this.harness = new DeepSeekHarness({ profile: 'sdk-minimal', patches: [profile],
             dshHome: join(this.root, 'dsh-home'), cwd: this.root, processCwd: this.root,
-            provider, model: config.model, maxTokens: 1024, initializeTimeoutMs: 45000,
+            provider, model: config.model, maxTokens: 2048, initializeTimeoutMs: 45000,
             env: { ...runtimeEnv({ ...options, modelConfig: config }, ['-I', '-B', mcp, '--binding', this.binding]),
                 GUIZHI_DISPATCH_CONFIG: JSON.stringify({ binding: this.binding }) } });
         await this.harness.start();

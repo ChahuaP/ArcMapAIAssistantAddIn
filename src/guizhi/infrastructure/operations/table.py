@@ -30,7 +30,8 @@ def lookup(ctx, field: str, where: AttributeFilter | None = None):
         for name, value in row.items():
             if type(value) is int and abs(value) > 2**53 - 1:
                 row[name] = str(value)
-    result = {"fields": [field], "rows": rows, "count": len(matches)}
+    result = {"fields": [field], "rows": rows, "count": len(matches), "layer": ctx.request.inputs[0].layer,
+              "filter": where.model_dump(mode="json", exclude_none=True) if where else None}
     ctx.json("lookup.json", result, "lookup")
     return {"statistics": {"lookup": result}}
 

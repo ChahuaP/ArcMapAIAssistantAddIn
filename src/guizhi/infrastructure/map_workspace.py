@@ -61,7 +61,7 @@ def output_layers(workspace, record, title):
     result = []
     for entry in data["evidence"]:
         kind = entry["step"]
-        if kind not in {"export", "boundaries"}:
+        if kind not in {"export", "boundaries", "transfer-source"}:
             continue
         ref = {"run": record["id"], "artifact": kind}
         file = read_artifact(workspace, record["id"], kind)
@@ -73,6 +73,61 @@ def output_layers(workspace, record, title):
                 {"file": str(file), "layer": None, "revision": entry["sha256"]}]}))
             result.append(raster_layer(workspace, {"run": preview["id"], "artifact": "raster_preview"}, title + " · 影像"))
     return result
+
+
+def selection_material(workspace, ref, revision, fids):
+    file, name = source(workspace, ref)
+    item = material(file, name)
+    if item["revision"] != revision:
+        raise ValueError("图层版本已变化，请重新选择要素")
+    if not isinstance(fids, list) or not 1 <= len(fids) <= 500 or any(type(fid) is not int for fid in fids):
+        raise ValueError("请选择 1 至 500 个地图要素")
+    selection = {"layer": name, "revision": revision, "fids": fids}
+    record = successful(run_operation(workspace.root, {"operation": "data.export_selection", "inputs": [item],
+        "parameters": {"selection": selection}}))
+    result = material(read_artifact(workspace, record["id"], "export"), record["result"]["export_layer"])
+    return {**result, "layers": [result["layer"]], "kind": "vector",
+            "mapSelection": {"source": ref, "revision": revision, "fids": fids}}
+
+
+def workflow_layers(workspace, record):
+    """Project committed results into map rows, following edits of the same layer."""
+    steps = record["result"].get("workflow", {}).get("steps", [])
+    if not steps:
+        return output_layers(workspace, record, "办理成果")
+
+    rows = {}
+    targets, last_result = {}, {}
+    for step in steps:
+        child = successful(workspace.read(step["run_id"]))
+        operation = step["operation"]
+        outputs = output_layers(workspace, child, child["result"].get("layer_name") or step_title(operation))
+        change = child["result"].get("changeset", {})
+        for layer in outputs:
+            artifact = layer["ref"]["artifact"]
+            key = "step." + step["id"] + ("" if artifact == "export" else "." + artifact)
+            edited = artifact == "export" and "target_revision" in change and operation != "geometry.explode"
+            moved_source = artifact == "transfer-source" and operation == "edit.transfer"
+            if edited or moved_source:
+                target = step["inputs"][int(operation == "edit.transfer" and not moved_source)]
+                if target.startswith("step.") and target not in targets:
+                    raise ValueError("编辑引用的上一步缺少地图图层")
+                root = targets.get(target, target)
+                if root in rows:
+                    previous = rows[root]
+                    # A second edit must consume the first edit's result.
+                    if targets.get(target) != root or previous["ref"] != last_result[target]:
+                        raise ValueError("同一图层的后续编辑须引用上一步成果")
+                    layer["name"] = previous["name"]
+                if root.startswith("material."):
+                    layer["replacesRole"] = root.removeprefix("material.")
+                targets[key] = root
+                rows[root] = layer
+            else:
+                targets[key] = key
+                rows[key] = layer
+            last_result[key] = layer["ref"]
+    return list(rows.values())
 
 
 def map_result(workspace, record, title, *, include_steps=False):
@@ -367,14 +422,8 @@ def request(workspace, payload):
         plan = successful(run_operation(workspace.root, {"operation": "edit.transfer_plan", "inputs": [origin, destination],
             "parameters": {"selection": selection}}))
         return plan["result"]["features"]
-    if action == "step-layers":
-        record = successful(workspace.read(payload["run"]))
-        operation = record["task"]["operation"]
-        layers = output_layers(workspace, record, payload.get("title") or step_title(operation))
-        if operation in {"crs.assign", "crs.assign_from"}:
-            revision = record["result"]["changeset"]["target_revision"]
-            return [{**layer, "replacesRevision": revision} for layer in layers]
-        return layers
+    if action == "workflow-layers":
+        return workflow_layers(workspace, successful(workspace.read(payload["run"])))
     if action == "import":
         items = payload["items"]
         if not isinstance(items, list) or not 1 <= len(items) <= 32:
@@ -492,21 +541,13 @@ def request(workspace, payload):
         return produce(workspace, "crs.reproject", file, name, {"definition": payload["crs"]})
     if action == "transform":
         return produce(workspace, "crs.transform", file, name, {"plan": payload["plan"]})
-    if action in {"edit", "selection"}:
-        item = material(file, name)
-        if item["revision"] != payload.get("revision"):
+    if action == "edit":
+        if material(file, name)["revision"] != payload.get("revision"):
             raise ValueError("图层版本已变化，请重新打开图层")
-        if action == "edit":
-            return produce(workspace, "edit.changes", file, name, {"changes": payload["changes"]})
-        fids = payload["fids"]
-        if not isinstance(fids, list) or not 1 <= len(fids) <= 500 or any(type(fid) is not int for fid in fids):
-            raise ValueError("请选择 1 至 500 个地图要素")
-        record = successful(run_operation(workspace.root, {"operation": "data.export_selection", "inputs": [item],
-            "parameters": {"selection": {"layer": name, "revision": item["revision"], "fids": fids}}}))
-        out = read_artifact(workspace, record["id"], "export")
-        result = material(out, record["result"]["export_layer"])
-        return {**result, "layers": [result["layer"]], "kind": "vector", "name": payload.get("name", name),
-                "mapSelection": {"source": payload["ref"], "revision": item["revision"], "fids": fids}}
+        return produce(workspace, "edit.changes", file, name, {"changes": payload["changes"]})
+    if action == "selection":
+        return {**selection_material(workspace, payload["ref"], payload["revision"], payload["fids"]),
+                "name": payload.get("name", name)}
     raise ValueError("未知地图操作")
 
 

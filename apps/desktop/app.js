@@ -80,7 +80,7 @@
     function Result({ task, retry, fail, editSkill, parcel, selectParcel, voiceReply, openComponents }) {
         if (active(task)) return h('article', { className: 'bubble assistant working', role: 'status' },
             task.status === 'cancelling' ? '正在结束任务'
-                : task.progress?.length ? h(Progress, { task }) : '正在准备本轮任务');
+                : task.progress?.length ? h(Progress, { task }) : '等待回复…');
         if (voiceReply?.task === task.id) return h('article', { className: 'bubble assistant' },
             voiceReply.text ? h('p', { className: 'voice-caption' }, voiceReply.text)
                 : h('span', { role: 'status' }, h('i', { className: 'pulse' }), '正在准备语音'));
@@ -92,7 +92,7 @@
                 markdown(task.response),
                 ...(task.outputImages || []).map(reference => h(ResultImage, { key: reference.run, reference })),
                 task.progress?.length > 0 && h('details', { className: 'result-progress' },
-                    h('summary', null, '办理过程'), h(Progress, { task })),
+                    h('summary', null, task.business ? '办理过程' : '执行过程'), h(Progress, { task })),
                 stats?.coverage_ratio !== undefined && h('dl', { className: 'metrics' },
                     h('div', null, h('dt', null, '重叠面积'), h('dd', null, number(stats.covered_area_m2), h('small', null, ' m²'))),
                     h('div', null, h('dt', null, '覆盖率'), h('dd', null, (stats.coverage_ratio * 100).toFixed(2), h('small', null, '%')))),
@@ -159,8 +159,8 @@
             setMention(match ? { from: value.length - match[1].length - 1, to: value.length, query: match[1] } : null);
         }
         useEffect(() => {
-            if (!launcher) void api.mapCatalog(layers, mapSelection).catch(fail);
-        }, [layers, mapSelection]);
+            if (!launcher) void api.mapCatalog(layers, mapSelection, activeLayer, hiddenLayers).catch(fail);
+        }, [layers, mapSelection, activeLayer, hiddenLayers]);
         const mapKey = window.GuizhiMap.key;
         function addLayers(items) {
             if (!items.length) return;
@@ -245,44 +245,25 @@
         const turns = (state?.tasks || []).slice().reverse();
         const task = turns.at(-1);
         const taskRunning = ['running', 'cancelling'].includes(task?.status);
-        const activity = taskRunning && state?.settings.showOperation !== false
-            ? task.status === 'cancelling' ? { label: '正在停止办理' } : task.visual || { label: '正在分析任务' } : null;
-        useEffect(() => {
-            if (!taskRunning || launcher) return;
-            setMapMounted(true);
-            setMapMode(mode => mode === 'chat' ? 'split' : mode);
-        }, [taskRunning]);
+        const activity = taskRunning && task.visual && state?.settings.showOperation !== false
+            ? task.status === 'cancelling' ? { label: '正在停止任务' } : task.visual : null;
         const shownMapRuns = useRef(new Set());
-        const shownSteps = useRef(new Set());
-        const pendingStepLayers = useRef(new Map());
         useEffect(() => {
-            shownSteps.current.clear();
-            pendingStepLayers.current.clear();
             shownMapRuns.current.clear();
         }, [state?.settings.workspace]);
-        useEffect(() => {
-            if (launcher || !task?.progress) return;
-            const workspace = state.settings.workspace;
-            for (const step of task.progress) {
-                if (step.phase !== 'workflow_step_finished' || step.kind === 'stop' || !step.childRun || shownSteps.current.has(step.childRun)) continue;
-                shownSteps.current.add(step.childRun);
-                const pending = api.map({ action: 'step-layers', run: step.childRun }).then(items => {
-                    if (workspace === currentWorkspace.current) addLayers(items.filter(item => !item.replacesRevision));
-                    return items;
-                });
-                pendingStepLayers.current.set(step.childRun, pending);
-                void pending.catch(fail);
-            }
-        }, [task?.progress]);
         const [layoutReady, setLayoutReady] = useState(null);
+        const [layoutOpen, setLayoutOpen] = useState(null);
         useEffect(() => {
             if (launcher || showLog || task?.status !== 'succeeded' ||
-                !(task.map || task.mapLayers?.length || task.coordinateRuns?.length || task.layout || task.mapActions) ||
+                !(task.map || task.mapLayers?.length || task.layout || task.mapActions) ||
                 shownMapRuns.current.has(task.id)) return;
             shownMapRuns.current.add(task.id);
-            void openMap(task).then(() => {
+            void openMap(task).then(opened => {
+                if (!opened) return;
                 if (task.layout && !task.layoutImage && !task.layoutError) setLayoutReady(task.id);
-                if (task.mapActions) setMapActions({ id: task.id, actions: task.mapActions });
+                if (task.mapActions) setMapActions({ id: task.id, actions: task.mapActions.map(action => ({
+                    ...action, ...(task.mapTargets?.[action.layer] && { layerRef: task.mapTargets[action.layer] }),
+                })) });
             });
         }, [task?.id, task?.status]);
         const resultTask = turns.find(item => item.id === viewed) ||
@@ -625,8 +606,9 @@
                     parcel: resultTask?.id === item.id ? parcel : null, selectParcel: id => { viewResult(item.id); selectParcel(id); },
                     editSkill: text => { setInitialMarkdown(text); showSettings('skills'); } }),
                 item.layout && h('div', { key: item.id + '-layout', className: 'map-layout-result' },
-                    item.layoutImage ? button('map', '打开地图图片', { onClick: () => api.openMapLayout(item.id).catch(fail) })
-                        : h('span', { role: 'status' }, item.layoutError || '正在绘制地图图片…')),
+                    item.layoutImage ? button('map', '打开图件', { onClick: () => api.openMapLayout(item.id).catch(fail) })
+                        : item.layoutReady ? button('layout', '编辑版面', { onClick: () => { setLayoutOpen({ id: item.id }); } })
+                            : h('span', { role: 'status' }, item.layoutError || '正在生成版面…')),
             ]) : h('div', { className: 'welcome' }, h('img', { src: '/mark.svg', alt: '', width: 50 }),
                 h('h2', null, '今天要办理什么？'), h('p', null, '输入办理要求，或选择已有业务。'), tiles)),
             h('div', { className: 'compose-wrap' }, composer));
@@ -646,35 +628,39 @@
                     resultTask?.hasReport && resultTask.business && h(ReportPanel, { id: resultTask.id }))));
         async function openMap(item) {
             setShowLog(false);
-            if (item?.map || item?.mapLayers?.length || item?.coordinateRuns?.length) {
+            if (item?.map || item?.mapLayers?.length) {
                 try {
-                    const stepRuns = new Set(item.progress?.filter(step => step.kind !== 'stop' && step.childRun).map(step => step.childRun));
-                    for (const run of item.coordinateRuns || []) stepRuns.add(run);
-                    const stepOutputs = (await Promise.all([...stepRuns].map(run => pendingStepLayers.current.get(run) ||
-                        (item.coordinateRuns?.includes(run) ? api.map({ action: 'step-layers', run }) : null)))).flat().filter(Boolean);
-                    const replacements = stepOutputs.filter(result => result.replacesRevision &&
-                        !layers.some(layer => mapKey(layer) === mapKey(result)));
-                    if (replacements.length) {
-                        const pairs = replacements.flatMap(result => {
-                            const sources = layers.filter(layer => layer.revision === result.replacesRevision);
-                            return sources.length === 1 ? [[sources[0], result]] : [];
-                        });
-                        if (pairs.length !== replacements.length) throw new Error('请在地图中确认要定义坐标系的原图层唯一且仍存在');
-                        replaceLayers(pairs);
+                    const groups = { ...item.materials, ...(item.project && { project: [item.project] }),
+                        ...(item.control && { control: [item.control] }) };
+                    if (!item.skill && groups.inputs) {
+                        groups.inputs.forEach((material, index) => { groups['layer-' + (index + 1)] = [material]; });
                     }
-                    const results = stepOutputs.length ? [] : await Promise.all((item.mapLayers || []).map(ref => api.map({ action: 'describe', ref })));
+                    const replacements = [], additions = [];
+                    for (const result of item.mapLayers || []) {
+                        const target = groups[result.replacesRole]?.[0]?.ref || item.mapTargets?.[result.replacesRole];
+                        if (!target) { additions.push(result); continue; }
+                        if (layers.some(layer => mapKey(layer) === mapKey(result))) continue;
+                        const before = layers.find(layer => mapKey(layer) === mapKey({ ref: target }));
+                        if (!before) throw new Error('原图层已变更或移除，请重新选择要编辑的图层');
+                        replacements.push([before, result]);
+                    }
                     const inputs = item.map ? await api.mapTaskInputs(item.id) : [];
                     const current = new Set(layers.map(mapKey));
-                    addLayers([...inputs.filter(input => !current.has(mapKey(input))), ...results.map((entry, index) =>
-                        ({ ...entry, name: index ? '边界成果' : '办理成果' }))]);
-                } catch (error) { fail(error); if (item.layout) await api.mapLayoutError(item.id, window.GuizhiErrorText(error)); return; }
+                    addLayers([...inputs.filter(input => !current.has(mapKey(input))), ...additions]);
+                    if (replacements.length) replaceLayers(replacements);
+                } catch (error) {
+                    fail(error);
+                    if (item.layout) await api.mapLayoutError(item.id, window.GuizhiErrorText(error));
+                    return false;
+                }
             }
             if (item?.layout && !item.mapLayers?.length && !layers.length) {
                 await api.mapLayoutError(item.id, '地图中没有可绘制的图层，请先添加图层。');
-                return;
+                return false;
             }
             setMapMounted(true);
             setMapMode(mode => mode === 'chat' ? 'split' : mode);
+            return true;
         }
         function replaceLayers(pairs) {
             const replacements = new Map(pairs.map(([before, after]) => [mapKey(before),
@@ -720,7 +706,7 @@
             fail, activity: state.settings.screenHighlight !== false ? activity : null,
             requestedLayout: task?.id === layoutReady && !task.layoutImage && !task.layoutError && task.layout
                 ? { taskId: task.id, layout: task.layout } : null,
-            onLayout: api.mapLayoutError, mapActions, onMapActions: () => setMapActions(null),
+            openLayout: layoutOpen, onLayout: api.mapLayoutError, mapActions, onMapActions: () => setMapActions(null),
             selection: mapSelection, setSelection: setMapSelection,
             replace: replaceLayer, replaceLayers, editing: setMapEditing });
         async function configure(value) {

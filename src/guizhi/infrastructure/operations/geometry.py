@@ -85,11 +85,16 @@ def polygon(feature):
     return shapely.orient_polygons(Polygon(feature.coordinates, holes=feature.holes))
 
 
-def create_dataset(ctx, geometry_type: Literal["point", "polyline", "polygon"], epsg: PositiveInt | None = None):
+def create_dataset(ctx, geometry_type: Literal["point", "polyline", "polygon"], epsg: PositiveInt | None = None,
+                   name: str | None = None):
     crs = crs_for(ctx, epsg)
     kind = {"point": "Point", "polyline": "LineString", "polygon": "Polygon"}[geometry_type]
     ctx.publish(geopandas.GeoDataFrame({"name": pd.Series(dtype="str")}, geometry=[], crs=crs),
                 geometry_type=kind)
+    if name is not None:
+        if not 1 <= len(name.strip()) <= 120:
+            raise ValueError("请填写 1 至 120 字的图层名称")
+        return {"layer_name": name.strip()}
 
 
 def create_points(ctx, features: list[PointFeature], epsg: PositiveInt | None = None):

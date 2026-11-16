@@ -55,6 +55,15 @@ function ColorInput({ label, value, change, compact = false, disabled = false })
             !compact && h('span', { 'aria-hidden': true }, '▾')));
 }
 
+export async function classifyLayer(item, field, existing = {}) {
+    const { classes, remaining } = await window.guizhi.map({ action: 'categories', ref: item.ref, field });
+    return { field, other: existing.other || '#798696', otherFill: existing.otherFill || '#798696', remaining,
+        classes: classes.map((entry, index) => {
+            const color = classColors[index % classColors.length];
+            return { ...entry, color, ...(/Polygon$/.test(item.geometry) && { fillColor: color }) };
+        }) };
+}
+
 function Classification({ item, style, update, polygon, points, setLoading }) {
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
@@ -65,13 +74,7 @@ function Classification({ item, style, update, polygon, points, setLoading }) {
         setBusy(true);
         setLoading(true);
         try {
-            const result = await window.guizhi.map({ action: 'categories', ref: item.ref, field: name });
-            update('classification', {
-                field: name, other: value.other, otherFill: value.otherFill, remaining: result.remaining,
-                classes: result.classes.map((entry, index) => {
-                    const color = classColors[index % classColors.length];
-                    return { ...entry, color, ...(polygon && { fillColor: color }) };
-                }) });
+            update('classification', await classifyLayer(item, name, value));
         } catch (issue) { setError(window.GuizhiErrorText(issue)); }
         finally { setBusy(false); setLoading(false); }
     }

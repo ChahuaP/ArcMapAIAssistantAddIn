@@ -223,21 +223,13 @@ class DesktopController {
     }
 
 
-    submit({ prompt, project, control, skill, materials = {}, skillParameters, parameterText, mentions, images = [], imageBlocks = [], dialogue = false }) {
+    submit({ prompt, project, control, skill, materials = {}, skillParameters, parameterText, mentions, images = [], imageBlocks = [], dialogue = false, mapContext }) {
         if (!this.settings.workspace) throw new Error('请先选择成果保存位置');
         if (this.active || this.modelTesting) throw new Error('已有任务在运行');
         if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 4000) throw new Error('请输入办理事项');
         let bindings = materialBindings({ ...materials, ...(project ? { project: [project] } : {}),
             ...(control ? { control: [control] } : {}) });
         const suppliedMaterials = Object.keys(bindings).length > 0;
-        if (!suppliedMaterials && !skill) {
-            const previous = this.tasks[0];
-            if (previous) {
-                ({ project, control, materials } = previous);
-                bindings = materialBindings({ ...materials, ...(project ? { project: [project] } : {}),
-                    ...(control ? { control: [control] } : {}) });
-            }
-        }
         let layerLabels;
         if (!skill && bindings.inputs) {
             const { inputs, ...named } = bindings;
@@ -259,6 +251,7 @@ class DesktopController {
         const { config, key } = this.selectModel({ modelConfig: this.settings.modelConfig });
         const task = { id: randomUUID(), title: [...prompt.trim()].slice(0, 32).join(''), prompt: prompt.trim(),
             project, control, skill, materials, parameterText, mentions, images, dialogue, operator: operator(this.settings), status: 'running', createdAt: new Date().toISOString() };
+        if (mapContext?.layers.length) task.mapTargets = Object.fromEntries(mapContext.layers.map(layer => [layer.id, layer.ref]));
         const next = [task, ...this.tasks];
         this.persist(next);
         this.tasks = next;
@@ -266,7 +259,7 @@ class DesktopController {
         const active = { stop, task, config, files: Object.values(bindings).flat().map(item => item.file) };
         this.active = active;
         const options = { workspace: this.settings.workspace, modelConfig: config, apiKey: key,
-            prompt: task.prompt, skill, skillParameters, materials: bindings, layerLabels, previousRun, history, dialogue, images: imageBlocks,
+            prompt: task.prompt, skill, skillParameters, materials: bindings, layerLabels, previousRun, history, dialogue, images: imageBlocks, mapContext,
             projectPlan: project?.plan || materials.project?.[0]?.plan,
             controlPlan: control?.plan || materials.control?.[0]?.plan };
         active.done = this.dispatch(options, { signal: stop.signal, onEvent: event => {
@@ -354,13 +347,9 @@ class DesktopController {
                 if (layout) task.layout = JSON.parse(layout.bytes);
                 const actions = checkedArtifact(record, 'map_actions');
                 if (actions) task.mapActions = JSON.parse(actions.bytes);
-                task.coordinateRuns = (record.result.workflow?.steps || []).filter(item =>
-                    ['crs.assign', 'crs.assign_from'].includes(item.operation)).map(item => item.run_id);
-                const lastOperation = record.result.workflow?.steps?.at(-1)?.operation;
-                task.mapLayers = record.result.evidence
-                    .filter(item => ['export', 'boundaries'].includes(item.step) && path.extname(item.path).toLowerCase() === '.gpkg' &&
-                        !(item.step === 'export' && ['crs.assign', 'crs.assign_from'].includes(lastOperation)))
-                    .map(item => ({ run: task.runId, artifact: item.step }));
+                const hasLayer = record.result.evidence.some(item =>
+                    ['export', 'boundaries'].includes(item.step) && /\.(gpkg|tiff?|img)$/i.test(item.path));
+                if (hasLayer) task.mapLayers = await this.request('map', { action: 'workflow-layers', run: task.runId });
                 task.outputImages = record.result.evidence.filter(item => item.step === 'raster_preview')
                     .map(item => ({ run: task.runId, artifact: item.step }));
                 const findings = checkedArtifact(record, 'case');
