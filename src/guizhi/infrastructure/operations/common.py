@@ -98,10 +98,11 @@ def condition_mask(frame, value, depth=0):
         mask = comparisons[op](series, other)
         if isinstance(other, pd.Series):
             missing |= other.isna()
-    elif op == "like" and keys == {"value"} and isinstance(value["value"], str):
+    elif op in {"contains", "like"} and keys == {"value"} and isinstance(value["value"], str):
         if not pd.api.types.is_string_dtype(series):
             raise ValueError("LIKE requires a text field")
-        mask = series.str.fullmatch(like_regex(value["value"]), na=False, flags=re.DOTALL)
+        mask = (series.str.contains(value["value"], regex=False, na=False) if op == "contains" else
+                series.str.fullmatch(like_regex(value["value"]), na=False, flags=re.DOTALL))
     elif op == "in" and keys == {"values"} and isinstance(value["values"], list) and value["values"]:
         mask = series.isin(value["values"]) & series.notna()
     elif op == "between" and keys == {"values"} and isinstance(value["values"], list) and len(value["values"]) == 2:

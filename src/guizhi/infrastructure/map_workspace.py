@@ -29,6 +29,7 @@ from guizhi.infrastructure.vector import digest
 
 MAX_VISIBLE = 8000
 MAX_MAP_POINTS = 180_000
+VECTOR_ARTIFACTS = {"import", "export", "boundaries", "transfer-source"}
 MANUAL_OPERATIONS = {
     "data.describe", "vector.area", "vector.buffer", "vector.clip", "vector.intersect",
     "vector.erase", "vector.dissolve", "vector.union", "vector.identity", "vector.symmetric_difference", "vector.update_overlay",
@@ -141,7 +142,7 @@ def source(workspace, ref):
     if not isinstance(ref, dict) or set(ref) != {"run", "artifact"}:
         raise ValueError("请选择已保存的地图图层")
     run, kind = ref["run"], ref["artifact"]
-    if not isinstance(run, str) or not re.fullmatch(r"[a-f0-9]{32}", run) or kind not in {"import", "export", "boundaries", "transfer-source"}:
+    if not isinstance(run, str) or not re.fullmatch(r"[a-f0-9]{32}", run) or kind not in VECTOR_ARTIFACTS:
         raise ValueError("地图图层引用无效")
     record = workspace.read(run)
     if record["status"] != "succeeded":
@@ -332,6 +333,8 @@ def request(workspace, payload):
 
         if action == "flow-tools":
             return map_flow.catalog()
+        if action == "flow-check":
+            return map_flow.check(workspace, payload)
         if action == "flow-run":
             return map_flow.run(workspace, payload)
         if action == "flow-progress":

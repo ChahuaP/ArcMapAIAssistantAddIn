@@ -9,7 +9,7 @@ from shapely import STRtree
 from pydantic import BaseModel, ConfigDict, Field
 
 from guizhi.infrastructure.operations.common import (
-    Mode, Selection, Unit, compatible, concatenate, condition, distance_in_crs,
+    Mode, Selection, Unit, compatible, concatenate, distance_in_crs,
     select, selection_fids, valid,
 )
 
@@ -74,11 +74,15 @@ def append(ctx, schema: Literal["strict", "map"] = "strict"):
     return {"changeset": {"target_revision": ctx.selection_hashes[0], "appended": len(result) - len(base)}}
 
 
+AttributeValue = str | int | float | bool | None
+
+
 class AttributeFilter(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    op: Literal["and", "or", "not", "eq", "ne", "gt", "gte", "lt", "lte", "is_null", "is_not_null", "like", "in", "between"]
+    op: Literal["and", "or", "not", "eq", "ne", "gt", "gte", "lt", "lte", "is_null", "is_not_null",
+                "contains", "like", "in", "between"]
     field: str | None = None
-    value: str | int | float | bool | None = None
+    value: AttributeValue = None
     value_field: str | None = None
     values: list[Any] | None = None
     conditions: Annotated[list["AttributeFilter"], Field(min_length=1, max_length=32)] | None = None
@@ -88,18 +92,15 @@ class AttributeFilter(BaseModel):
 def select_by_attribute(ctx, where: AttributeFilter | None = None, mode: Mode = "new_selection",
                         previous: Selection | None = None, sql: str | None = None):
     if (where is None) == (sql is None):
-        raise ValueError("请选择条件表单或 SQL 条件")
-    frame = ctx.frames[0]
-    if sql is not None:
-        from guizhi.infrastructure.operations.sql_expression import evaluate
+        raise ValueError("请提供一组属性查询条件")
+    from guizhi.infrastructure.operations.sql_expression import attribute_predicate, evaluate
 
-        info = ctx.info[0]
-        rows = evaluate(ctx.directory / ctx.evidence[0]["path"], ctx.request.inputs[0].layer,
-                        info["fid_column"], info["fields"], sql, predicate=True)
-        chosen = {row[0] for row in rows}
-    else:
-        chosen = set(map(int, frame.index[condition(frame, where.model_dump(exclude_none=True))]))
-    return select(ctx, chosen, mode, previous)
+    info = ctx.info[0]
+    fields = dict(zip(info["fields"], info["dtypes"], strict=True))
+    expression, arguments = attribute_predicate(where, fields) if where is not None else (sql, None)
+    rows = evaluate(ctx.directory / ctx.evidence[0]["path"], ctx.request.inputs[0].layer,
+                    info["fid_column"], fields, expression, predicate=True, arguments=arguments)
+    return select(ctx, {row[0] for row in rows}, mode, previous)
 
 
 def select_by_location(

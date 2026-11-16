@@ -6,7 +6,7 @@ from pydantic import Field
 from guizhi.infrastructure.vector import digest
 
 
-def read_artifact(workspace, run_id, step):
+def artifact_reference(workspace, run_id, step):
     record = workspace.read(run_id)
     if record["status"] != "succeeded":
         raise ValueError("The referenced run has no committed result")
@@ -14,7 +14,14 @@ def read_artifact(workspace, run_id, step):
     if len(refs) != 1:
         raise ValueError(f"Run must have exactly one {step} artifact")
     file = artifact_path(workspace, run_id, refs[0]["path"])
-    if not file.is_file() or digest(file) != refs[0]["sha256"]:
+    if not file.is_file():
+        raise ValueError("Artifact is missing or has changed")
+    return file, refs[0]["sha256"]
+
+
+def read_artifact(workspace, run_id, step):
+    file, checksum = artifact_reference(workspace, run_id, step)
+    if digest(file) != checksum:
         raise ValueError("Artifact is missing or has changed")
     return file
 

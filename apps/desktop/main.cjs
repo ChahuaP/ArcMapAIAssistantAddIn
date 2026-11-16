@@ -506,7 +506,7 @@ async function startDesktop(options) {
     });
     bind('materialPaths', (paths, kind) => controller.intake(paths, kind));
     const mapReads = new Set(['describe', 'features', 'table', 'table-complement', 'table-statistics', 'table-unique-values', 'table-feature',
-        'crs-search', 'raster-preview', 'raster-display', 'categories']);
+        'crs-search', 'raster-preview', 'raster-display', 'categories', 'flow-check']);
     bind('map', async (surface, input) => {
         if (surface !== window || !input || !mapReads.has(input.action) &&
                 !['assign', 'reproject', 'transform', 'edit', 'edit-sketch', 'edit-transfer-plan', 'tool', 'step-layers',

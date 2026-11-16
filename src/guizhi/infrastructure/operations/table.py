@@ -14,7 +14,7 @@ import shapely
 from pydantic import BaseModel, ConfigDict, Field
 
 from guizhi.infrastructure.operations.common import condition
-from guizhi.infrastructure.operations.data import AttributeFilter
+from guizhi.infrastructure.operations.data import AttributeFilter, AttributeValue
 
 FIELD_TYPES = {"smallinteger": "SMALLINT", "integer": "MEDIUMINT", "single": "FLOAT",
                "double": "DOUBLE", "string": "TEXT", "date": "DATETIME", "guid": "TEXT", "blob": "BLOB"}
@@ -193,12 +193,29 @@ def delete_field(ctx, field: str):
     return table_copy(ctx, action)
 
 
+class ConstantValue(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    value: AttributeValue
+
+
 def calculate_field(ctx, field: str, source_field: str | None = None,
                     operator: Literal["copy", "add", "subtract", "multiply", "divide"] = "copy",
-                    operand: float = 0, expression: str | None = None, value: float | None = None):
+                    operand: float = 0, expression: str | None = None, value: float | None = None,
+                    constant: ConstantValue | None = None):
     frame = ctx.frames[0]
     if field not in frame or field == frame.geometry.name:
         raise ValueError("请选择有效的目标字段")
+    if constant is not None:
+        from pandas import Series
+
+        from guizhi.infrastructure.operations.sql_expression import attribute_value
+
+        if any(item is not None for item in (value, expression, source_field)):
+            raise ValueError("请选择一个字段计算来源")
+        info = ctx.info[0]
+        types = dict(zip(info["fields"], info["dtypes"], strict=True))
+        assigned = None if constant.value is None else attribute_value(field, types[field], constant.value)
+        return write_field(ctx, field, Series(assigned, index=frame.index, dtype=object))
     if value is not None:
         from pandas import Series
 

@@ -58,11 +58,31 @@ const definitions = Object.fromEntries([...tools.flatMap(group => group.tools), 
     tool('table.calculate_geometry', '计算几何', 'area', item => Object.keys(geometryProperties(item)).length > 0),
     tool('presentation.export_table', '导出属性表', 'download', vector),
     tool('flow.unique_values', '唯一值', 'filter', vector),
-    tool('flow.expression', 'SQL 表达式', 'table'),
+    tool('flow.condition', '查询条件', 'filter', vector),
     tool('flow.calculate', '计算', 'calculator'),
 ].map(item => [item.id, item]));
 export const toolIcon = id => definitions[id]?.icon;
 export const toolTitle = id => definitions[id]?.title;
+export function acceptsFlowLayer(operation, index, layer) {
+    const { accepts } = definitions[operation];
+    return Boolean((accepts[index] || accepts.at(-1))?.(layer));
+}
+
+const sameCrs = new Set(['vector.intersect', 'vector.erase', 'vector.clip', 'vector.union', 'vector.identity',
+    'vector.update_overlay', 'vector.symmetric_difference', 'vector.spatial_join', 'data.merge']);
+
+export function flowInputIssue(operation, names, inputs, parameters, linked) {
+    const invalid = inputs.findIndex((layer, index) => layer && !acceptsFlowLayer(operation, index, layer));
+    if (invalid >= 0) return '「' + names[invalid] + '」的图层类型不符合要求';
+    if (operation !== 'data.describe' && inputs.some(layer => layer?.crs === null)) return '请先为输入图层定义坐标系';
+    if (sameCrs.has(operation) && inputs.every(layer => /^EPSG:\d+$/.test(layer?.crs)) && inputs[0].crs !== inputs[1].crs)
+        return '两个输入图层的坐标系不同，请先转换为同一坐标系';
+    if (['vector.area', 'vector.buffer'].includes(operation) && inputs[0]?.units === 'degrees')
+        return '请先将输入图层转换为投影坐标系';
+    if (operation === 'flow.calculate' && parameters.operator === 'divide' && !linked[1] && parameters.right === 0)
+        return '除数不能为 0';
+    return '';
+}
 const layerOptions = layers => layers.map(item => ({ value: key(item), label: item.name }));
 export const layerMatches = (role, item) => (raster(item) ? 'raster' : 'vector') === role.kind &&
     (role.geometry === 'any' || ({ line: 'LineString', polygon: 'Polygon', point: 'Point' }[role.geometry] &&
@@ -116,7 +136,7 @@ const stats = {
 
 
 function toolForm(definition, inputs, values, update, linked) {
-    const { id, accepts } = definition;
+    const { id } = definition;
     const input = inputs[0];
     const names = input?.fields?.map(item => item.name) || [];
     const fields = names.map(name => ({ value: name, label: name }));
@@ -128,11 +148,12 @@ function toolForm(definition, inputs, values, update, linked) {
     const columns = (name, label, extra = {}) => field(label, dropdown(values[name], fields, value => update(name, value), extra));
     const controls = [];
     let parameters = {};
-    let valid = inputs.every((layer, index) => (accepts[index] || accepts.at(-1))?.(layer));
-    const attributeTools = { 'data.select_by_attribute': attributeFilter, 'table.calculate_field': fieldCalculation,
+    let valid = inputs.every((layer, index) => acceptsFlowLayer(id, index, layer));
+    const attributeTools = { 'data.select_by_attribute': attributeFilter, 'flow.condition': attributeFilter,
+        'table.calculate_field': fieldCalculation,
         'table.calculate_geometry': geometryCalculation };
     if (attributeTools[id]) {
-        const form = attributeTools[id](input, values, update, { field, select, text, columns });
+        const form = attributeTools[id](input, values, update, { field });
         return { controls: [...controls, ...form.parts], valid: valid && form.valid, parameters: form.parameters };
     }
     if (id === 'geometry.create_dataset') {
@@ -205,11 +226,6 @@ export function flowForm(operation, inputs, values, update, linked) {
             value: values.query || '', onChange: event => update('query', event.target.value) })],
         parameters: { field: values.field, query: values.query?.trim() || '' }, valid: selected,
     };
-    if (operation === 'flow.expression') return {
-        controls: [h(Input.TextArea, { 'aria-label': 'SQL 表达式', rows: 2, maxLength: 4096, value: values.text || '',
-            placeholder: '例如 "地类" = \'耕地\'', onChange: event => update('text', event.target.value) })],
-        parameters: { text: values.text }, valid: Boolean(values.text?.trim()),
-    };
     if (operation === 'flow.calculate') {
         const operator = values.operator || 'add';
         const names = { add: '+', subtract: '−', multiply: '×', divide: '÷' };
@@ -228,7 +244,7 @@ export function flowForm(operation, inputs, values, update, linked) {
     if (operation === 'data.select_by_attribute' && linked[2]) return {
         controls: [selectField('匹配字段')], parameters: { where: { field: values.field } }, valid: selected,
     };
-    if (operation === 'table.calculate_field' && (linked[1] || linked[2])) return {
+    if (operation === 'table.calculate_field' && linked[1]) return {
         controls: [selectField('写入字段')], parameters: { field: values.field }, valid: selected,
     };
     const settings = { ...(operation === 'data.select_by_location' && { predicate: 'intersect' }),

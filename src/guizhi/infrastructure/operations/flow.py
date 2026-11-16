@@ -4,6 +4,8 @@ from operator import add, mul, sub, truediv
 from typing import Literal
 
 from guizhi.infrastructure.map_attributes import unique_values as read_values
+from guizhi.infrastructure.operations.data import AttributeFilter
+from guizhi.infrastructure.operations.sql_expression import attribute_predicate
 
 
 def unique_values(ctx, field: str, query: str = ""):
@@ -18,11 +20,10 @@ def unique_values(ctx, field: str, query: str = ""):
     raise ValueError("匹配的唯一值超过 500 个，请缩小搜索范围")
 
 
-def expression(ctx, text: str):
-    text = text.strip()
-    if not 1 <= len(text) <= 4096:
-        raise ValueError("请填写 1 至 4096 字的 SQL 表达式")
-    return {"value": text}
+def condition(ctx, where: AttributeFilter):
+    info = ctx.info[0]
+    attribute_predicate(where, dict(zip(info["fields"], info["dtypes"], strict=True)))
+    return {"value": where.model_dump(exclude_none=True)}
 
 
 def calculate(ctx, operator: Literal["add", "subtract", "multiply", "divide"], left: float, right: float):

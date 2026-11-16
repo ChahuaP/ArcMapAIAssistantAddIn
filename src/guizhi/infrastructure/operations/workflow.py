@@ -44,6 +44,8 @@ def resolve_value(value, records, skill_parameters):
     if isinstance(value, list):
         return [resolve_value(item, records, skill_parameters) for item in value]
     if isinstance(value, dict):
+        if set(value) == {"$literal"}:
+            return value["$literal"]
         return {key: resolve_value(item, records, skill_parameters) for key, item in value.items()}
     return value
 

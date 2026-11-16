@@ -46,7 +46,8 @@ export function UniquePicker({ layer, field, onPick, display, label = '唯一值
     return h(Popover, { open, trigger: 'click', placement: 'bottomLeft', onOpenChange: next => {
         setOpen(next); setQuery(''); setPage(0);
     }, content: h('div', { className: 'gis-choice-panel' },
-        h(Input, { size: 'small', autoFocus: true, maxLength: 200, placeholder: '搜索图层中的值', 'aria-label': '搜索图层值',
+        h(Input, { size: 'small', autoFocus: true, maxLength: 200, placeholder: manual ? '搜索或输入值' : '搜索图层中的值',
+            'aria-label': manual ? '搜索或输入值' : '搜索图层值',
             value: query, onChange: event => { setQuery(event.target.value); setPage(0); } }),
         h('div', { className: 'gis-choice-list', role: 'group', 'aria-label': '字段唯一值' },
             result?.values.length ? result.values.map((value, index) => h(Button, { type: 'text', size: 'small', key: index,

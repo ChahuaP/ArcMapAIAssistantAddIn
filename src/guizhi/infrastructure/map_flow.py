@@ -6,12 +6,14 @@ import re
 from shutil import copyfileobj
 from uuid import uuid4
 
-from pydantic import Field
+from pydantic import Field, ValidationError
+from pyproj import CRS
+from pyproj.exceptions import CRSError
 
 from guizhi.application.skills import execute
 from guizhi.domain.capabilities import CAPABILITIES
 from guizhi.domain.skills import Slug, Strict, Title
-from guizhi.infrastructure.operations.evidence import read_artifact
+from guizhi.infrastructure.operations.evidence import artifact_reference, read_artifact
 from guizhi.infrastructure.operations.runner import handler, parameter_model
 
 
@@ -45,14 +47,14 @@ TOOLS = {
     "raster.mosaic": (["影像", "拼接影像"], "layer"),
     "presentation.export_table": (["图层"], "table"),
     "flow.unique_values": (["图层"], "values"),
-    "flow.expression": ([], "expression"),
+    "flow.condition": (["图层"], "condition"),
     "flow.calculate": ([], "number"),
 }
 
 # These ports are optional when the node has a literal value in its editor.
 VALUE_PORTS = {
-    "data.select_by_attribute": [("SQL", "expression", "sql"), ("唯一值", "values", "values")],
-    "table.calculate_field": [("公式", "expression", "expression"), ("数值", "number", "value")],
+    "data.select_by_attribute": [("查询条件", "condition", "where"), ("唯一值", "values", "values")],
+    "table.calculate_field": [("数值", "number", "value")],
     "vector.buffer": [("距离", "number", "distance")],
     "flow.calculate": [("左值", "number", "left"), ("右值", "number", "right")],
 }
@@ -83,6 +85,12 @@ class Model(Strict):
     connections: list[Connection] = Field(max_length=32)
 
 
+class FlowIssue(ValueError):
+    def __init__(self, message, node=None):
+        super().__init__(message)
+        self.node = node
+
+
 def catalog():
     return [{"operation": name, "inputs": inputs, "valuePorts": [label for label, _, _ in VALUE_PORTS.get(name, ())],
              "inputTypes": input_types(name), "output": output, "title": CAPABILITIES[name].title}
@@ -90,7 +98,10 @@ def catalog():
 
 
 def inspect_model(raw):
-    model = Model.model_validate(raw)
+    try:
+        model = Model.model_validate(raw)
+    except ValidationError as error:
+        raise ValueError("流程节点或连线格式无效，最多可添加 16 个节点和 32 条连线") from error
     nodes = {node.id: node for node in model.nodes}
     if len(nodes) != len(model.nodes) or any(node.operation not in {"input", *TOOLS} for node in nodes.values()):
         raise ValueError("流程节点类型或编号无效")
@@ -102,19 +113,19 @@ def inspect_model(raw):
         if kind == "selection":
             kind = "layer"
         if (edge.port >= len(types) or types[edge.port] != kind or edge.port in inputs[edge.target]):
-            raise ValueError("流程连接不匹配或同一个输入重复连接")
+            raise FlowIssue("连线类型不匹配，或同一个输入重复连接", edge.target if target else None)
         inputs[edge.target][edge.port] = edge.source
     try:
         order = tuple(TopologicalSorter({name: ports.values() for name, ports in inputs.items()}).static_order())
     except CycleError as error:
-        raise ValueError("流程中存在循环，请调整连接") from error
+        raise FlowIssue("流程中存在循环，请调整连线", error.args[1][0]) from error
     return model, nodes, inputs, order
 
 
-def compile_model(workspace, raw, bindings, target=None):
-    from guizhi.infrastructure.map_workspace import map_material
-
+def compile_model(raw, bindings, target=None):
     _, nodes, inputs, order = inspect_model(raw)
+    if not isinstance(bindings, dict):
+        raise ValueError("流程图层绑定无效")
     if target is not None and (target not in nodes or nodes[target].operation == "input"):
         raise ValueError("请选择要运行到的工具节点")
     wanted = set(order) if target is None else {target}
@@ -122,29 +133,33 @@ def compile_model(workspace, raw, bindings, target=None):
         for name in reversed(order):
             if name in wanted:
                 wanted.update(inputs[name].values())
-    groups, steps, ports, records = {}, [], {}, {}
+    references, steps, ports, records = {}, [], {}, {}
+    used = {source for name in wanted for source in inputs[name].values()}
     for name in order:
         if name not in wanted:
             continue
         node = nodes[name]
+        label = node.label or ("输入图层" if node.operation == "input" else CAPABILITIES[node.operation].title)
         step_id = "n" + str(len(steps) + 1)
         if node.operation == "input":
-            # Unconnected layer placeholders are useful in a template.
-            if not any(name in inputs[other].values() for other in wanted):
-                continue
+            if name not in used:
+                raise FlowIssue("请把图层连到工具节点，或移除此节点", name)
             if name not in bindings:
-                raise ValueError(f"请为「{node.label or '输入图层'}」选择图层")
-            groups[name] = [map_material(workspace, bindings[name])]
+                raise FlowIssue("请选择图层", name)
+            references[name] = bindings[name]
             ports[name] = "material." + name
             continue
         slot_names, result_type = TOOLS[node.operation]
         missing = "、".join(title for index, title in enumerate(slot_names) if index not in inputs[name])
         if missing:
-            raise ValueError(f"「{node.label or CAPABILITIES[node.operation].title}」需要连接{missing}")
+            raise FlowIssue("请连接" + missing, name)
         predecessors = [ports[inputs[name][index]] for index in range(len(slot_names))]
-        parameters = bind_values(node, inputs[name], ports)
+        try:
+            parameters = bind_values(node, inputs[name], ports)
+        except ValueError as error:
+            raise FlowIssue(str(error), name) from error
         steps.append({"id": step_id, "operation": node.operation, "inputs": predecessors, "parameters": parameters})
-        record = {"step": step_id, "node": name, "operation": node.operation, "label": node.label or CAPABILITIES[node.operation].title}
+        record = {"step": step_id, "node": name, "operation": node.operation, "label": label}
         records[step_id] = record
         port = step_id
         if result_type == "selection":
@@ -155,7 +170,7 @@ def compile_model(workspace, raw, bindings, target=None):
         ports[name] = "step." + port
     if not 1 <= len(steps) <= 12:
         raise ValueError("每次可运行 1 至 12 个处理步骤，筛选结果生成图层也计一步")
-    return groups, steps, records
+    return references, steps, records
 
 
 def bind_values(node, inputs, ports):
@@ -167,26 +182,66 @@ def bind_values(node, inputs, ports):
     if len(connected) > 1 and node.operation != "flow.calculate":
         raise ValueError("一个工具节点只能连接一种计算来源")
     if node.operation == "data.select_by_attribute" and connected:
-        if "sql" in connected:
+        if "where" in connected:
             parameters = connected
         else:
             field = parameters.get("where", {}).get("field")
             if not isinstance(field, str) or not field:
                 raise ValueError("请选择要与唯一值匹配的字段")
-            parameters = {"where": {"field": field, "op": "in", **connected}}
+            parameters = {"where": {"field": {"$literal": field}, "op": "in", **connected}}
     elif node.operation == "table.calculate_field" and connected:
         if not parameters.get("field"):
             raise ValueError("请选择写入字段")
-        parameters = {"field": parameters["field"], **connected}
+        parameters = {"field": {"$literal": parameters["field"]}, **connected}
     else:
         parameters.update(connected)
     if connected:
         # The registered operation validates the complete parameters after the upstream outputs resolve.
         return parameters
+    if node.operation.startswith("raster."):
+        from importlib.util import find_spec
+
+        if find_spec("rasterio") is None:
+            raise ValueError("请先安装栅格处理组件")
     try:
-        return parameter_model(handler(node.operation)).model_validate(parameters).model_dump(mode="json")
+        validated = parameter_model(handler(node.operation)).model_validate(parameters).model_dump(mode="json")
     except ValueError as error:
-        raise ValueError(f"「{node.label or CAPABILITIES[node.operation].title}」的参数未填完整或类型有误") from error
+        raise ValueError("参数未填完整或类型有误") from error
+    if node.operation == "flow.calculate" and validated["operator"] == "divide" and validated["right"] == 0:
+        raise ValueError("除数不能为 0")
+    if node.operation == "data.select_by_attribute" and validated["where"] is None and validated["sql"] is None:
+        raise ValueError("请填写属性查询条件或连接查询条件节点")
+    epsg = validated.get("epsg") if node.operation == "geometry.create_dataset" else None
+    if node.operation == "raster.reproject" and validated["target_crs"].startswith("EPSG:"):
+        epsg = validated["target_crs"]
+    if epsg is not None:
+        try:
+            CRS.from_user_input(epsg)
+        except CRSError as error:
+            raise ValueError("请选择有效的 EPSG 坐标系") from error
+    return {"$literal": validated}
+
+
+def check(workspace, payload):
+    from guizhi.infrastructure.map_workspace import VECTOR_ARTIFACTS
+
+    try:
+        references, _, _ = compile_model(payload["model"], payload.get("bindings", {}), payload.get("target"))
+    except ValueError as error:
+        return [{"node": getattr(error, "node", None), "message": str(error)}]
+    issues = []
+    for node, ref in references.items():
+        try:
+            if (not isinstance(ref, dict) or set(ref) != {"run", "artifact"}
+                    or not isinstance(ref["run"], str) or not isinstance(ref["artifact"], str)):
+                raise ValueError("无效的图层引用")
+            step = ref["artifact"]
+            if step not in VECTOR_ARTIFACTS and step != "raster_preview":
+                raise ValueError("无效的图层成果")
+            artifact_reference(workspace, ref["run"], "raster-1" if step == "raster_preview" else step)
+        except (OSError, ValueError):
+            issues.append({"node": node, "message": "图层成果不可用，请重新选择图层"})
+    return issues
 
 
 def job_key(payload):
@@ -210,9 +265,10 @@ def progress(workspace, payload):
 
 
 def run(workspace, payload):
-    from guizhi.infrastructure.map_workspace import output_layers
+    from guizhi.infrastructure.map_workspace import map_material, output_layers
 
-    groups, steps, records = compile_model(workspace, payload["model"], payload.get("bindings", {}), payload.get("target"))
+    references, steps, records = compile_model(payload["model"], payload.get("bindings", {}), payload.get("target"))
+    groups = {name: [map_material(workspace, ref)] for name, ref in references.items()}
     key = job_key(payload)
     cancel = workspace.root / (key + ".cancel")
     receipt = execute(workspace.root, groups, steps=steps, cancel_requested=cancel.exists, key=key)

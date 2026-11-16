@@ -1,6 +1,6 @@
-import { ReactFlow, Background, Controls, Handle, Position, applyEdgeChanges, applyNodeChanges } from '@xyflow/react';
+import { ReactFlow, Background, Controls, Handle, Position, applyEdgeChanges, applyNodeChanges, useUpdateNodeInternals } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { flowForm, toolIcon, toolTitle } from './map-processing.js';
+import { acceptsFlowLayer, flowForm, flowInputIssue, toolIcon, toolTitle } from './map-processing.js';
 import { AttributePreview, TokenPicker } from './map-pickers.js';
 
 const h = window.React.createElement;
@@ -10,12 +10,12 @@ const api = window.guizhi;
 const layerKey = layer => layer.ref.run + ':' + layer.ref.artifact;
 const dragType = 'application/x-guizhi-flow';
 const outputs = { layer: '图层', selection: '筛选结果', statistics: '统计结果', table: '属性表',
-    values: '唯一值', expression: 'SQL', number: '数值' };
+    values: '唯一值', condition: '查询条件', number: '数值' };
 const headings = { area_m2: '合并面积（平方米）', feature_count: '要素数', selected_count: '选中要素数',
     updated: '计算要素数', row_count: '记录数', distinct_count: '唯一值数', width: '宽度（像元）',
     height: '高度（像元）', band_count: '波段数' };
 const writesFields = new Set(['table.add_field', 'table.delete_field', 'table.calculate_geometry', 'table.calculate_field']);
-const inputTool = { title: '输入图层', inputs: [], output: 'layer' };
+const inputTool = { title: '输入图层', inputs: [], inputTypes: [], output: 'layer' };
 const graphNode = (node, definition, result, failed) => ({ id: node.id, type: 'operation', position: { x: node.x, y: node.y },
     data: { ...node, definition, result, failed }, ariaLabel: node.label || definition.title });
 const edge = (source, target, port) => ({ id: [source, target, port].join(':'), source, target, targetHandle: String(port) });
@@ -25,10 +25,12 @@ const cleanGraph = (nodes, edges, forms) => ({ nodes: nodes.map(node => ({
     y: Math.round(node.position.y), settings: node.data.settings, parameters: forms.get(node.id)?.parameters || {},
 })), connections: edges.map(connection) });
 
-function OperationNode({ data }) {
-    const { definition, failed, result, editor, name, lock, actions } = data;
+function OperationNode({ id, data }) {
+    const { definition, failed, result, editor, name, lock, actions, showOutput } = data;
+    const updateHandles = useUpdateNodeInternals();
     const [preview, showPreview] = useState(false);
     const [renaming, rename] = useState(false);
+    useEffect(() => { updateHandles(id); }, [id, showOutput, updateHandles]);
     const layer = result?.layers[0];
     return h('div', { className: 'gis-flow-node', 'data-kind': definition.output,
         'data-state': failed ? 'error' : result ? 'done' : undefined },
@@ -45,7 +47,7 @@ function OperationNode({ data }) {
         result && h('div', { className: 'gis-flow-result nodrag nopan nowheel' },
             Object.entries(result.statistics || {}).filter(([name, value]) => headings[name] && typeof value === 'number').map(([name, value]) =>
                 h('div', { key: name }, headings[name] + ' ' + value.toLocaleString('zh-CN', { maximumFractionDigits: 3 }))),
-            Object.hasOwn(result, 'value') && (Array.isArray(result.value)
+            definition.output !== 'condition' && Object.hasOwn(result, 'value') && (Array.isArray(result.value)
                 ? h('details', null, h('summary', null, '查看唯一值'), h('div', { className: 'gis-flow-values' },
                     result.value.map((value, i) => h('div', { key: i }, value == null ? '空值' : value === '' ? '空字符串' : String(value)))))
                 : h('output', null, String(result.value))),
@@ -59,9 +61,8 @@ function OperationNode({ data }) {
                 actions.highlight && h(Button, { size: 'small', disabled: lock, onClick: actions.highlight }, '高亮原图层'),
                 result.table && h(Button, { size: 'small', disabled: lock, onClick: actions.table }, '导出 CSV')),
             preview && layer?.geometry && h(AttributePreview, { key: layerKey(layer), layer, field: data.field })),
-        h('div', { className: 'gis-flow-output' }, outputs[definition.output],
-            !['statistics', 'table'].includes(definition.output) &&
-                h(Handle, { type: 'source', position: Position.Right, title: '连接到下游节点', 'aria-label': outputs[definition.output] + '输出' })));
+        showOutput && h('div', { className: 'gis-flow-output' }, outputs[definition.output],
+            h(Handle, { type: 'source', position: Position.Right, title: '连接到下游节点', 'aria-label': outputs[definition.output] + '输出' })));
 }
 const nodeTypes = { operation: OperationNode };
 
@@ -86,6 +87,7 @@ export function MapFlow({ open, layers, busy, setBusy, close, glyph, onLayers, o
     const [progress, setProgress] = useState('');
     const [results, setResults] = useState({});
     const [failed, setFailed] = useState(null);
+    const [issues, setIssues] = useState([]);
     const [message, setMessage] = useState('');
     const [error, setError] = useState('');
     const definition = id => id === 'input' ? inputTool : catalog.find(item => item.operation === id);
@@ -130,6 +132,7 @@ export function MapFlow({ open, layers, busy, setBusy, close, glyph, onLayers, o
         setMessage('');
         setError('');
         setFailed(null);
+        setIssues([]);
     }
     function patchSettings(id, name, value) {
         clearResults([id]);
@@ -156,6 +159,9 @@ export function MapFlow({ open, layers, busy, setBusy, close, glyph, onLayers, o
         const form = flowForm(operation, inputs, node.data.settings, (name, value) => patchSettings(id, name, value), predecessors);
         form.input = inputs[0];
         form.valid = form.valid && inputs.every(input => input !== undefined);
+        form.issue = flowInputIssue(operation, tool.inputs, inputs, form.parameters, predecessors);
+        form.missing = tool.inputs.filter((_, port) => !predecessors[port]);
+        form.waitingForInput = inputs.some(input => input === undefined);
         forms.set(id, form);
         const layer = results[id]?.layers[0];
         if (layer) descriptors.set(id, layer);
@@ -165,6 +171,7 @@ export function MapFlow({ open, layers, busy, setBusy, close, glyph, onLayers, o
         });
         else if (inputs[0] && ['layer', 'selection'].includes(tool.output)) {
             const inherited = { ...inputs[0], unavailable: true };
+            if (operation === 'raster.reproject') inherited.crs = form.parameters.target_crs;
             const field = operation === 'table.calculate_geometry' && form.parameters.field;
             if (field && !inherited.fields?.some(item => item.name === field)) {
                 inherited.fields = [...inherited.fields, { name: field, type: 'float64' }];
@@ -189,7 +196,11 @@ export function MapFlow({ open, layers, busy, setBusy, close, glyph, onLayers, o
         const result = results[id];
         const isInput = node.data.operation === 'input';
         const currentInput = form?.input?.ref && !form.input.unavailable && choices.some(item => item.value === layerKey(form.input));
-        return { ...node, data: { ...node.data, result, failed: failed === id, lock, field: form?.parameters.field,
+        const showOutput = edges.some(link => link.source === id) || nodes.some(next =>
+            next.data.definition.inputTypes.some((_, port) => canConnect(id, next, String(port))));
+        return { ...node, selected: selected === id,
+            data: { ...node.data, result, failed: failed === id || issues.some(issue => issue.node === id),
+                lock, showOutput, field: form?.parameters.field,
             name: label => setNodes(old => old.map(item => item.id === id ? { ...item,
                 ariaLabel: label || item.data.definition.title, data: { ...item.data, label } } : item)),
             editor: isInput ? [h(TokenPicker, { label: '选择图层', items: choices, selected: bindings[id],
@@ -253,18 +264,23 @@ export function MapFlow({ open, layers, busy, setBusy, close, glyph, onLayers, o
         select(id);
         if (!position) setTimeout(() => diagram?.fitView({ maxZoom: 1, padding: .15 }), 90);
     }
-    function validConnection(link) {
-        if (lock || !link.source || !link.target || link.source === link.target ||
-                edges.some(item => item.target === link.target && item.targetHandle === link.targetHandle)) return false;
-        const source = nodes.find(item => item.id === link.source)?.data.definition.output;
-        const target = nodes.find(item => item.id === link.target)?.data.definition.inputTypes?.[Number(link.targetHandle)];
+    function canConnect(sourceId, node, handle) {
+        if (!sourceId || !node || sourceId === node.id ||
+                edges.some(item => item.target === node.id && item.targetHandle === handle)) return false;
+        const source = nodes.find(item => item.id === sourceId)?.data.definition.output;
+        const port = Number(handle);
+        const target = node.data.definition.inputTypes[port];
         if (!target || (source === 'selection' ? 'layer' : source) !== target) return false;
-        const node = nodes.find(item => item.id === link.target);
+        const layer = descriptors.get(sourceId);
+        if (target === 'layer' && layer && !acceptsFlowLayer(node.data.operation, port, layer)) return false;
         if (target !== 'layer' && node.data.operation !== 'flow.calculate' &&
-            edges.some(item => item.target === link.target && Number(item.targetHandle) >= node.data.definition.inputs.length)) return false;
-        const seen = new Set([link.target]);
+            edges.some(item => item.target === node.id && Number(item.targetHandle) >= node.data.definition.inputs.length)) return false;
+        const seen = new Set([node.id]);
         for (const id of seen) edges.filter(item => item.source === id).forEach(item => seen.add(item.target));
-        return !seen.has(link.source);
+        return !seen.has(sourceId);
+    }
+    function validConnection(link) {
+        return !lock && canConnect(link.source, nodes.find(item => item.id === link.target), link.targetHandle);
     }
     function connect(link) {
         if (!validConnection(link)) return;
@@ -277,7 +293,8 @@ export function MapFlow({ open, layers, busy, setBusy, close, glyph, onLayers, o
         const removed = changes.filter(change => change.type === 'remove').map(change => change.id);
         const next = changes.find(change => change.type === 'select' && change.selected);
         if (next) select(next.id);
-        else if (removed.includes(selected)) select(null);
+        else if (removed.includes(selected) || changes.some(change =>
+            change.type === 'select' && change.id === selected && !change.selected)) select(null);
         if (removed.length) {
             setEdges(old => old.filter(link => !removed.includes(link.source) && !removed.includes(link.target)));
             setBindings(old => Object.fromEntries(Object.entries(old).filter(([id]) => !removed.includes(id))));
@@ -297,35 +314,60 @@ export function MapFlow({ open, layers, busy, setBusy, close, glyph, onLayers, o
         for (const id of ids) edges.filter(link => link.target === id).forEach(link => ids.add(link.source));
         return ids;
     }
-    async function run(target) {
-        if (lock) return;
+    function focusNode(id) {
+        if (!id) return;
+        select(id);
+        void diagram?.fitView({ nodes: [{ id }], maxZoom: 1, padding: .25, duration: 150 });
+    }
+    async function verify(target) {
         const ids = required(target);
-        setError('');
-        setMessage('');
-        setFailed(null);
-        if (missingRaster && nodes.some(node => ids.has(node.id) && node.data.operation.startsWith('raster.'))) {
-            setError('请先安装栅格处理组件');
-            return;
-        }
-        const invalid = nodes.find(node => ids.has(node.id) && node.data.operation !== 'input' && !forms.get(node.id)?.valid);
-        if (invalid) {
-            select(invalid.id);
-            setFailed(invalid.id);
-            setError('请检查「' + (invalid.data.label || invalid.data.definition.title) + '」的连线和参数。');
-            return;
-        }
+        clearResults([]);
         const model = cleanGraph(nodes, edges, forms);
         model.nodes = model.nodes.filter(node => ids.has(node.id));
         model.connections = model.connections.filter(link => ids.has(link.source) && ids.has(link.target));
+        const bindings = Object.fromEntries([...ids].flatMap(id => layerFor(id) ? [[id, layerFor(id).ref]] : []));
+        const problems = [];
+        const used = new Set(model.connections.map(link => link.source));
+        for (const { id, operation } of model.nodes) {
+            const form = forms.get(id);
+            const add = message => problems.push({ node: id, message });
+            if (operation === 'input') {
+                if (!bindings[id]) add('请选择图层');
+                if (!used.has(id)) add('请把图层连到工具节点，或移除此节点');
+            } else if (form.missing.length) add('请连接' + form.missing.join('、'));
+            else if (missingRaster && operation.startsWith('raster.')) add('请先安装栅格处理组件');
+            else if (form.issue) add(form.issue);
+            else if (!form.valid && !form.waitingForInput) add('请补齐节点参数，或检查填写的值');
+        }
+        if (!model.nodes.some(node => node.operation !== 'input') && !problems.length)
+            problems.push({ message: '请添加一个要运行的工具节点' });
+        const payload = { model, bindings, target };
+        if (!problems.length) problems.push(...await api.map({ action: 'flow-check', ...payload }));
+        if (!problems.length) return payload;
+        setIssues(problems);
+        focusNode(problems.find(issue => issue.node)?.node);
+    }
+    async function check() {
+        await perform(async () => {
+            if (await verify()) setMessage('检查通过，可以运行流程');
+        });
+    }
+    async function run(target) {
+        if (lock) return;
+        setPending(true);
+        let payload;
+        try { payload = await verify(target); }
+        catch (problem) { reportError(problem); }
+        finally { setPending(false); }
+        if (!payload) return;
         setBusy(true);
         setProgress('正在读取图层…');
         setRunning(true);
         try {
-            const bound = Object.fromEntries([...ids].flatMap(id => layerFor(id) ? [[id, layerFor(id).ref]] : []));
-            const result = await api.mapFlowRun({ model, bindings: bound, target });
+            const result = await api.mapFlowRun(payload);
             if (result.status === 'cancelled') setMessage('流程已停止');
             else if (result.status !== 'succeeded') {
-                if (result.failedNode) { select(result.failedNode); setFailed(result.failedNode); }
+                if (result.failedNode) { focusNode(result.failedNode); setFailed(result.failedNode); }
                 reportError(result.message);
             } else {
                 setMessage('已完成 ' + result.steps.length + ' 个节点');
@@ -341,7 +383,14 @@ export function MapFlow({ open, layers, busy, setBusy, close, glyph, onLayers, o
         catch (problem) { setStopping(false); reportError(problem); }
     }
     function load(item) {
-        if (lock || item.model.nodes.some(node => !definition(node.operation))) return;
+        if (lock) return;
+        if (item.model.nodes.some(node => !definition(node.operation) ||
+            node.operation === 'table.calculate_field' && node.settings?.operator === 'sql' ||
+            node.operation === 'data.select_by_attribute' && node.settings?.method === 'sql')) {
+            setTemplateOpen(false);
+            setError('此模板含有已停用的手写表达式，请用「查询条件」或「计算字段」重新配置。');
+            return;
+        }
         setNodes(item.model.nodes.map(node => graphNode(node, definition(node.operation))));
         setEdges(item.model.connections.map(link => edge(link.source, link.target, link.port)));
         setTemplateId(item.id);
@@ -417,7 +466,8 @@ export function MapFlow({ open, layers, busy, setBusy, close, glyph, onLayers, o
         onCancel: close },
     h('div', { className: 'gis-flow-toolbar' },
         h(Button, { type: 'primary', disabled: lock || !forms.size, onClick: () => run() }, '运行流程'),
-        h(Button, { disabled: lock || !forms.has(selected), onClick: () => run(selected) }, '运行至此'),
+        h(Button, { disabled: lock || !forms.has(selected), onClick: () => run(selected) }, '运行至选中节点'),
+        h(Button, { disabled: lock || !nodes.length, onClick: check }, '检查流程'),
         running && h(Button, { disabled: stopping, onClick: stop }, stopping ? '正在停止' : '停止'),
         h('span', { className: 'gis-flow-space' }),
         h(Button, { disabled: lock || !nodes.length, onClick: reset }, '新建'),
@@ -449,6 +499,11 @@ export function MapFlow({ open, layers, busy, setBusy, close, glyph, onLayers, o
     deleteTemplate && h(Modal, { open: true, centered: true, title: '删除模板', okText: '删除', cancelText: '取消',
         confirmLoading: pending, okButtonProps: { danger: true }, onOk: () => removeTemplate(deleteTemplate),
         onCancel: () => { if (!pending) setDeleteTemplate(null); } }, '删除「' + deleteTemplate.title + '」？'),
-    h('div', { className: 'gis-flow-status', role: error ? 'alert' : 'status' },
-        error ? h('span', { className: 'error' }, error) : running ? progress : message || ''));
+    h('div', { className: 'gis-flow-status', role: error || issues.length ? 'alert' : 'status' },
+        issues.length > 0 ? h('ul', { className: 'gis-flow-issues' }, issues.map(({ node, message }) => {
+            const item = nodes.find(value => value.id === node);
+            const text = item ? (item.data.label || item.data.definition.title) + ' · ' + message : message;
+            return h('li', { key: (node || '') + message },
+                item ? h('button', { type: 'button', onClick: () => focusNode(node) }, text) : text);
+        })) : error ? h('span', { className: 'error' }, error) : running ? progress : message || ''));
 }
