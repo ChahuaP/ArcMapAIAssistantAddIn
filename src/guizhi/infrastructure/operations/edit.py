@@ -4,9 +4,10 @@ from typing import Annotated, Literal
 import geopandas
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, StrictInt
-from shapely.geometry import shape
+import shapely
+from shapely.geometry import MultiLineString, MultiPoint, MultiPolygon, shape
 
-from guizhi.infrastructure.operations.common import valid
+from guizhi.infrastructure.operations.common import Selection, selection_fids, valid
 
 
 class Change(BaseModel):
@@ -17,19 +18,34 @@ class Change(BaseModel):
     fields: dict = Field(default_factory=dict)
 
 
+def editable(frame, info):
+    if frame.crs is None:
+        raise ValueError("请先为图层定义坐标系")
+    if frame.geometry.has_z.any() or frame.geometry.has_m.any():
+        raise ValueError("地图编辑适用于二维图层")
+    kind = info["geometry_type"]
+    if kind.removeprefix("Multi") not in {"Point", "LineString", "Polygon"}:
+        raise ValueError("请选择点、线或面图层")
+    return kind
+
+
+def publish_edit(ctx, frame, kind, **options):
+    valid(frame)
+    family = kind.removeprefix("Multi")
+    if kind.startswith("Multi") or frame.geom_type.str.startswith("Multi").any():
+        composite = {"Point": MultiPoint, "LineString": MultiLineString, "Polygon": MultiPolygon}[family]
+        frame = frame.set_geometry(frame.geometry.map(lambda geom: composite([geom]) if geom.geom_type == family else geom))
+        kind = "Multi" + family
+    ctx.publish(frame, geometry_type=kind, **options)
+
+
 def changes(ctx, changes: Annotated[list[Change], Field(min_length=1, max_length=500)]):
     original = ctx.frames[0]
     frame = original.copy()
     geometry = frame.geometry.name
     fields = frame.columns.drop(geometry)
-    if frame.crs is None:
-        raise ValueError("请先为图层定义坐标系")
-    if frame.geometry.has_z.any() or frame.geometry.has_m.any():
-        raise ValueError("地图编辑适用于二维图层")
-    geom_type = ctx.info[0]["geometry_type"]
+    geom_type = editable(frame, ctx.info[0])
     expected = geom_type.removeprefix("Multi")
-    if expected not in {"Point", "LineString", "Polygon"}:
-        raise ValueError("请选择点、线或面图层")
     seen = set()
     additions = []
     for change in changes:
@@ -75,11 +91,55 @@ def changes(ctx, changes: Annotated[list[Change], Field(min_length=1, max_length
                 dtype = "boolean"
             incoming[name] = incoming[name].astype(dtype)
         frame = geopandas.GeoDataFrame(pd.concat([frame, incoming], ignore_index=True), geometry=geometry, crs=frame.crs)
-    valid(frame)
-    ctx.publish(frame, geometry_type=geom_type if frame.empty else None)
+    publish_edit(ctx, frame, geom_type)
     ctx.json("edits.json", {"revision": ctx.selection_hashes[0],
         "changes": [change.model_dump(mode="json") for change in changes]}, "edits")
     return {"changeset": {"target_revision": ctx.selection_hashes[0], "count": len(changes)}}
+
+
+def transfer(ctx, selection: Selection, mode: Literal["copy", "cut"]):
+    from guizhi.infrastructure.map_workspace import projection
+
+    source, target = ctx.frames
+    source_info, target_info = ctx.info
+    source_kind, target_kind = editable(source, source_info), editable(target, target_info)
+    if source_kind.removeprefix("Multi") != target_kind.removeprefix("Multi"):
+        raise ValueError("源图层和目标图层的几何类型必须一致")
+    fids = sorted(selection_fids(ctx, selection))
+    if not 1 <= len(fids) <= 500:
+        raise ValueError("请选择 1 至 500 个要素")
+    selected = source.loc[fids]
+    geom = selected.geometry.array
+    if source.crs != target.crs:
+        transform = projection(source.crs, target.crs, selected.total_bounds)
+        geom = shapely.transform(geom, lambda x, y: transform.transform(x, y, errcheck=True), interleaved=False)
+
+    target_fields = dict(zip(target_info["fields"], target_info["dtypes"], strict=True))
+    source_fields = {name.casefold(): (name, kind) for name, kind in zip(source_info["fields"], source_info["dtypes"], strict=True)}
+    attrs = {}
+    base = target.copy()
+    for name, kind in target_fields.items():
+        match = source_fields.get(name.casefold())
+        if match and match[1] != kind:
+            raise ValueError(f"同名字段 {name} 的类型不同，请先调整字段类型")
+        values = list(selected[match[0]]) if match else [None] * len(selected)
+        if kind.startswith(("int", "uint")):
+            dtype = kind.capitalize()
+            base[name] = base[name].astype(dtype)
+        elif kind == "bool":
+            dtype = "boolean"
+            base[name] = base[name].astype(dtype)
+        else:
+            dtype = target[name].dtype
+        attrs[name] = pd.Series(values, dtype=dtype)
+    geometry = target.geometry.name
+    incoming = geopandas.GeoDataFrame({**attrs, geometry: geom}, geometry=geometry, crs=target.crs)
+    added = geopandas.GeoDataFrame(pd.concat([base, incoming], ignore_index=True), geometry=geometry, crs=target.crs)
+    publish_edit(ctx, added, target_kind)
+    if mode == "cut":
+        publish_edit(ctx, source.drop(index=fids), source_kind, artifact="transfer-source", filename="source.gpkg")
+    return {"changeset": {"mode": mode, "moved": len(fids), "source_revision": ctx.selection_hashes[0],
+                          "target_revision": ctx.selection_hashes[1], "fids": fids}}
 
 
 def field_value(series, value):

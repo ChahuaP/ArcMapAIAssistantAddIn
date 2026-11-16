@@ -69,6 +69,7 @@ CAPABILITIES = {
     "crs.transform": Capability("按已验证方案转换坐标"),
     "crs.reproject": Capability("转换矢量投影"),
     "edit.changes": Capability("保存图层编辑", edit=True),
+    "edit.transfer": Capability("在图层间复制或剪切要素", 2, 2, edit=True),
     "geometry.create_dataset": Capability("新建空图层", 0, 1),
     "geometry.create_points": Capability("创建点", 0, 1),
     "geometry.append_points": Capability("追加点", edit=True),

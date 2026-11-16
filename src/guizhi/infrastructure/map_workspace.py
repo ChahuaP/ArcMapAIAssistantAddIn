@@ -141,7 +141,7 @@ def source(workspace, ref):
     if not isinstance(ref, dict) or set(ref) != {"run", "artifact"}:
         raise ValueError("请选择已保存的地图图层")
     run, kind = ref["run"], ref["artifact"]
-    if not isinstance(run, str) or not re.fullmatch(r"[a-f0-9]{32}", run) or kind not in {"import", "export", "boundaries"}:
+    if not isinstance(run, str) or not re.fullmatch(r"[a-f0-9]{32}", run) or kind not in {"import", "export", "boundaries", "transfer-source"}:
         raise ValueError("地图图层引用无效")
     record = workspace.read(run)
     if record["status"] != "succeeded":
@@ -310,7 +310,12 @@ def features(workspace, payload):
         frame = frame.iloc[:limit]
     records = frame.drop(columns=frame.geometry.name).to_json(orient="records", date_format="iso", force_ascii=False)
     attributes = json.loads(records) if len(frame.columns) > 1 else [{} for _ in frame.index]
-    if not fids and payload.get("fields"):
+    if fids:
+        for row in attributes:
+            for key, value in row.items():
+                if type(value) is int and abs(value) > 2**53 - 1:
+                    row[key] = str(value)
+    elif payload.get("fields"):
         for row in attributes:
             for key, value in row.items():
                 row[key] = category_value(value)
@@ -331,6 +336,26 @@ def request(workspace, payload):
         return manual_tool(workspace, payload)
     if action == "skill":
         return manual_skill(workspace, payload)
+    if action == "edit-sketch":
+        from guizhi.infrastructure.map_editing import sketch
+
+        return sketch(payload)
+    if action == "edit-transfer":
+        if payload["ref"] == payload["destination"]:
+            raise ValueError("请选择另一个图层")
+        origin = material(*source(workspace, payload["ref"]))
+        destination = material(*source(workspace, payload["destination"]))
+        if origin["revision"] != payload["revision"] or destination["revision"] != payload["destinationRevision"]:
+            raise ValueError("图层已修改，请重新复制或剪切要素")
+        mode = payload["mode"]
+        record = successful(run_operation(workspace.root, {"operation": "edit.transfer", "inputs": [origin, destination],
+            "parameters": {"selection": {"layer": origin["layer"], "revision": origin["revision"], "fids": payload["fids"]},
+                           "mode": mode}, "idempotency_key": uuid4().hex}))
+        result = {"destination": describe(workspace, {"run": record["id"], "artifact": "export"}),
+                  "count": record["result"]["changeset"]["moved"]}
+        if mode == "cut":
+            result["source"] = describe(workspace, {"run": record["id"], "artifact": "transfer-source"})
+        return result
     if action == "step-layers":
         record = successful(workspace.read(payload["run"]))
         return output_layers(workspace, record, payload.get("title") or step_title(record["task"]["operation"]))

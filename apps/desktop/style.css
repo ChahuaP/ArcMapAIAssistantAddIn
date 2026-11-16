@@ -350,7 +350,8 @@ dialog label { display: grid; gap: 5px; }
 .map-swatch[data-color="4"] { background: #cc5785; }
 .map-viewport { display: flex; flex-direction: column; min-height: 0; position: relative; overflow: hidden; }
 .map-viewport .geo-map { position: relative; }
-.workspace-map[data-identify="true"] .geo-map { cursor: crosshair; }
+.workspace-map:is([data-identify="true"], [data-box-select="true"]) .geo-map { cursor: crosshair; }
+.map-selection-box { border: 2px solid #fff000; background: #fff00018; box-shadow: 0 0 0 1px #312a05; }
 .map-identify-popup {
     position: relative; display: flex; flex-direction: column; color: var(--ink); background: var(--panel);
     border: 1px solid var(--gis-edge); border-radius: 8px; box-shadow: 0 4px 16px #0003; cursor: default;
@@ -384,6 +385,7 @@ dialog label { display: grid; gap: 5px; }
     background: var(--panel);
 }
 .map-notice { max-height: 5em; overflow: auto; pointer-events: auto; }
+.workspace-map[data-edit-mode="split"] .map-notice { pointer-events: none; }
 .map-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 7px 10px; background: var(--sub); }
 .map-legend-entry { display: flex; align-items: center; gap: 8px; padding: 6px 12px; }
 .map-coordinate { display: grid; margin-top: auto; padding: 6px; }

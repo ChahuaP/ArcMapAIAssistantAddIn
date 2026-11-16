@@ -295,7 +295,8 @@ async function startDesktop(options) {
     bind('mapCatalog', async (surface, items, selection) => {
         if (surface !== window || !Array.isArray(items) || items.length > 256 ||
             items.some(item => !item || typeof item.name !== 'string' || !item.name.trim() || item.name.length > 255 ||
-                !/^[a-f0-9]{32}$/.test(item.ref?.run) || !['import', 'export', 'boundaries', 'raster_preview'].includes(item.ref.artifact))) {
+                !/^[a-f0-9]{32}$/.test(item.ref?.run) ||
+                !['import', 'export', 'boundaries', 'transfer-source', 'raster_preview'].includes(item.ref.artifact))) {
             throw new Error('地图图层引用无效');
         }
         mapCatalogVersion += 1;
@@ -503,7 +504,7 @@ async function startDesktop(options) {
         'crs-search', 'raster-preview', 'raster-display', 'categories']);
     bind('map', async (surface, input) => {
         if (surface !== window || !input || !mapReads.has(input.action) &&
-                !['assign', 'reproject', 'transform', 'edit', 'tool', 'step-layers'].includes(input.action)) {
+                !['assign', 'reproject', 'transform', 'edit', 'edit-sketch', 'edit-transfer', 'tool', 'step-layers'].includes(input.action)) {
             throw new Error('地图请求无效');
         }
         if (!controller.settings.workspace) throw new Error('请先选择成果保存位置');

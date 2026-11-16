@@ -662,12 +662,15 @@
             setMapMounted(true);
             setMapMode(mode => mode === 'chat' ? 'split' : mode);
         }
-        function replaceLayer(before, after) {
-            const item = { ...after, name: before.name, style: before.style, group: before.group };
-            setLayers(old => old.map(layer => mapKey(layer) === mapKey(before) ? item : layer));
-            setActiveLayer(mapKey(item));
+        function replaceLayers(pairs) {
+            const replacements = new Map(pairs.map(([before, after]) => [mapKey(before),
+                { ...after, name: before.name, style: before.style, group: before.group }]));
+            setLayers(old => old.map(layer => replacements.get(mapKey(layer)) || layer));
+            hideLayers(old => old.map(id => replacements.has(id) ? mapKey(replacements.get(id)) : id));
+            setActiveLayer(mapKey(pairs.at(-1)[1]));
             setMapSelection(null);
         }
+        const replaceLayer = (before, after) => replaceLayers([[before, after]]);
         const mapWorkspace = mapMounted && h(window.GuizhiMap.WorkspaceMap, { layers, add: addLayers, active: activeLayer,
             moveLayer: (source, target, before) => setLayers(old => {
                 const from = old.findIndex(item => mapKey(item) === source);
@@ -704,7 +707,7 @@
                 ? { taskId: task.id, layout: task.layout } : null,
             onLayout: api.mapLayoutError, mapActions, onMapActions: () => setMapActions(null),
             selection: mapSelection, setSelection: setMapSelection,
-            replace: replaceLayer, editing: setMapEditing });
+            replace: replaceLayer, replaceLayers, editing: setMapEditing });
         async function configure(value) {
             const next = await api.configure(value);
             setState(next);
