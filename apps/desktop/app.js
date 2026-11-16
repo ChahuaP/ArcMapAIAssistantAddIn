@@ -585,7 +585,7 @@
                         disabled: adding || !draft.prompt.trim() || (!suggestion.exact && !canSubmit) })));
         const tiles = h('div', { className: 'business-tiles' }, ...catalog.slice(0, 3).map(item =>
             h('button', { key: reference(item), className: 'business-tile', title: item.title, onClick: () => choose(item) },
-                h('span', { className: 'tile-icon' }, icon(['layers', 'globe', 'folder'][catalog.indexOf(item)])),
+                h('span', { className: 'tile-icon' }, icon(window.GuizhiShell.businessIcon(item.id))),
                 h('b', null, item.title))));
         const quick = h('main', { className: 'launcher' },
             h('header', { className: 'launcher-head' }, brand(true), h('div', { className: 'title-group' },
@@ -608,8 +608,8 @@
             nav('app', '工作台', { className: mapOpen || showLog ? '' : 'rail-current', 'aria-current': mapOpen || showLog ? undefined : 'page',
                 disabled: mapEditing, onClick: () => showMapWorkspace(false) }),
             nav('map', '地图工作区', { disabled: !ready || (mapOpen && !showLog), 'aria-current': mapOpen && !showLog ? 'page' : undefined, onClick: () => openMap() }),
-            nav('grid', '业务中心', { disabled: !ready || mapEditing, onClick: () => showBusiness('browse') }),
-            nav('clock', '业务办理日志', { disabled: mapEditing, className: showLog ? 'rail-current' : '',
+            nav('briefcase', '业务中心', { disabled: !ready || mapEditing, onClick: () => showBusiness('browse') }),
+            nav('book', '业务办理日志', { disabled: mapEditing, className: showLog ? 'rail-current' : '',
                 'aria-current': showLog ? 'page' : undefined, onClick: () => setShowLog(true) }),
             nav('settings', '设置', { disabled: mapEditing, onClick: () => showSettings(true) }));
         };

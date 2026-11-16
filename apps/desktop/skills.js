@@ -2,7 +2,7 @@
     const h = React.createElement;
     const { useEffect, useRef, useState } = React;
     const api = window.guizhi;
-    const { button, iconButton, icon } = window.GuizhiShell;
+    const { button, iconButton, icon, businessIcon } = window.GuizhiShell;
     const { SkillEditor, deliverables } = window.GuizhiSkillEditor;
     const { reference, normalizeBusiness } = window.GuizhiTaskCommands;
     const domainTitles = { data: '数据', vector: '空间分析', geometry: '几何', table: '属性表',
@@ -40,14 +40,14 @@
                             placeholder: '搜索业务名称或常用说法', value: query, onChange: event => setQuery(event.target.value) }),
                         matches.length ? h('div', { className: 'skill-cards' }, ...matches.map(item => h('article', {
                             className: 'skill-card', key: reference(item),
-                        }, h('div', { className: 'section-head' }, h('h3', null, icon('layers'), item.title),
+                        }, h('div', { className: 'section-head' }, h('h3', null, icon(businessIcon(item.id)), item.title),
                             section === 'manage' && h('small', null, 'v' + item.release_version)),
                         item.summary && h('p', null, item.summary),
                         h('dl', { className: 'skill-facts' },
                             h('dt', null, '材料'), h('dd', null, item.materials.filter(role => !role.resource)
                                 .map(role => role.label).join('、') || '无需附件'),
                             h('dt', null, '成果'), h('dd', null, [...new Set(item.outputs.map(kind => deliverables[kind] || '业务成果'))].join('、') || '办理留痕')),
-                        section === 'manage' ? button('layers', '编辑', { onClick: () =>
+                        section === 'manage' ? button('pencil', '编辑', { onClick: () =>
                             api.skillShow(reference(item)).then(result => setEditor({ markdown: result.markdown })).catch(fail) }) :
                             button('plus', '开始办理', { type: 'primary', onClick: () => choose(item) }))))
                             : h('p', { className: 'muted' }, '没有匹配的业务')) :

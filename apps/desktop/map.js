@@ -1,5 +1,5 @@
 import 'ol/ol.css';
-import { MapProcessing, TOOL_GROUPS, roleLayerPicker, layerMatches, mapLayerMaterial } from './map-processing.js';
+import { MapProcessing, TOOL_GROUPS, toolIcon, roleLayerPicker, layerMatches, mapLayerMaterial } from './map-processing.js';
 import { MapFlow } from './map-flow.js';
 import { geometryProperties } from './map-attribute-tools.js';
 import { AttributeSort, AttributeStatistics, AttributeCell } from './map-table-ui.js';
@@ -29,61 +29,22 @@ import { getPointResolution } from 'ol/proj.js';
 const h = window.React.createElement;
 const { useEffect, useRef, useState } = window.React;
 const { Button, Input, Select: Choice, Table, Modal } = window.antd;
+const { icon: glyph, businessIcon } = window.GuizhiShell;
 const api = window.guizhi;
 const format = new GeoJSON();
 const palette = ['#1785db', '#bf6f2b', '#17a489', '#8263ca', '#cc5785'];
-const glyphs = {
-    map: 'm3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3zm6-3v15m6-12v15',
-    layers: 'm12 3 9 5-9 5-9-5zm-9 9 9 5 9-5M3 16l9 5 9-5',
-    pencil: 'm14 6 4 4M4 20l4-1 12-12-4-4L4 15z',
-    analysis: 'M3 3v18h18M8 16v-4m5 4V8m5 8V5',
-    globe: 'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0ZM3 12h18M12 3c5 4 5 14 0 18-5-4-5-14 0-18Z',
-    extent: 'M9 4H4v5m11-5h5v5m0 6v5h-5M4 15v5h5M9 9h6v6H9z',
-    target: 'M12 3v3m0 12v3M3 12h3m12 0h3m-3 0a6 6 0 1 1-12 0 6 6 0 0 1 12 0Z',
-    zoomIn: 'M15.5 15.5 21 21M17 10a7 7 0 1 1-14 0 7 7 0 0 1 14 0ZM7 10h6m-3-3v6',
-    zoomOut: 'M15.5 15.5 21 21M17 10a7 7 0 1 1-14 0 7 7 0 0 1 14 0ZM7 10h6',
-    select: 'm4 4 15 7-7 2-2 7-6-16Z',
-    clear: 'M8 4H4v4m12-4h4v4m0 8v4h-4M4 16v4h4m0-12 8 8m0-8-8 8',
-    table: 'M3 4h18v16H3zM3 9h18M3 14h18M9 9v11',
-    add: 'M3 5h7l2 2h9v13H3zM12 10v7m-3.5-3.5h7',
-    download: 'M12 3v12m-4-4 4 4 4-4M4 16v5h16v-5',
-    area: 'M3 3h18v18H3zM7 17l10-10m-5 0h5v5m-5 5H7v-5',
-    buffer: 'M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0Zm5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z',
-    clip: 'M4 4h12v12H4zM8 8h12v12H8z',
-    count: 'M5 8h14M5 16h14M10 4 8 20m8-16-2 16',
-    node: 'M5 5h4v4H5zm10 10h4v4h-4zM9 9l6 6',
-    move: 'M12 2v20M2 12h20M9 5l3-3 3 3M9 19l3 3 3-3M5 9l-3 3 3 3m14-6 3 3-3 3',
-    undo: 'M4 5v7h7m-7 0 5-5a6 6 0 1 1 5 10',
-    save: 'M4 3h13l3 3v15H4zM8 3v6h8V3m-8 18v-7h8v7',
-    trash: 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13m-8 4v5m4-5v5',
-    close: 'm6 6 12 12M18 6 6 18',
-    chevron: 'm6 9 6 6 6-6',
-    check: 'm5 12 4 4L19 6',
-    chat: 'M4 5h16v12H9l-5 4zM8 9h8m-8 4h5',
-    more: 'M5 12h.1m6.9 0h.1m6.9 0h.1',
-    grip: 'M8 5h.1m7.9 0h.1M8 12h.1m7.9 0h.1M8 19h.1m7.9 0h.1',
-    info: 'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0ZM12 11v5m0-8h.01',
-    box: 'M4 4h5m6 0h5v5m0 6v5h-5m-6 0H4v-5m0-6V4',
-    split: 'M4 4h16v16H4zM8 22 16 2',
-    copy: 'M8 8h12v12H8zM16 4H4v12',
-    cut: 'M8 8a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm0 8a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm-1-6 14 10M7 14 21 4',
-    paste: 'M9 4H5v17h14V4h-4m-6-1h6v4H9zM8 12h8m-8 4h8',
-};
 const commandIcons = {
-    全图: 'extent', 定位图层: 'target', 放大: 'zoomIn', 缩小: 'zoomOut', 清除选择: 'clear', 按属性选择: 'select', 按位置选择: 'target', 选中要素另存为图层: 'download',
-    属性表: 'table', 添加图层: 'add', 导出属性表: 'table', 最近成果: 'table', 添加字段: 'add', 删除字段: 'trash', 修复几何: 'pencil', 新建图层: 'add', 复制图层: 'layers', 合并图层: 'layers', '导出 SHP': 'download', 坐标系设置: 'globe', 地图属性: 'map', '打开 MXD': 'map', '保存 MXD': 'save',
+    全图: 'extent', 定位图层: 'target', 放大: 'zoomIn', 缩小: 'zoomOut', 清除选择: 'clear',
+    按属性选择: toolIcon('data.select_by_attribute'), 按位置选择: toolIcon('data.select_by_location'), 添加图层: 'add', 最近成果: 'history',
+    添加字段: toolIcon('table.add_field'), 删除字段: toolIcon('table.delete_field'), 新建图层: toolIcon('geometry.create_dataset'),
+    复制图层: toolIcon('data.copy'), 合并图层: toolIcon('data.merge'), 地图属性: 'settings',
     编辑图层: 'pencil', 选择: 'select', 绘制: 'pencil', 编辑顶点: 'node', 移动: 'move',
     完成绘制: 'check', 撤销绘制点: 'undo', 编辑属性: 'table', 删除要素: 'trash',
-    撤销: 'undo', 退出: 'close', 面积汇总: 'area', 缓冲分析: 'buffer', 识别要素: 'info', 框选: 'box',
-    合并要素: 'layers', 分割要素: 'split', 完成分割: 'check', 复制: 'copy', 剪切: 'cut', '粘贴到图层…': 'paste',
-    裁切: 'clip', 要素计数: 'count', 打开: 'map', 保存: 'save', 字段计算: 'analysis',
+    撤销: 'undo', 退出: 'close', 识别要素: 'info', 框选: 'box',
+    合并要素: 'merge', 分割要素: 'split', 完成分割: 'check', 复制: 'copy', 剪切: 'cut', '粘贴到图层…': 'paste',
+    打开: 'folderOpen', 保存: 'save', 字段计算器: toolIcon('table.calculate_field'), 计算几何: toolIcon('table.calculate_geometry'),
 };
-const tabIcons = { 地图: 'map', 数据: 'layers', 编辑: 'pencil', 分析: 'analysis', 制图: 'map', 业务: 'analysis' };
-function glyph(name, size = 17) {
-    return h('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'none',
-        stroke: 'currentColor', strokeWidth: ['more', 'grip'].includes(name) ? 3 : 1.65, strokeLinecap: 'round',
-        strokeLinejoin: 'round', 'aria-hidden': true }, h('path', { d: glyphs[name] }));
-}
+const tabIcons = { 地图: 'map', 数据: 'layers', 编辑: 'pencil', 分析: 'analysis', 制图: 'layout', 业务: 'briefcase' };
 
 const roles = { project: '项目范围', coverage: '重叠范围' };
 const key = item => item.ref.run + ':' + item.ref.artifact;
@@ -730,8 +691,8 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
     }
     const openTool = tool => setAnalysis({ tool });
     const skillGroups = [
-        ['规划与用地', ['control-check', 'farmland-balance', 'annual-land', 'permit-history']],
-        ['数据与影像', ['shared-delivery', 'cad-coordinates', 'imagery-change']],
+        ['规划与用地', ['control-check', 'farmland-balance', 'annual-land', 'permit-history'], 'parcels'],
+        ['数据与影像', ['shared-delivery', 'cad-coordinates', 'imagery-change'], 'image'],
     ];
     const customSkills = catalog.filter(item => !skillGroups.some(([, ids]) => ids.includes(item.id)));
     const menuGroup = (title, icon, items, onClick) => h('section', { className: 'ribbon-group ribbon-menu' }, h(antd.Dropdown, {
@@ -1095,7 +1056,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
             { key: 'fit', label: '缩放至图层', icon: glyph('target') },
             { key: 'table', label: '打开属性表', icon: glyph('table'), disabled: raster },
             { key: 'rename', label: '重命名', icon: glyph('pencil') },
-            { key: 'style', label: raster ? '显示' : '符号化', icon: glyph('pencil') },
+            { key: 'style', label: raster ? '显示' : '符号化', icon: glyph(raster ? 'image' : 'swatches') },
             { key: 'export', label: '导出', icon: glyph('download'), children: [
                 { key: 'export-data', label: '导出为…' },
                 ...(!raster ? [{ key: 'export-table', label: '导出属性表' }] : []),
@@ -1103,9 +1064,9 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
             ...(id === active && picked.length && !raster ? [
                 { key: 'selection', label: '选中要素另存为图层', icon: glyph('download') }] : []),
             { type: 'divider' },
-            { key: 'remove', label: '从地图移除', icon: glyph('trash'), danger: true },
+            { key: 'remove', label: '从地图移除', icon: glyph('removeLayer'), danger: true },
             { type: 'divider' },
-            { key: 'properties', label: '图层属性', icon: glyph('layers') },
+            { key: 'properties', label: '图层属性', icon: glyph('settings') },
         ], onClick: ({ key: action }) => {
             if (action === 'remove') { remove(id); return; }
             if (action === 'rename') { setRenamingLayer(id); return; }
@@ -1208,7 +1169,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
             ...editCommands],
         制图: [group('出图', command('导出地图', () => setLayout(true), { icon: glyph('download'), disabled: busy || !viewReady }))],
         分析: [group('流程', command('流程编辑器', () => setFlowOpen(true), {
-            icon: glyph('analysis'), disabled: busy || Boolean(edit),
+            icon: glyph('workflow'), disabled: busy || Boolean(edit),
         })), ...TOOL_GROUPS.map(({ title, icon, tools }) => {
             const prominent = { '统计': 2, '矢量处理': 2, '叠加分析': 2 }[title] || 0;
             return prominent ? group(title, ...tools.slice(0, prominent).map(item => command(item.title, () => openTool(item.id),
@@ -1217,9 +1178,10 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 ...(tools.length > prominent ? [menuGroup('更多', icon, tools.slice(prominent), openTool)] : []))
                 : menuGroup(title, icon, tools, openTool);
         })],
-        业务: [...skillGroups.map(([title, ids]) => [title, catalog.filter(item => ids.includes(item.id))]),
-            ['自定义业务', customSkills]].filter(([, items]) => items.length)
-            .map(([title, items]) => menuGroup(title, 'analysis', items, id => setAnalysis({ skill: items.find(item => item.id === id) }))),
+        业务: [...skillGroups.map(([title, ids, icon]) => [title, catalog.filter(item => ids.includes(item.id)), icon]),
+            ['自定义业务', customSkills, 'briefcase']].filter(([, items]) => items.length)
+            .map(([title, items, icon]) => menuGroup(title, icon, items.map(item => ({ ...item, icon: businessIcon(item.id) })),
+                id => setAnalysis({ skill: items.find(item => item.id === id) }))),
     };
     return h('section', { className: 'workspace-map', 'aria-label': '地图工作区', onKeyDown: mapKeys,
         'data-identify': identify ? 'true' : undefined, 'data-box-select': boxSelect && (!edit || edit === 'select') ? 'true' : undefined,
@@ -1311,11 +1273,11 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 h('span', null, layer.name),
                 command('添加字段', () => openTool('table.add_field'), { disabled: busy || Boolean(edit) }),
                 command('删除字段', () => openTool('table.delete_field'), { disabled: busy || Boolean(edit) || !layer.fields?.length }),
-                command('字段计算器', () => openTool('table.calculate_field'), { icon: glyph('analysis'), disabled: busy || Boolean(edit) || !layer.fields?.length }),
-                command('计算几何', () => openTool('table.calculate_geometry'), { icon: glyph('area'),
+                command('字段计算器', () => openTool('table.calculate_field'), { disabled: busy || Boolean(edit) || !layer.fields?.length }),
+                command('计算几何', () => openTool('table.calculate_geometry'), {
                     disabled: busy || Boolean(edit) || !Object.keys(geometryProperties(layer)).length }),
-                command('高级排序', () => setTableDialog({ kind: 'sort' }), { icon: glyph('table'), disabled: busy }),
-                command('统计', () => setTableDialog({ kind: 'stats' }), { icon: glyph('analysis'), disabled: busy || !tableFields.length }),
+                command('高级排序', () => setTableDialog({ kind: 'sort' }), { icon: glyph('sort'), disabled: busy }),
+                command('统计', () => setTableDialog({ kind: 'stats' }), { icon: glyph('statistics'), disabled: busy || !tableFields.length }),
                 command('切换选择', invertSelection, { icon: glyph('select'), disabled: busy }),
                 h(Button, { type: 'text', size: 'small', icon: glyph('close', 15),
                     'aria-label': '关闭属性表', onClick: () => { setTable(null); setTableDialog(null); } })),

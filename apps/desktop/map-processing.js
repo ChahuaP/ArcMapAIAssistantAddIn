@@ -21,44 +21,45 @@ const number = value => value === '' || value == null ? NaN : Number(value);
 const tool = (id, title, icon, ...accepts) => ({ id, title, icon, accepts });
 const area = tool('vector.area', '面积汇总', 'area', polygon);
 const count = tool('data.describe', '要素计数', 'count', vector);
-const selectAttr = tool('data.select_by_attribute', '按属性选择', 'select', vector);
-const selectLocation = tool('data.select_by_location', '按位置选择', 'target', vector, vector);
+const selectAttr = tool('data.select_by_attribute', '按属性选择', 'filter', vector);
+const selectLocation = tool('data.select_by_location', '按位置选择', 'spatialSelect', vector, vector);
 const tools = [
-    { title: '统计', icon: 'analysis', tools: [area, count] },
+    { title: '统计', icon: 'statistics', tools: [area, count] },
     { title: '矢量处理', icon: 'layers', tools: [
         tool('vector.buffer', '缓冲分析', 'buffer', vector),
-        tool('vector.dissolve', '融合', 'layers', vector),
+        tool('vector.dissolve', '融合', 'dissolve', vector),
     ] },
-    { title: '叠加分析', icon: 'clip', tools: [
-        tool('vector.intersect', '相交', 'clip', vector, vector),
-        tool('vector.erase', '擦除', 'clear', vector, polygon),
+    { title: '叠加分析', icon: 'layers', tools: [
+        tool('vector.intersect', '相交', 'intersect', vector, vector),
+        tool('vector.erase', '擦除', 'erase', vector, polygon),
         tool('vector.clip', '裁剪', 'clip', vector, polygon),
-        tool('vector.union', '联合', 'layers', polygon, polygon),
-        tool('vector.identity', '标识叠加', 'clip', polygon, polygon),
-        tool('vector.update_overlay', '更新叠加', 'layers', polygon, polygon),
-        tool('vector.symmetric_difference', '对称差集', 'clip', polygon, polygon),
-        tool('vector.spatial_join', '空间连接', 'target', vector, vector),
+        tool('vector.union', '联合', 'union', polygon, polygon),
+        tool('vector.identity', '标识叠加', 'overlayIdentity', polygon, polygon),
+        tool('vector.update_overlay', '更新叠加', 'refresh', polygon, polygon),
+        tool('vector.symmetric_difference', '对称差集', 'difference', polygon, polygon),
+        tool('vector.spatial_join', '空间连接', 'spatialJoin', vector, vector),
     ] },
-    { title: '栅格处理', icon: 'map', tools: [
-        tool('raster.statistics', '栅格与波段统计', 'analysis', raster),
+    { title: '栅格处理', icon: 'grid', tools: [
+        tool('raster.statistics', '栅格与波段统计', 'statistics', raster),
         tool('raster.clip', '裁切栅格', 'clip', raster, polygon),
         tool('raster.reproject', '栅格重投影', 'globe', raster),
-        { ...tool('raster.mosaic', '拼接栅格', 'layers', raster), multiple: true },
+        { ...tool('raster.mosaic', '拼接栅格', 'merge', raster), multiple: true },
     ] },
 ];
 export const TOOL_GROUPS = tools;
 const definitions = Object.fromEntries([...tools.flatMap(group => group.tools), selectAttr, selectLocation,
-    tool('data.copy', '复制图层', 'layers', vector),
-    { ...tool('data.merge', '合并图层', 'layers', vector), multiple: true },
-    tool('data.export_selection', '选中要素另存为图层', 'select', vector),
-    tool('geometry.create_dataset', '新建图层', 'add'),
+    tool('data.copy', '复制图层', 'copy', vector),
+    { ...tool('data.merge', '合并图层', 'merge', vector), multiple: true },
+    tool('data.export_selection', '选中要素另存为图层', 'download', vector),
+    tool('geometry.create_dataset', '新建图层', 'newLayer'),
     tool('geometry.repair', '修复几何', 'pencil', vector),
-    tool('table.add_field', '添加字段', 'add', vector),
-    tool('table.delete_field', '删除字段', 'trash', vector),
-    tool('table.calculate_field', '字段计算器', 'analysis', vector),
+    tool('table.add_field', '添加字段', 'columnAdd', vector),
+    tool('table.delete_field', '删除字段', 'columnRemove', vector),
+    tool('table.calculate_field', '字段计算器', 'calculator', vector),
     tool('table.calculate_geometry', '计算几何', 'area', item => Object.keys(geometryProperties(item)).length > 0),
-    tool('presentation.export_table', '导出属性表', 'table', vector),
+    tool('presentation.export_table', '导出属性表', 'download', vector),
 ].map(item => [item.id, item]));
+export const toolIcon = id => definitions[id]?.icon;
 const layerOptions = layers => layers.map(item => ({ value: key(item), label: item.name }));
 export const layerMatches = (role, item) => (raster(item) ? 'raster' : 'vector') === role.kind &&
     (role.geometry === 'any' || ({ line: 'LineString', polygon: 'Polygon', point: 'Point' }[role.geometry] &&
@@ -367,7 +368,7 @@ export function MapProcessing({ tool: id, skill, layers, active, picked, entries
         .filter(([name, value]) => stats[name] && ['boolean', 'number'].includes(typeof value));
     return h(Modal, { open: true, centered: true, width: skill || result?.map ? 640 : 460, className: 'gis-dialog',
         rootClassName: 'gis-modal-root', closable: !busy, keyboard: !busy, maskClosable: false,
-        title: h('span', { className: 'gis-dialog-title' }, glyph(definition?.icon || 'analysis'), title),
+        title: h('span', { className: 'gis-dialog-title' }, glyph(skill ? window.GuizhiShell.businessIcon(skill.id) : definition.icon), title),
         onCancel: preview ? () => setPreview(null) : dismiss, onOk: result ? dismiss : preview ? () => {
             onResult({ ...preview, input: refs[0] });
             setResult(preview);

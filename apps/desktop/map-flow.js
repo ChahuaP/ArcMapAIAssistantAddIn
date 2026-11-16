@@ -1,6 +1,6 @@
 import { ReactFlow, Background, Controls, Handle, Position, applyEdgeChanges, applyNodeChanges } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { flowForm } from './map-processing.js';
+import { flowForm, toolIcon } from './map-processing.js';
 import { AttributePreview, TokenPicker } from './map-pickers.js';
 
 const h = window.React.createElement;
@@ -322,8 +322,7 @@ export function MapFlow({ open, layers, busy, setBusy, close, glyph, onLayers })
             !search && libraryButton('输入图层', 'add', { operation: 'input' }),
             h('h3', null, '工具'),
             catalog.filter(item => match(item.title)).map(item =>
-                libraryButton(item.title, { selection: 'select', layer: 'clip', statistics: 'analysis', table: 'table' }[item.output],
-                    { operation: item.operation }))),
+                libraryButton(item.title, toolIcon(item.operation), { operation: item.operation }))),
         h('div', { className: 'gis-flow-canvas', 'aria-label': '流程画布' }, graph,
             !nodes.length && h('p', { className: 'gis-flow-empty' }, '从左侧添加图层和工具，再拖动端口连接处理步骤。')),
         h('aside', { className: 'gis-flow-inspector', 'aria-label': '节点设置' },

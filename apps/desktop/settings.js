@@ -7,7 +7,7 @@
     const sections = [
         ['model', 'server', '模式与模型'], ['voice', 'mic', '语音与音色'],
         ['crs', 'globe', '坐标系与转换'], ['appearance', 'sun', '外观与交互'],
-        ['storage', 'folder', '成果与存储'], ['skills', 'grid', '业务管理'],
+        ['storage', 'folder', '成果与存储'], ['skills', 'briefcase', '业务管理'],
         ['components', 'layers', '按需组件'], ['extensions', 'link', '第三方扩展'], ['about', 'info', '关于与诊断'],
     ];
     const themes = [{ value: 'system', label: '跟随系统' }, { value: 'light', label: '明亮' },
@@ -78,8 +78,8 @@
             h('span', { role: 'status' }, error || labels[phase] || '当前版本 ' + state.version),
             h('div', { className: 'business-actions' },
                 ['idle', 'current', 'failed', 'checking', 'complete'].includes(phase) &&
-                    button('clock', '检查更新', { loading: phase === 'checking', onClick: () => run(api.updateCheck) }),
-                phase === 'offered' && button('clock', '下载更新', { type: 'primary', onClick: () => run(api.updatePrepare) }),
+                    button('refresh', '检查更新', { loading: phase === 'checking', onClick: () => run(api.updateCheck) }),
+                phase === 'offered' && button('download', '下载更新', { type: 'primary', onClick: () => run(api.updatePrepare) }),
                 phase === 'preparing' && h(antd.Button, { onClick: () => run(api.updateCancel) }, '取消下载'),
                 phase === 'ready' && h(antd.Button, { type: 'primary', disabled: busy, onClick: () => run(api.updateApply) }, '重启更新'))));
     }
