@@ -142,8 +142,10 @@ function toolForm(definition, layers, refs, setRefs, values, update, picked) {
         layerOptions(layers.filter(item => predicate(item) && (index === 0 || key(item) !== refs[0]))),
         value => setRefs(isMultiple ? [...refs.slice(0, index), ...value] : Object.assign([...refs], { [index]: value }),
             index === 0), { showSearch: true, optionFilterProp: 'label', ...(isMultiple ? { mode: 'multiple' } : {}) }));
+    const location = id === 'data.select_by_location';
     const controls = accepts.map((predicate, index) => layerSelect(index,
-        index === 0 ? '输入图层' : id.endsWith('.clip') ? '裁切范围' : '叠加图层', predicate, multiple && index > 0));
+        location ? (index === 0 ? '目标图层' : '参照图层') : index === 0 ? '输入图层' : id.endsWith('.clip') ? '裁切范围' : '叠加图层',
+        predicate, multiple && index > 0));
     if (multiple && accepts.length === 1) controls.push(layerSelect(1, '其他图层', accepts[0], true));
     if (namedResult(id)) controls.push(text('resultName', '输出图层名（选填）', definition.title));
     let parameters = {};

@@ -156,10 +156,10 @@ export function fieldCalculation(layer, values, update, controls) {
 export function geometryCalculation(layer, values, update, { field, select }) {
     const properties = geometryProperties(layer);
     const property = values.property || Object.keys(properties)[0];
-    const units = property === 'area' ? { square_meters: '平方米', hectares: '公顷', square_kilometers: '平方千米' } :
+    const units = property === 'area' ? { square_meters: '平方米', mu: '亩', hectares: '公顷', square_kilometers: '平方千米' } :
         ['perimeter', 'length'].includes(property) ? { meters: '米', kilometers: '千米' } : { layer: '图层坐标单位' };
     const unit = values.unit || Object.keys(units)[0];
-    const suffix = { square_meters: '_M2', hectares: '_HA', square_kilometers: '_KM2', meters: '_M', kilometers: '_KM', layer: '' };
+    const suffix = { square_meters: '_M2', mu: '_MU', hectares: '_HA', square_kilometers: '_KM2', meters: '_M', kilometers: '_KM', layer: '' };
     const base = property && property.toUpperCase() + suffix[unit];
     const names = new Set([layer?.fidField, ...(layer?.fields || []).map(item => item.name)].filter(Boolean).map(name => name.toLowerCase()));
     let generated = base;

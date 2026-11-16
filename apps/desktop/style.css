@@ -343,6 +343,7 @@ dialog label { display: grid; gap: 5px; }
 .map-layer-row:has(.map-layer-active) { background: var(--soft); border-color: var(--gis-edge); }
 .map-layer-row .ant-btn { min-width: 0; padding-inline: 5px; justify-content: flex-start; }
 .map-layer-row .ant-btn span { overflow: hidden; text-overflow: ellipsis; }
+.map-layer-name.ant-input { min-width: 0; padding-inline: 5px; }
 .map-swatch { width: 8px; height: 8px; border-radius: 3px; background: #1785db; }
 .map-swatch[data-color="1"] { background: #bf6f2b; }
 .map-swatch[data-color="2"] { background: #17a489; }
@@ -615,6 +616,13 @@ dialog label { display: grid; gap: 5px; }
 .gis-color-input.ant-btn { display: inline-flex; align-items: center; justify-content: flex-start; gap: 8px; }
 .gis-color-chip { display: inline-block; width: 20px; height: 14px; border: 1px solid var(--border); border-radius: 3px; }
 .gis-color-input:disabled .gis-color-chip { opacity: .45; }
+.gis-color-palette { display: grid; gap: 8px; }
+.gis-color-swatches { display: grid; grid-template-columns: repeat(5, 25px); gap: 6px; }
+.gis-color-swatches button {
+    width: 25px; height: 24px; padding: 0; border: 1px solid var(--border); border-radius: 4px; cursor: pointer;
+}
+.gis-color-swatches button:is(:hover, :focus-visible, [aria-pressed="true"]) { outline: 2px solid var(--accent); outline-offset: 1px; }
+.gis-color-palette > .ant-btn { justify-self: start; padding-inline: 3px; }
 .gis-map-background { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 10px; }
 .map-class-legend { padding: 3px 0 3px 19px; font-size: 12px; }
 .map-class-legend ul { list-style: none; padding: 0 6px; margin: 0; max-height: 180px; overflow-y: auto; }

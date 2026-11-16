@@ -251,7 +251,7 @@ def write_field(ctx, field, values, *, create=False):
 
 def calculate_geometry(ctx, field: str = "AREA_M2",
                        property: Literal["area", "perimeter", "length", "point_x", "point_y", "center_x", "center_y"] = "area",
-                       unit: Literal["square_meters", "hectares", "square_kilometers", "meters", "kilometers", "layer"] | None = None):
+                       unit: Literal["square_meters", "mu", "hectares", "square_kilometers", "meters", "kilometers", "layer"] | None = None):
     from pyproj import CRS
     from pandas import Series
 
@@ -270,7 +270,7 @@ def calculate_geometry(ctx, field: str = "AREA_M2",
     crs = CRS(frame.crs)
     if not (crs.is_projected or crs.is_geographic):
         raise ValueError("请选择使用地理或投影坐标系的图层")
-    units = ({"square_meters": 1, "hectares": 10_000, "square_kilometers": 1_000_000} if property == "area" else
+    units = ({"square_meters": 1, "mu": 10_000 / 15, "hectares": 10_000, "square_kilometers": 1_000_000} if property == "area" else
              {"meters": 1, "kilometers": 1_000} if property in {"length", "perimeter"} else {"layer": 1})
     if unit is not None and unit not in units:
         raise ValueError("所选单位与几何属性不匹配")

@@ -28,13 +28,31 @@ export function layerSymbol(value, color) {
     const base = symbol(value, color);
     return value?.classification ? { ...base, classification: value.classification } : base;
 }
+const commonColors = [
+    ['白色', '#ffffff'], ['浅灰', '#d9d9d9'], ['灰色', '#808080'], ['深灰', '#434343'], ['黑色', '#000000'],
+    ['红色', '#d4380d'], ['橙色', '#fa8c16'], ['金色', '#faad14'], ['黄色', '#fadb14'], ['棕色', '#bf6f2b'],
+    ['黄绿', '#73d13d'], ['绿色', '#389e0d'], ['深绿', '#135200'], ['青绿', '#17a489'], ['青色', '#13c2c2'],
+    ['天蓝', '#69b1ff'], ['蓝色', '#1785db'], ['深蓝', '#003a8c'], ['紫色', '#8263ca'], ['玫红', '#cc5785'],
+];
 function ColorInput({ label, value, change, compact = false, disabled = false }) {
-    return h(ColorPicker, { value, disabled, disabledAlpha: true, format: 'hex',
-        onChange: next => change(next.toHexString()) },
+    const [open, setOpen] = useState(false);
+    const [custom, setCustom] = useState(false);
+    function toggle(next) {
+        setOpen(next);
+        if (!next) setCustom(false);
+    }
+    return h(ColorPicker, { value, open, disabled, disabledAlpha: true, defaultFormat: 'hex', onOpenChange: toggle,
+        onChange: next => change(next.toHexString()),
+        panelRender: panel => custom ? panel : h('div', { className: 'gis-color-palette' },
+            h('div', { className: 'gis-color-swatches', role: 'group', 'aria-label': '常用颜色' },
+                ...commonColors.map(([name, color]) => h('button', { key: color, type: 'button', 'aria-label': name,
+                    'aria-pressed': color.toLowerCase() === value.toLowerCase(), title: name, style: { backgroundColor: color },
+                    onClick: () => { change(color); toggle(false); } }))),
+            h(Button, { type: 'text', size: 'small', onClick: () => setCustom(true) }, '自定义颜色…')) },
         h(Button, { className: 'gis-color-input', size: compact ? 'small' : 'middle', disabled,
             'aria-label': label, title: label },
             h('span', { className: 'gis-color-chip', style: { backgroundColor: value } }),
-            !compact && h('span', null, value.toUpperCase())));
+            !compact && h('span', { 'aria-hidden': true }, '▾')));
 }
 
 function Classification({ item, style, update, polygon, points, setLoading }) {

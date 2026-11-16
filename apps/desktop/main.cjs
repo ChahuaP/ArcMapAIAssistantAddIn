@@ -618,7 +618,7 @@ async function startDesktop(options) {
         if (surface !== window || typeof value !== 'string' || value.length > 1_000_000) throw new Error('属性值无法复制');
         clipboard.writeText(value);
     }, true);
-    bind('mapExport', async (surface, ref, table) => {
+    bind('mapExport', async (surface, ref, table, style, pointIcon) => {
         if (surface !== window) throw new Error('请从工作台导出图层');
         const item = mapLayers.get(mapKey(ref));
         if (!item) throw new Error('请选择地图中的图层');
@@ -635,7 +635,8 @@ async function startDesktop(options) {
         const relative = path.relative(path.join(controller.settings.workspace, 'runs'), output);
         if (!filters.some(filter => filter.extensions.includes(extension)) ||
                 !path.isAbsolute(relative) && relative.split(path.sep)[0] !== '..') throw new Error('请选择有效的导出位置与格式');
-        const result = await controller.request('map', { action: 'export', ref, output, format: extension });
+        const result = await controller.request('map', { action: 'export', ref, output, format: extension,
+            ...(extension === 'kml' && { name: item.name, style, pointIcon }) });
         shell.showItemInFolder(output);
         return result;
     }, true);

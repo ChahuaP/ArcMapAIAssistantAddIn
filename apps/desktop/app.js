@@ -688,6 +688,7 @@
                 setLayers(old => old.filter(item => mapKey(item) !== id));
                 if (activeLayer === id) { setActiveLayer(null); setMapSelection(null); }
             },
+            renameLayer: (id, name) => setLayers(old => old.map(item => mapKey(item) === id ? { ...item, name } : item)),
             hidden: hiddenLayers, toggle: id => hideLayers(old => old.includes(id) ? old.filter(value => value !== id) : [...old, id]),
             selectLayer: id => { setActiveLayer(id); setMapSelection(null); },
             entries: coordinates, catalog, components: state.components, openComponents,

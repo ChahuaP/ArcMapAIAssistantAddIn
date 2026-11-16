@@ -61,7 +61,7 @@ CAPABILITIES = {
     "table.add_field": Capability("添加字段", edit=True),
     "table.delete_field": Capability("删除字段", edit=True),
     "table.calculate_field": Capability("计算字段", edit=True, version="1.1.0"),
-    "table.calculate_geometry": Capability("计算几何", edit=True, version="1.1.0"),
+    "table.calculate_geometry": Capability("计算几何", edit=True, version="1.2.0"),
     "table.edit_cell": Capability("编辑属性值", edit=True),
     "table.update_rows": Capability("更新属性", edit=True, version="1.0.1"),
     "table.delete_rows": Capability("删除要素", edit=True, version="1.0.1"),

@@ -527,16 +527,17 @@ def export_layer(workspace, payload):
             record = successful(run_operation(workspace.root, {"operation": "presentation.export_table",
                 "inputs": [material(file, name)]}))
             copyfile(read_artifact(workspace, record["id"], "table"), output)
-        elif extension in {"gpkg", "geojson", "kml"}:
+        elif extension == "kml":
+            from guizhi.infrastructure.map_kml import export_kml
+
+            if not describe(workspace, ref)["crs"]:
+                raise ValueError("请先为图层定义正确的坐标系，再导出 KML")
+            export_kml(file, name, output, payload)
+        elif extension in {"gpkg", "geojson"}:
             from guizhi.infrastructure.gdal_translate import vector_translate
 
-            driver = {"gpkg": "GPKG", "geojson": "GeoJSON", "kml": "KML"}[extension]
-            projection = ()
-            if extension == "kml":
-                if not describe(workspace, ref)["crs"]:
-                    raise ValueError("请先为图层定义正确的坐标系，再导出 KML")
-                projection = ("-t_srs", "EPSG:4326")
-            vector_translate(file, output, "-f", driver, *projection, name)
+            driver = {"gpkg": "GPKG", "geojson": "GeoJSON"}[extension]
+            vector_translate(file, output, "-f", driver, name)
         else:
             raise ValueError("请选择有效的矢量导出格式")
     return {"file": str(output)}

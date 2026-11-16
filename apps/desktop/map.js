@@ -232,7 +232,7 @@ function CoordinateTools({ layer, display, setDisplay, entries, request, onLayer
 
 }
 
-function WorkspaceMap({ layers, add, remove, moveLayer, selectLayer, active, hidden, toggle, entries, catalog, components,
+function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer, active, hidden, toggle, entries, catalog, components,
     openComponents, display, setDisplay, background, setBackground, styleLayer, importFrame, fail, activity,
     requestedLayout, onLayout, mapActions, onMapActions, selection, setSelection, replace, replaceLayers, editing }) {
     const node = useRef(null);
@@ -265,6 +265,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, selectLayer, active, hid
     layerList.current = layers;
     const [ribbon, setRibbon] = useState('地图');
     const [layerSearch, setLayerSearch] = useState('');
+    const [renamingLayer, setRenamingLayer] = useState(null);
     const draggedLayer = useRef(null);
     const [dropEdge, setDropEdge] = useState(null);
     const mapBasis = useRef(null);
@@ -829,7 +830,10 @@ function WorkspaceMap({ layers, add, remove, moveLayer, selectLayer, active, hid
                 const id = item.getId();
                 return { action: 'update', id, geometry: format.writeGeometryObject(item.getGeometry()) };
             });
-            if (changes.length) push(changes);
+            if (changes.length) {
+                push(changes);
+                node.current.focus({ preventScroll: true });
+            }
         };
         if (edit === 'draw' || edit === 'split') {
             const splitting = edit === 'split';
@@ -1088,7 +1092,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, selectLayer, active, hid
         return { items: [
             { key: 'fit', label: '缩放至图层', icon: glyph('target') },
             { key: 'table', label: '打开属性表', icon: glyph('table'), disabled: raster },
-            { key: 'properties', label: '图层属性', icon: glyph('layers') },
+            { key: 'rename', label: '重命名', icon: glyph('pencil') },
             { key: 'style', label: raster ? '显示' : '符号化', icon: glyph('pencil') },
             { key: 'export', label: '导出', icon: glyph('download'), children: [
                 { key: 'export-data', label: '导出为…' },
@@ -1098,10 +1102,18 @@ function WorkspaceMap({ layers, add, remove, moveLayer, selectLayer, active, hid
                 { key: 'selection', label: '选中要素另存为图层', icon: glyph('download') }] : []),
             { type: 'divider' },
             { key: 'remove', label: '从地图移除', icon: glyph('trash'), danger: true },
+            { type: 'divider' },
+            { key: 'properties', label: '图层属性', icon: glyph('layers') },
         ], onClick: ({ key: action }) => {
             if (action === 'remove') { remove(id); return; }
+            if (action === 'rename') { setRenamingLayer(id); return; }
             if (action.startsWith('export-')) {
-                api.mapExport(item.ref, action === 'export-table').catch(fail);
+                const table = action === 'export-table';
+                const appearance = !table && !raster && layerSymbol({ ...item.style, opacity: item.style?.opacity ?? item.opacity },
+                    palette[index % palette.length]);
+                const pointIcon = appearance && /Point/.test(item.geometry) ?
+                    style('#ffffff', { ...appearance, color: '#ffffff' }).getImage().getImage(1).toDataURL('image/png') : undefined;
+                api.mapExport(item.ref, table, appearance || undefined, pointIcon).catch(fail);
                 return;
             }
             if (action === 'properties' || action === 'style') {
@@ -1125,6 +1137,32 @@ function WorkspaceMap({ layers, add, remove, moveLayer, selectLayer, active, hid
             }
         } };
     }
+    function layerName(item, index) {
+        const id = key(item);
+        if (renamingLayer === id) {
+            const confirm = event => {
+                const name = event.currentTarget.value.trim();
+                if (name && name !== item.name) renameLayer(id, name);
+                setRenamingLayer(null);
+            };
+            return h(Input, { className: 'map-layer-name', autoFocus: true, size: 'small', defaultValue: item.name,
+                maxLength: 120, 'aria-label': '图层名称', onFocus: event => event.currentTarget.select(), onBlur: confirm,
+                onPressEnter: confirm, onKeyDown: event => {
+                    if (event.key === 'Escape') {
+                        event.stopPropagation();
+                        event.currentTarget.value = item.name;
+                        setRenamingLayer(null);
+                    }
+                } });
+        }
+        return h(antd.Dropdown, { trigger: ['contextMenu'], menu: layerMenu(item, index), disabled: Boolean(edit) || busy },
+            h(Button, { type: 'text', className: id === active ? 'map-layer-active' : '',
+                title: item.group ? item.group + ' / ' + item.name : item.name, disabled: Boolean(edit) || busy,
+                onClick: () => { setPage(0); setEditLayer(null); selectLayer(id); },
+                onDoubleClick: () => setRenamingLayer(id), onKeyDown: event => {
+                    if (event.key === 'F2') { event.preventDefault(); setRenamingLayer(id); }
+                } }, item.name));
+    }
     const notices = new globalThis.Map(layerErrors.map(({ message, names }) => [message, names]));
     for (const message of [document ? '' : ioStatus, issue]) {
         if (message && !notices.has(message)) notices.set(message, []);
@@ -1138,7 +1176,11 @@ function WorkspaceMap({ layers, add, remove, moveLayer, selectLayer, active, hid
             command('定位图层', () => position(true), { disabled: !layer }),
             command('放大', () => graph.current.view.adjustZoom(1)), command('缩小', () => graph.current.view.adjustZoom(-1))),
             group('查询', command('识别要素', () => toggleIdentify(!identify), { disabled: busy || !layers.some(item => item.geometry),
-                type: identify ? 'primary' : 'default', 'aria-pressed': identify })),
+                type: identify ? 'primary' : 'default', 'aria-pressed': identify }),
+                command('按属性选择', () => { toggleIdentify(false); openTool('data.select_by_attribute'); },
+                    { disabled: busy || !layer?.geometry }),
+                command('按位置选择', () => { toggleIdentify(false); openTool('data.select_by_location'); },
+                    { disabled: busy || !layer?.geometry || layers.filter(item => item.geometry).length < 2 })),
             group('显示', command('地图属性', () => setMapProperties(true), { disabled: busy }))],
         数据: [group('地图工程', command('打开', () => mxd(api.mxdRead(), value => { setLocateMxd(null); setDocument(value); }),
             { disabled: busy, 'aria-label': '打开地图工程' }),
@@ -1157,9 +1199,6 @@ function WorkspaceMap({ layers, add, remove, moveLayer, selectLayer, active, hid
             command('框选', () => { toggleIdentify(false); setBoxSelect(!boxSelect); node.current.focus(); },
                 { title: '按住 Shift 可追加选择，按住 Ctrl 可减选', 'aria-pressed': boxSelect, type: boxSelect ? 'primary' : 'default',
                     disabled: busy || edit && edit !== 'select' || !layer?.geometry || hidden.includes(active) }),
-            command('按属性选择', () => openTool('data.select_by_attribute'), { disabled: busy || Boolean(edit) || !layer?.geometry }),
-            command('按位置选择', () => openTool('data.select_by_location'),
-                { disabled: busy || Boolean(edit) || !layer?.geometry || layers.filter(item => item.geometry).length < 2 }),
             command('清除选择', clear, { disabled: busy || edit === 'split' || !picked.length })),
             ...(!edit ? [group('剪贴板', command('复制', () => copyFeatures('copy'), { disabled: !canCopy, title: 'Ctrl+C', 'aria-keyshortcuts': 'Control+C' }),
                 command('剪切', () => copyFeatures('cut'), { disabled: !canCopy, title: 'Ctrl+X', 'aria-keyshortcuts': 'Control+X' }),
@@ -1217,10 +1256,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, selectLayer, active, hid
                         onChange: () => toggle(key(item)) }),
                     h('span', { className: 'map-swatch', 'data-color': index % palette.length,
                         ref: node => { if (node) node.style.backgroundColor = symbol(item.style, palette[index % palette.length]).color; } }),
-                    h(antd.Dropdown, { trigger: ['contextMenu'], menu: layerMenu(item, index), disabled: Boolean(edit) || busy },
-                        h(Button, { type: 'text', className: key(item) === active ? 'map-layer-active' : '',
-                            title: item.group ? item.group + ' / ' + item.name : item.name, disabled: Boolean(edit) || busy,
-                            onClick: () => { setPage(0); setEditLayer(null); selectLayer(key(item)); } }, item.name)),
+                    layerName(item, index),
                     h(antd.Dropdown, { trigger: ['click'], menu: layerMenu(item, index) },
                         h(Button, { type: 'text', size: 'small', disabled: Boolean(edit) || busy,
                             'aria-label': item.name + '菜单', icon: glyph('more', 16) }))),
