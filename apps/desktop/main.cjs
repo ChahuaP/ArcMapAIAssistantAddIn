@@ -509,8 +509,8 @@ async function startDesktop(options) {
         'crs-search', 'raster-preview', 'raster-display', 'categories']);
     bind('map', async (surface, input) => {
         if (surface !== window || !input || !mapReads.has(input.action) &&
-                !['assign', 'reproject', 'transform', 'edit', 'edit-sketch', 'edit-transfer', 'tool', 'step-layers',
-                    'flow-tools', 'flow-templates', 'flow-save'].includes(input.action)) {
+                !['assign', 'reproject', 'transform', 'edit', 'edit-sketch', 'edit-transfer-plan', 'tool', 'step-layers',
+                    'flow-tools', 'flow-templates', 'flow-save', 'flow-delete'].includes(input.action)) {
             throw new Error('地图请求无效');
         }
         if (!controller.settings.workspace) throw new Error('请先选择成果保存位置');
@@ -733,7 +733,11 @@ async function startDesktop(options) {
         return resetConversation(next);
     });
     function namedLayers(prompt) {
-        return [...mapLayers.values()].filter(item => prompt.includes(item.name))
+        const layers = [...mapLayers.values()];
+        const alias = item => item.name.replace(/^项目/u, '');
+        return layers.filter(item => prompt.includes(item.name) ||
+                alias(item) !== item.name && alias(item).length >= 4 && prompt.includes(alias(item)) &&
+                layers.filter(other => alias(other) === alias(item)).length === 1)
             .filter((item, _, all) => !all.some(other => other.name.length > item.name.length && other.name.includes(item.name)))
             .sort((a, b) => prompt.indexOf(a.name) - prompt.indexOf(b.name));
     }

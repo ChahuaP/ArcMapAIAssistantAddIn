@@ -14,9 +14,25 @@ import shapely
 from pydantic import BaseModel, ConfigDict, Field
 
 from guizhi.infrastructure.operations.common import condition
+from guizhi.infrastructure.operations.data import AttributeFilter
 
 FIELD_TYPES = {"smallinteger": "SMALLINT", "integer": "MEDIUMINT", "single": "FLOAT",
                "double": "DOUBLE", "string": "TEXT", "date": "DATETIME", "guid": "TEXT", "blob": "BLOB"}
+
+
+def lookup(ctx, field: str, where: AttributeFilter | None = None):
+    frame = ctx.frames[0]
+    if field not in frame or field == frame.geometry.name:
+        raise ValueError("请选择图层中实际存在的属性字段")
+    matches = frame.loc[condition(frame, where.model_dump(exclude_none=True)), [field]] if where else frame[[field]]
+    rows = json.loads(matches.head(25).to_json(orient="records", date_format="iso", double_precision=15))
+    for row in rows:
+        for name, value in row.items():
+            if type(value) is int and abs(value) > 2**53 - 1:
+                row[name] = str(value)
+    result = {"fields": [field], "rows": rows, "count": len(matches)}
+    ctx.json("lookup.json", result, "lookup")
+    return {"statistics": {"lookup": result}}
 
 
 class FieldSpec(BaseModel):
@@ -179,10 +195,16 @@ def delete_field(ctx, field: str):
 
 def calculate_field(ctx, field: str, source_field: str | None = None,
                     operator: Literal["copy", "add", "subtract", "multiply", "divide"] = "copy",
-                    operand: float = 0, expression: str | None = None):
+                    operand: float = 0, expression: str | None = None, value: float | None = None):
     frame = ctx.frames[0]
     if field not in frame or field == frame.geometry.name:
         raise ValueError("请选择有效的目标字段")
+    if value is not None:
+        from pandas import Series
+
+        if expression is not None or source_field is not None or not isfinite(value):
+            raise ValueError("请选择一个有效的字段计算来源")
+        return write_field(ctx, field, Series(value, index=frame.index))
     if expression is not None:
         from guizhi.infrastructure.operations.sql_expression import evaluate
 

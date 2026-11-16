@@ -108,9 +108,22 @@ def select_by_location(
     mode: Mode = "new_selection", previous: Selection | None = None,
 ):
     frame, query = ctx.frames
-    crs = compatible(ctx.frames)
+    crs = frame.crs
+    if crs is None or query.crs is None:
+        raise ValueError("按位置选择前，请为目标图层和参照图层定义坐标系")
     for item in ctx.frames:
-        valid(item)
+        try:
+            valid(item)
+        except ValueError as error:
+            raise ValueError("存在空或无效的几何，请先检查图层") from error
+    query = query.loc[~query.geometry.is_empty]
+    if crs != query.crs and not query.empty:
+        from guizhi.infrastructure.map_workspace import projection
+        import shapely
+
+        tx = projection(query.crs, crs, query.total_bounds)
+        query = query.set_geometry(shapely.transform(query.geometry.to_numpy(),
+            lambda x, y, z=None: tx.transform(x, y, z, errcheck=True), interleaved=False, include_z=None))
     translation = {"intersect": "intersects", "contain": "contains", "touch": "touches",
                    "overlap": "overlaps", "cross": "crosses", "within_a_distance": "dwithin"}
     spatial = translation.get(predicate, predicate)

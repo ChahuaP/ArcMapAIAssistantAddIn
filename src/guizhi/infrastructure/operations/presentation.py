@@ -1,7 +1,7 @@
 """Export attributes from a processed vector dataset."""
 import csv
 from typing import Annotated, Literal
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 import pandas as pd
 
@@ -32,11 +32,30 @@ def export_table(ctx, fields: list[str] | None = None):
     return {"statistics": {"row_count": len(attributes)}}
 
 
+class LayoutPosition(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    x: float = Field(ge=0, le=1)
+    y: float = Field(ge=0, le=1)
+    width: float = Field(ge=.065, le=1)
+    height: float = Field(ge=.055, le=1)
+
+    @model_validator(mode="after")
+    def on_paper(self):
+        if self.x + self.width > 1 or self.y + self.height > 1:
+            raise ValueError("版面元素超出纸张边界")
+        return self
+
+
 def map_layout(ctx, title: str, format: Literal["png", "jpg"] = "png",
-               legend: bool = True, scale: bool = True, border: bool = True):
+               legend: bool = True, scale: bool = True, border: bool = True,
+               paper: Literal["a4", "a3"] = "a4", orientation: Literal["landscape", "portrait"] = "landscape",
+               positions: dict[Literal["frame", "title", "legend", "scale"], LayoutPosition] | None = None):
     if not 1 <= len(title.strip()) <= 80:
         raise ValueError("图名应为 1 至 80 字")
-    layout = {"title": title.strip(), "format": format, "legend": legend, "scale": scale, "border": border}
+    layout = {"title": title.strip(), "format": format, "legend": legend, "scale": scale, "border": border,
+              "paper": paper, "orientation": orientation}
+    if positions:
+        layout["positions"] = {name: box.model_dump(mode="json") for name, box in positions.items()}
     ctx.json("layout.json", layout, "layout")
     return {"presentation": layout}
 

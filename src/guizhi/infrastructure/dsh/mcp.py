@@ -203,6 +203,30 @@ def register(server, job=None):
             workspace, plan, cancel_requested=cancelled.exists, key=dispatch.name))
 
     @server.tool
+    def lookup_layer_field(role: str, field: str, match_field: str | None = None,
+                           match_value: str | int | float | bool | None = None) -> dict:
+        """读取已绑定矢量图层中匹配要素的实际字段值。role 是材料角色，例如 layer-1。field 是要读的字段，match_field 和 match_value 是筛选字段和值。"""
+        if job["skill"] or len(materials.get(role, ())) != 1:
+            return input_issue("invalid_materials", "请选择一份已绑定的矢量图层并填写其材料角色")
+        if match_field is None and match_value is not None:
+            return input_issue("invalid_materials", "请指定匹配值所在的字段")
+        params = {"field": field}
+        if match_field:
+            params["where"] = {"field": match_field, "op": "is_null" if match_value is None else "eq", "value": match_value}
+        return run_plan("free", None, [{"id": "lookup", "operation": "table.lookup", "inputs": ["material." + role],
+                                        "parameters": params}])
+
+    @server.tool
+    def define_crs_from_layer(target_role: str, reference_role: str) -> dict:
+        """采用参照图层的坐标系定义更新未定义坐标系的目标矢量图层。使用已绑定的材料角色。保留原几何坐标。"""
+        if (job["skill"] or target_role == reference_role or
+                any(len(materials.get(role, ())) != 1 for role in (target_role, reference_role))):
+            return input_issue("invalid_materials", "请选择两份已绑定的矢量图层作为目标与参照")
+        return run_plan("free", None, [{"id": "define-crs", "operation": "crs.assign_from",
+                                       "inputs": ["material." + target_role, "material." + reference_role],
+                                       "parameters": {}}])
+
+    @server.tool
     def review_approval(document_run: str, project_code: str, region: str, parcel_field: str,
                         project_field: str, facts: list[Fact], catalog_run: str | None = None,
                         as_of: date | None = None, matter: str | None = None) -> dict:

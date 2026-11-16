@@ -1,11 +1,12 @@
 """Apply explicit desktop edits to a sealed vector layer."""
+import json
 from typing import Annotated, Literal
 
 import geopandas
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, StrictInt
 import shapely
-from shapely.geometry import MultiLineString, MultiPoint, MultiPolygon, shape
+from shapely.geometry import MultiLineString, MultiPoint, MultiPolygon, mapping, shape
 
 from guizhi.infrastructure.operations.common import Selection, selection_fids, valid
 
@@ -85,10 +86,12 @@ def changes(ctx, changes: Annotated[list[Change], Field(min_length=1, max_length
         incoming = geopandas.GeoDataFrame(additions, geometry=geometry, crs=frame.crs)
         for name in fields:
             dtype = original[name].dtype
-            if pd.api.types.is_integer_dtype(dtype) and incoming[name].isna().any():
-                dtype = "Int64"
+            if pd.api.types.is_integer_dtype(dtype) and (incoming[name].isna().any() or frame[name].isna().any()):
+                dtype = str(dtype).capitalize()
+                frame[name] = frame[name].astype(dtype)
             elif pd.api.types.is_bool_dtype(dtype) and incoming[name].isna().any():
                 dtype = "boolean"
+                frame[name] = frame[name].astype(dtype)
             incoming[name] = incoming[name].astype(dtype)
         frame = geopandas.GeoDataFrame(pd.concat([frame, incoming], ignore_index=True), geometry=geometry, crs=frame.crs)
     publish_edit(ctx, frame, geom_type)
@@ -97,7 +100,7 @@ def changes(ctx, changes: Annotated[list[Change], Field(min_length=1, max_length
     return {"changeset": {"target_revision": ctx.selection_hashes[0], "count": len(changes)}}
 
 
-def transfer(ctx, selection: Selection, mode: Literal["copy", "cut"]):
+def transfer_rows(ctx, selection):
     from guizhi.infrastructure.map_workspace import projection
 
     source, target = ctx.frames
@@ -120,9 +123,7 @@ def transfer(ctx, selection: Selection, mode: Literal["copy", "cut"]):
     base = target.copy()
     for name, kind in target_fields.items():
         match = source_fields.get(name.casefold())
-        if match and match[1] != kind:
-            raise ValueError(f"同名字段 {name} 的类型不同，请先调整字段类型")
-        values = list(selected[match[0]]) if match else [None] * len(selected)
+        values = list(selected[match[0]]) if match and match[1] == kind else [None] * len(selected)
         if kind.startswith(("int", "uint")):
             dtype = kind.capitalize()
             base[name] = base[name].astype(dtype)
@@ -134,7 +135,26 @@ def transfer(ctx, selection: Selection, mode: Literal["copy", "cut"]):
         attrs[name] = pd.Series(values, dtype=dtype)
     geometry = target.geometry.name
     incoming = geopandas.GeoDataFrame({**attrs, geometry: geom}, geometry=geometry, crs=target.crs)
-    added = geopandas.GeoDataFrame(pd.concat([base, incoming], ignore_index=True), geometry=geometry, crs=target.crs)
+    return base, incoming, source_kind, target_kind, fids
+
+
+def transfer_plan(ctx, selection: Selection):
+    _, incoming, _, _, _ = transfer_rows(ctx, selection)
+    rows = json.loads(incoming.drop(columns=incoming.geometry.name).to_json(orient="records", date_format="iso", double_precision=15))
+    for row in rows:
+        for key, value in row.items():
+            if type(value) is int and abs(value) > 2**53 - 1:
+                row[key] = str(value)
+    return {"features": [{"geometry": mapping(geom), "properties": row}
+                         for geom, row in zip(incoming.geometry, rows, strict=True)]}
+
+
+def transfer(ctx, selection: Selection, mode: Literal["copy", "cut"]):
+    base, incoming, source_kind, target_kind, fids = transfer_rows(ctx, selection)
+    source = ctx.frames[0]
+    geometry = base.geometry.name
+    target_crs = base.crs
+    added = geopandas.GeoDataFrame(pd.concat([base, incoming], ignore_index=True), geometry=geometry, crs=target_crs)
     publish_edit(ctx, added, target_kind)
     if mode == "cut":
         publish_edit(ctx, source.drop(index=fids), source_kind, artifact="transfer-source", filename="source.gpkg")

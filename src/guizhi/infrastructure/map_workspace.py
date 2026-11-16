@@ -336,7 +336,7 @@ def request(workspace, payload):
             return map_flow.run(workspace, payload)
         if action == "flow-progress":
             return map_flow.progress(workspace, payload)
-        if action in {"flow-templates", "flow-save"}:
+        if action in {"flow-templates", "flow-save", "flow-delete"}:
             return map_flow.template(workspace, payload)
         if action == "flow-export-table":
             return map_flow.export_table(workspace, payload)
@@ -353,25 +353,25 @@ def request(workspace, payload):
         from guizhi.infrastructure.map_editing import sketch
 
         return sketch(payload)
-    if action == "edit-transfer":
+    if action == "edit-transfer-plan":
         if payload["ref"] == payload["destination"]:
             raise ValueError("请选择另一个图层")
         origin = material(*source(workspace, payload["ref"]))
         destination = material(*source(workspace, payload["destination"]))
         if origin["revision"] != payload["revision"] or destination["revision"] != payload["destinationRevision"]:
             raise ValueError("图层已修改，请重新复制或剪切要素")
-        mode = payload["mode"]
-        record = successful(run_operation(workspace.root, {"operation": "edit.transfer", "inputs": [origin, destination],
-            "parameters": {"selection": {"layer": origin["layer"], "revision": origin["revision"], "fids": payload["fids"]},
-                           "mode": mode}, "idempotency_key": uuid4().hex}))
-        result = {"destination": describe(workspace, {"run": record["id"], "artifact": "export"}),
-                  "count": record["result"]["changeset"]["moved"]}
-        if mode == "cut":
-            result["source"] = describe(workspace, {"run": record["id"], "artifact": "transfer-source"})
-        return result
+        selection = {"layer": origin["layer"], "revision": origin["revision"], "fids": payload["fids"]}
+        plan = successful(run_operation(workspace.root, {"operation": "edit.transfer_plan", "inputs": [origin, destination],
+            "parameters": {"selection": selection}}))
+        return plan["result"]["features"]
     if action == "step-layers":
         record = successful(workspace.read(payload["run"]))
-        return output_layers(workspace, record, payload.get("title") or step_title(record["task"]["operation"]))
+        operation = record["task"]["operation"]
+        layers = output_layers(workspace, record, payload.get("title") or step_title(operation))
+        if operation in {"crs.assign", "crs.assign_from"}:
+            revision = record["result"]["changeset"]["target_revision"]
+            return [{**layer, "replacesRevision": revision} for layer in layers]
+        return layers
     if action == "import":
         items = payload["items"]
         if not isinstance(items, list) or not 1 <= len(items) <= 32:

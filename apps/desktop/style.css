@@ -567,7 +567,7 @@ dialog label { display: grid; gap: 5px; }
     display: grid; gap: 2px; min-width: max-content; padding: 3px 6px;
     background: var(--sub); border: 1px solid var(--line); border-radius: 6px;
 }
-.ribbon-menu { display: flex; align-items: center; }
+.ribbon-menu { display: flex; align-items: flex-start; }
 .ribbon-menu .ant-btn { min-height: 28px; }
 .ribbon-actions > .ribbon-menu { padding: 0; border: 0; background: transparent; }
 .ribbon-actions > .ribbon-menu .ant-btn { min-height: 28px; }
@@ -700,7 +700,21 @@ dialog label { display: grid; gap: 5px; }
 .map-import-progress progress { width: 100%; accent-color: #2385de; }
 .map-properties-coordinates { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 12px; }
 .map-properties-coordinates h3 { margin: 0 0 8px; }
-.map-layout-options { display: flex; gap: 12px; flex-wrap: wrap; }
+.gis-layout-toolbar { display: flex; align-items: end; flex-wrap: wrap; gap: 8px; padding-bottom: 12px; }
+.gis-layout-toolbar label { display: grid; gap: 4px; color: var(--ink); font-size: 12px; }
+.gis-layout-toolbar .ant-select { min-width: 64px; }
+.gis-layout-toolbar .ant-checkbox-wrapper { display: inline-flex; align-items: center; padding: 3px 4px; }
+.gis-layout-workspace { display: grid; grid-template-columns: minmax(0, 1fr) clamp(140px, 17vw, 220px);
+    border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.gis-paper-viewport { display: grid; place-items: center; padding: 16px; background: var(--sub); min-height: 260px; }
+.gis-paper { position: relative; background: white; box-shadow: 0 2px 8px var(--shadow); }
+.gis-paper canvas { display: block; width: 100%; height: 100%; }
+.gis-paper-element { position: absolute; cursor: move; touch-action: none; outline: 1px dashed transparent; }
+.gis-paper-element:hover, .gis-paper-element:focus-visible, .gis-paper-element[aria-selected=true] { outline-color: #0973d0; }
+.gis-paper-resize { position: absolute; bottom: 0; right: 0; width: 12px; height: 12px;
+    border: 1px solid #0973d0; background: white; cursor: nwse-resize; touch-action: none; }
+.gis-layout-properties { padding: 12px; border-left: 1px solid var(--line); align-content: start; }
+.gis-layout-properties hr { width: 100%; border: 0; border-top: 1px solid var(--line); }
 .map-layout-result { align-self: flex-start; }
 @media (prefers-reduced-motion: reduce) { .workbench-ai-edge { animation: none; } }
 
@@ -746,21 +760,22 @@ dialog label { display: grid; gap: 5px; }
 .gis-preview-table tr:last-child td { border-bottom: 0; }
 .gis-flow-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 0 0 12px; }
 .gis-flow-space { flex: 1; }
-.gis-flow-layout { display: grid; grid-template-columns: minmax(112px, 172px) minmax(190px, 1fr) minmax(170px, 280px);
+.gis-flow-layout { display: grid; grid-template-columns: minmax(112px, 184px) minmax(190px, 1fr);
     height: min(65vh, 650px); min-height: 260px; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; }
-.gis-flow-library, .gis-flow-inspector { padding: 12px; overflow: auto; background: var(--panel); }
+.gis-flow-library { padding: 12px; overflow: auto; background: var(--panel); }
 .gis-flow-library { border-right: 1px solid var(--line); }
 .gis-flow-library .ant-btn { display: flex; width: 100%; justify-content: flex-start; gap: 6px; margin-bottom: 3px; padding-inline: 7px; }
 .gis-flow-library .ant-btn > span { min-width: 0; text-overflow: ellipsis; overflow: hidden; }
 .gis-flow-library .ant-btn[draggable=true] { cursor: grab; }
 .gis-flow-layout h3 { margin: 10px 0 6px; font-size: 13px; color: var(--ink); }
-.gis-flow-inspector { border-left: 1px solid var(--line); }
-.gis-flow-inspector > h3 { margin-top: 0; font-size: 15px; overflow-wrap: anywhere; }
-.gis-flow-fields { border: 0; padding: 0; margin: 0; min-width: 0; display: grid; gap: 8px; }
+.gis-flow-fields { border: 0; padding: 8px 10px; margin: 0; min-width: 0; display: grid; gap: 7px; }
 .gis-flow-fields .gis-tool-help { align-items: flex-start; font-size: 12px; }
-.gis-flow-fields input[aria-label='节点名称'] { margin-top: 4px; }
-.gis-flow-preview { display: grid; gap: 8px; margin-top: 12px; border-top: 1px solid var(--line); }
-.gis-flow-preview p { margin: 0; }
+.gis-flow-arithmetic > input { width: 76px; }
+.gis-flow-distance.ant-input { width: 96px; }
+.gis-flow-linked { min-width: 54px; color: var(--muted); }
+.gis-flow-result { border-top: 1px solid var(--line); padding: 8px 10px; display: grid; gap: 6px; font-size: 12px; }
+.gis-flow-result-actions { display: flex; flex-wrap: wrap; gap: 4px; }
+.gis-flow-values { max-height: 125px; overflow: auto; }
 .gis-flow-canvas { position: relative; min-width: 0; min-height: 0; background: var(--sub); }
 .gis-flow-canvas .react-flow { --xy-background-pattern-dots-color-default: var(--border);
     --xy-edge-stroke-default: var(--accent); --xy-edge-stroke-selected-default: var(--primary);
@@ -769,11 +784,13 @@ dialog label { display: grid; gap: 5px; }
     --xy-controls-button-border-color-default: var(--line); }
 .gis-flow-canvas .react-flow__controls-button { padding: 4px; }
 .gis-flow-empty { position: absolute; top: 38%; left: 16px; right: 16px; pointer-events: none; text-align: center; color: var(--muted); }
-.gis-flow-node { width: 165px; position: relative; border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
+.gis-flow-node { width: 255px; position: relative; border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
     box-shadow: 0 2px 6px var(--shadow); color: var(--ink); overflow-wrap: anywhere; }
 .gis-flow-node > strong { display: block; height: 37px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     padding: 8px 11px; border-bottom: 1px solid var(--line); }
-.gis-flow-node .gis-flow-port { padding: 2px 12px; height: 25px; font-size: 11px; color: var(--muted); }
+.gis-flow-node .gis-flow-port { position: relative; padding: 2px 12px; height: 23px; font-size: 11px; color: var(--muted); }
+.gis-flow-node .gis-flow-port:is([data-port-type=expression],[data-port-type=values],[data-port-type=number]) .react-flow__handle,
+.gis-flow-node:is([data-kind=expression],[data-kind=values],[data-kind=number]) .react-flow__handle.source { background: var(--tile-violet); }
 .gis-flow-node .react-flow__handle { width: 11px; height: 11px; background: var(--primary); border: 2px solid var(--panel); }
 .gis-flow-output { position: relative; text-align: right; color: var(--tile-blue); padding: 3px 11px; font-size: 11px; }
 .gis-flow-node[data-kind=selection] .gis-flow-output { color: var(--tile-ochre); }
@@ -784,3 +801,4 @@ dialog label { display: grid; gap: 5px; }
 .gis-flow-status { min-height: 28px; padding-top: 6px; color: var(--muted); }
 .gis-flow-save { display: flex; gap: 6px; width: 235px; }
 .gis-flow-templates { min-width: 155px; }
+.gis-flow-template-row { display: flex; justify-content: space-between; }

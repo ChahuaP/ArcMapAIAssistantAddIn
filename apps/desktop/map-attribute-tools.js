@@ -44,7 +44,7 @@ function expressionFields(layer, values, update, name, controls, placeholder) {
         token('可用字段', selected, fieldsOf(layer), value => update('expressionField', value), !layer, 'application/x-guizhi-field'),
         h('div', { className: 'gis-expression-actions' },
             h(Button, { size: 'small', disabled: !selected, onClick: () => insert(identifier(selected)) }, '插入字段'),
-            unique(layer, selected, value => insert(integer(type) && numericLiteral(value) ? value : sqlValue(value))))];
+            name !== 'expression' && unique(layer, selected, value => insert(integer(type) && numericLiteral(value) ? value : sqlValue(value))))];
 }
 
 function valueInput(label, value, change, disabled, type, field) {
@@ -132,8 +132,7 @@ export function fieldCalculation(layer, values, update, controls) {
     }
     if (action === 'constant') {
         const change = value => update('value', value);
-        parts.push(valueInput('填入值', values.value, change, !type, type, field), unique(layer, values.field,
-            value => change(value === null ? null : type === 'bool' ? String(Boolean(value)) : String(value))));
+        parts.push(valueInput('填入值', values.value, change, !type, type, field));
         const result = typedValue(type, values.value, true);
         return { parts, parameters: { ...parameters, expression: result.sql }, valid: Boolean(type && result.valid) };
     }

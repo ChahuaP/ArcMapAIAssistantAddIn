@@ -88,7 +88,8 @@ class Execution:
             source = Path(material.file)
             frame, info, revision, evidence, originals = import_layer(
                 material.file, material.layer, directory, f"input-{i + 1}.gpkg", job["id"], check,
-                allow_undefined=request.operation in {"data.describe", "data.list_fields", "crs.assign"},
+                allow_undefined=request.operation in {"data.describe", "data.list_fields", "data.select_by_location",
+                                                      "table.lookup", "crs.assign", "crs.assign_from"},
                 metadata_only=request.operation in {"data.describe", "data.list_fields"},
                 expected_source_revision=material.revision,
             )
@@ -167,10 +168,11 @@ class Execution:
         path.write_text(json.dumps(value, ensure_ascii=False, allow_nan=False, indent=2), encoding="utf-8")
         return self.record(step, path)
 
-    def publish(self, frame, *, geometry_type=None, artifact="export", filename="result.gpkg"):
+    def publish(self, frame, *, geometry_type=None, artifact="export", filename="result.gpkg", preserve_fids=False):
         self.check()
         out = self.path(filename)
-        frame = frame.reset_index(drop=True)
+        if not preserve_fids:
+            frame = frame.reset_index(drop=True)
         if frame.crs is None:
             raise ValueError("Result requires a defined CRS")
         # GeoPackage reserves its FID and geometry columns; choose names outside attribute names.
@@ -182,10 +184,12 @@ class Execution:
             return base
         with warnings.catch_warnings():
             warnings.simplefilter("error", RuntimeWarning)
-            pyogrio.write_dataframe(frame, out, layer="result", driver="GPKG", geometry_type=geometry_type,
+            fid, geometry = available("fid"), available("geom")
+            data = frame.assign(**{fid: frame.index.astype("int64")}) if preserve_fids else frame
+            pyogrio.write_dataframe(data, out, layer="result", driver="GPKG", geometry_type=geometry_type,
                                     promote_to_multi=False,
-                                    layer_options={"FID": available("fid"), "GEOMETRY_NAME": available("geom")})
-            check = pyogrio.read_dataframe(out, layer="result")
+                                    layer_options={"FID": fid, "GEOMETRY_NAME": geometry})
+            check = pyogrio.read_dataframe(out, layer="result", fid_as_index=preserve_fids)
         if check.crs != frame.crs or shapely.to_wkb(frame.geometry).tolist() != shapely.to_wkb(check.geometry).tolist():
             raise Fault("tool", "export_geometry_mismatch", "Export failed geometry or CRS verification",
                         same_crs=check.crs == frame.crs, expected_count=len(frame), actual_count=len(check))

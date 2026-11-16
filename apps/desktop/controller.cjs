@@ -354,8 +354,12 @@ class DesktopController {
                 if (layout) task.layout = JSON.parse(layout.bytes);
                 const actions = checkedArtifact(record, 'map_actions');
                 if (actions) task.mapActions = JSON.parse(actions.bytes);
+                task.coordinateRuns = (record.result.workflow?.steps || []).filter(item =>
+                    ['crs.assign', 'crs.assign_from'].includes(item.operation)).map(item => item.run_id);
+                const lastOperation = record.result.workflow?.steps?.at(-1)?.operation;
                 task.mapLayers = record.result.evidence
-                    .filter(item => ['export', 'boundaries'].includes(item.step) && path.extname(item.path).toLowerCase() === '.gpkg')
+                    .filter(item => ['export', 'boundaries'].includes(item.step) && path.extname(item.path).toLowerCase() === '.gpkg' &&
+                        !(item.step === 'export' && ['crs.assign', 'crs.assign_from'].includes(lastOperation)))
                     .map(item => ({ run: task.runId, artifact: item.step }));
                 task.outputImages = record.result.evidence.filter(item => item.step === 'raster_preview')
                     .map(item => ({ run: task.runId, artifact: item.step }));

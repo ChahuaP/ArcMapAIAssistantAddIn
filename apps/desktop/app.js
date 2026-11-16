@@ -267,7 +267,7 @@
                 if (step.phase !== 'workflow_step_finished' || step.kind === 'stop' || !step.childRun || shownSteps.current.has(step.childRun)) continue;
                 shownSteps.current.add(step.childRun);
                 const pending = api.map({ action: 'step-layers', run: step.childRun }).then(items => {
-                    if (workspace === currentWorkspace.current) addLayers(items);
+                    if (workspace === currentWorkspace.current) addLayers(items.filter(item => !item.replacesRevision));
                     return items;
                 });
                 pendingStepLayers.current.set(step.childRun, pending);
@@ -276,7 +276,9 @@
         }, [task?.progress]);
         const [layoutReady, setLayoutReady] = useState(null);
         useEffect(() => {
-            if (launcher || showLog || task?.status !== 'succeeded' || !(task.map || task.mapLayers?.length || task.layout || task.mapActions) || shownMapRuns.current.has(task.id)) return;
+            if (launcher || showLog || task?.status !== 'succeeded' ||
+                !(task.map || task.mapLayers?.length || task.coordinateRuns?.length || task.layout || task.mapActions) ||
+                shownMapRuns.current.has(task.id)) return;
             shownMapRuns.current.add(task.id);
             void openMap(task).then(() => {
                 if (task.layout && !task.layoutImage && !task.layoutError) setLayoutReady(task.id);
@@ -644,10 +646,22 @@
                     resultTask?.hasReport && resultTask.business && h(ReportPanel, { id: resultTask.id }))));
         async function openMap(item) {
             setShowLog(false);
-            if (item?.map || item?.mapLayers?.length) {
+            if (item?.map || item?.mapLayers?.length || item?.coordinateRuns?.length) {
                 try {
                     const stepRuns = new Set(item.progress?.filter(step => step.kind !== 'stop' && step.childRun).map(step => step.childRun));
-                    const stepOutputs = (await Promise.all([...stepRuns].map(run => pendingStepLayers.current.get(run)))).flat().filter(Boolean);
+                    for (const run of item.coordinateRuns || []) stepRuns.add(run);
+                    const stepOutputs = (await Promise.all([...stepRuns].map(run => pendingStepLayers.current.get(run) ||
+                        (item.coordinateRuns?.includes(run) ? api.map({ action: 'step-layers', run }) : null)))).flat().filter(Boolean);
+                    const replacements = stepOutputs.filter(result => result.replacesRevision &&
+                        !layers.some(layer => mapKey(layer) === mapKey(result)));
+                    if (replacements.length) {
+                        const pairs = replacements.flatMap(result => {
+                            const sources = layers.filter(layer => layer.revision === result.replacesRevision);
+                            return sources.length === 1 ? [[sources[0], result]] : [];
+                        });
+                        if (pairs.length !== replacements.length) throw new Error('请在地图中确认要定义坐标系的原图层唯一且仍存在');
+                        replaceLayers(pairs);
+                    }
                     const results = stepOutputs.length ? [] : await Promise.all((item.mapLayers || []).map(ref => api.map({ action: 'describe', ref })));
                     const inputs = item.map ? await api.mapTaskInputs(item.id) : [];
                     const current = new Set(layers.map(mapKey));

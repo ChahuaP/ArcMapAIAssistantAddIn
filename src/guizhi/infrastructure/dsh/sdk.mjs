@@ -28,6 +28,17 @@ function verifiedResponse(receipt, dialogue) {
     if (stats.changed_parcels) parts.push(`更新涉及 ${stats.changed_parcels} 宗地。`);
     for (const item of receipt.steps ?? [{ statistics: stats }]) {
         const fact = item.statistics;
+        if (fact.lookup) {
+            const { fields, rows, count } = fact.lookup;
+            if (!count) parts.push('没有找到匹配的要素。');
+            else if (count === 1) parts.push(fields.map(field => field + '为' + (rows[0][field] ?? '空值')).join('，') + '。');
+            else {
+                const labels = rows.map((row, index) => (index + 1) + '. ' +
+                    fields.map(field => field + '为' + (row[field] ?? '空值')).join('，'));
+                parts.push('共匹配 ' + count + ' 个要素' + (count > rows.length ? '，以下为前 ' + rows.length + ' 个' : '') + '。\n\n' +
+                    labels.join('\n') + '\n\n');
+            }
+        }
         if (fact.coverage_ratio !== undefined) {
             const counts = fact.relations || {};
             const findings = [['inside', '完全覆盖'], ['overlap', '部分重叠'], ['touch_line', '线接触'],
@@ -38,6 +49,9 @@ function verifiedResponse(receipt, dialogue) {
         }
     }
     if (receipt.steps?.some(step => step.operation === 'map_raster.preview')) parts.push('影像预览已生成。');
+    if (receipt.steps?.some(step => step.operation === 'crs.assign_from' || step.operation === 'crs.assign')) {
+        parts.push('已为目标图层定义坐标系，原始坐标值保持不变。');
+    }
     if (stats.area_m2 !== undefined) parts.push(`合并范围面积 ${area(stats.area_m2)} m²。`);
     if (stats.feature_count !== undefined) parts.push(`共 ${stats.feature_count} 个要素。`);
     if (stats.geometry_types && !dialogue) parts.push(Object.entries(stats.geometry_types)

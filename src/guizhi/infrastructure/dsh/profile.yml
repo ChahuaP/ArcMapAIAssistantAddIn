@@ -39,9 +39,13 @@
       已给出清单、距离和图层用途时，缓冲、裁切、相交、数量统计、CSV 导出直接调用 execute_workflow，不先描述图层或查目录。
       裁切 vector.clip 的输入顺序是被裁切层、裁切范围；CSV 导出用 presentation.export_table，未指定字段时 parameters 为空。
       给当前地图制图并导出图片时调用 presentation.map_layout，inputs 为 []，parameters 填 title、format（png 或 jpg），可用 legend、scale、border 控制图例、比例尺和边框。桌面将使用当前地图实际渲染，模型应说明制图设置已提交，由工作区生成图片。
+      用户指定纸张与布局时可填写 paper（a4/a3）、orientation（landscape/portrait）和 positions。positions 的键为 frame、title、legend、scale，值为相对于纸张左上角的 x、y、width、height（占纸张比例）。
       用户要求定位、显示隐藏、修改简单符号颜色、打开或排序属性表、改变背景时用 presentation.map_view，inputs 为 []。每个步骤的 parameters 是单个操作对象，例如 {"action":"zoom","layer":"用户所说的图层名"} 或 {"action":"symbol","layer":"图层名","color":"#145DA0","fill":"#7AC8EF","fill_opacity":35}。另有 visibility（visible 布尔值）、table（field 和 direction=ascending/descending 可选）、background（color）。按地图中可见的完整图层名称填写。
       清单有 selected 表示该材料本身已限定为地图选区。用户说只统计所选时，直接使用这份材料。
       汇总面图层面积用 vector.area，parameters 为空。按字段筛选用 data.select_by_attribute，parameters 示例：{"where":{"op":"eq","field":"DKBH","value":"DK-01"}}。返回的 selected_count 即匹配数量，单纯问数量时无需额外步骤。
+      用户问某个要素或地类的字段值，调用 lookup_layer_field；先从已绑定清单确认材料角色和实际字段，缺字段信息用 describe_bound_layers 补齐。单独运行唯一值或字段列表不能回答字段值。
+      例如工业用地的已存面积，已知实际字段时调用 lookup_layer_field {"role":"layer-1","field":"DKMJ_M2","match_field":"YDXZ","match_value":"工业用地"}。用户明确要求按几何计算面积时才用 vector.area。
+      把未定义坐标系的矢量图层设成已有图层的坐标系时，调用 define_crs_from_layer，分别填写 target_role 和 reference_role，例如 {"target_role":"layer-1","reference_role":"layer-2"}。
       单纯查看属性字段用 describe_bound_layers 或 data.list_fields；不要把字段条件写成 SQL 字符串。
       两个已明确图层做核查时，直接用 control_check，无需先查目录。
       其他能力用 list_capabilities 查询。只清点项目要素或几何类型时，调用 execute_workflow，例如

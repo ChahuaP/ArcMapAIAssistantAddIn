@@ -15,6 +15,7 @@ from guizhi.domain.skills import Step
 from guizhi.infrastructure.cache import record_dependencies, reuse_job
 from guizhi.infrastructure.operations.evidence import read_artifact
 from guizhi.infrastructure.operations.runner import data_revision
+from guizhi.infrastructure.vector import digest
 
 
 def committed(record):
@@ -29,17 +30,17 @@ def resolve_value(value, records, skill_parameters):
         if name not in skill_parameters:
             raise ValueError(f"Missing declared skill parameter: {name}")
         return skill_parameters[name]
-    if isinstance(value, str) and value.startswith(("$run.", "$selection.")):
+    if isinstance(value, str) and value.startswith(("$run.", "$selection.", "$value.")):
         mode, name = value.split(".", 1)
         record = records.get(name)
         if record is None:
             raise ValueError(f"Unavailable prior step: {name}")
         if mode == "$run":
             return record["id"]
-        result = record["result"].get("selection")
-        if result is None:
-            raise ValueError(f"Step {name} has no selection")
-        return result
+        key = mode[1:]
+        if key not in record["result"]:
+            raise ValueError(f"Step {name} has no {key} output")
+        return record["result"][key]
     if isinstance(value, list):
         return [resolve_value(item, records, skill_parameters) for item in value]
     if isinstance(value, dict):
@@ -54,7 +55,7 @@ def material_from(ctx, record):
                     upstream_operation=record["task"]["operation"], upstream_run=record["id"])
     file = read_artifact(ctx.workspace, record["id"], "export")
     return {"file": str(file), "layer": data.get("export_layer"),
-            "revision": data.get("data_revision") or data_revision(file)}
+            "revision": data.get("data_revision") or (data_revision(file) if file.suffix.lower() == ".gpkg" else digest(file))}
 
 
 def execute(ctx, specification: dict):
