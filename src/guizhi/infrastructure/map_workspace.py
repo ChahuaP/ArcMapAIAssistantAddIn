@@ -36,7 +36,7 @@ MANUAL_OPERATIONS = {
     "data.select_by_location", "data.export_selection", "geometry.create_dataset", "geometry.repair",
     "geometry.explode", "table.add_field", "table.delete_field", "table.add_coordinates",
     "presentation.export_table", "raster.statistics", "raster.clip", "raster.reproject", "raster.mosaic",
-    "table.calculate_field",
+    "table.calculate_field", "table.calculate_geometry", "table.edit_cell",
 }
 
 
@@ -200,7 +200,7 @@ def describe(workspace, ref, file=None, name=None):
     stat = file.stat()
     _, revision = interactive_revision(file, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
     return {"ref": ref, "name": name, "sourceName": original, "revision": revision, "sourceRevision": ":".join(source_parts) or revision, "geometry": info["geometry_type"],
-            "count": info["features"], "bounds": numbers(info["total_bounds"]),
+            "count": info["features"], "fidField": info["fid_column"], "bounds": numbers(info["total_bounds"]),
             "crs": crs.to_string() if crs else None,
             "crsName": (source_crs_name or crs.name) if crs else "未定义坐标系",
             "metresPerUnit": crs.axis_info[0].unit_conversion_factor if crs and crs.is_projected else None,
@@ -399,25 +399,13 @@ def request(workspace, payload):
         counts = Counter(map(category_value, values))
         return {"classes": [{"value": value, "count": count} for value, count in counts.most_common(120)],
                 "remaining": max(0, len(counts) - 120)}
-    if action == "table":
-        file, name = source(workspace, payload["ref"])
-        page = payload["page"]
-        if type(page) is not int or not 0 <= page <= 1_000_000:
-            raise ValueError("属性表页码无效")
-        from guizhi.infrastructure.operations.table import identifier
+    if action in {"table", "table-complement", "table-statistics"}:
+        from guizhi.infrastructure import map_attributes
 
-        info = pyogrio.read_info(file, layer=name)
-        order = payload.get("sort")
-        fields = list(info["fields"])
-        if order is not None and (order not in fields or payload.get("direction") not in {"ascend", "descend"}):
-            raise ValueError("请选择有效的排序字段")
-        fid = identifier(info["fid_column"])
-        sort = f'{identifier(order)} {"DESC" if payload["direction"] == "descend" else "ASC"}, ' if order else ""
-        columns = ", ".join([fid, *map(identifier, fields)])
-        with closing(sqlite3.connect(file.as_uri() + "?mode=ro", uri=True)) as db:
-            rows = db.execute(f"SELECT {columns} FROM {identifier(name)} ORDER BY {sort}{fid} LIMIT 50 OFFSET ?", (page * 50,)).fetchall()
-        return {"rows": [{"id": row[0], "values": {field: value.hex() if isinstance(value, bytes) else value
-                         for field, value in zip(fields, row[1:], strict=True)}} for row in rows]}
+        file, name = source(workspace, payload["ref"])
+        reader = {"table": map_attributes.table_page, "table-complement": map_attributes.complement,
+                  "table-statistics": map_attributes.statistics}[action]
+        return reader(file, name, payload)
     if action == "crs-search":
         from pyproj.database import query_crs_info
         query = str(payload.get("query", "")).strip().casefold()

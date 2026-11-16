@@ -52,7 +52,8 @@ const definitions = Object.fromEntries([...tools.flatMap(group => group.tools),
     tool('geometry.repair', '修复几何', 'pencil', vector),
     tool('table.add_field', '添加字段', 'add', vector),
     tool('table.delete_field', '删除字段', 'trash', vector),
-    tool('table.calculate_field', '字段计算', 'analysis', vector),
+    tool('table.calculate_field', '字段计算器', 'analysis', vector),
+    tool('table.calculate_geometry', '计算几何', 'area', polygon),
     tool('presentation.export_table', '导出属性表', 'table', vector),
 ].map(item => [item.id, item]));
 const layerOptions = layers => layers.map(item => ({ value: key(item), label: item.name }));
@@ -97,6 +98,7 @@ const skillHints = {
 };
 const stats = {
     project_area_m2: '项目面积（平方米）', covered_area_m2: '重叠面积（平方米）', coverage_ratio: '覆盖率',
+    updated: '已计算要素数',
     area_m2: '合并面积（平方米）', file_count: '交付文件数', year_count: '统计年份数', feature_count: '要素数', selected_count: '选中要素数', row_count: '统计记录数',
     removed_area_m2: '调出面积（平方米）', replacement_area_m2: '补划面积（平方米）',
     qualified_area_m2: '符合质量阈值面积（平方米）', required_area_m2: '要求补划面积（平方米）',
@@ -142,8 +144,13 @@ function toolForm(definition, layers, refs, setRefs, values, update, picked) {
         parameters = { distance: number(values.distance), unit: values.unit || 'meters', cap: values.cap || 'round',
             join: values.join || 'round', dissolve: values.dissolve === 'all' };
         valid &&= Number.isFinite(parameters.distance) && parameters.distance > 0;
+    } else if (id === 'data.select_by_attribute' && values.method === 'sql') {
+        controls.push(select('method', '条件方式', { form: '条件表单', sql: 'SQL 条件' }),
+            text('sql', 'SQL 条件', '例如 "地类" = \'耕地\' AND "面积" > 100'));
+        parameters = { sql: values.sql?.trim() };
+        valid &&= Boolean(parameters.sql);
     } else if (id === 'data.select_by_attribute') {
-        controls.push(columns('field', '属性字段'), select('op', '比较方式', { eq: '等于', ne: '不等于', gt: '大于', gte: '大于或等于',
+        controls.push(select('method', '条件方式', { form: '条件表单', sql: 'SQL 条件' }, { placeholder: '条件表单' }), columns('field', '属性字段'), select('op', '比较方式', { eq: '等于', ne: '不等于', gt: '大于', gte: '大于或等于',
             lt: '小于', lte: '小于或等于', is_null: '为空', is_not_null: '不为空', like: '文本匹配（% 为任意字符）' }));
         const compare = values.op && !values.op.startsWith('is_');
         if (compare) controls.push(text('value', '比较值'));
@@ -179,7 +186,17 @@ function toolForm(definition, layers, refs, setRefs, values, update, picked) {
         controls.push(columns('field', '删除字段'));
         parameters = { field: values.field };
         valid &&= names.includes(values.field);
+    } else if (id === 'table.calculate_geometry') {
+        controls.push(text('areaField', '面积字段（平方米）', 'AREA_M2'),
+            h('small', { className: 'muted' }, '字段不存在时会新建。地理坐标系按椭球面计算。'));
+        parameters = { field: values.areaField?.trim() || 'AREA_M2' };
+    } else if (id === 'table.calculate_field' && values.method === 'sql') {
+        controls.push(select('method', '计算方式', { form: '按字段计算', sql: 'SQL 表达式' }),
+            columns('field', '目标字段'), text('expression', 'SQL 表达式', '例如 ROUND("面积" / 10000.0, 2)'));
+        parameters = { field: values.field, expression: values.expression?.trim() };
+        valid &&= names.includes(values.field) && Boolean(parameters.expression);
     } else if (id === 'table.calculate_field') {
+        controls.push(select('method', '计算模式', { form: '按字段计算', sql: 'SQL 表达式' }, { placeholder: '按字段计算' }));
         const operator = values.operator || 'copy';
         controls.push(columns('field', '目标字段'), columns('source_field', '来源字段'),
             select('operator', '计算方式', { copy: '复制字段', add: '加', subtract: '减', multiply: '乘', divide: '除' }));

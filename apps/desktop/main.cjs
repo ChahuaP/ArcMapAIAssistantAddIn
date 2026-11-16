@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, net, protocol, safeStorage, shell, Tray } = require('electron');
+const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, net, protocol, safeStorage, shell, Tray } = require('electron');
 const { randomBytes, randomUUID, createHash } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -487,11 +487,11 @@ async function startDesktop(options) {
     });
     bind('materialPaths', (paths, kind) => controller.intake(paths, kind));
     bind('map', async (surface, input) => {
-        if (surface !== window || !input || !['describe', 'features', 'table', 'crs-search', 'raster-preview', 'raster-display', 'categories', 'assign', 'reproject', 'transform', 'edit', 'tool', 'step-layers'].includes(input.action)) {
+        if (surface !== window || !input || !['describe', 'features', 'table', 'table-complement', 'table-statistics', 'crs-search', 'raster-preview', 'raster-display', 'categories', 'assign', 'reproject', 'transform', 'edit', 'tool', 'step-layers'].includes(input.action)) {
             throw new Error('地图请求无效');
         }
         if (!controller.settings.workspace) throw new Error('请先选择成果保存位置');
-        return ['describe', 'features', 'table', 'crs-search', 'raster-preview', 'raster-display', 'categories'].includes(input.action)
+        return ['describe', 'features', 'table', 'table-complement', 'table-statistics', 'crs-search', 'raster-preview', 'raster-display', 'categories'].includes(input.action)
             ? controller.reader.map(controller.settings.workspace, input) : controller.request('map', input);
     }, true);
     bind('mapSkill', async (surface, input) => {
@@ -596,6 +596,10 @@ async function startDesktop(options) {
             ...(task.control && { control: [task.control] }) };
         return controller.request('map', { action: 'task-inputs', run: task.runId,
             existing: inputReferences(groups, task.skill) });
+    }, true);
+    bind('copyAttribute', (surface, value) => {
+        if (surface !== window || typeof value !== 'string' || value.length > 1_000_000) throw new Error('属性值无法复制');
+        clipboard.writeText(value);
     }, true);
     bind('mapExport', async (surface, ref, table, only) => {
         if (surface !== window) throw new Error('请从工作台导出图层');
@@ -837,7 +841,8 @@ async function startDesktop(options) {
         if (!controller.settings.workspace || !controller.settings.modelConfig) reveal();
         desktop.showPortrait();
     }
-    return { window, launcher, portrait, tray, controller, speech, arcgis: sync, components };
+    return { window, launcher, portrait, tray, controller, speech, arcgis: sync, components,
+        updateActivated: () => updater.set('complete') };
 }
 
 module.exports = { startDesktop };

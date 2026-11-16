@@ -61,6 +61,16 @@ async function main() {
             const pending = updateReady + '.pending';
             fs.writeFileSync(pending, JSON.stringify({ version, profile: app.getPath('userData') }), { flag: 'wx' });
             fs.renameSync(pending, updateReady);
+            const active = path.join(values['installation-root'], 'active.json');
+            const running = path.resolve(__dirname, '../../..');
+            for (let i = 0; i < 80; i++) {
+                const pointer = JSON.parse(fs.readFileSync(active, 'utf8'));
+                if (path.join(values['installation-root'], 'releases', pointer.current.release) === running) {
+                    desktop.updateActivated();
+                    break;
+                }
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
         }
     }
 }

@@ -664,3 +664,10 @@ dialog label { display: grid; gap: 5px; }
 .gis-spatial-example.distance span { width: 24px; left: 2px; }
 .gis-spatial-example.distance span + span { width: 24px; left: 46px; }
 .gis-tool-guide p { margin: 5px 0 0; color: var(--muted); }
+
+.map-attribute-head { flex-wrap: wrap; }
+.map-attribute-head > button { margin-left: 0; }
+.map-attribute-head > button:last-child { margin-inline-start: auto; }
+.map-table-status { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 5px 10px; border-top: 1px solid var(--line); color: var(--muted); }
+.map-attributes .gis-cell { user-select: text; cursor: text; display: inline-block; max-width: 220px; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
+.gis-sort-row { display: grid; grid-template-columns: minmax(130px, 1fr) 88px auto; gap: 8px; }

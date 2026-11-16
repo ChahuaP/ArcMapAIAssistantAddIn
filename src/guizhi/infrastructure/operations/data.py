@@ -85,9 +85,20 @@ class AttributeFilter(BaseModel):
     condition: "AttributeFilter | None" = None
 
 
-def select_by_attribute(ctx, where: AttributeFilter, mode: Mode = "new_selection", previous: Selection | None = None):
+def select_by_attribute(ctx, where: AttributeFilter | None = None, mode: Mode = "new_selection",
+                        previous: Selection | None = None, sql: str | None = None):
+    if (where is None) == (sql is None):
+        raise ValueError("请选择条件表单或 SQL 条件")
     frame = ctx.frames[0]
-    chosen = set(map(int, frame.index[condition(frame, where.model_dump(exclude_none=True))]))
+    if sql is not None:
+        from guizhi.infrastructure.operations.sql_expression import evaluate
+
+        info = ctx.info[0]
+        rows = evaluate(ctx.directory / ctx.evidence[0]["path"], ctx.request.inputs[0].layer,
+                        info["fid_column"], info["fields"], sql, predicate=True)
+        chosen = {row[0] for row in rows}
+    else:
+        chosen = set(map(int, frame.index[condition(frame, where.model_dump(exclude_none=True))]))
     return select(ctx, chosen, mode, previous)
 
 

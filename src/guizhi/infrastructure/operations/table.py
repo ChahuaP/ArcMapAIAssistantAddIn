@@ -177,41 +177,113 @@ def delete_field(ctx, field: str):
     return table_copy(ctx, action)
 
 
-def calculate_field(ctx, field: str, source_field: str, operator: Literal["copy", "add", "subtract", "multiply", "divide"] = "copy",
-                    operand: float = 0):
+def calculate_field(ctx, field: str, source_field: str | None = None,
+                    operator: Literal["copy", "add", "subtract", "multiply", "divide"] = "copy",
+                    operand: float = 0, expression: str | None = None):
     frame = ctx.frames[0]
-    if any(name not in frame or name == frame.geometry.name for name in (field, source_field)):
-        raise ValueError("请选择有效的属性字段")
-    import operator as arithmetic
-    from pandas.api.types import is_numeric_dtype
+    if field not in frame or field == frame.geometry.name:
+        raise ValueError("请选择有效的目标字段")
+    if expression is not None:
+        from guizhi.infrastructure.operations.sql_expression import evaluate
 
-    values = frame[source_field]
-    if operator != "copy":
-        if not is_numeric_dtype(values) or not isfinite(operand) or (operator == "divide" and operand == 0):
-            raise ValueError("算术计算需要数字字段和有效数值，除数不能为零")
-        compute = {"add": arithmetic.add, "subtract": arithmetic.sub,
-                   "multiply": arithmetic.mul, "divide": arithmetic.truediv}
-        values = compute[operator](values, operand)
+        if source_field is not None:
+            raise ValueError("请选择按字段或按 SQL 计算")
+        info = ctx.info[0]
+        rows = evaluate(ctx.directory / ctx.evidence[0]["path"], ctx.request.inputs[0].layer,
+                        info["fid_column"], info["fields"], expression)
+        values = {fid: value for fid, value in rows}
+    else:
+        if source_field not in frame or source_field == frame.geometry.name:
+            raise ValueError("请选择有效的来源字段")
+        import operator as arithmetic
+        from pandas.api.types import is_numeric_dtype
+
+        values = frame[source_field]
+        if operator != "copy":
+            if not is_numeric_dtype(values) or not isfinite(operand) or (operator == "divide" and operand == 0):
+                raise ValueError("算术计算需要数字字段和有效数值，除数不能为零")
+            compute = {"add": arithmetic.add, "subtract": arithmetic.sub,
+                       "multiply": arithmetic.mul, "divide": arithmetic.truediv}
+            values = compute[operator](values, operand)
+    return write_field(ctx, field, values)
+
+
+def write_field(ctx, field, values, *, create=False):
     from pandas import isna
 
     def action(db, table, fields):
         column = identifier(field)
-        fid = identifier(ctx.info[0]["fid_column"])
+        fid_name = ctx.info[0]["fid_column"]
+        fid = identifier(fid_name)
+        if create and field not in fields:
+            if any(field.casefold() == name.casefold() for name in fields):
+                raise ValueError("字段名称与已有字段冲突")
+            db.execute(f"ALTER TABLE {table} ADD COLUMN {column} DOUBLE")
+        elif field == fid_name or field not in fields or field == ctx.info[0]["geometry_name"]:
+            raise ValueError("请选择可编辑的属性字段")
+        elif create and not re.search(r"INT|DOUBLE|REAL|FLOAT|NUMERIC", fields[field][2], re.I):
+            raise ValueError("面积只能写入数值字段")
         data = []
         for key, value in values.items():
+            ctx.check()
             if isna(value):
-                data.append((None, int(key)))
+                value = None
             elif hasattr(value, "item"):
-                data.append((value.item(), int(key)))
-            else:
-                data.append((value, int(key)))
+                value = value.item()
+            if type(value) is float and not isfinite(value):
+                raise ValueError("计算结果包含无效数值")
+            data.append((value, int(key)))
         db.executemany(f"UPDATE {table} SET {column}=? WHERE {fid}=?", data)
-        if any(db.execute(f"SELECT {column} FROM {table} WHERE {fid}=?", (key,)).fetchone()[0] != value
-               for value, key in data):
+        if len(data) == len(ctx.frames[0]):
+            observed = dict(db.execute(f"SELECT {fid}, {column} FROM {table}"))
+        else:
+            observed = {key: db.execute(f"SELECT {column} FROM {table} WHERE {fid}=?", (key,)).fetchone()[0]
+                        for _, key in data}
+        if any(observed.get(key) != value for value, key in data):
             raise ValueError("计算结果与目标字段类型不匹配")
         return {"calculated_field": field, "updated": len(data)}
 
     return table_copy(ctx, action)
+
+
+def calculate_geometry(ctx, field: str = "AREA_M2"):
+    from pyproj import CRS
+
+    frame = ctx.frames[0]
+    field = field.strip()
+    if not 1 <= len(field) <= 255:
+        raise ValueError("请输入有效的面积字段名称")
+    if frame.crs is None or not frame.geom_type.isin(["Polygon", "MultiPolygon"]).all():
+        raise ValueError("计算面积需要带坐标系的面图层")
+    crs = CRS(frame.crs)
+    if crs.is_projected:
+        x, y = crs.axis_info[:2]
+        values = frame.area * x.unit_conversion_factor * y.unit_conversion_factor
+    elif crs.is_geographic:
+        geod = crs.get_geod()
+        values = {}
+        for fid, geom in frame.geometry.items():
+            ctx.check()
+            values[fid] = abs(geod.geometry_area_perimeter(shapely.orient_polygons(geom))[0])
+    else:
+        raise ValueError("计算面积需要地理或投影坐标系")
+    return write_field(ctx, field, values, create=True)
+
+
+def edit_cell(ctx, fid: int, field: str, value: str | None):
+    info = ctx.info[0]
+    frame = ctx.frames[0]
+    if field not in info["fields"] or fid not in frame.index:
+        raise ValueError("属性字段或 FID 已失效")
+    from guizhi.infrastructure.operations.edit import field_value
+
+    try:
+        parsed = field_value(frame[field], value)
+        if isinstance(parsed, datetime):
+            parsed = parsed.isoformat(timespec="milliseconds")
+    except (TypeError, ValueError) as error:
+        raise ValueError("输入值与字段类型不匹配") from error
+    return write_field(ctx, field, {fid: parsed})
 
 
 def write_rows(ctx, where, assignments):

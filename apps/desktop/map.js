@@ -1,5 +1,6 @@
 import 'ol/ol.css';
 import { MapProcessing, TOOL_GROUPS, roleLayerPicker, layerMatches, mapLayerMaterial } from './map-processing.js';
+import { AttributeSort, AttributeStatistics, AttributeCell } from './map-table-ui.js';
 import { MapLayout, layoutDefaults, mapImage } from './map-layout.js';
 import { LayerProperties, MapProperties, MxdOpen, categoryValue, defaultMapBackground, layerSymbol, opacity, symbol } from './map-layer-dialog.js';
 import Map from 'ol/Map.js';
@@ -251,6 +252,8 @@ function WorkspaceMap({ layers, add, remove, moveLayer, selectLayer, active, hid
     const [tableLayer, setTableLayer] = useState(null);
     const [page, setPage] = useState(0);
     const [sort, setSort] = useState({});
+    const [tableFilter, setTableFilter] = useState('all');
+    const [tableDialog, setTableDialog] = useState(null);
     const [limited, setLimited] = useState([]);
     const [viewRevision, setViewRevision] = useState(0);
     const selectionRef = useRef(selection);
@@ -547,25 +550,57 @@ function WorkspaceMap({ layers, add, remove, moveLayer, selectLayer, active, hid
         const collection = state.select.getFeatures();
         if (!collection.getLength() && !source) return;
         collection.clear();
-        if (source) for (const id of selected.ids) {
-            const found = source.getFeatureById(id);
-            if (found) collection.push(found);
+        if (source && selected.ids.length) {
+            const ids = new Set(selected.ids);
+            collection.extend(source.getFeatures().filter(feature => ids.has(feature.getId())));
         }
     }
     useEffect(() => {
         if (graph.current) restoreSelection(graph.current, selection);
     }, [selection]);
+    const picked = selection?.key === active ? selection.ids : [];
+    const selectedRows = tableFilter === 'selected' && selection?.key === active ? selection.ids : undefined;
+    const emptyFilter = tableFilter === 'selected' && !selectedRows;
+    useEffect(() => { setPage(0); setTableFilter('all'); setTableDialog(null); }, [active]);
     useEffect(() => {
         if (!layer || layer.kind === 'raster' || !table) return;
         let alive = true;
-        const order = sort.key === key(layer) ? sort : {};
-        api.map({ action: 'table', ref: layer.ref, page, sort: order.field, direction: order.direction }).then(result => {
+        const order = sort.key === key(layer) ? sort.order : [];
+        api.map({ action: 'table', ref: layer.ref, page, order, selection: emptyFilter ? [] : selectedRows }).then(result => {
             if (alive) { setTable(result.rows); setTableLayer(key(layer)); }
         }).catch(error => { if (alive) fail(error); });
         return () => { alive = false; };
-    }, [layer, page, sort, Boolean(table)]);
-
-    const picked = selection?.key === active ? selection.ids : [];
+    }, [layer, page, sort, selectedRows, emptyFilter, Boolean(table)]);
+    async function invertSelection() {
+        setBusy(true);
+        try {
+            const ids = await api.map({ action: 'table-complement', ref: layer.ref, fids: picked });
+            setPage(0);
+            setSelection({ key: active, ids });
+        } catch (error) { fail(error); }
+        finally { setBusy(false); }
+    }
+    function replaceAttributes(input, output) {
+        replace(input, output);
+        const changed = key(output);
+        if (picked.length) setSelection({ key: changed, ids: picked });
+        if (sort.key === active) {
+            setSort({ key: changed, order: sort.order.filter(item => item.field === output.fidField ||
+                output.fields.some(field => field.name === item.field)) });
+        }
+    }
+    async function saveAttribute(value) {
+        if (!tableDialog?.cell || busy) return;
+        const { fid, field } = tableDialog.cell;
+        setBusy(true);
+        try {
+            const result = await api.map({ action: 'tool', operation: 'table.edit_cell', refs: [layer.ref],
+                parameters: { fid, field, value } });
+            replaceAttributes(layer, result.layers[0]);
+            setTableDialog(null);
+        } catch (error) { fail(error); }
+        finally { setBusy(false); }
+    }
     const openTool = tool => setAnalysis({ tool });
     const skillGroups = [
         ['规划与用地', ['control-check', 'farmland-balance', 'annual-land', 'permit-history']],
@@ -715,10 +750,23 @@ function WorkspaceMap({ layers, add, remove, moveLayer, selectLayer, active, hid
         } catch (error) { fail(error); }
     }
 
-    const columns = [{ title: 'FID', dataIndex: 'id', width: 75 },
-        ...(layer?.fields || []).map(field => ({ title: field.name, key: field.name, sorter: true,
-            sortOrder: sort.key === active && sort.field === field.name ? sort.direction : null,
-            render: (_, row) => String(row.values[field.name] ?? '—') }))];
+    const tableFields = layer?.fidField ? [{ label: 'FID', value: layer.fidField },
+        ...layer.fields.map(field => ({ label: field.name, value: field.name }))] : [];
+    const cellOrder = sort.key === active ? sort.order : [];
+    const columns = tableFields.map(({ label, value }, index) => ({
+        title: label, key: value, sorter: true, width: index ? undefined : 75,
+        sortOrder: cellOrder[0]?.field === value ? cellOrder[0].direction : null,
+        render: (_, row) => {
+            const raw = index ? row.values[value] : row.id;
+            return h('span', { className: 'gis-cell', tabIndex: 0, title: '双击编辑或复制',
+                onDoubleClick: () => setTableDialog({ cell: { value: raw, field: value, fid: row.id, readonly: !index || Boolean(edit), fail } }),
+                onKeyDown: event => {
+                    if (event.key !== 'F2' && event.key !== 'Enter') return;
+                    event.preventDefault();
+                    setTableDialog({ cell: { value: raw, field: value, fid: row.id, readonly: !index || Boolean(edit), fail } });
+                } }, String(raw ?? '—'));
+        },
+    }));
     const command = (label, onClick, props = {}) => h(Button, { size: 'small', icon: glyph(commandIcons[label]),
         onClick, ...props }, label);
     const group = (label, ...items) => h('section', { className: 'ribbon-group', 'aria-label': label },
@@ -903,21 +951,37 @@ function WorkspaceMap({ layers, add, remove, moveLayer, selectLayer, active, hid
         table && layer && layer.kind !== 'raster' && h('section', { className: 'map-attribute-panel', 'aria-label': '属性表' },
             h('header', { className: 'map-attribute-head' }, h('strong', null, glyph('table'), '属性表'),
                 h('span', null, layer.name),
-                command('添加字段', () => openTool('table.add_field'), { disabled: busy }),
-                command('删除字段', () => openTool('table.delete_field'), { disabled: busy || !layer.fields?.length }),
-                command('字段计算', () => openTool('table.calculate_field'), { disabled: busy || !layer.fields?.length }),
+                command('按属性选择', () => openTool('data.select_by_attribute'), { disabled: busy || Boolean(edit) }),
+                command('添加字段', () => openTool('table.add_field'), { disabled: busy || Boolean(edit) }),
+                command('删除字段', () => openTool('table.delete_field'), { disabled: busy || Boolean(edit) || !layer.fields?.length }),
+                command('字段计算器', () => openTool('table.calculate_field'), { icon: glyph('analysis'), disabled: busy || Boolean(edit) || !layer.fields?.length }),
+                command('计算几何', () => openTool('table.calculate_geometry'), { icon: glyph('area'), disabled: busy || Boolean(edit) || !/Polygon$/.test(layer.geometry) }),
+                command('高级排序', () => setTableDialog({ kind: 'sort' }), { icon: glyph('table'), disabled: busy }),
+                command('统计', () => setTableDialog({ kind: 'stats' }), { icon: glyph('analysis'), disabled: busy || !tableFields.length }),
+                command('切换选择', invertSelection, { icon: glyph('select'), disabled: busy }),
                 h(Button, { type: 'text', size: 'small', icon: glyph('close', 15),
-                    'aria-label': '关闭属性表', onClick: () => setTable(null) })),
+                    'aria-label': '关闭属性表', onClick: () => { setTable(null); setTableDialog(null); } })),
             h(Table, { className: 'map-attributes', size: 'small', columns, rowKey: 'id', dataSource: tableLayer === active ? table : [],
-            onChange: (_, filters, sorter, { action }) => {
-                if (action !== 'sort') return;
-                setPage(0);
-                setSort(sorter.order ? { key: active, field: sorter.columnKey, direction: sorter.order } : {});
-            },
-            scroll: { x: 'max-content', y: 130 }, rowSelection: { selectedRowKeys: picked, preserveSelectedRowKeys: true,
-                onChange: ids => setSelection({ key: active, ids }) },
-            pagination: { current: page + 1, pageSize: 50, total: layer.count,
-                showSizeChanger: false, onChange: value => setPage(value - 1) } })),
+                onChange: (_, filters, sorter, { action }) => {
+                    if (action !== 'sort') return;
+                    setPage(0);
+                    setSort({ key: active, order: sorter.order ? [{ field: sorter.columnKey, direction: sorter.order }] : [] });
+                },
+                scroll: { x: 'max-content', y: 146 }, rowSelection: { selectedRowKeys: picked, preserveSelectedRowKeys: true,
+                    onChange: ids => { if (tableFilter === 'selected') setPage(0); setSelection({ key: active, ids }); } },
+                pagination: { current: page + 1, pageSize: 50,
+                    total: tableFilter === 'selected' ? picked.length : layer.count,
+                    showSizeChanger: false, onChange: value => setPage(value - 1) } }),
+            h('div', { className: 'map-table-status' },
+                h('span', { role: 'status' }, '已选 ' + picked.length.toLocaleString('zh-CN') + ' / ' + layer.count.toLocaleString('zh-CN') + ' 个要素'),
+                h(antd.Segmented, { size: 'small', 'aria-label': '显示要素', value: tableFilter,
+                    options: [{ label: '全部', value: 'all' }, { label: '已选', value: 'selected' }],
+                    onChange: value => { setTableFilter(value); setPage(0); } }))),
+        tableDialog?.kind === 'sort' && h(AttributeSort, { columns: tableFields, order: cellOrder,
+            close: () => setTableDialog(null), apply: order => { setPage(0); setSort({ key: active, order }); } }),
+        tableDialog?.kind === 'stats' && h(AttributeStatistics, { columns: tableFields, source: layer.ref,
+            selected: picked, close: () => setTableDialog(null) }),
+        tableDialog?.cell && h(AttributeCell, { cell: tableDialog.cell, busy, close: () => setTableDialog(null), save: saveAttribute }),
         properties && h(LayerProperties, { ...properties, close: () => setProperties(null), glyph,
             save: value => styleLayer(key(properties.item), value) }),
         mapProperties && h(MapProperties, { background: backgroundColor, save: setBackground, coordinates: coordinateTools(),
@@ -955,12 +1019,12 @@ function WorkspaceMap({ layers, add, remove, moveLayer, selectLayer, active, hid
                     selectLayer(result.input);
                     setSelection({ key: result.input, ids: result.selection.fids });
                 }
-                if (result.layers.length && ['table.add_field', 'table.delete_field', 'table.calculate_field'].includes(analysis.tool)) {
+                if (result.layers.length && ['table.add_field', 'table.delete_field', 'table.calculate_field', 'table.calculate_geometry'].includes(analysis.tool)) {
                     const input = layers.find(item => key(item) === result.input);
                     if (input) {
                         const output = result.layers[0];
                         const classification = input.style?.classification;
-                        replace(classification && !output.fields.some(field => field.name === classification.field)
+                        replaceAttributes(classification && !output.fields.some(field => field.name === classification.field)
                             ? { ...input, style: { ...input.style, classification: undefined } } : input, output);
                     }
                 } else if (result.layers.length) {
