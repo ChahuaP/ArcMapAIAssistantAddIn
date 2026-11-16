@@ -12,7 +12,7 @@ export function MapLayout({ initial, busy, close, exportImage }) {
             h('label', null, '版式', h(Select, { 'aria-label': '版式', value: value.preset,
                 options: [{ value: 'formal', label: '政务图件' }, { value: 'compact', label: '简洁地图' }],
                 onChange: preset => setValue(previous => ({ ...previous, preset, border: preset === 'formal',
-                    scaleStyle: preset === 'formal' ? 'line' : 'bar' })) })),
+                    scaleStyle: preset === 'formal' ? 'line' : 'bar', legendStyle: preset === 'formal' ? 'boxed' : 'plain' })) })),
             h('label', null, '文件名', h(Input, { 'aria-label': '文件名', value: value.fileName,
                 placeholder: value.title || '小六地图', maxLength: 80,
                 onChange: event => update('fileName', event.target.value) })),
@@ -26,12 +26,15 @@ export function MapLayout({ initial, busy, close, exportImage }) {
                     h(Checkbox, { key: field, checked: value[field], onChange: event => update(field, event.target.checked) }, label))),
             value.legend && h('label', null, '图例标题', h(Input, { 'aria-label': '图例标题', value: value.legendTitle,
                 maxLength: 24, onChange: event => update('legendTitle', event.target.value) })),
+            value.legend && h('label', null, '图例样式', h(Select, { 'aria-label': '图例样式', value: value.legendStyle,
+                options: [{ value: 'boxed', label: '带边框' }, { value: 'plain', label: '无边框' }],
+                onChange: next => update('legendStyle', next) })),
             value.scale && h('label', null, '比例尺样式', h(Select, { 'aria-label': '比例尺样式', value: value.scaleStyle,
                 options: [{ value: 'line', label: '刻线' }, { value: 'bar', label: '黑白分段' }],
                 onChange: next => update('scaleStyle', next) }))));
 }
 
-export const layoutDefaults = { title: '', fileName: '', format: 'png', preset: 'formal', legend: true, legendTitle: '图例', scale: true, scaleStyle: 'line', border: true };
+export const layoutDefaults = { title: '', fileName: '', format: 'png', preset: 'formal', legend: true, legendTitle: '图例', legendStyle: 'boxed', scale: true, scaleStyle: 'line', border: true };
 
 export function mapImage(map, viewport, background, legend, layout) {
     const size = map.getSize();
@@ -96,7 +99,7 @@ export function mapImage(map, viewport, background, legend, layout) {
         const x = margin + width - box - 10, y = top + 10;
         ctx.fillStyle = '#fffffff2';
         ctx.fillRect(x, y, box, 31 + lines.length * 21);
-        ctx.strokeRect(x + .5, y + .5, box - 1, 30 + lines.length * 21);
+        if (layout.legendStyle !== 'plain') ctx.strokeRect(x + .5, y + .5, box - 1, 30 + lines.length * 21);
         ctx.fillStyle = '#182638';
         ctx.fillText(layout.legendTitle?.trim() || '图例', x + 10, y + 20, box - 20);
         lines.forEach(({ name, color, fill }, index) => {

@@ -671,3 +671,10 @@ dialog label { display: grid; gap: 5px; }
 .map-table-status { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 5px 10px; border-top: 1px solid var(--line); color: var(--muted); }
 .map-attributes .gis-cell { user-select: text; cursor: text; display: inline-block; max-width: 220px; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
 .gis-sort-row { display: grid; grid-template-columns: minmax(130px, 1fr) 88px auto; gap: 8px; }
+
+.gis-spatial-example.intersection span + span { width: 20px; height: 25px; inset: 10px auto auto 27px; background: #edb953b8; }
+.gis-spatial-example.erase span + span { left: 27px; background: var(--sub); border-style: dashed; }
+.gis-spatial-example.union span, .gis-spatial-example.union span + span { background: #57a6ff91; border-color: #438dd0; }
+.gis-spatial-example.difference span + span { background: #f2a7459c; }
+.gis-spatial-example.buffer span { inset: 2px auto auto 17px; width: 41px; height: 41px; border-radius: 50%; }
+.gis-spatial-example.buffer span + span { inset: 15px auto auto 30px; width: 15px; height: 15px; border-radius: 50%; background: #438dd0; border-color: #438dd0; }

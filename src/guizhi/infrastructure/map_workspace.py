@@ -114,7 +114,7 @@ def manual_tool(workspace, payload):
             raise ValueError("请选择 1 至 500 个地图要素")
         parameters = {"selection": {"layer": items[0]["layer"], "revision": items[0]["revision"], "fids": fids}}
     title = {"data.export_selection": "所选要素"}.get(operation) or step_title(operation)
-    if operation == "geometry.create_dataset":
+    if operation == "geometry.create_dataset" or payload.get("name") is not None:
         name = payload.get("name")
         if not isinstance(name, str) or not 1 <= len(name.strip()) <= 120:
             raise ValueError("请填写 1 至 120 字的图层名称")

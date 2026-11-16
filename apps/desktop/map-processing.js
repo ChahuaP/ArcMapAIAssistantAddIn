@@ -90,6 +90,22 @@ function SpatialExample({ predicate }) {
     return h('div', { className: 'gis-tool-help' }, h('div', { className: 'gis-spatial-example ' + shape, 'aria-hidden': true },
         h('span'), h('span')), h('span', null, text));
 }
+const toolExamples = {
+    'vector.buffer': ['buffer', '按指定距离向外扩展，生成缓冲范围。'],
+    'vector.dissolve': ['union', '合并同一组范围，移除组内边界。'],
+    'vector.intersect': ['intersection', '保留两个图层共有的部分，并合并相交部分的属性。'],
+    'vector.erase': ['erase', '从输入图层减去叠加图层覆盖的部分，保留未覆盖部分。'],
+    'vector.clip': ['intersection', '只保留裁切范围内的输入要素，输出沿用输入图层的属性。'],
+    'vector.union': ['union', '保留两层的全部覆盖范围，按边界切分并保留两边属性。'],
+    'vector.identity': ['overlap', '保留输入范围，用叠加边界切分并补充属性。'],
+    'vector.symmetric_difference': ['difference', '保留只被其中一个图层覆盖的部分。'],
+    'vector.update_overlay': ['union', '用叠加图层覆盖同位置的输入要素，保留其余部分。'],
+    'vector.spatial_join': ['overlap', '用位置关系匹配要素，将匹配图层的属性带到输入图层。'],
+    'raster.clip': ['intersection', '只保留裁切边界内的像元。'],
+};
+const namedResult = id => /^(vector|raster|data)\./.test(id) && ![
+    'vector.area', 'raster.statistics', 'data.describe', 'data.select_by_attribute', 'data.select_by_location',
+].includes(id);
 const skillHints = {
     'control-check': '用项目范围与管控范围叠加，按相交后去重的面积计算覆盖率。只碰到边或点时，重叠面积为零。',
     'farmland-balance': '分别填写拟调出范围和补划范围，按同一面积口径比较调出面积和有效补划面积。',
@@ -127,6 +143,7 @@ function toolForm(definition, layers, refs, setRefs, values, update, picked) {
     const controls = accepts.map((predicate, index) => layerSelect(index,
         index === 0 ? '输入图层' : id.endsWith('.clip') ? '裁切范围' : '叠加图层', predicate, multiple && index > 0));
     if (multiple && accepts.length === 1) controls.push(layerSelect(1, '其他图层', accepts[0], true));
+    if (namedResult(id)) controls.push(text('resultName', '输出图层名（选填）', definition.title));
     let parameters = {};
     let valid = refs.length >= accepts.length && (!multiple || refs.length > 1) && refs.every((ref, index) =>
         (accepts[index] || accepts.at(-1))?.(layers.find(item => key(item) === ref)));
@@ -339,7 +356,7 @@ export function MapProcessing({ tool: id, skill, layers, active, picked, entries
                 coordinatePlans: Object.fromEntries(['project', 'control'].filter(role => materials[role]?.[0]?.plan)
                     .map(role => [role + '_plan', materials[role][0].plan])) })
                 : await api.map({ action: 'tool', operation: id, refs: refs.map(ref => layers.find(item => key(item) === ref).ref),
-                    parameters, name: id === 'geometry.create_dataset' ? values.name.trim() : undefined });
+                    parameters, name: id === 'geometry.create_dataset' ? values.name.trim() : values.resultName?.trim() || undefined });
             onResult({ ...output, input: refs[0] });
             setResult(output);
         } catch (issue) { fail(issue); }
@@ -377,6 +394,10 @@ export function MapProcessing({ tool: id, skill, layers, active, picked, entries
                 pendingMaterial && h('p', { role: 'status', className: 'muted' }, '正在读取材料…'),
                 Object.keys(skill.parameters).length > 0 && h('div', { className: 'gis-skill-parameters' }, h(SkillParameters, { skill, materials, layers, entries, values,
                     setValues, disabled: busy || missing.length > 0 })))
-                : h('fieldset', { className: 'gis-tool-fields', disabled: busy }, form.controls.map((control, index) => h(window.React.Fragment, { key: index }, control))),
+                : h('fieldset', { className: 'gis-tool-fields', disabled: busy },
+                    toolExamples[id] && h('div', { className: 'gis-tool-help' },
+                        h('div', { className: 'gis-spatial-example ' + toolExamples[id][0], 'aria-hidden': true }, h('span'), h('span')),
+                        h('span', null, toolExamples[id][1])),
+                    form.controls.map((control, index) => h(window.React.Fragment, { key: index }, control))),
             error && h('p', { className: 'error', role: 'alert' }, error)));
 }
