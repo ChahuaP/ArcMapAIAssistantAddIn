@@ -223,7 +223,7 @@ class DesktopController {
     }
 
 
-    submit({ prompt, project, control, skill, materials = {}, skillParameters, parameterText, images = [], imageBlocks = [], dialogue = false }) {
+    submit({ prompt, project, control, skill, materials = {}, skillParameters, parameterText, mentions, images = [], imageBlocks = [], dialogue = false }) {
         if (!this.settings.workspace) throw new Error('请先选择成果保存位置');
         if (this.active || this.modelTesting) throw new Error('已有任务在运行');
         if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 4000) throw new Error('请输入办理事项');
@@ -258,7 +258,7 @@ class DesktopController {
         if (skillParameters && Buffer.byteLength(JSON.stringify(skillParameters)) > 65536) throw new Error('办理参数最多 64 KB');
         const { config, key } = this.selectModel({ modelConfig: this.settings.modelConfig });
         const task = { id: randomUUID(), title: [...prompt.trim()].slice(0, 32).join(''), prompt: prompt.trim(),
-            project, control, skill, materials, parameterText, images, dialogue, operator: operator(this.settings), status: 'running', createdAt: new Date().toISOString() };
+            project, control, skill, materials, parameterText, mentions, images, dialogue, operator: operator(this.settings), status: 'running', createdAt: new Date().toISOString() };
         const next = [task, ...this.tasks];
         this.persist(next);
         this.tasks = next;

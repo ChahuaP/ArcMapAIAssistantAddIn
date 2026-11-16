@@ -56,19 +56,22 @@ const definitions = Object.fromEntries([...tools.flatMap(group => group.tools),
     tool('presentation.export_table', '导出属性表', 'table', vector),
 ].map(item => [item.id, item]));
 const layerOptions = layers => layers.map(item => ({ value: key(item), label: item.name }));
-const layerMatches = (role, item) => (raster(item) ? 'raster' : 'vector') === role.kind &&
+export const layerMatches = (role, item) => (raster(item) ? 'raster' : 'vector') === role.kind &&
     (role.geometry === 'any' || ({ line: 'LineString', polygon: 'Polygon', point: 'Point' }[role.geometry] &&
         item.geometry?.includes({ line: 'LineString', polygon: 'Polygon', point: 'Point' }[role.geometry]))) &&
     (role.coordinate === 'any' || Boolean(item.crs) && (role.coordinate !== 'projected_meters' || item.units === 'm'));
+export function mapLayerMaterial(item) {
+    const id = key(item);
+    const kind = raster(item) ? 'raster' : 'vector';
+    const roleInfo = { name: item.name, geometry: item.geometry, crs: item.crs, projected_meters: item.units === 'm' };
+    return { file: id, mapKey: id, ref: item.ref, kind, name: item.name,
+        layer: kind === 'raster' ? null : item.name, layers: kind === 'raster' ? [] : [item.name],
+        layerInfo: [roleInfo], metadata: roleInfo };
+}
 export const roleLayerPicker = (layers, busy) => (role, items, append, pending) => {
     const choices = layers.filter(layer => layer.ref && layerMatches(role, layer) && !items.some(item => item.mapKey === key(layer)));
     return choices.length > 0 && dropdown(null, layerOptions(choices), id => {
-        const item = choices.find(layer => key(layer) === id);
-        const kind = raster(item) ? 'raster' : 'vector';
-        const roleInfo = { name: item.name, geometry: item.geometry, crs: item.crs, projected_meters: item.units === 'm' };
-        append([{ file: id, mapKey: id, ref: item.ref, kind, name: item.name,
-            layer: kind === 'raster' ? null : item.name, layers: kind === 'raster' ? [] : [item.name],
-            layerInfo: [roleInfo], metadata: roleInfo }]);
+        append([mapLayerMaterial(choices.find(layer => key(layer) === id))]);
     }, { disabled: busy || pending, showSearch: true, optionFilterProp: 'label', placeholder: '从地图选图层',
         'aria-label': '选择' + role.label + '图层' });
 };

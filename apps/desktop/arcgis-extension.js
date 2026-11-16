@@ -40,21 +40,13 @@
                 error && h('p', { role: 'alert', className: 'error' }, error)));
     };
 
-    window.GuizhiArcgisMaterials = function ArcgisMaterials({ host, disabled, attach, fail }) {
-        const [busy, setBusy] = useState(false);
+    window.GuizhiArcgisMaterialItems = function (host) {
         const layers = host?.frames[0]?.layers.filter(layer => layer.kind === 'vector' && layer.visible) || [];
         if (!layers.length) return null;
-        const items = layers.map(layer => ({ key: String(layer.index), label: layer.name, children: [
-            { key: layer.index + ':all', label: '整个图层' }, { key: layer.index + ':selection', label: '已选要素' },
-        ] }));
-        async function capture({ key }) {
-            const [layer, choice] = key.split(':');
-            setBusy(true);
-            try { attach(await api.arcgisCapture(Number(layer), choice === 'selection')); }
-            catch (issue) { fail(issue); }
-            finally { setBusy(false); }
-        }
-        return h(antd.Dropdown, { trigger: ['click'], menu: { items, onClick: capture }, disabled: disabled || busy || host.editing },
-            button('map', '从 ArcGIS 添加', { type: 'text', loading: busy }));
+        return { key: 'arcgis', label: '从 ArcGIS 添加', icon: icon('map'), disabled: host.editing,
+            children: layers.map(layer => ({ key: 'arcgis:' + layer.index, label: layer.name, children: [
+                { key: 'arcgis:' + layer.index + ':all', label: '整个图层' },
+                { key: 'arcgis:' + layer.index + ':selection', label: '已选要素' },
+            ] })) };
     };
 })();

@@ -38,7 +38,7 @@ async function startDesktop(options) {
         'style.css', 'theme.css', 'mark.svg', 'luhe-banner.png', 'model-form.js', 'onboarding.js',
         'portrait.html', 'portrait.css', 'portrait.js', 'task-commands.js', 'speech-settings.js',
         'speech-audio.js', 'voice-input.js', 'arcgis-extension.js', 'markdown.js', 'messages.js',
-        'component-actions.js', 'business-log.js', 'business-log.css'];
+        'component-actions.js', 'business-log.js', 'business-log.css', 'composer-media.js'];
     const files = new Map(localFiles.map(name => ['/' + name, path.join(__dirname, name)]));
     files.set('/map.js', path.join(rendererRuntime, 'map.js'));
     files.set('/map.css', path.join(rendererRuntime, 'map.css'));
@@ -73,6 +73,7 @@ async function startDesktop(options) {
     let sync;
     let draft = {};
     const imageInputs = new Map();
+    let imageSequence = 0;
     let mapLayers = new Map();
     let mapSelection;
     let mapCatalogVersion = 0;
@@ -200,12 +201,28 @@ async function startDesktop(options) {
     function requireImageComposer(surface) {
         if (![window, launcher].includes(surface)) throw new Error('请从对话添加图片');
     }
+    const imageReferences = () => Array.from(imageInputs.values(), entry => entry.reference).reverse();
+    function clearImages() {
+        imageInputs.clear();
+        imageSequence = 0;
+        desktop.notify('imageReferences', []);
+    }
+    bind('imageReferences', surface => {
+        requireImageComposer(surface);
+        return imageReferences();
+    }, true);
+    bind('conversationImage', (surface, id) => {
+        requireImageComposer(surface);
+        const entry = imageInputs.get(id);
+        return entry ? 'data:' + entry.block.mimeType + ';base64,' + entry.block.data : null;
+    }, true);
     function requireImageBatch(items) {
         if (!Array.isArray(items) || items.length > 4) throw new Error('每轮最多添加 4 张图片');
     }
     function registerImages(inputs) {
+        const names = new Set(imageReferences().map(item => item.name));
         const blocks = inputs.map(({ image, name }) => {
-            if (image.isEmpty()) throw new Error('无法读取图片 ' + name);
+            if (image.isEmpty()) throw new Error(name ? '无法读取图片 ' + name : '无法读取剪贴板图片');
             const { width, height } = image.getSize();
             if (Math.max(width, height) > 1500) {
                 image = image.resize(width > height ? { width: 1500 } : { height: 1500 });
@@ -215,11 +232,22 @@ async function startDesktop(options) {
             const block = png.length <= 1024 * 1024
                 ? { mimeType: 'image/png', data: png.toString('base64') }
                 : { mimeType: 'image/jpeg', data: image.toJPEG(82).toString('base64') };
-            return { id, name, block };
+            const base = name || '剪贴板图片 ' + (++imageSequence);
+            name = base;
+            for (let count = 2; names.has(name); count++) name = base + '（' + count + '）';
+            names.add(name);
+            const thumb = image.resize(width > height ? { width: 144 } : { height: 144 });
+            const reference = { id, name, thumbnail: 'data:image/jpeg;base64,' + thumb.toJPEG(83).toString('base64') };
+            return { reference, block: { type: 'image', ...block, name } };
         });
-        for (const { id, name, block } of blocks) imageInputs.set(id, { type: 'image', ...block, name });
-        while (imageInputs.size > 24) imageInputs.delete(imageInputs.keys().next().value);
-        return blocks.map(({ id, name }) => ({ id, name }));
+        for (const entry of blocks) imageInputs.set(entry.reference.id, entry);
+        const attached = new Set(Array.isArray(draft.images) ? draft.images.slice(0, 4).map(item => item?.id) : []);
+        while (imageInputs.size > 24) {
+            const oldest = [...imageInputs.keys()].find(id => !attached.has(id));
+            imageInputs.delete(oldest);
+        }
+        desktop.notify('imageReferences', imageReferences());
+        return blocks.map(({ reference }) => reference);
     }
     bind('addImages', async (surface, paths) => {
         requireImageComposer(surface);
@@ -241,7 +269,7 @@ async function startDesktop(options) {
             if (!(bytes instanceof ArrayBuffer) || !bytes.byteLength || bytes.byteLength > maxImageBytes) {
                 throw new Error('请粘贴不超过 12 MB 的图片');
             }
-            return { image: nativeImage.createFromBuffer(Buffer.from(bytes)), name: '剪贴板图片' };
+            return { image: nativeImage.createFromBuffer(Buffer.from(bytes)) };
         }));
     }, true);
     bind('mapImage', async (surface, ref) => {
@@ -327,7 +355,7 @@ async function startDesktop(options) {
         const workspace = controller.settings.workspace;
         const state = controller.configure({ ...input, modelVision: Boolean(input.modelConfig) });
         if (state.settings.workspace !== workspace) {
-            imageInputs.clear();
+            clearImages();
             mapLayers.clear();
             mapCatalogVersion += 1;
             desktop.notify('mapReferences', []);
@@ -626,7 +654,7 @@ async function startDesktop(options) {
     }
     function resetConversation(next = {}, fromVoice = false) {
         const state = controller.resetConversation();
-        imageInputs.clear();
+        clearImages();
         setVoiceReply(null);
         replaceDraft(next);
         if (!fromVoice) portrait.webContents.send('guizhi:voiceStop');
@@ -665,10 +693,18 @@ async function startDesktop(options) {
         }
         if (!task.skill) {
             const explicit = [...task.prompt.matchAll(/[@＠]「([^」]+)」/gu)].map(match => match[1]);
-            const picks = explicit.length ? [...new Set(explicit)].map(name => {
+            const mentions = new Map(Object.entries(task.mentions || {}));
+            const picks = explicit.length ? [...new Set(explicit)].flatMap(name => {
+                const mention = mentions.get(name);
+                if (mention) {
+                    if (mention.type !== 'layer') return [];
+                    const layer = mapLayers.get(mention.key);
+                    if (!layer) throw new Error('所引用的图层已移除，请重新选择');
+                    return [layer];
+                }
                 const matches = [...mapLayers.values()].filter(item => item.name === name);
                 if (matches.length !== 1) throw new Error('请确认地图图层「' + name + '」存在且名称唯一');
-                return matches[0];
+                return matches;
             }) : namedLayers(task.prompt);
             if (new Set(picks.map(item => item.name)).size !== picks.length) {
                 throw new Error('地图中有同名图层，请先移除不使用的图层');
@@ -700,9 +736,10 @@ async function startDesktop(options) {
         if (!Array.isArray(imageIds) || imageIds.length > 4) throw new Error('每轮最多使用 4 张图片');
         const imageBlocks = imageIds.map(item => {
             if (!imageInputs.has(item?.id)) throw new Error('图片已失效，请重新添加');
-            return imageInputs.get(item.id);
+            return imageInputs.get(item.id).block;
         });
-        const state = controller.submit({ ...task, imageBlocks });
+        const images = imageIds.map(item => imageInputs.get(item.id).reference);
+        const state = controller.submit({ ...task, images, imageBlocks });
         if (task.dialogue && speech.state().tts !== 'off') setVoiceReply({ task: state.tasks[0].id, text: '' });
         replaceDraft();
         broadcast(state);

@@ -368,9 +368,140 @@ dialog label { display: grid; gap: 5px; }
     color: var(--muted); border-radius: 50%; font-size: 11px; display: inline-grid; place-items: center; }
 .model-field-label .model-help-trigger.ant-btn:hover { color: var(--accent); border-color: currentColor; }
 
-.layer-mentions { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 10px 6px; padding: 5px;
-    border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
-.layer-mentions > .ant-btn { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.composer-images {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 12px 2px;
+}
+.bubble .composer-images {
+    padding: 0 0 8px;
+}
+.composer-image-tile {
+    position: relative;
+    width: clamp(64px, 8vw, 100px);
+    min-width: 0;
+}
+.composer-image-open {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    justify-items: stretch;
+    width: 100%;
+    padding: 0;
+    background: var(--sub);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    overflow: hidden;
+    cursor: zoom-in;
+    text-align: start;
+}
+.composer-image-open img,
+.composer-image-open > svg {
+    display: block;
+    width: 100%;
+    aspect-ratio: 5 / 4;
+    object-fit: cover;
+    height: auto;
+    background: var(--soft);
+}
+.composer-image-open > svg {
+    padding: 25%;
+}
+.composer-image-open span {
+    display: block;
+    padding: 3px 6px;
+    color: var(--muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 11px;
+}
+.composer-image-remove {
+    position: absolute;
+    display: grid;
+    place-items: center;
+    inset: 4px 4px auto auto;
+    width: 23px;
+    height: 23px;
+    padding: 0;
+    border-radius: 50%;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    color: var(--ink);
+    cursor: pointer;
+}
+.composer-image-remove:hover {
+    background: var(--soft);
+}
+.composer-image-remove svg {
+    width: 14px;
+    height: 14px;
+}
+.composer-image-preview img {
+    display: block;
+    max-width: 100%;
+    max-height: min(76vh, 900px);
+    margin-inline: auto;
+    object-fit: contain;
+}
+.composer-reference-popover {
+    width: min(390px, calc(100vw - 38px));
+}
+.composer-reference-popover .ant-popover-inner {
+    padding: 4px;
+    border: 1px solid var(--line);
+    background: var(--panel);
+}
+.composer-mentions {
+    max-height: min(265px, 42vh);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+.composer-mention-group {
+    padding: 7px 8px 3px;
+    font-size: 12px;
+    color: var(--muted);
+}
+.composer-mention-item {
+    width: 100%;
+    min-height: 34px;
+    display: flex;
+    gap: 8px;
+    padding: 5px 8px;
+    align-items: center;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--ink);
+    text-align: start;
+    cursor: pointer;
+}
+.composer-mention-item[aria-selected="true"] {
+    background: var(--soft);
+}
+.composer-mention-item img,
+.composer-mention-item svg {
+    width: 23px;
+    height: 23px;
+    flex: none;
+    object-fit: cover;
+    border-radius: 4px;
+}
+.composer-mention-item svg {
+    padding: 3px;
+    color: var(--muted);
+}
+.composer-mention-item span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.composer-mentions-empty {
+    color: var(--muted);
+    padding: 8px 10px;
+    margin: 0;
+}
 
 .map-ribbon { overflow: hidden; flex: none; }
 .ribbon-tabs {
@@ -484,7 +615,6 @@ dialog label { display: grid; gap: 5px; }
 .gis-dialog .role-material { display: grid; gap: 6px; }
 .gis-dialog .role-material > button { justify-self: start; }
 .reply-image { display: block; max-width: 100%; max-height: 440px; object-fit: contain; border-radius: 8px; }
-.message-images { display: block; margin-top: 5px; color: var(--muted); }
 
 .mxd-open-fields { display: grid; gap: 8px; }
 .mxd-open-fields:empty { display: none; }

@@ -10,11 +10,12 @@
         budget_exhausted: '已保存进度' };
     const active = task => task && ['running', 'cancelling'].includes(task.status);
     const emptyDraft = () => ({ prompt: '', project: null, control: null, skill: null, materials: {}, parameterText: {},
-        unassigned: [], images: [], freeMode: false });
+        unassigned: [], images: [], mentions: {}, freeMode: false });
     const number = value => value.toLocaleString('zh-CN', { maximumFractionDigits: 2 });
     const { Material, RoleMaterials, materialReady, roleReady, mergeMaterials, intake } = window.GuizhiMaterials;
     const { render, open } = window.GuizhiMarkdown;
     const errorText = window.GuizhiErrorText;
+    const { ImageAttachments, MentionList, AddMenu } = window.GuizhiComposerMedia;
     const { BusinessLog, ReportPanel } = window.GuizhiBusinessLog;
     const markdown = text => h('div', { className: 'answer-markdown', onClick: open,
         dangerouslySetInnerHTML: { __html: render(text) } });
@@ -147,25 +148,15 @@
         const [activeLayer, setActiveLayer] = useState(null);
         const [mapSelection, setMapSelection] = useState(null);
         const [references, setReferences] = useState([]);
+        const [imageReferences, setImageReferences] = useState([]);
         const [mention, setMention] = useState(null);
         const [mentionIndex, setMentionIndex] = useState(0);
         const composerInput = useRef(null);
-        const mentionItems = mention ? references.filter(item => item.name.toLowerCase().includes(mention.query.toLowerCase())).slice(0, 8) : [];
         function updateMention(input) {
             const value = input.value.slice(0, input.selectionStart);
             const match = value.match(/(?:^|[\s，。；：])[@＠]([^@＠「」\n]*)$/u);
             setMentionIndex(0);
             setMention(match ? { from: value.length - match[1].length - 1, to: value.length, query: match[1] } : null);
-        }
-        function insertMention(item) {
-            const { from, to } = mention;
-            const token = '@「' + item.name + '」 ';
-            update('prompt', draft.prompt.slice(0, from) + token + draft.prompt.slice(to));
-            setMention(null);
-            requestAnimationFrame(() => {
-                composerInput.current?.focus();
-                composerInput.current?.setSelectionRange(from + token.length, from + token.length);
-            });
         }
         useEffect(() => {
             if (!launcher) void api.mapCatalog(layers, mapSelection).catch(fail);
@@ -213,13 +204,14 @@
             }).catch(fail);
             api.readDraft().then(receiveDraft).catch(fail);
             api.mapReferences().then(setReferences).catch(fail);
+            api.imageReferences().then(setImageReferences).catch(fail);
             const callbacks = [
-                api.onMapReferences(setReferences), api.onState(setState), api.onVoiceCaption(setVoiceReply),
+                api.onMapReferences(setReferences), api.onImageReferences(setImageReferences), api.onState(setState), api.onVoiceCaption(setVoiceReply),
                 api.onSettings(section => showSettings(section || true)), api.onAppearance(setAppearance), api.onDraft(receiveDraft),
                 api.onLauncherFocus(() => document.querySelector('.launcher textarea')?.focus()),
             ];
             const dismiss = event => {
-                if (launcher && event.key === 'Escape' && !event.isComposing && !document.querySelector('dialog[open]')) {
+                if (launcher && event.key === 'Escape' && !event.isComposing && !document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) {
                     void api.hideLauncher().catch(fail);
                 }
             };
@@ -309,7 +301,7 @@
         const fields = skill?.parameters || {};
         const missingComponents = (skill?.components || []).filter(kind => state?.components?.[kind]?.installed === false);
         const openComponents = () => launcher ? api.workbench('components').catch(fail) : showSettings('components');
-        const suggestion = !skill && !draft.freeMode && !references.some(item => draft.prompt.includes(item.name)) ? matchBusiness(draft.prompt, catalog) : { items: [] };
+        const suggestion = !skill && !draft.freeMode && !draft.images.length && !references.some(item => draft.prompt.includes(item.name)) ? matchBusiness(draft.prompt, catalog) : { items: [] };
         const canSubmit = materialsReady && !missingComponents.length && parametersReady(fields, draft.parameterText) &&
             (suggestion.items.length < 2 || suggestion.exact);
         async function submit(event) {
@@ -336,8 +328,10 @@
             } catch (error) { fail(error); } finally { setSending(false); }
         }
         function retry(item) {
-            const { prompt, project, control, skill, materials, parameterText } = item;
-            const next = { ...emptyDraft(), prompt, project, control, skill, materials, parameterText: parameterText || {} };
+            const { prompt, project, control, skill, materials, parameterText, mentions } = item;
+            const images = (item.images || []).filter(image => imageReferences.some(ref => ref.id === image.id));
+            const next = { ...emptyDraft(), prompt, project, control, skill, materials, images, mentions: mentions || {},
+                parameterText: parameterText || {} };
             const restored = catalog.find(entry => reference(entry) === skill);
             if (skill && !restored) {
                 const current = shared.current;
@@ -347,6 +341,7 @@
             } else setDraft({ ...next, skillDefinition: restored });
         }
         async function resetConversation(next = {}) {
+            setMention(null);
             setShowLog(false);
             setError('');
             setSending(true);
@@ -365,17 +360,71 @@
         }
         const ready = Boolean(state?.settings.workspace);
         const picked = [draft.project, draft.control, ...draft.unassigned, ...Object.values(draft.materials).flat()].filter(Boolean);
-        function appendMaterials(items) {
-            setDraft(current => {
-                const unique = mergeMaterials(current.materials.inputs || [], items);
-                if (unique.length > 30) throw new Error('一次最多添加 30 份自由材料');
-                return { ...current, materials: { ...current.materials, inputs: unique } };
-            });
+        const materialKey = item => JSON.stringify([item.file, item.layer]);
+        const priorMaterials = turns.flatMap(item => [item.project, item.control, ...Object.values(item.materials || {}).flat()])
+            .filter(item => item && !item.ref && Array.isArray(item.layers));
+        const referenceMaterial = mergeMaterials(priorMaterials, picked).filter(item => !item.ref && item.name);
+        const mentionItems = mention ? [
+            ...references.filter(layer => !skill || skill.materials.some(role => window.GuizhiMap.layerMatches(role, layer)))
+                .map(item => ({ type: 'layer', key: item.id, name: item.name, value: item })),
+            ...referenceMaterial.map(item => ({ type: 'material', key: materialKey(item), name: item.name, value: item })),
+            ...imageReferences.map(item => ({ type: 'image', key: item.id, name: item.name, thumbnail: item.thumbnail, value: item })),
+        ].filter(item => item.name.toLocaleLowerCase().includes(mention.query.trim().toLocaleLowerCase())) : [];
+
+        function withMaterials(current, items) {
+            if (current.skill) return { ...current, unassigned: mergeMaterials(current.unassigned, items) };
+            const inputs = mergeMaterials(current.materials.inputs || [], items);
+            if (inputs.length > 30) throw new Error('一次最多添加 30 份自由材料');
+            return { ...current, materials: { ...current.materials, inputs } };
         }
-        function attachArcgis(item) {
-            if (shared.current !== draft) return;
-            if (draft.skill) setDraft(old => ({ ...old, unassigned: mergeMaterials(old.unassigned, [item]) }));
-            else appendMaterials([item]);
+        function withImages(current, items) {
+            const images = [...new Map([...current.images, ...items].map(item => [item.id, item])).values()];
+            if (images.length > 4) throw new Error('每轮最多添加 4 张图片');
+            return { ...current, images };
+        }
+        function insertMention(item) {
+            if (!mention || !item) return;
+            const { from, to } = mention;
+            const base = item.name.replaceAll('「', '').replaceAll('」', '').trim() || '引用内容';
+            const same = ref => ref?.type === item.type && ref.key === item.key;
+            let label = base;
+            for (let number = 2; Object.hasOwn(draft.mentions, label) && !same(draft.mentions[label]); number++) {
+                label = base + '（' + number + '）';
+            }
+            const token = '@「' + label + '」 ';
+            if (draft.prompt.length - (to - from) + token.length > 4000) return fail('办理事项最多填写 4000 个字符');
+            try {
+                setDraft(current => {
+                    let next = current;
+                    if (item.type === 'image') next = withImages(current, [item.value]);
+                    if (item.type === 'material' && !picked.some(material => materialKey(material) === item.key)) {
+                        next = withMaterials(current, [item.value]);
+                    }
+                    if (item.type === 'layer' && skill && !picked.some(material => material.mapKey === item.key)) {
+                        next = withMaterials(current, [window.GuizhiMap.mapLayerMaterial(item.value)]);
+                    }
+                    return { ...next, prompt: current.prompt.slice(0, from) + token + current.prompt.slice(to),
+                        mentions: { ...current.mentions, [label]: { type: item.type, key: item.key } } };
+                });
+                setError('');
+                setMention(null);
+                requestAnimationFrame(() => {
+                    composerInput.current?.focus();
+                    composerInput.current?.setSelectionRange(from + token.length, from + token.length);
+                });
+            } catch (error) { fail(error); }
+        }
+        function removeImage(image) {
+            setDraft(current => {
+                const labels = Object.entries(current.mentions).filter(([, entry]) => entry.type === 'image' && entry.key === image.id);
+                let prompt = current.prompt;
+                const mentions = { ...current.mentions };
+                for (const [label] of labels) {
+                    prompt = prompt.replaceAll('@「' + label + '」', '');
+                    delete mentions[label];
+                }
+                return { ...current, prompt, mentions, images: current.images.filter(item => item.id !== image.id) };
+            });
         }
         async function addMaterials(source) {
             if (adding) return;
@@ -383,16 +432,29 @@
             setAdding(true);
             setError('');
             try { await intake(source(), items => {
-                if (shared.current === draft) appendMaterials(items);
+                if (shared.current === draft) setDraft(current => withMaterials(current, items));
             }, fail); }
             finally { setAdding(false); }
         }
         async function addImages(job) {
             try {
                 const items = await job;
-                if (shared.current.images.length + items.length > 4) throw new Error('每轮最多添加 4 张图片');
-                setDraft(current => ({ ...current, images: [...current.images, ...items] }));
+                if (!items.length) return;
+                setDraft(current => withImages(current, items));
+                setError('');
             } catch (error) { fail(error); }
+        }
+        async function addFromMenu(key) {
+            if (key === 'image') return addImages(api.addImages());
+            if (key === 'file') return addMaterials(() => api.material());
+            if (key === 'folder') return addMaterials(() => api.material('any', true));
+            const [, layer, scope] = key.split(':');
+            setAdding(true);
+            try {
+                const item = await api.arcgisCapture(Number(layer), scope === 'selection');
+                if (shared.current === draft) setDraft(current => withMaterials(current, [item]));
+            } catch (error) { fail(error); }
+            finally { setAdding(false); }
         }
         function paste(event) {
             const pictures = Array.from(event.clipboardData?.files || []).filter(file => file.type.startsWith('image/'));
@@ -435,30 +497,41 @@
             onDragOver: event => event.preventDefault(), onDrop: drop },
             error && h('p', { role: 'alert', className: 'error' }, error),
             h(window.GuizhiComponentLink, { message: error, open: openComponents }),
-            h('textarea', { ref: composerInput, 'aria-label': '办理事项', placeholder: launcher
-                ? '说说需要办理什么，也可以把材料拖到这里' : '继续提问或补充办理要求', rows: 2,
-                value: draft.prompt, maxLength: 4000, onPaste: paste, onChange: event => { update('prompt', event.target.value); updateMention(event.target); },
-                onKeyDown: event => {
-                    if (event.key === 'Escape' && mention) { event.nativeEvent.stopImmediatePropagation(); setMention(null); return; }
-                    if (mentionItems.length && ['ArrowUp', 'ArrowDown'].includes(event.key) && !event.nativeEvent.isComposing) {
-                        event.preventDefault();
-                        setMentionIndex(index => (index + mentionItems.length + (event.key === 'ArrowDown' ? 1 : -1)) % mentionItems.length);
-                        return;
-                    }
-                    if (event.key === 'Enter' && mentionItems.length && !event.nativeEvent.isComposing && !event.shiftKey) {
-                        event.preventDefault(); insertMention(mentionItems[mentionIndex] || mentionItems[0]); return;
-                    }
-                    if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) {
-                        event.preventDefault();
-                        event.currentTarget.form.requestSubmit();
-                    }
-                } }),
-            draft.images.length > 0 && h('div', { className: 'layer-mentions', 'aria-label': '图片附件' },
-                ...draft.images.map(item => h(antd.Tag, { key: item.id, closable: true,
-                    onClose: () => update('images', draft.images.filter(image => image.id !== item.id)) }, item.name))),
-            mentionItems.length > 0 && h('div', { className: 'layer-mentions', 'aria-label': '引用地图图层' },
-                ...mentionItems.map((item, index) => h(antd.Button, { key: item.id, type: index === mentionIndex ? 'primary' : 'text',
-                    onMouseDown: event => event.preventDefault(), onClick: () => insertMention(item) }, item.name))),
+            draft.images.length > 0 && h(ImageAttachments, { images: draft.images, remove: removeImage }),
+            h(antd.Popover, { open: Boolean(mention), trigger: [], arrow: false, destroyOnHidden: true,
+                placement: launcher ? 'bottomLeft' : 'topLeft', classNames: { root: 'composer-reference-popover' },
+                content: h(MentionList, { items: mentionItems, activeIndex: mentionIndex,
+                    setIndex: setMentionIndex, choose: insertMention }) },
+                h('div', { className: 'composer-text' },
+                    h('textarea', { ref: composerInput, 'aria-label': '办理事项', placeholder: launcher
+                        ? '说说需要办理什么，也可以把材料拖到这里' : '继续提问或补充办理要求', rows: 2,
+                        value: draft.prompt, maxLength: 4000, onPaste: paste,
+                        'aria-autocomplete': 'list', 'aria-controls': mention ? 'composer-references' : undefined,
+                        'aria-activedescendant': mentionItems.length ? 'composer-reference-' + Math.min(mentionIndex, mentionItems.length - 1) : undefined,
+                        onBlur: () => setMention(null), onClick: event => updateMention(event.currentTarget),
+                        onChange: event => { update('prompt', event.target.value); updateMention(event.target); },
+                        onKeyDown: event => {
+                            if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+                            if (event.key === 'Escape' && mention) {
+                                event.preventDefault(); event.stopPropagation(); setMention(null); return;
+                            }
+                            if (mention && ['ArrowUp', 'ArrowDown'].includes(event.key) && mentionItems.length) {
+                                event.preventDefault();
+                                const delta = event.key === 'ArrowDown' ? 1 : -1;
+                                setMentionIndex(index => (Math.min(index, mentionItems.length - 1) + mentionItems.length + delta) % mentionItems.length);
+                                return;
+                            }
+                            if (mention && (event.key === 'Enter' || event.key === 'Tab') && !event.shiftKey) {
+                                if (event.key === 'Enter' || mentionItems.length) event.preventDefault();
+                                if (mentionItems.length) insertMention(mentionItems[Math.min(mentionIndex, mentionItems.length - 1)]);
+                                else setMention(null);
+                                return;
+                            }
+                            if (event.key === 'Enter' && !event.shiftKey) {
+                                event.preventDefault();
+                                event.currentTarget.form.requestSubmit();
+                            }
+                        } }))),
             suggestion.items.length > 0 && h('div', { className: 'business-suggestion' },
                 h('span', null, suggestion.items.length > 1 ? '请选择要办理的业务' : '匹配业务'),
                 ...suggestion.items.map(item => button('layers', item.title,
@@ -467,7 +540,7 @@
             skill && h('div', { className: 'materials skill-materials' },
                 h('div', { className: 'section-head' }, h('strong', null, skill.title),
                     h(antd.Button, { type: 'text', onClick: () => setDraft(old => ({ ...emptyDraft(), prompt: old.prompt,
-                        freeMode: true, materials: { inputs: [...old.unassigned, ...Object.values(old.materials).flat()] } })) }, '改为自由任务')),
+                        freeMode: true, images: old.images, mentions: old.mentions, materials: { inputs: [...old.unassigned, ...Object.values(old.materials).flat()] } })) }, '改为自由任务')),
                 freeInputs.length > 0 && h('div', { className: 'unassigned' }, h('small', null, '请为已添加的材料分配角色'),
                     ...freeInputs.map(freeMaterial)),
                 missingComponents.length > 0 && h('div', { className: 'section-head' },
@@ -486,17 +559,14 @@
                 })),
                 ...freeInputs.map(freeMaterial)),
             h('div', { className: 'compose-actions' },
-                !skill && button('paperclip', adding ? '正在读取本地材料…' : '添加材料', { type: 'text', loading: adding, onClick: () => addMaterials(() => api.material()) }),
-                !skill && iconButton('folder', '添加材料目录', { disabled: adding, onClick: () => addMaterials(() => api.material('any', true)) }),
-                h(window.GuizhiArcgisMaterials, { host: state?.arcgis.host, disabled: adding || busy, attach: attachArcgis, fail }),
-                iconButton('file', '添加图片', { disabled: busy, onClick: () => addImages(api.addImages()) }),
+                h(AddMenu, { skill, host: state?.arcgis.host, busy: busy || adding, add: addFromMenu }),
                 h('span', { className: 'spacer' }),
-                iconButton('mic', '语音对话', { type: 'default', onClick: () => {
+                iconButton('mic', '语音对话', { onClick: () => {
                     if (!launcher && state?.speech.asr === 'off') showSettings('voice');
                     else void api.portraitVoice().catch(fail);
                 } }),
                 busy ? h(antd.Button, { onClick: () => api.cancel().then(setState).catch(fail) }, '停止')
-                    : button('send', '发送', { type: 'primary', htmlType: 'submit',
+                    : iconButton('send', '发送', { type: 'primary', htmlType: 'submit',
                         disabled: adding || !draft.prompt.trim() || (!suggestion.exact && !canSubmit) })));
         const tiles = h('div', { className: 'business-tiles' }, ...catalog.slice(0, 3).map(item =>
             h('button', { key: reference(item), className: 'business-tile', title: item.title, onClick: () => choose(item) },
@@ -532,8 +602,8 @@
             task && h('div', { className: 'task-head' }, h('h1', null, turns[0].title),
                 h('span', { className: 'status-tag' }, labels[task.status] || '未完成')),
             h('div', { className: 'messages', ref: messages }, task ? turns.flatMap(item => [
-                h('article', { key: item.id + '-question', className: 'bubble user' }, item.prompt, item.images?.length > 0 && h('small', { className: 'message-images' },
-                    item.images.map(image => image.name).join('、'))),
+                h('article', { key: item.id + '-question', className: 'bubble user' },
+                    item.images?.length > 0 && h(ImageAttachments, { images: item.images }), item.prompt),
                 h(Result, { key: item.id + '-answer', task: item, retry, fail, voiceReply, openComponents,
                     parcel: resultTask?.id === item.id ? parcel : null, selectParcel: id => { viewResult(item.id); selectParcel(id); },
                     editSkill: text => { setInitialMarkdown(text); showSettings('skills'); } }),

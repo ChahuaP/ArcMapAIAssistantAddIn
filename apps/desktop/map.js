@@ -1,5 +1,5 @@
 import 'ol/ol.css';
-import { MapProcessing, TOOL_GROUPS, roleLayerPicker } from './map-processing.js';
+import { MapProcessing, TOOL_GROUPS, roleLayerPicker, layerMatches, mapLayerMaterial } from './map-processing.js';
 import { MapLayout, layoutDefaults, mapImage } from './map-layout.js';
 import { LayerProperties, MapProperties, MxdOpen, categoryValue, defaultMapBackground, layerSymbol, opacity, symbol } from './map-layer-dialog.js';
 import Map from 'ol/Map.js';
@@ -976,4 +976,4 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
                 } }))))));
 }
 
-window.GuizhiMap = { Preview, WorkspaceMap, key, roleLayerPicker };
+window.GuizhiMap = { Preview, WorkspaceMap, key, roleLayerPicker, layerMatches, mapLayerMaterial };
