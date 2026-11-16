@@ -196,19 +196,16 @@ async function startDesktop(options) {
     }, true);
     bind('readDraft', () => draft);
     bind('mapReferences', () => knownLayers());
-    bind('addImages', async (surface, paths) => {
+    const maxImageBytes = 12 * 1024 * 1024;
+    function requireImageComposer(surface) {
         if (![window, launcher].includes(surface)) throw new Error('请从对话添加图片');
-        const files = paths || (await dialog.showOpenDialog(surface, { properties: ['openFile', 'multiSelections'],
-            filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp'] }] })).filePaths;
-        if (!Array.isArray(files) || files.length > 4) throw new Error('每轮最多添加 4 张图片');
-        const result = [];
-        for (const input of files) {
-            const file = externalPath(input);
-            if (!/\.(png|jpe?g|webp)$/i.test(file) || fs.statSync(file).size > 12 * 1024 * 1024) {
-                throw new Error('请添加不超过 12 MB 的 PNG、JPEG 或 WebP 图片');
-            }
-            let image = nativeImage.createFromPath(file);
-            if (image.isEmpty()) throw new Error('无法读取图片 ' + path.basename(file));
+    }
+    function requireImageBatch(items) {
+        if (!Array.isArray(items) || items.length > 4) throw new Error('每轮最多添加 4 张图片');
+    }
+    function registerImages(inputs) {
+        const blocks = inputs.map(({ image, name }) => {
+            if (image.isEmpty()) throw new Error('无法读取图片 ' + name);
             const { width, height } = image.getSize();
             if (Math.max(width, height) > 1500) {
                 image = image.resize(width > height ? { width: 1500 } : { height: 1500 });
@@ -218,11 +215,34 @@ async function startDesktop(options) {
             const block = png.length <= 1024 * 1024
                 ? { mimeType: 'image/png', data: png.toString('base64') }
                 : { mimeType: 'image/jpeg', data: image.toJPEG(82).toString('base64') };
-            imageInputs.set(id, { type: 'image', ...block, name: path.basename(file) });
-            result.push({ id, name: path.basename(file) });
-        }
+            return { id, name, block };
+        });
+        for (const { id, name, block } of blocks) imageInputs.set(id, { type: 'image', ...block, name });
         while (imageInputs.size > 24) imageInputs.delete(imageInputs.keys().next().value);
-        return result;
+        return blocks.map(({ id, name }) => ({ id, name }));
+    }
+    bind('addImages', async (surface, paths) => {
+        requireImageComposer(surface);
+        const files = paths || (await dialog.showOpenDialog(surface, { properties: ['openFile', 'multiSelections'],
+            filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp'] }] })).filePaths;
+        requireImageBatch(files);
+        return registerImages(files.map(input => {
+            const file = externalPath(input);
+            if (!/\.(png|jpe?g|webp)$/i.test(file) || fs.statSync(file).size > maxImageBytes) {
+                throw new Error('请添加不超过 12 MB 的 PNG、JPEG 或 WebP 图片');
+            }
+            return { image: nativeImage.createFromPath(file), name: path.basename(file) };
+        }));
+    }, true);
+    bind('pasteImages', (surface, images) => {
+        requireImageComposer(surface);
+        requireImageBatch(images);
+        return registerImages(images.map(bytes => {
+            if (!(bytes instanceof ArrayBuffer) || !bytes.byteLength || bytes.byteLength > maxImageBytes) {
+                throw new Error('请粘贴不超过 12 MB 的图片');
+            }
+            return { image: nativeImage.createFromBuffer(Buffer.from(bytes)), name: '剪贴板图片' };
+        }));
     }, true);
     bind('mapImage', async (surface, ref) => {
         if (![window, launcher].includes(surface) || !ref || !/^[a-f0-9]{32}$/.test(ref.run) || ref.artifact !== 'raster_preview') {

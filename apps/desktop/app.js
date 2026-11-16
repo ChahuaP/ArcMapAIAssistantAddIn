@@ -394,6 +394,15 @@
                 setDraft(current => ({ ...current, images: [...current.images, ...items] }));
             } catch (error) { fail(error); }
         }
+        function paste(event) {
+            const pictures = Array.from(event.clipboardData?.files || []).filter(file => file.type.startsWith('image/'));
+            if (!pictures.length) return;
+            event.preventDefault();
+            if (busy) return;
+            if (shared.current.images.length + pictures.length > 4) return fail('每轮最多添加 4 张图片');
+            if (pictures.some(file => file.size > 12 * 1024 * 1024)) return fail('请粘贴不超过 12 MB 的图片');
+            void addImages(Promise.all(pictures.map(file => file.arrayBuffer())).then(api.pasteImages));
+        }
         function drop(event) {
             event.preventDefault();
             const files = [...event.dataTransfer.files];
@@ -428,7 +437,7 @@
             h(window.GuizhiComponentLink, { message: error, open: openComponents }),
             h('textarea', { ref: composerInput, 'aria-label': '办理事项', placeholder: launcher
                 ? '说说需要办理什么，也可以把材料拖到这里' : '继续提问或补充办理要求', rows: 2,
-                value: draft.prompt, maxLength: 4000, onChange: event => { update('prompt', event.target.value); updateMention(event.target); },
+                value: draft.prompt, maxLength: 4000, onPaste: paste, onChange: event => { update('prompt', event.target.value); updateMention(event.target); },
                 onKeyDown: event => {
                     if (event.key === 'Escape' && mention) { event.nativeEvent.stopImmediatePropagation(); setMention(null); return; }
                     if (mentionItems.length && ['ArrowUp', 'ArrowDown'].includes(event.key) && !event.nativeEvent.isComposing) {
