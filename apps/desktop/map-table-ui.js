@@ -54,11 +54,11 @@ export function AttributeCell({ cell, busy, save, close }) {
     return h(Modal, { open: true, centered: true, title: cell.field + ' · FID ' + cell.fid, rootClassName: 'gis-modal-root',
         okText: '保存', cancelText: '关闭', onCancel: () => { if (!busy) close(); },
         onOk: () => save(isNull ? null : value), confirmLoading: busy,
-        okButtonProps: { disabled: cell.readonly },
+        okButtonProps: { disabled: cell.readonly } },
         h('div', { className: 'map-field-editor' },
             h(Input, { 'aria-label': '属性值', value, autoFocus: true, readOnly: cell.readonly,
                 onChange: event => { setValue(event.target.value); setNull(false); } }),
             h('div', { className: 'setting-row' },
                 h(Checkbox, { checked: isNull, disabled: cell.readonly, onChange: event => setNull(event.target.checked) }, '空值'),
-                h(Button, { onClick: () => window.guizhi.copyAttribute(isNull ? '' : value).catch(cell.fail) }, '复制值')))));
+                h(Button, { onClick: () => window.guizhi.copyAttribute(isNull ? '' : value).catch(cell.fail) }, '复制值'))));
 }
