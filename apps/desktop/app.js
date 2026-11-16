@@ -164,8 +164,23 @@
         const mapKey = window.GuizhiMap.key;
         function addLayers(items) {
             if (!items.length) return;
-            setLayers(old => [...new Map([...old, ...items].map(item => [mapKey(item), item])).values()]);
-            setActiveLayer(mapKey(items.at(-1)));
+            const identity = layer => layer.sourceRevision && layer.ref.artifact === 'import'
+                ? JSON.stringify([layer.sourceName.toLowerCase(), layer.sourceLayer || layer.name, layer.sourceRevision]) : null;
+            const known = new Map(layers.filter(layer => identity(layer)).map(layer => [identity(layer), layer]));
+            const open = items.map(layer => known.get(identity(layer)) || layer);
+            setLayers(old => {
+                const next = new Map(old.map(layer => [mapKey(layer), layer]));
+                const sources = new Set(old.map(identity).filter(Boolean));
+                for (const item of open) {
+                    const signature = identity(item);
+                    if (next.has(mapKey(item)) || signature && sources.has(signature)) continue;
+                    next.set(mapKey(item), { ...item, sourceLayer: item.name,
+                        ...(item.kind !== 'raster' && !item.style && { style: window.GuizhiMap.initialStyle(next.size) }) });
+                    if (signature) sources.add(signature);
+                }
+                return [...next.values()];
+            });
+            setActiveLayer(mapKey(open.at(-1)));
             setMapSelection(null);
         }
         useEffect(() => {
@@ -654,6 +669,15 @@
             setMapSelection(null);
         }
         const mapWorkspace = mapMounted && h(window.GuizhiMap.WorkspaceMap, { layers, add: addLayers, active: activeLayer,
+            moveLayer: (id, direction) => setLayers(old => {
+                const index = old.findIndex(item => mapKey(item) === id);
+                const next = index + direction;
+                if (index < 0 || next < 0 || next >= old.length) return old;
+                const copy = old.map((item, i) => item.style || item.kind === 'raster' ? item
+                    : { ...item, style: window.GuizhiMap.initialStyle(i) });
+                [copy[index], copy[next]] = [copy[next], copy[index]];
+                return copy;
+            }),
             remove: id => {
                 setLayers(old => old.filter(item => mapKey(item) !== id));
                 if (activeLayer === id) { setActiveLayer(null); setMapSelection(null); }

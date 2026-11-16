@@ -9,11 +9,11 @@ const { randomUUID } = require('node:crypto');
 const exec = promisify(execFile);
 const catalog = path.join(__dirname, '../../packaging/components.json');
 const installer = path.join(__dirname, '../../packaging/component_archive.py');
-const origin = 'https://123.56.108.57:8443/guizhi/releases/';
+const origin = new URL('..', require('../../packaging/update-trust.json').url);
 
 class Components {
-    constructor(userData, version, python, changed) {
-        this.root = path.join(userData, 'components', version);
+    constructor(userData, python, changed) {
+        this.root = path.join(userData, 'components');
         this.pythonRoot = path.resolve(path.dirname(python), '../../../../guizhi-python-components');
         this.entries = fs.existsSync(catalog) ? JSON.parse(fs.readFileSync(catalog, 'utf8')) : {};
         this.python = python;

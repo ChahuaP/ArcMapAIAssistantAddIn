@@ -651,3 +651,16 @@ dialog label { display: grid; gap: 5px; }
 .map-layout-options { display: flex; gap: 12px; flex-wrap: wrap; }
 .map-layout-result { align-self: flex-start; }
 @media (prefers-reduced-motion: reduce) { .workbench-ai-edge { animation: none; } }
+
+.gis-tool-help { display: flex; align-items: center; gap: 11px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); }
+.gis-spatial-example { position: relative; width: 74px; height: 46px; flex: none; }
+.gis-spatial-example span { position: absolute; inset: 5px auto auto 6px; width: 39px; height: 30px; background: #57a6ff43; border: 2px solid #438dd0; border-radius: 4px; }
+.gis-spatial-example span + span { inset: 10px auto auto 30px; background: #f2a74546; border-color: #b36515; }
+.gis-spatial-example.cross span + span { height: 0; width: 60px; top: 21px; left: 3px; transform: rotate(-15deg); }
+.gis-spatial-example.touch span { width: 29px; left: 3px; }
+.gis-spatial-example.touch span + span { left: 32px; width: 38px; }
+.gis-spatial-example.contain span + span, .gis-spatial-example.within span { inset: 13px auto auto 13px; width: 21px; height: 15px; }
+.gis-spatial-example.within span + span { inset: 5px auto auto 6px; width: 39px; height: 30px; }
+.gis-spatial-example.distance span { width: 24px; left: 2px; }
+.gis-spatial-example.distance span + span { width: 24px; left: 46px; }
+.gis-tool-guide p { margin: 5px 0 0; color: var(--muted); }

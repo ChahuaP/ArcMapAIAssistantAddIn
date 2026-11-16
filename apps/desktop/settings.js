@@ -61,6 +61,29 @@
             !recording && !appearance.shortcutRegistered && h('small', null, '快捷键尚未注册，可选择其他组合。'));
     }
 
+    function SoftwareUpdate({ state, busy }) {
+        const [error, setError] = useState('');
+        const { phase, target, count, bytes, received, message } = state;
+        const size = value => value < 1024 * 1024 ? (value / 1024).toFixed(0) + ' KB' : (value / (1024 * 1024)).toFixed(1) + ' MB';
+        const run = action => {
+            setError('');
+            void action().catch(issue => setError(errorText(issue)));
+        };
+        const labels = { checking: '正在检查更新…', current: '已是最新版本', complete: '更新已完成',
+            offered: '可更新到 ' + target + ' · ' + count + ' 个文件 · 约 ' + size(bytes || 0),
+            preparing: '正在准备 ' + target + ' · 已下载 ' + size(received || 0),
+            ready: target + ' 已就绪 · 已下载 ' + size(received || 0),
+            restarting: '正在重启并验证新版…', failed: message };
+        return card('软件更新', h('div', { className: 'setting-row' },
+            h('span', { role: 'status' }, error || labels[phase] || '当前版本 ' + state.version),
+            h('div', { className: 'business-actions' },
+                ['idle', 'current', 'failed', 'checking', 'complete'].includes(phase) &&
+                    button('clock', '检查更新', { loading: phase === 'checking', onClick: () => run(api.updateCheck) }),
+                phase === 'offered' && button('clock', '下载更新', { type: 'primary', onClick: () => run(api.updatePrepare) }),
+                phase === 'preparing' && h(antd.Button, { onClick: () => run(api.updateCancel) }, '取消下载'),
+                phase === 'ready' && h(antd.Button, { type: 'primary', disabled: busy, onClick: () => run(api.updateApply) }, '重启更新'))));
+    }
+
     function About({ state }) {
         const [report, setReport] = useState(null);
         const [busy, setBusy] = useState(false);
@@ -97,6 +120,7 @@
             h('p', { className: 'about-name' }, productName),
             h('p', { lang: 'en', className: 'muted' }, 'Xiaoliu - Smart Business Governance System for the Liuhe Branch of the Nanjing Municipal Bureau of Planning and Natural Resources'),
             h('p', null, '数字智能体 · 小六　　版本 ' + state.version), h('p', null, '版权所有 © 于佳民 · 个人自研'))),
+        state.update?.available && h(SoftwareUpdate, { state: state.update, busy: state.busy }),
         card('诊断报告', button('server', '检查运行状态', { loading: busy, onClick: () => void refresh(true) }),
             report && h('dl', { className: 'diagnostic-list' },
                 row('智能体模型', statuses[report.model.state], [

@@ -190,14 +190,16 @@ def describe(workspace, ref, file=None, name=None):
         crs = None
     original = str(file)
     source_crs_name = None
+    source_parts = []
     if ref["artifact"] == "import":
         details = workspace.read(ref["run"])["result"]
         original = (details.get("datasets") or [{}])[0].get("source") or original
         crs = CRS(details["crs"]) if details["crs"] else None
         source_crs_name = details.get("crs_name")
+        source_parts = [item["sha256"] for item in details["evidence"] if "-source-" in item["step"]]
     stat = file.stat()
     _, revision = interactive_revision(file, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
-    return {"ref": ref, "name": name, "sourceName": original, "revision": revision, "geometry": info["geometry_type"],
+    return {"ref": ref, "name": name, "sourceName": original, "revision": revision, "sourceRevision": ":".join(source_parts) or revision, "geometry": info["geometry_type"],
             "count": info["features"], "bounds": numbers(info["total_bounds"]),
             "crs": crs.to_string() if crs else None,
             "crsName": (source_crs_name or crs.name) if crs else "未定义坐标系",
@@ -511,10 +513,16 @@ def export_layer(workspace, payload):
             record = successful(run_operation(workspace.root, {"operation": "presentation.export_table",
                 "inputs": [material(file, name)]}))
             copyfile(read_artifact(workspace, record["id"], "table"), output)
-        elif extension in {"gpkg", "geojson"}:
+        elif extension in {"gpkg", "geojson", "kml"}:
             from guizhi.infrastructure.gdal_translate import vector_translate
 
-            vector_translate(file, output, "-f", "GPKG" if extension == "gpkg" else "GeoJSON", name)
+            driver = {"gpkg": "GPKG", "geojson": "GeoJSON", "kml": "KML"}[extension]
+            projection = ()
+            if extension == "kml":
+                if not describe(workspace, ref)["crs"]:
+                    raise ValueError("请先为图层定义正确的坐标系，再导出 KML")
+                projection = ("-t_srs", "EPSG:4326")
+            vector_translate(file, output, "-f", driver, *projection, name)
         else:
             raise ValueError("请选择有效的矢量导出格式")
     return {"file": str(output)}

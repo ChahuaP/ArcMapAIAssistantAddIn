@@ -95,7 +95,7 @@ def build(stage, runtime, desktop, dsh, speech, arcmap, addin, tree, commit):
         copy_tree(SOURCE / name, core / name)
     for name in ("VERSION", "LICENSE", "requirements.lock", "packaging/runtime.lock.json",
                  "packaging/dsh-runtime/package.json", "packaging/local-speech/models.lock.json",
-                 "packaging/component_archive.py"):
+                 "packaging/component_archive.py", "packaging/update-trust.json"):
         copy_file(SOURCE / name, core / name)
     lock = json_file(dsh / "package-lock.json")
     dsh_target = payload / "runtime/dsh"
@@ -124,7 +124,8 @@ def build(stage, runtime, desktop, dsh, speech, arcmap, addin, tree, commit):
     for file in (runtime / "python").iterdir():
         if file.suffix.lower() in {".dll", ".pyd"}:
             copy_file(file, bootstrap / file.name)
-    copy_file(SOURCE / "packaging/install_state.py", bootstrap / "install_state.py")
+    for name in ("install_state.py", "apply_update.py"):
+        copy_file(SOURCE / "packaging" / name, bootstrap / name)
     copy_file(SOURCE / "packaging/guizhi.ico", bootstrap / "guizhi.ico")
 
     archives = stage / "components"

@@ -43,7 +43,7 @@ def assemble(python, payload, stage, version, copy_tree):
     for kind, members in groups.items():
         source = stage / ("python-" + kind)
         copy_tree(python / site, source, members.__contains__)
-        (source / "component.json").write_text(json.dumps({"kind": kind, "version": version}), encoding="ascii")
+        (source / "component.json").write_text(json.dumps({"schema": 1, "kind": kind}), encoding="ascii")
         components[kind] = {**create(source, stage / "components" / f"Guizhi-{version}-{kind}.zip"),
                             "python": True}
 

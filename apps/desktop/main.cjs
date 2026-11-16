@@ -13,6 +13,7 @@ const { listModels, checkModelConnection, testModel } = require('./model-service
 const { formats, materialBindings } = require('./materials.cjs');
 const { ArcGisSync } = require('./arcgis-sync.cjs');
 const { DiagnosticsUpload } = require('./diagnostics-upload.cjs');
+const { Updater } = require('./updater.cjs');
 const { Components } = require('./components.cjs');
 const { action, parameterValues, parametersReady, isBusinessRequest, matchBusiness, reference } = require('./task-commands.js');
 
@@ -85,7 +86,7 @@ async function startDesktop(options) {
     const visionIdentity = (config, key) => JSON.stringify([config, createHash('sha256').update(key).digest('hex')]);
     let voiceReply = null;
     const python = path.join(runtime, 'python', 'python.exe');
-    const components = new Components(app.getPath('userData'), version, python, () => {
+    const components = new Components(app.getPath('userData'), python, () => {
         speech.bundledLocalRoot = options.bundledSpeech || components.installed('speech');
         broadcast(controller.state());
     });
@@ -97,11 +98,13 @@ async function startDesktop(options) {
         local: new LocalSpeechRuntime(python, externalPath),
         bundledLocalRoot: options.bundledSpeech || components.installed('speech'),
         websocket: () => require(path.join(dsh || path.join(runtime, 'dsh'), 'node_modules', 'ws')) });
+    const updater = new Updater({ root: options.installationRoot, userData: app.getPath('userData'), version,
+        changed: () => broadcast(controller.state()) });
     const withSpeech = state => {
         const available = components.state();
         return { ...state, speech: { ...speech.state(), component: available.speech }, voiceReply,
             appearance: desktop.appearance(), arcgis: sync?.state(),
-            components: available, version };
+            components: available, update: updater.state(), version };
     };
     function setVoiceReply(value) {
         if (!voiceReply && !value) return;
@@ -184,6 +187,16 @@ async function startDesktop(options) {
         });
     }
     bind('state', () => withSpeech(controller.state()));
+    bind('updateCheck', () => updater.check());
+    bind('updatePrepare', () => updater.prepare());
+    bind('updateCancel', () => updater.cancel());
+    bind('updateApply', async () => {
+        if (controller.active || controller.modelTesting || controller.hostBusy || controller.skillBusy || components.active.size) {
+            throw new Error('请在当前操作结束后重启更新');
+        }
+        await updater.apply();
+        app.quit();
+    });
     bind('openLink', value => {
         if (typeof value !== 'string' || value.length > 2048) throw new Error('链接无效');
         const url = new URL(value);
@@ -584,16 +597,19 @@ async function startDesktop(options) {
         return controller.request('map', { action: 'task-inputs', run: task.runId,
             existing: inputReferences(groups, task.skill) });
     }, true);
-    bind('mapExport', async (surface, ref, table) => {
+    bind('mapExport', async (surface, ref, table, only) => {
         if (surface !== window) throw new Error('请从工作台导出图层');
         const item = mapLayers.get(mapKey(ref));
         if (!item) throw new Error('请选择地图中的图层');
         const raster = item.kind === 'raster';
-        const filters = table && !raster ? [{ name: '属性表', extensions: ['csv'] }]
+        let filters = table && !raster ? [{ name: '属性表', extensions: ['csv'] }]
             : raster ? [{ name: 'GeoTIFF', extensions: ['tif'] }, { name: 'JPEG 影像', extensions: ['jpg'] }]
                 : [{ name: 'SHP 成果包', extensions: ['zip'] }, { name: 'GeoPackage', extensions: ['gpkg'] },
-                    { name: 'GeoJSON', extensions: ['geojson'] }];
-        const pick = await dialog.showSaveDialog(window, { defaultPath: '小六-图层.' + filters[0].extensions[0], filters });
+                    { name: 'GeoJSON', extensions: ['geojson'] }, { name: 'KML', extensions: ['kml'] }];
+        if (only) filters = filters.filter(filter => filter.extensions.includes(only));
+        if (!filters.length) throw new Error('图层不支持此导出格式');
+        const name = item.name.replace(/[<>:"/\\|?*\x00-\x1f]/g, '-').replace(/[ .]+$/, '') || '图层';
+        const pick = await dialog.showSaveDialog(window, { defaultPath: name + '.' + filters[0].extensions[0], filters });
         if (pick.canceled) return;
         const output = externalPath(pick.filePath);
         const extension = path.extname(output).slice(1).toLowerCase();
@@ -604,7 +620,7 @@ async function startDesktop(options) {
         shell.showItemInFolder(output);
         return result;
     }, true);
-    bind('mapLayout', async (surface, { format, data, taskId }) => {
+    bind('mapLayout', async (surface, { format, data, name, taskId }) => {
         if (surface !== window || !['png', 'jpg'].includes(format) || typeof data !== 'string' || data.length > 24 << 20) {
             throw new Error('地图图片无效');
         }
@@ -622,7 +638,8 @@ async function startDesktop(options) {
             broadcast(controller.state());
             return true;
         }
-        const pick = await dialog.showSaveDialog(window, { defaultPath: '小六地图.' + format,
+        const title = String(name || '').slice(0, 80).replace(/[<>:"/\\|?*\x00-\x1f]/g, '-').replace(/[ .]+$/, '') || '小六地图';
+        const pick = await dialog.showSaveDialog(window, { defaultPath: title + '.' + format,
             filters: [{ name: '地图图片', extensions: [format] }] });
         if (pick.canceled) return false;
         const output = externalPath(pick.filePath);
@@ -671,6 +688,7 @@ async function startDesktop(options) {
             .sort((a, b) => prompt.indexOf(a.name) - prompt.indexOf(b.name));
     }
     async function submitTask(task) {
+        if (updater.handoff) throw new Error('小六正在重启更新');
         if (controller.active || controller.modelTesting) throw new Error('已有任务在运行');
         if (!controller.settings.modelVision) {
             reveal();

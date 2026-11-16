@@ -59,6 +59,7 @@ Type: files; Name: "{app}\active.json"
 Type: files; Name: "{app}\install.lock"
 Type: files; Name: "{app}\last-install-error.txt"
 Type: filesandordirs; Name: "{app}\guizhi-python-components"
+Type: filesandordirs; Name: "{app}\releases"
 
 [Code]
 var

@@ -5,7 +5,7 @@ import json
 from pathlib import Path, PurePosixPath
 import shutil
 import tempfile
-from zipfile import ZIP_DEFLATED, ZipFile
+from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 
 def checksum(file):
@@ -17,7 +17,12 @@ def create(source, archive):
     with ZipFile(archive, "w", ZIP_DEFLATED, compresslevel=3) as target:
         for file in sorted(source.rglob("*")):
             if file.is_file():
-                target.write(file, file.relative_to(source).as_posix())
+                info = ZipInfo(file.relative_to(source).as_posix())
+                info.compress_type = ZIP_DEFLATED
+                info._compresslevel = 3
+                info.file_size = file.stat().st_size
+                with file.open("rb") as content, target.open(info, "w") as output:
+                    shutil.copyfileobj(content, output)
     return {"file": archive.name, "size": archive.stat().st_size, "sha256": checksum(archive)}
 
 

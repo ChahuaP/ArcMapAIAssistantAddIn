@@ -1,7 +1,7 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 const api = {};
-for (const name of ['state', 'configure', 'workspace', 'material', 'submit', 'cancel', 'reportPage', 'businessLog', 'businessDetail', 'businessDelete',
+for (const name of ['state', 'updateCheck', 'updatePrepare', 'updateCancel', 'updateApply', 'configure', 'workspace', 'material', 'submit', 'cancel', 'reportPage', 'businessLog', 'businessDetail', 'businessDelete',
     'skills', 'capabilities', 'capability', 'skillShow', 'skillPreview', 'skillTrial', 'skillPublish', 'skillOpen', 'skillTemplate',
     'map', 'mapSkill', 'mxdRead', 'mxdImport', 'mxdWrite', 'mapImport', 'mapReferences', 'mapCatalog', 'addImages', 'pasteImages', 'imageReferences', 'conversationImage', 'mapImage', 'mapTaskInputs', 'mapExport', 'diagnostics', 'diagnosticsUpload',
     'coordinates', 'coordinateFile', 'importCoordinate', 'coordinateRename', 'coordinateRemove', 'coordinateSolve', 'coordinateApply',

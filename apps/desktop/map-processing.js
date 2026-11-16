@@ -75,6 +75,26 @@ export const roleLayerPicker = (layers, busy) => (role, items, append, pending) 
     }, { disabled: busy || pending, showSearch: true, optionFilterProp: 'label', placeholder: '从地图选图层',
         'aria-label': '选择' + role.label + '图层' });
 };
+const locationGuide = {
+    intersect: ['有任何公共部分，包括只碰到边或点。', 'overlap'],
+    contain: ['输入要素包住查询要素。', 'contain'],
+    within: ['输入要素完全落在查询要素内。', 'within'],
+    touch: ['边界相碰，内部没有交集。', 'touch'],
+    overlap: ['同维度要素共享部分范围，双方均有未重叠的部分。例如两个面部分盖住。', 'overlap'],
+    cross: ['要素穿过另一个要素，交集维度低于其中较高的维度。例如一条路穿过一个地块。两个面不会判为穿越。', 'cross'],
+    within_a_distance: ['两要素之间最短距离小于或等于设定值。', 'distance'],
+};
+function SpatialExample({ predicate }) {
+    const [text, shape] = locationGuide[predicate] || locationGuide.overlap;
+    return h('div', { className: 'gis-tool-help' }, h('div', { className: 'gis-spatial-example ' + shape, 'aria-hidden': true },
+        h('span'), h('span')), h('span', null, text));
+}
+const skillHints = {
+    'control-check': '用项目范围与管控范围叠加，按相交后去重的面积计算覆盖率。只碰到边或点时，重叠面积为零。',
+    'farmland-balance': '分别填写拟调出范围和补划范围，按同一面积口径比较调出面积和有效补划面积。',
+    'annual-land': '选择两期地类面图层，通过叠加识别类别保留和变化范围。',
+    'permit-history': '用范围叠加比对用地手续与历史地类，按时间区分不同记录。',
+};
 const stats = {
     project_area_m2: '项目面积（平方米）', covered_area_m2: '重叠面积（平方米）', coverage_ratio: '覆盖率',
     area_m2: '合并面积（平方米）', file_count: '交付文件数', year_count: '统计年份数', feature_count: '要素数', selected_count: '选中要素数', row_count: '统计记录数',
@@ -136,6 +156,7 @@ function toolForm(definition, layers, refs, setRefs, values, update, picked) {
     } else if (id === 'data.select_by_location') {
         controls.push(select('predicate', '空间关系', { intersect: '相交', contain: '包含', within: '位于范围内', touch: '接触',
             overlap: '重叠', cross: '穿越', within_a_distance: '距离范围内' }));
+        controls.push(h(SpatialExample, { predicate: values.predicate }));
         parameters = { predicate: values.predicate };
         valid &&= Boolean(values.predicate);
         if (values.predicate === 'within_a_distance') {
@@ -329,6 +350,11 @@ export function MapProcessing({ tool: id, skill, layers, active, picked, entries
                 result.layers.length > 0 && h('p', { role: 'status', className: 'gis-added-layers' }, '已加入地图 ' + result.layers.length + ' 个图层'),
                 result.map && h(Preview, { map: result.map }),
                 result.business?.reportDigest && h(window.GuizhiBusinessLog.ReportPanel, { id: result.business.id })) : skill ? h(window.React.Fragment, null,
+                skillHints[skill.id] && h('details', { className: 'gis-tool-guide' },
+                    h('summary', null, '适用条件'), skill.id === 'control-check'
+                        ? h('div', { className: 'gis-tool-help' }, h('div', { className: 'gis-spatial-example overlap', 'aria-hidden': true },
+                            h('span'), h('span')), h('span', null, skillHints[skill.id]))
+                        : h('p', null, skillHints[skill.id])),
                 h(RoleMaterials, { roles, materials, change: setMaterials, plans: entries.filter(item => item.kind === 'plan'),
                     fail, disabled: busy || missing.length > 0, picker, onPending: setPendingMaterial }),
                 pendingMaterial && h('p', { role: 'status', className: 'muted' }, '正在读取材料…'),

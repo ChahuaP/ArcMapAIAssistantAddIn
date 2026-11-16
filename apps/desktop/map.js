@@ -81,10 +81,10 @@ const feature = item => format.readFeature({ type: 'Feature', ...item });
 const style = (color, selected, settings) => {
     const appearance = symbol(settings, color);
     const lineDash = appearance.pattern === 'dash' ? [9, 5] : appearance.pattern === 'dot' ? [2, 4] : undefined;
-    const stroke = !appearance.noOutline || selected ? new Stroke({ color: selected ? '#f7be49' : appearance.color,
-        width: selected ? 3 : appearance.width, lineDash: selected ? undefined : lineDash }) : undefined;
+    const stroke = !appearance.noOutline || selected ? new Stroke({ color: selected ? '#a94205' : appearance.color,
+        width: selected ? 4 : appearance.width, lineDash: selected ? undefined : lineDash }) : undefined;
     const fill = appearance.fill || selected
-        ? new Fill({ color: selected ? '#f7be494e' : fillColor(appearance.fill, appearance.fillOpacity) }) : undefined;
+        ? new Fill({ color: selected ? '#ffe093' : fillColor(appearance.fill, appearance.fillOpacity) }) : undefined;
     const point = { radius: selected ? 6 : appearance.size / 2,
         fill: new Fill({ color: selected ? '#f7be49' : appearance.color }),
         stroke: new Stroke({ color: selected ? '#522d0c' : appearance.color, width: 1 }) };
@@ -210,7 +210,7 @@ function CoordinateTools({ layer, display, setDisplay, entries, request, onLayer
 
 }
 
-function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle, entries, catalog, components,
+function WorkspaceMap({ layers, add, remove, moveLayer, selectLayer, active, hidden, toggle, entries, catalog, components,
     openComponents, display, setDisplay, background, setBackground, styleLayer, importFrame, fail, activity,
     requestedLayout, onLayout, mapActions, onMapActions, selection, setSelection, replace, editing }) {
     const node = useRef(null);
@@ -281,7 +281,7 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
                     fill: /Polygon/.test(item.geometry || '') ? appearance.fill : appearance.color }];
             });
             const result = await api.mapLayout({ format: config.format,
-                data: mapImage(graph.current.ol, node.current, backgroundColor, legend, config), taskId });
+                data: mapImage(graph.current.ol, node.current, backgroundColor, legend, config), name: config.fileName || config.title, taskId });
             if (result) setLayout(false);
         } catch (error) { if (taskId) await onLayout(taskId, window.GuizhiErrorText(error)); else fail(error); }
         finally { setBusy(false); }
@@ -715,7 +715,7 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
         } catch (error) { fail(error); }
     }
 
-    const columns = [{ title: '要素', dataIndex: 'id', width: 75 },
+    const columns = [{ title: 'FID', dataIndex: 'id', width: 75 },
         ...(layer?.fields || []).map(field => ({ title: field.name, key: field.name, sorter: true,
             sortOrder: sort.key === active && sort.field === field.name ? sort.direction : null,
             render: (_, row) => String(row.values[field.name] ?? '—') }))];
@@ -751,11 +751,13 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
         return { items: [
             { key: 'fit', label: '缩放至图层', icon: glyph('target') },
             { key: 'table', label: '打开属性表', icon: glyph('table'), disabled: raster },
+            { key: 'up', label: '上移', icon: glyph('zoomIn'), disabled: index === 0 },
+            { key: 'down', label: '下移', icon: glyph('zoomOut'), disabled: index === layers.length - 1 },
             { key: 'properties', label: '图层属性', icon: glyph('layers') },
             { key: 'style', label: raster ? '显示' : '符号化', icon: glyph('pencil') },
             { key: 'export', label: '导出', icon: glyph('download'), children: [
                 { key: 'export-data', label: '导出为…' },
-                ...(!raster ? [{ key: 'export-table', label: '导出属性表' }] : []),
+                ...(!raster ? [{ key: 'export-table', label: '导出属性表' }, { key: 'export-kml', label: '导出 KML' }] : []),
             ] },
             ...(id === active && picked.length && !raster ? [
                 { key: 'selection', label: '选中要素另存为图层', icon: glyph('download') }] : []),
@@ -763,8 +765,9 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
             { key: 'remove', label: '从地图移除', icon: glyph('trash'), danger: true },
         ], onClick: ({ key: action }) => {
             if (action === 'remove') { remove(id); return; }
-            if (action === 'export-data' || action === 'export-table') {
-                api.mapExport(item.ref, action === 'export-table').catch(fail);
+            if (action === 'up' || action === 'down') { moveLayer(id, action === 'up' ? -1 : 1); return; }
+            if (action.startsWith('export-')) {
+                api.mapExport(item.ref, action === 'export-table', action === 'export-kml' ? 'kml' : undefined).catch(fail);
                 return;
             }
             if (action === 'properties' || action === 'style') {
@@ -814,6 +817,8 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
             { disabled: busy || !layers.length || !viewReady, 'aria-label': '保存地图工程' })),
             group('图层管理', command('添加图层', () => load(api.mapImport()), { disabled: Boolean(edit) || busy }),
                 command('新建图层', () => openTool('geometry.create_dataset')),
+                command('导出 KML', () => api.mapExport(layer.ref, false, 'kml').catch(fail),
+                    { icon: glyph('download'), disabled: !layer?.geometry || busy }),
                 command('复制图层', () => openTool('data.copy'), { disabled: !layer?.geometry }),
                 command('合并图层', () => openTool('data.merge'), { disabled: layers.filter(item => item.geometry).length < 2 })),
             group('成果', command('最近成果', () => setAnalysis(lastResult), { disabled: !lastResult }))],
@@ -976,4 +981,4 @@ function WorkspaceMap({ layers, add, remove, selectLayer, active, hidden, toggle
                 } }))))));
 }
 
-window.GuizhiMap = { Preview, WorkspaceMap, key, roleLayerPicker, layerMatches, mapLayerMaterial };
+window.GuizhiMap = { Preview, WorkspaceMap, key, roleLayerPicker, layerMatches, mapLayerMaterial, initialStyle: index => layerSymbol(undefined, palette[index % palette.length]) };
