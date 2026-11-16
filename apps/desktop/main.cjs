@@ -411,10 +411,23 @@ async function startDesktop(options) {
             } finally { controller.modelTesting = undefined; }
         }
         const appearance = desktop.appearance();
+        const folder = settings.workspace;
+        const workspace = { path: folder, state: folder ? 'configured' : 'missing' };
+        if (check && folder) {
+            try {
+                if (!fs.statSync(folder).isDirectory()) throw new Error('成果位置不是目录');
+                controller.workspaceReady(folder);
+                workspace.state = 'verified';
+            } catch (error) {
+                workspace.state = 'failed';
+                workspace.detail = error.code === 'ENOENT' ? '目录不存在' : '请检查目录和写入权限';
+            }
+        }
         return { model: { mode: config?.mode, name: config?.model, state: config ? 'configured' : 'missing', ...modelCheck },
             upload: diagnostics.state(),
             voice: { asr: speech.diagnostic('asr'), tts: speech.diagnostic('tts') },
             bridge: Boolean(sync.bridge && fs.existsSync(sync.bridge)),
+            workspace,
             shortcut: { registered: appearance.shortcutRegistered, value: appearance.shortcut } };
     }, true);
     bind('diagnosticsUpload', (surface, enabled) => {
@@ -486,12 +499,15 @@ async function startDesktop(options) {
         return pick.canceled ? { items: [], issues: [] } : controller.intake(pick.filePaths, kind);
     });
     bind('materialPaths', (paths, kind) => controller.intake(paths, kind));
+    const mapReads = new Set(['describe', 'features', 'table', 'table-complement', 'table-statistics', 'table-unique-values', 'table-feature',
+        'crs-search', 'raster-preview', 'raster-display', 'categories']);
     bind('map', async (surface, input) => {
-        if (surface !== window || !input || !['describe', 'features', 'table', 'table-complement', 'table-statistics', 'crs-search', 'raster-preview', 'raster-display', 'categories', 'assign', 'reproject', 'transform', 'edit', 'tool', 'step-layers'].includes(input.action)) {
+        if (surface !== window || !input || !mapReads.has(input.action) &&
+                !['assign', 'reproject', 'transform', 'edit', 'tool', 'step-layers'].includes(input.action)) {
             throw new Error('地图请求无效');
         }
         if (!controller.settings.workspace) throw new Error('请先选择成果保存位置');
-        return ['describe', 'features', 'table', 'table-complement', 'table-statistics', 'crs-search', 'raster-preview', 'raster-display', 'categories'].includes(input.action)
+        return mapReads.has(input.action)
             ? controller.reader.map(controller.settings.workspace, input) : controller.request('map', input);
     }, true);
     bind('mapSkill', async (surface, input) => {
@@ -601,17 +617,15 @@ async function startDesktop(options) {
         if (surface !== window || typeof value !== 'string' || value.length > 1_000_000) throw new Error('属性值无法复制');
         clipboard.writeText(value);
     }, true);
-    bind('mapExport', async (surface, ref, table, only) => {
+    bind('mapExport', async (surface, ref, table) => {
         if (surface !== window) throw new Error('请从工作台导出图层');
         const item = mapLayers.get(mapKey(ref));
         if (!item) throw new Error('请选择地图中的图层');
         const raster = item.kind === 'raster';
-        let filters = table && !raster ? [{ name: '属性表', extensions: ['csv'] }]
+        const filters = table && !raster ? [{ name: '属性表', extensions: ['csv'] }]
             : raster ? [{ name: 'GeoTIFF', extensions: ['tif'] }, { name: 'JPEG 影像', extensions: ['jpg'] }]
                 : [{ name: 'SHP 成果包', extensions: ['zip'] }, { name: 'GeoPackage', extensions: ['gpkg'] },
                     { name: 'GeoJSON', extensions: ['geojson'] }, { name: 'KML', extensions: ['kml'] }];
-        if (only) filters = filters.filter(filter => filter.extensions.includes(only));
-        if (!filters.length) throw new Error('图层不支持此导出格式');
         const name = item.name.replace(/[<>:"/\\|?*\x00-\x1f]/g, '-').replace(/[ .]+$/, '') || '图层';
         const pick = await dialog.showSaveDialog(window, { defaultPath: name + '.' + filters[0].extensions[0], filters });
         if (pick.canceled) return;

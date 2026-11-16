@@ -67,3 +67,31 @@ def statistics(file, name, payload):
             filters = f" WHERE {identifier(fid)} IN (SELECT id FROM selected)"
         row = db.execute(f"SELECT count(*), count({column}), count(DISTINCT {column}){metrics} FROM {table}{filters}").fetchone()
         return dict(zip(("count", "valid", "distinct", "min", "max", "sum", "mean"), row))
+
+
+def unique_values(file, name, payload):
+    field = payload.get("field")
+    with attribute_table(file, name) as (db, table, _, fields):
+        if not isinstance(field, str) or field not in fields:
+            raise ValueError("请选择有效的属性字段")
+        column = identifier(field)
+        rows = db.execute(f"SELECT DISTINCT {column} FROM {table} ORDER BY {column} LIMIT 201").fetchall()
+    values = [row[0] for row in rows[:200]]
+    if any(isinstance(value, bytes) for value in values):
+        raise ValueError("二进制字段不支持获取唯一值")
+    return {"values": [str(value) if type(value) is int and abs(value) > 2**53 - 1 else value for value in values],
+            "limited": len(rows) > 200}
+
+
+def feature_attributes(file, name, payload):
+    feature = payload.get("fid")
+    if type(feature) is not int:
+        raise ValueError("要素编号无效")
+    with attribute_table(file, name) as (db, table, fid, fields):
+        index = identifier(fid)
+        columns = ', '.join([index, *map(identifier, fields)])
+        row = db.execute(f"SELECT {columns} FROM {table} WHERE {index}=?", (feature,)).fetchone()
+    if row is None:
+        raise ValueError("要素已不存在")
+    return {name: value.hex() if isinstance(value, bytes) else str(value) if type(value) is int and abs(value) > 2**53 - 1 else value
+            for name, value in zip(fields, row[1:], strict=True)}

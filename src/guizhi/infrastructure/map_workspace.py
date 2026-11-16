@@ -399,12 +399,13 @@ def request(workspace, payload):
         counts = Counter(map(category_value, values))
         return {"classes": [{"value": value, "count": count} for value, count in counts.most_common(120)],
                 "remaining": max(0, len(counts) - 120)}
-    if action in {"table", "table-complement", "table-statistics"}:
+    if action in {"table", "table-complement", "table-statistics", "table-unique-values", "table-feature"}:
         from guizhi.infrastructure import map_attributes
 
         file, name = source(workspace, payload["ref"])
         reader = {"table": map_attributes.table_page, "table-complement": map_attributes.complement,
-                  "table-statistics": map_attributes.statistics}[action]
+                  "table-statistics": map_attributes.statistics, "table-unique-values": map_attributes.unique_values,
+                  "table-feature": map_attributes.feature_attributes}[action]
         return reader(file, name, payload)
     if action == "crs-search":
         from pyproj.database import query_crs_info

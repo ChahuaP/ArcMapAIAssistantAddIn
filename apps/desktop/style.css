@@ -321,10 +321,25 @@ dialog label { display: grid; gap: 5px; }
     min-width: 0; background: var(--panel); border: 1px solid var(--gis-edge); border-radius: 8px;
 }
 .map-layers { padding: 8px; display: flex; flex-direction: column; gap: 6px; overflow: auto; }
+.map-layer-entry { position: relative; }
+.map-layer-entry[data-drop-edge]::after {
+    content: ''; position: absolute; inset-inline: 0; height: 2px; border-radius: 1px;
+    background: var(--accent); pointer-events: none;
+}
+.map-layer-entry[data-drop-edge="before"]::after { top: -4px; }
+.map-layer-entry[data-drop-edge="after"]::after { bottom: -4px; }
 .map-layer-row {
-    display: grid; grid-template-columns: 16px 9px minmax(0, 1fr) 26px;
+    display: grid; grid-template-columns: 16px 16px 9px minmax(0, 1fr) 26px;
     align-items: center; gap: 6px; padding: 3px 5px; border: 1px solid var(--line); border-radius: 6px;
 }
+.map-layer-grip {
+    display: grid; place-items: center; width: 16px; height: 26px; padding: 0;
+    border: 0; border-radius: 4px; color: var(--muted); background: transparent; cursor: grab;
+}
+.map-layer-grip:not(:disabled):hover { background: var(--panel); color: var(--accent); }
+.map-layer-grip:not(:disabled):active { cursor: grabbing; }
+.map-layer-grip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.map-layer-grip:disabled { visibility: hidden; }
 .map-layer-row:has(.map-layer-active) { background: var(--soft); border-color: var(--gis-edge); }
 .map-layer-row .ant-btn { min-width: 0; padding-inline: 5px; justify-content: flex-start; }
 .map-layer-row .ant-btn span { overflow: hidden; text-overflow: ellipsis; }
@@ -335,6 +350,33 @@ dialog label { display: grid; gap: 5px; }
 .map-swatch[data-color="4"] { background: #cc5785; }
 .map-viewport { display: flex; flex-direction: column; min-height: 0; position: relative; overflow: hidden; }
 .map-viewport .geo-map { position: relative; }
+.workspace-map[data-identify="true"] .geo-map { cursor: crosshair; }
+.map-identify-popup {
+    position: relative; display: flex; flex-direction: column; color: var(--ink); background: var(--panel);
+    border: 1px solid var(--gis-edge); border-radius: 8px; box-shadow: 0 4px 16px #0003; cursor: default;
+}
+.map-identify-popup header {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 5px 8px 5px 12px; border-bottom: 1px solid var(--line);
+}
+.map-identify-popup header strong { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.map-identify-popup dl { margin: 0; padding: 4px 12px; overflow: auto; overscroll-behavior: contain; }
+.map-identify-popup dl > div { display: grid; grid-template-columns: minmax(65px, 2fr) minmax(0, 3fr); gap: 8px; padding: 4px 0; }
+.map-identify-popup dl > div + div { border-top: 1px solid var(--line); }
+.map-identify-popup dt { color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+.map-identify-popup dd { margin: 0; overflow-wrap: anywhere; }
+.map-identify-popup p { margin: 8px 12px; }
+.map-identify-popup::after {
+    content: ''; position: absolute; width: 9px; height: 9px; left: calc(50% - 5px); top: -5px;
+    transform: rotate(45deg); background: var(--panel); border: solid var(--gis-edge); border-width: 1px 0 0 1px; pointer-events: none;
+}
+.map-identify-popup[data-above="true"]::after { top: auto; bottom: -5px; border-width: 0 1px 1px 0; }
+.map-identify-popup[data-align="left"]::after { left: 8px; }
+.map-identify-popup[data-align="right"]::after { left: auto; right: 8px; }
+.gis-filter-clause { min-width: 0; display: grid; gap: 8px; padding: 10px; margin: 0; border: 1px solid var(--line); border-radius: 8px; }
+.gis-filter-clause > .ant-btn { justify-self: start; }
+.gis-unique-values, .gis-expression-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.gis-unique-values .ant-select { flex: 1; min-width: 140px; }
 .map-notice { position: absolute; inset: 12px 12px auto; padding: 8px 12px; border-radius: 8px; background: var(--panel); color: var(--ink); pointer-events: none; }
 .map-empty.ant-btn {
     position: absolute; inset: 50% auto auto 50%; transform: translate(-50%, -50%);

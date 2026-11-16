@@ -222,7 +222,7 @@ def write_field(ctx, field, values, *, create=False):
         elif field == fid_name or field not in fields or field == ctx.info[0]["geometry_name"]:
             raise ValueError("请选择可编辑的属性字段")
         elif create and not re.search(r"DOUBLE|REAL|FLOAT", fields[field][2], re.I):
-            raise ValueError("面积需要小数字段，请选择小数字段或填写新字段名称")
+            raise ValueError("请将几何计算结果写入小数字段")
         data = []
         for key, value in values.items():
             ctx.check()
@@ -249,27 +249,61 @@ def write_field(ctx, field, values, *, create=False):
     return table_copy(ctx, action)
 
 
-def calculate_geometry(ctx, field: str = "AREA_M2"):
+def calculate_geometry(ctx, field: str = "AREA_M2",
+                       property: Literal["area", "perimeter", "length", "point_x", "point_y", "center_x", "center_y"] = "area",
+                       unit: Literal["square_meters", "hectares", "square_kilometers", "meters", "kilometers", "layer"] | None = None):
     from pyproj import CRS
+    from pandas import Series
 
     frame = ctx.frames[0]
     field = field.strip()
     if not 1 <= len(field) <= 255:
-        raise ValueError("请输入有效的面积字段名称")
-    if frame.crs is None or not frame.geom_type.isin(["Polygon", "MultiPolygon"]).all():
-        raise ValueError("计算面积需要带坐标系的面图层")
+        raise ValueError("请选择有效的结果字段")
+    if frame.crs is None:
+        raise ValueError("请先定义图层坐标系")
+    kind = ctx.info[0]["geometry_type"].split()[0].removeprefix("Multi")
+    available = {"Polygon": {"area", "perimeter", "center_x", "center_y"},
+                 "LineString": {"length", "center_x", "center_y"},
+                 "Point": {"point_x", "point_y"} if not ctx.info[0]["geometry_type"].startswith("Multi") else {"center_x", "center_y"}}
+    if property not in available.get(kind, set()):
+        raise ValueError("图层不支持所选几何属性")
     crs = CRS(frame.crs)
-    if crs.is_projected:
-        x, y = crs.axis_info[:2]
-        values = frame.area * x.unit_conversion_factor * y.unit_conversion_factor
-    elif crs.is_geographic:
-        geod = crs.get_geod()
-        values = {}
-        for fid, geom in frame.geometry.items():
-            ctx.check()
-            values[fid] = abs(geod.geometry_area_perimeter(shapely.orient_polygons(geom))[0])
+    if not (crs.is_projected or crs.is_geographic):
+        raise ValueError("请选择使用地理或投影坐标系的图层")
+    units = ({"square_meters": 1, "hectares": 10_000, "square_kilometers": 1_000_000} if property == "area" else
+             {"meters": 1, "kilometers": 1_000} if property in {"length", "perimeter"} else {"layer": 1})
+    if unit is not None and unit not in units:
+        raise ValueError("所选单位与几何属性不匹配")
+    divisor = units[unit or next(iter(units))]
+    shapes = frame.geometry.array
+    if property.startswith(("point_", "center_")):
+        points = shapes if property.startswith("point_") else shapely.centroid(shapes)
+        measure = shapely.get_x if property.endswith("_x") else shapely.get_y
+        values = measure(points)
+    elif crs.is_projected:
+        x, y = (axis.unit_conversion_factor for axis in crs.axis_info[:2])
+        if property == "area":
+            values = shapely.area(shapes) * x * y
+        else:
+            scaled = shapes if (x, y) == (1, 1) else shapely.transform(shapes, lambda coordinates: coordinates * [x, y])
+            values = shapely.length(shapely.boundary(scaled) if property == "perimeter" else scaled)
     else:
-        raise ValueError("计算面积需要地理或投影坐标系")
+        geod = crs.get_geod()
+        from math import degrees
+
+        angles = [degrees(axis.unit_conversion_factor) for axis in crs.axis_info[:2]]
+        if angles != [1, 1]:
+            shapes = shapely.transform(shapes, lambda coordinates: coordinates * angles)
+        values = []
+        for geom in shapes:
+            ctx.check()
+            if geom is None or geom.is_empty:
+                values.append(None)
+            elif property == "area":
+                values.append(abs(geod.geometry_area_perimeter(shapely.orient_polygons(geom))[0]))
+            else:
+                values.append(geod.geometry_length(geom.boundary if property == "perimeter" else geom))
+    values = Series(values, index=frame.index, dtype="float64").mask(frame.geometry.is_empty) / divisor
     return write_field(ctx, field, values, create=True)
 
 

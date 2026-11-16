@@ -105,17 +105,22 @@
             finally { setBusy(false); }
         }
         useEffect(() => { void refresh(); }, []);
-        const statuses = { off: '关闭', verified: '可用', failed: '检查失败', ready: '组件就绪',
-            configured: '已配置 · 待测试', missing: '未配置' };
-        const row = (title, summary, detail, tone) => h('div', { key: title }, h('dt', null, title), h('dd', null,
-            h(antd.Tag, { color: tone }, summary), detail && h('small', null, detail)));
+        const statuses = { off: '关闭', disabled: '未启用', verified: '可用', failed: '检查失败', ready: '组件就绪',
+            configured: '待检查', missing: '未配置', connected: '已连接', waiting: '等待连接',
+            unavailable: '扩展未就绪', registered: '已注册', unregistered: '未注册' };
+        const tones = { verified: 'success', ready: 'success', connected: 'success', registered: 'success',
+            failed: 'error', missing: 'error', unavailable: 'error', unregistered: 'error' };
+        const details = (...items) => items.filter(Boolean).join(' · ');
+        const row = (title, status, detail) => h('div', { key: title }, h('dt', null, title), h('dd', null,
+            h(antd.Tag, { color: tones[status] }, statuses[status]), detail && h('small', null, detail)));
         const voiceRow = (kind, title) => {
             const item = report.voice[kind];
-            return row(title, statuses[item.state],
-                [window.GuizhiSpeechNames[item.provider], item.at && new Date(item.at).toLocaleString()].filter(Boolean).join(' · '),
-                item.state === 'verified' || item.state === 'ready' ? 'success' : item.state === 'failed' ? 'error' : 'default');
+            return row(title, item.state, item.state !== 'off' &&
+                details(window.GuizhiSpeechNames[item.provider], item.at && new Date(item.at).toLocaleString()));
         };
         const host = state.arcgis.host;
+        const arcgis = state.settings.carrier === 'none' ? 'disabled' : host ? 'connected' :
+            report?.bridge && state.arcgis.installed ? 'waiting' : 'unavailable';
         return [card('产品信息', h('div', { className: 'about-product' },
             h('p', { className: 'about-name' }, productName),
             h('p', { lang: 'en', className: 'muted' }, 'Xiaoliu - Smart Business Governance System for the Liuhe Branch of the Nanjing Municipal Bureau of Planning and Natural Resources'),
@@ -123,17 +128,14 @@
         state.update?.available && h(SoftwareUpdate, { state: state.update, busy: state.busy }),
         card('诊断报告', button('server', '检查运行状态', { loading: busy, onClick: () => void refresh(true) }),
             report && h('dl', { className: 'diagnostic-list' },
-                row('智能体模型', statuses[report.model.state], [
+                row('智能体模型', report.model.state, details(
                     report.model.mode === 'local' ? '本地' : report.model.mode === 'online' ? '在线' : '',
                     report.model.name, report.model.detail && errorText(report.model.detail),
-                    report.model.at && new Date(report.model.at).toLocaleString()].filter(Boolean).join(' · '),
-                    report.model.state === 'verified' ? 'success' : report.model.state === 'failed' ? 'error' : 'default'),
+                    report.model.at && new Date(report.model.at).toLocaleString())),
                 voiceRow('asr', '语音识别'), voiceRow('tts', '语音回答'),
-                row('ArcGIS', state.arcgis.carrier === 'none' ? '未启用' : host ? '已连接' : '等待数据',
-                    host ? 'ArcGIS Desktop ' + host.version : report.bridge && state.arcgis.installed ? '扩展已安装' : '扩展未就绪',
-                    host ? 'success' : 'default'),
-                row('全局快捷键', report.shortcut.registered ? '已注册' : '未注册', report.shortcut.value),
-                row('成果位置', state.settings.workspace ? '已配置' : '未配置', state.settings.workspace)),
+                row('ArcGIS', arcgis, host ? 'ArcGIS Desktop ' + host.version : ''),
+                row('全局快捷键', report.shortcut.registered ? 'registered' : 'unregistered', report.shortcut.value),
+                row('成果位置', report.workspace.state, details(report.workspace.path, report.workspace.detail))),
             error && h('p', { role: 'alert', className: 'error' }, error)),
         report?.upload && card('故障上报', h('div', { className: 'setting-row' },
             h('span', null, '自动上报故障摘要'), h(antd.Switch, { checked: report.upload.enabled, disabled: busy,

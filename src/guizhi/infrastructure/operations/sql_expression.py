@@ -25,7 +25,8 @@ def evaluate(path: Path, layer, fid, fields, expression, *, predicate=False):
             selections += 1
             allowed = selections == 1
         elif code == sqlite3.SQLITE_READ:
-            allowed = database == "main" and first == layer and second in fields
+            # SQLite requests a columnless read for expressions that only use a literal or row ID.
+            allowed = first == layer and ((database == "main" and second in fields) or (database is None and second == ""))
         elif code == sqlite3.SQLITE_FUNCTION:
             allowed = second.casefold() in FUNCTIONS
         else:

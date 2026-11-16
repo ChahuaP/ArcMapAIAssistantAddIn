@@ -1,3 +1,5 @@
+import { attributeFilter, fieldCalculation, geometryCalculation, geometryProperties } from './map-attribute-tools.js';
+
 const h = window.React.createElement;
 const { useState } = window.React;
 const { Button, Input, Modal, Select } = window.antd;
@@ -53,7 +55,7 @@ const definitions = Object.fromEntries([...tools.flatMap(group => group.tools), 
     tool('table.add_field', '添加字段', 'add', vector),
     tool('table.delete_field', '删除字段', 'trash', vector),
     tool('table.calculate_field', '字段计算器', 'analysis', vector),
-    tool('table.calculate_geometry', '计算几何', 'area', polygon),
+    tool('table.calculate_geometry', '计算几何', 'area', item => Object.keys(geometryProperties(item)).length > 0),
     tool('presentation.export_table', '导出属性表', 'table', vector),
 ].map(item => [item.id, item]));
 const layerOptions = layers => layers.map(item => ({ value: key(item), label: item.name }));
@@ -147,6 +149,12 @@ function toolForm(definition, layers, refs, setRefs, values, update, picked) {
     let parameters = {};
     let valid = refs.length >= accepts.length && (!multiple || refs.length > 1) && refs.every((ref, index) =>
         (accepts[index] || accepts.at(-1))?.(layers.find(item => key(item) === ref)));
+    const attributeTools = { 'data.select_by_attribute': attributeFilter, 'table.calculate_field': fieldCalculation,
+        'table.calculate_geometry': geometryCalculation };
+    if (attributeTools[id]) {
+        const form = attributeTools[id](input, values, update, { field, select, text, columns });
+        return { controls: [...controls, ...form.parts], valid: valid && form.valid, parameters: form.parameters };
+    }
     if (id === 'geometry.create_dataset') {
         controls.push(text('name', '图层名称'), select('geometry_type', '要素类型', { point: '点', polyline: '线', polygon: '面' }),
             numeric('EPSG', values.epsg, value => update('epsg', value), 1));
@@ -161,22 +169,6 @@ function toolForm(definition, layers, refs, setRefs, values, update, picked) {
         parameters = { distance: number(values.distance), unit: values.unit || 'meters', cap: values.cap || 'round',
             join: values.join || 'round', dissolve: values.dissolve === 'all' };
         valid &&= Number.isFinite(parameters.distance) && parameters.distance > 0;
-    } else if (id === 'data.select_by_attribute' && values.method === 'sql') {
-        controls.push(select('method', '条件方式', { form: '条件表单', sql: 'SQL 条件' }),
-            text('sql', 'SQL 条件', '例如 "地类" = \'耕地\' AND "面积" > 100'));
-        parameters = { sql: values.sql?.trim() };
-        valid &&= Boolean(parameters.sql);
-    } else if (id === 'data.select_by_attribute') {
-        controls.push(select('method', '条件方式', { form: '条件表单', sql: 'SQL 条件' }, { placeholder: '条件表单' }), columns('field', '属性字段'), select('op', '比较方式', { eq: '等于', ne: '不等于', gt: '大于', gte: '大于或等于',
-            lt: '小于', lte: '小于或等于', is_null: '为空', is_not_null: '不为空', like: '文本匹配（% 为任意字符）' }));
-        const compare = values.op && !values.op.startsWith('is_');
-        if (compare) controls.push(text('value', '比较值'));
-        const type = input?.fields?.find(item => item.name === values.field)?.type || '';
-        const isNumeric = /^(?:u?int|float)/.test(type) && values.op !== 'like';
-        const value = isNumeric ? number(values.value) : type === 'bool' ? values.value === 'true' : values.value ?? '';
-        parameters = { where: { field: values.field, op: values.op, ...(compare ? { value } : {}) } };
-        valid &&= Boolean(names.includes(values.field) && values.op && (!compare || values.value !== undefined &&
-            (!isNumeric || Number.isFinite(value)) && (type !== 'bool' || ['true', 'false'].includes(values.value))));
     } else if (id === 'data.select_by_location') {
         controls.push(select('predicate', '空间关系', { intersect: '相交', contain: '包含', within: '位于范围内', touch: '接触',
             overlap: '重叠', cross: '穿越', within_a_distance: '距离范围内' }));
@@ -203,25 +195,6 @@ function toolForm(definition, layers, refs, setRefs, values, update, picked) {
         controls.push(columns('field', '删除字段'));
         parameters = { field: values.field };
         valid &&= names.includes(values.field);
-    } else if (id === 'table.calculate_geometry') {
-        controls.push(text('areaField', '面积字段（平方米）', 'AREA_M2'),
-            h('small', { className: 'muted' }, '字段不存在时会新建。地理坐标系按椭球面计算。'));
-        parameters = { field: values.areaField?.trim() || 'AREA_M2' };
-    } else if (id === 'table.calculate_field' && values.method === 'sql') {
-        controls.push(select('method', '计算方式', { form: '按字段计算', sql: 'SQL 表达式' }),
-            columns('field', '目标字段'), text('expression', 'SQL 表达式', '例如 ROUND("面积" / 10000.0, 2)'));
-        parameters = { field: values.field, expression: values.expression?.trim() };
-        valid &&= names.includes(values.field) && Boolean(parameters.expression);
-    } else if (id === 'table.calculate_field') {
-        controls.push(select('method', '计算模式', { form: '按字段计算', sql: 'SQL 表达式' }, { placeholder: '按字段计算' }));
-        const operator = values.operator || 'copy';
-        controls.push(columns('field', '目标字段'), columns('source_field', '来源字段'),
-            select('operator', '计算方式', { copy: '复制字段', add: '加', subtract: '减', multiply: '乘', divide: '除' }));
-        if (operator !== 'copy') controls.push(numeric('数值', values.operand, value => update('operand', value)));
-        parameters = { field: values.field, source_field: values.source_field, operator,
-            ...(operator !== 'copy' ? { operand: number(values.operand) } : {}) };
-        valid &&= names.includes(values.field) && names.includes(values.source_field) &&
-            (operator === 'copy' || Number.isFinite(parameters.operand) && (operator !== 'divide' || parameters.operand !== 0));
     } else if (id === 'vector.spatial_join') {
         controls.push(select('mode', '连接方式', { one_to_one: '一对一', one_to_many: '一对多' }));
         parameters = { mode: values.mode || 'one_to_one' };
@@ -336,6 +309,9 @@ export function MapProcessing({ tool: id, skill, layers, active, picked, entries
     const update = (name, value) => setValues(old => ({ ...old, [name]: value }));
     const fail = issue => setError(window.GuizhiErrorText(issue));
     const title = skill?.title || definition.title;
+    const submit = ({ 'geometry.create_dataset': '确定', 'table.add_field': '确定', 'table.delete_field': '删除',
+        'table.calculate_field': '计算', 'table.calculate_geometry': '计算',
+        'data.select_by_attribute': '确定', 'data.select_by_location': '确定' })[id] || '运行';
     const missing = (skill?.components || (id?.startsWith('raster.') ? ['raster'] : []))
         .filter(kind => components?.[kind]?.installed === false);
     const roles = skill?.materials.filter(role => !role.resource) || [];
@@ -343,7 +319,8 @@ export function MapProcessing({ tool: id, skill, layers, active, picked, entries
     const picker = roleLayerPicker(layers, busy);
     const form = definition ? toolForm(definition, layers, refs, (next, inputChanged) => {
         setRefs(inputChanged ? [next[0], ...next.slice(1).filter(ref => ref !== next[0])] : next);
-        if (inputChanged) setValues(old => ({ ...old, field: undefined, fields: undefined }));
+        if (inputChanged) setValues(old => ({ ...old, field: undefined, fields: undefined, source_field: undefined,
+            property: undefined, unit: undefined, expressionField: undefined, filters: undefined, value: undefined }));
     }, values, update, picked) : null;
     const parameters = skill ? skillValues(skill, values) : form.parameters;
     const valid = !missing.length && !pendingMaterial && (skill ? parameters && roles.every(role => roleReady(role, materials[role.id])) : form.valid);
@@ -371,7 +348,7 @@ export function MapProcessing({ tool: id, skill, layers, active, picked, entries
     return h(Modal, { open: true, centered: true, width: skill || result?.map ? 640 : 460, className: 'gis-dialog',
         rootClassName: 'gis-modal-root', closable: !busy, keyboard: !busy, maskClosable: false,
         title: h('span', { className: 'gis-dialog-title' }, glyph(definition?.icon || 'analysis'), title),
-        onCancel: dismiss, onOk: result ? dismiss : run, okText: result ? '完成' : busy ? '正在处理' : '运行',
+        onCancel: dismiss, onOk: result ? dismiss : run, okText: result ? '完成' : submit,
         cancelText: '取消', confirmLoading: busy, okButtonProps: { disabled: !result && !valid },
         cancelButtonProps: { disabled: busy, className: result ? 'gis-result-cancel' : undefined } },
         h('div', { className: 'map-field-editor', 'aria-busy': busy },
@@ -381,7 +358,8 @@ export function MapProcessing({ tool: id, skill, layers, active, picked, entries
             result ? h(window.React.Fragment, null,
                 metrics.length > 0 && h('dl', { className: 'gis-result-metrics', role: 'status' },
                     ...metrics.map(([name, value]) => h('div', { key: name }, h('dt', null, stats[name]), h('dd', null, metric(name, value))))),
-                result.layers.length > 0 && h('p', { role: 'status', className: 'gis-added-layers' }, '已加入地图 ' + result.layers.length + ' 个图层'),
+                result.layers.length > 0 && h('p', { role: 'status', className: 'gis-added-layers' },
+                    id?.startsWith('table.') ? '已更新属性表' : '已加入地图 ' + result.layers.length + ' 个图层'),
                 result.map && h(Preview, { map: result.map }),
                 result.business?.reportDigest && h(window.GuizhiBusinessLog.ReportPanel, { id: result.business.id })) : skill ? h(window.React.Fragment, null,
                 skillHints[skill.id] && h('details', { className: 'gis-tool-guide' },

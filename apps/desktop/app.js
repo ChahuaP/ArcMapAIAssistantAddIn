@@ -669,13 +669,16 @@
             setMapSelection(null);
         }
         const mapWorkspace = mapMounted && h(window.GuizhiMap.WorkspaceMap, { layers, add: addLayers, active: activeLayer,
-            moveLayer: (id, direction) => setLayers(old => {
-                const index = old.findIndex(item => mapKey(item) === id);
-                const next = index + direction;
-                if (index < 0 || next < 0 || next >= old.length) return old;
+            moveLayer: (source, target, before) => setLayers(old => {
+                const from = old.findIndex(item => mapKey(item) === source);
+                const to = old.findIndex(item => mapKey(item) === target);
+                if (from < 0 || to < 0 || from === to) return old;
+                const insert = to + (before ? 0 : 1) - (from < to ? 1 : 0);
+                if (insert === from) return old;
                 const copy = old.map((item, i) => item.style || item.kind === 'raster' ? item
                     : { ...item, style: window.GuizhiMap.initialStyle(i) });
-                [copy[index], copy[next]] = [copy[next], copy[index]];
+                const [item] = copy.splice(from, 1);
+                copy.splice(insert, 0, item);
                 return copy;
             }),
             remove: id => {
