@@ -1,4 +1,4 @@
-const fs = require('node:fs');
+const fs = require('original-fs');
 const fsp = fs.promises;
 const path = require('node:path');
 const os = require('node:os');
