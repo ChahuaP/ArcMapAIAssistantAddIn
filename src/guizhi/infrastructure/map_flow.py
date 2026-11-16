@@ -292,17 +292,17 @@ def run(workspace, payload):
     return {"status": "succeeded", "run": receipt["id"], "steps": results}
 
 
-def template(workspace, payload):
+def saved_flows(workspace, payload):
     action = payload["action"]
     with workspace.connect() as db:
-        if action == "flow-templates":
+        if action == "flow-list":
             return [json.loads(row["body"]) for row in db.execute("SELECT body FROM map_flows ORDER BY title, id")]
         key = payload.get("id") if action == "flow-delete" else payload.get("id") or uuid4().hex
         if not isinstance(key, str) or not re.fullmatch(r"[0-9a-f]{32}", key):
-            raise ValueError("流程模板编号无效")
+            raise ValueError("流程编号无效")
         if action == "flow-delete":
             if db.execute("DELETE FROM map_flows WHERE id=?", (key,)).rowcount != 1:
-                raise ValueError("流程模板已删除")
+                raise ValueError("流程已删除")
             return {"id": key}
         title = str(payload.get("title", "")).strip()
         model, *_ = inspect_model(payload["model"])
@@ -311,7 +311,7 @@ def template(workspace, payload):
         body = {"id": key, "title": title, "model": model.model_dump(mode="json")}
         content = json.dumps(body, ensure_ascii=False, allow_nan=False)
         if len(content.encode()) > 65536:
-            raise ValueError("流程模板超出 64 KB")
+            raise ValueError("流程超出 64 KB")
         db.execute("INSERT INTO map_flows VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET title=excluded.title, body=excluded.body",
                    (key, title, content))
         return body

@@ -38,7 +38,7 @@ def exchange_root(workspace):
 
 def view(root, executable):
     location = exchange_root(Workspace(root, create=True))
-    target = location / "小六数据视图.mxd"
+    target = location / "成果数据视图.mxd"
     if target.resolve() != target:
         raise ValueError("ArcGIS 数据视图不能指向其他位置")
     if not target.exists():

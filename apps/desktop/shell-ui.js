@@ -104,9 +104,9 @@
     function iconButton(glyph, label, props = {}) {
         return button(glyph, null, { type: 'text', title: label, 'aria-label': label, ...props });
     }
-    const { productName, agentName } = window.GuizhiBrand;
-    const brand = (full = false) => h('span', { className: 'brand' + (full ? ' brand-full' : ''), title: full ? productName : undefined },
-        h('img', { src: '/mark.svg', alt: '', width: 28 }), h('span', null, full ? productName : agentName));
+    const { productName } = window.GuizhiBrand;
+    const brand = () => h('span', { className: 'brand brand-full', title: productName },
+        h('img', { src: '/mark.svg', alt: '', width: 28 }), h('span', null, productName));
     function Theme({ appearance, children }) {
         const dark = appearance.dark;
         useEffect(() => { document.documentElement.dataset.theme = dark ? 'dark' : 'light'; }, [dark]);
@@ -125,7 +125,7 @@
             h('div', { className: 'title-group' },
                 !onboarding && (settings ? iconButton('back', '返回工作台', { onClick: back })
                     : iconButton('left', '折叠或展开导航栏', { onClick: left, onKeyDown: resize(0) })),
-                brand(true), settings && h('span', { className: 'title-path' }, '设置')),
+                brand(), settings && h('span', { className: 'title-path' }, '设置')),
             !settings && !onboarding && h('div', { className: 'title-group' },
                 button('link', '第三方扩展', { type: 'text', onClick: arcgis,
                     title: connected ? 'ArcGIS 已连接' : '查看第三方扩展' }),

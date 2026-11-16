@@ -755,8 +755,9 @@ dialog label { display: grid; gap: 5px; }
 .gis-preview-table th, .gis-preview-table td { padding: 5px 8px; border-bottom: 1px solid var(--line); text-align: left; }
 .gis-preview-table th { position: sticky; top: 0; background: var(--sub); }
 .gis-preview-table tr:last-child td { border-bottom: 0; }
-.gis-flow-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 0 0 12px; }
-.gis-flow-space { flex: 1; }
+.gis-flow-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
+    gap: 10px 24px; padding: 0 0 12px; }
+.gis-flow-toolgroup { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; }
 .gis-flow-layout { display: grid; grid-template-columns: minmax(112px, 184px) minmax(190px, 1fr);
     height: min(65vh, 650px); min-height: 260px; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; }
 .gis-flow-library { padding: 12px; overflow: auto; background: var(--panel); }
@@ -800,6 +801,7 @@ dialog label { display: grid; gap: 5px; }
 .gis-flow-issues button { min-height: 26px; padding: 2px 6px; border: 0; border-radius: 4px; background: transparent;
     color: inherit; font: inherit; text-align: start; cursor: pointer; }
 .gis-flow-issues button:hover, .gis-flow-issues button:focus-visible { background: var(--soft); }
-.gis-flow-save { display: flex; gap: 6px; width: 235px; }
-.gis-flow-templates { min-width: 155px; }
-.gis-flow-template-row { display: flex; justify-content: space-between; }
+.gis-flow-save { display: flex; gap: 6px; width: min(240px, 75vw); }
+.gis-flow-saved { width: min(260px, 75vw); }
+.gis-flow-saved-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; }
+.gis-flow-saved-row > .ant-btn:first-child { overflow-wrap: anywhere; }

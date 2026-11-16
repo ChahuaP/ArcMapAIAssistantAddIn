@@ -5,7 +5,8 @@
 #ifndef Stage
   #error Stage is required
 #endif
-#define ProductName "小六-南京市规划和自然资源局六合分局业务智慧治理系统"
+#define ProductName "南京市规划和自然资源局六合分局业务智慧治理系统"
+#define PreviousProductName "小六-" + ProductName
 
 [Setup]
 AppId={{43CA251E-39B7-43E8-9E28-95465414C772}
@@ -26,7 +27,7 @@ SetupMutex=Guizhi.Desktop.Setup
 CloseApplications=no
 RestartApplications=no
 OutputDir={#OutputDir}
-OutputBaseFilename=GuizhiSetup-{#Build}
+OutputBaseFilename={#ProductName}-{#Version}
 SetupIconFile={#Stage}\bootstrap\guizhi.ico
 Compression=lzma2/fast
 SolidCompression=yes
@@ -87,7 +88,24 @@ function InstallDesktopIcon: Boolean;
 begin
   Result := WizardIsTaskSelected('desktopicon') or
     IsProductShortcut(ExpandConstant('{userdesktop}\{#ProductName}.lnk')) or
+    IsProductShortcut(ExpandConstant('{userdesktop}\{#PreviousProductName}.lnk')) or
     IsProductShortcut(ExpandConstant('{userdesktop}\规智.lnk'));
+end;
+
+procedure RemoveOldShortcuts(Name: String);
+var
+  DesktopShortcut, StartGroup, StartShortcut: String;
+begin
+  DesktopShortcut := ExpandConstant('{userdesktop}\') + Name + '.lnk';
+  StartGroup := ExpandConstant('{userprograms}\') + Name;
+  StartShortcut := StartGroup + '\' + Name + '.lnk';
+  if IsProductShortcut(DesktopShortcut) then
+    DeleteFile(DesktopShortcut);
+  if IsProductShortcut(StartShortcut) then
+  begin
+    DeleteFile(StartShortcut);
+    RemoveDir(StartGroup);
+  end;
 end;
 
 function ReleaseDirectory(Param: String): String;
@@ -122,13 +140,8 @@ begin
       RaiseException('无法切换到新版本。');
     if Code <> 0 then
       RaiseException('未能切换到新版本。详情见安装目录中的 last-install-error.txt。');
-    if IsProductShortcut(ExpandConstant('{userdesktop}\规智.lnk')) then
-      DeleteFile(ExpandConstant('{userdesktop}\规智.lnk'));
-    if IsProductShortcut(ExpandConstant('{userprograms}\规智\规智.lnk')) then
-    begin
-      DeleteFile(ExpandConstant('{userprograms}\规智\规智.lnk'));
-      RemoveDir(ExpandConstant('{userprograms}\规智'));
-    end;
+    RemoveOldShortcuts('{#PreviousProductName}');
+    RemoveOldShortcuts('规智');
   end;
 end;
 

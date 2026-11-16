@@ -232,7 +232,7 @@ export async function dispatch(options, { signal, onEvent = () => {}, getService
                 : `本轮材料图层清单（键为 material. 后的引用）：${JSON.stringify(layers)}。已选技能无。`;
             const visualContext = images.length ? '本轮用户消息有图片附件。图片内容问题直接看图回答。\n' : '';
             const context = `${visualContext}${selection}${bound}有已选历史成果：${Boolean(options.previousRun)}。\n`;
-            const conversation = history.length ? '最近对话记录（每项为用户提问与小六答复）：' + JSON.stringify(history) + '\n' : '';
+            const conversation = history.length ? '最近对话记录（每项为用户提问与智能体答复）：' + JSON.stringify(history) + '\n' : '';
             const speech = options.dialogue ? '本轮使用语音输入。先实际办理，再用简洁口语回答，不用 Markdown。\n' : '';
             const run = (prompt, includeImages = false) => harness.run(includeImages && images.length
                 ? [{ type: 'text', text: prompt }, ...images] : prompt, {

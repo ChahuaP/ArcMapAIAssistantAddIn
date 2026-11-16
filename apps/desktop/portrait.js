@@ -65,7 +65,7 @@ const voice = new VoiceAudio(api, mode => {
     mouthLevel = 0;
     if (mode === 'speaking') frame = requestAnimationFrame(animateMouth);
     tell({ opening: '正在打开麦克风', listening: '我在听', recognizing: '我听到了',
-        synthesizing: '让我想一下', speaking: '小六正在回答' }[mode] || '');
+        synthesizing: '让我想一下', speaking: '正在回答' }[mode] || '');
 });
 
 function appearance(value) {

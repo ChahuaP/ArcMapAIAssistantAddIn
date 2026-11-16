@@ -1,6 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
+const { agentName } = require('./brand.js');
 const { endpoint, normalizeKey } = require('../../src/guizhi/infrastructure/dsh/model-config.cjs');
 const { recognizeVolc } = require('./volc-recognition.cjs');
 
@@ -515,7 +516,7 @@ class SpeechController {
                 output = await adapter.recognize(readPcmWav(audio), signal, () => {});
                 if (!output.trim() || output.length > 4000) throw new Error('没有识别到可用的文字');
             } else {
-                output = wavBuffer(await adapter.synthesize('你好，我是小六。我们可以开始对话了。', selectedVoice(input), signal));
+                output = wavBuffer(await adapter.synthesize('你好，我是' + agentName + '。我们可以开始对话了。', selectedVoice(input), signal));
             }
             if (same) this.status[kind] = { state: 'verified', at: new Date().toISOString() };
             return output;

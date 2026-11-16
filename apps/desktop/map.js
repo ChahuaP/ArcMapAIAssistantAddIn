@@ -1373,7 +1373,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
             save: value => styleLayer(key(properties.item), value) }),
         mapProperties && h(MapProperties, { background: backgroundColor, save: setBackground, coordinates: coordinateTools(),
             close: () => setMapProperties(false), glyph }),
-        layout && h(MapLayout, { initial: layoutDraft || { ...layoutDefaults, title: layer?.name || '小六地图' },
+        layout && h(MapLayout, { initial: layoutDraft || { ...layoutDefaults, title: layer?.name || '地图' },
             change: setLayoutDraft, draw: drawLayout,
             busy, close: () => setLayout(false), exportImage }),
         document && h(MxdOpen, { document, busy, glyph, locateAvailable: locateMxd, close: () => setDocument(null),
@@ -1401,7 +1401,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 onClick: () => setImportIssues([]), type: 'primary' }, '关闭') },
             h('ul', { className: 'map-field-editor' }, ...importIssues.map((item, index) =>
                 h('li', { key: index }, item.name + '：' + window.GuizhiErrorText(item.message))))),
-        flowOpen !== null && h(MapFlow, { open: flowOpen, layers, busy, setBusy, glyph, request: flowRequest, components, openComponents,
+        flowOpen !== null && h(MapFlow, { open: flowOpen, layers, busy, setBusy, glyph, request: flowRequest, components,
             onApply: replaceAttributes,
             close: () => setFlowOpen(false), onLayers: items => {
                 graph.current.fitNeeded = true;

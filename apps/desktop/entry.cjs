@@ -52,7 +52,7 @@ async function main() {
             })`),
             desktop.portrait.webContents.executeJavaScript("Boolean(window.guizhi && document.getElementById('open'))"),
         ]);
-        if (!workbench || !launcher || !portrait) throw new Error('小六界面启动检查失败');
+        if (!workbench || !launcher || !portrait) throw new Error('界面启动检查失败');
         if (probe) {
             fs.writeFileSync(probe, JSON.stringify({ workbench, portrait }), { flag: 'wx' });
             app.exit(0);

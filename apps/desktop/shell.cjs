@@ -36,11 +36,11 @@ function createShell({ userData, icon, verifyStartup }) {
         show: false, title: productName, titleBarStyle: 'hidden', titleBarOverlay: overlay(), autoHideMenuBar: true,
         backgroundColor: overlay().color, icon, webPreferences });
     const launcher = new BrowserWindow({ width: 944, height: launcherBaseHeight, frame: false,
-        show: false, title: '小六快捷面板', skipTaskbar: true,
+        show: false, title: productName, skipTaskbar: true,
         backgroundColor: overlay().color, icon, webPreferences });
     const portrait = new BrowserWindow({ width: 312, height: 244, frame: false, transparent: true,
         backgroundColor: '#00000000', resizable: false, skipTaskbar: true, alwaysOnTop: true,
-        show: false, hasShadow: false, title: '小六数字形象',
+        show: false, hasShadow: false, title: '数字智能体',
         webPreferences: { ...webPreferences, autoplayPolicy: 'no-user-gesture-required' } });
     const windows = [workbench, launcher, portrait];
     let shortcutRegistered = false;

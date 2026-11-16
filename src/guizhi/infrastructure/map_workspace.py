@@ -339,8 +339,8 @@ def request(workspace, payload):
             return map_flow.run(workspace, payload)
         if action == "flow-progress":
             return map_flow.progress(workspace, payload)
-        if action in {"flow-templates", "flow-save", "flow-delete"}:
-            return map_flow.template(workspace, payload)
+        if action in {"flow-list", "flow-save", "flow-delete"}:
+            return map_flow.saved_flows(workspace, payload)
         if action == "flow-export-table":
             return map_flow.export_table(workspace, payload)
     if action in {"mxd-read", "mxd-import", "mxd-write"}:

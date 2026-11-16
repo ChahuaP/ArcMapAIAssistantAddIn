@@ -44,9 +44,12 @@ if ($StageOnly) {
     exit 0
 }
 [IO.Directory]::CreateDirectory($out) | Out-Null
-$exe = Join-Path $out "GuizhiSetup-$($summary.build).exe"
+$setup = Join-Path $PSScriptRoot 'GuizhiSetup.iss'
+$product = [regex]::Match((Get-Content -LiteralPath $setup -Raw -Encoding UTF8), '(?m)^#define ProductName "([^"]+)"\r?$')
+if (!$product.Success) { throw 'Installer product name is missing' }
+$exe = Join-Path $out "$($product.Groups[1].Value)-$($summary.version).exe"
 if (Test-Path -LiteralPath $exe) { throw 'Installer already exists' }
-& $compiler /Qp "/DStage=$stage" "/DOutputDir=$out" "/DVersion=$($summary.version)" "/DBuild=$($summary.build)" (Join-Path $PSScriptRoot 'GuizhiSetup.iss')
+& $compiler /Qp "/DStage=$stage" "/DOutputDir=$out" "/DVersion=$($summary.version)" "/DBuild=$($summary.build)" $setup
 if ($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'Installer compilation failed' }
 $summary | Add-Member -NotePropertyName installer -NotePropertyValue $exe
 $summary | Add-Member -NotePropertyName installer_sha256 -NotePropertyValue ((Get-FileHash -LiteralPath $exe).Hash.ToLowerInvariant())

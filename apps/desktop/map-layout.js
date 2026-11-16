@@ -73,7 +73,7 @@ export function MapLayout({ initial, busy, close, exportImage, draw, change }) {
     }
     const visible = name => name === 'frame' || Boolean(value[name]);
     const choose = name => {
-        if (name === 'title' && !value.title) update('title', '小六地图');
+        if (name === 'title' && !value.title) update('title', '地图');
         else if (!visible(name)) update(name, true);
         setActive(name);
     };

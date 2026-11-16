@@ -73,7 +73,7 @@
                 .catch(issue => { if (mounted) setError(errorText(issue)); });
             return () => { mounted = false; };
         }, [reference.run, reference.artifact]);
-        return url ? h('img', { className: 'reply-image', src: url, alt: '小六生成的影像预览' })
+        return url ? h('img', { className: 'reply-image', src: url, alt: '影像预览' })
             : error ? h('p', { role: 'alert' }, error) : null;
     }
 
@@ -83,12 +83,12 @@
                 : task.progress?.length ? h(Progress, { task }) : '正在准备本轮任务');
         if (voiceReply?.task === task.id) return h('article', { className: 'bubble assistant' },
             voiceReply.text ? h('p', { className: 'voice-caption' }, voiceReply.text)
-                : h('span', { role: 'status' }, h('i', { className: 'pulse' }), '小六正在准备语音'));
+                : h('span', { role: 'status' }, h('i', { className: 'pulse' }), '正在准备语音'));
         if (task.status === 'succeeded' || task.status === 'answered') {
             const stats = task.statistics;
             return h('article', { className: 'bubble assistant' },
                 h('div', { className: 'result-head' }, h('img', { src: '/mark.svg', alt: '', width: 29 }),
-                    h('strong', null, task.status === 'answered' ? '小六' : '办理结果')),
+                    h('strong', null, task.status === 'answered' ? '智能体' : '办理结果')),
                 markdown(task.response),
                 ...(task.outputImages || []).map(reference => h(ResultImage, { key: reference.run, reference })),
                 task.progress?.length > 0 && h('details', { className: 'result-progress' },
@@ -590,7 +590,7 @@
                 h('span', { className: 'tile-icon' }, icon(window.GuizhiShell.businessIcon(item.id))),
                 h('b', null, item.title))));
         const quick = h('main', { className: 'launcher' },
-            h('header', { className: 'launcher-head' }, brand(true), h('div', { className: 'title-group' },
+            h('header', { className: 'launcher-head' }, brand(), h('div', { className: 'title-group' },
                 appearance.shortcutRegistered && h('kbd', null, appearance.shortcut.replaceAll('+', ' + ')),
                 button('app', '打开工作台', { type: 'text', onClick: () => api.workbench().catch(fail) }),
                 iconButton('close', '收起快捷面板', { onClick: () => api.hideLauncher().catch(fail) }))),

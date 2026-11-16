@@ -66,7 +66,7 @@ function OperationNode({ id, data }) {
 }
 const nodeTypes = { operation: OperationNode };
 
-export function MapFlow({ open, layers, busy, setBusy, close, glyph, onLayers, onHighlight, onApply, request, components, openComponents }) {
+export function MapFlow({ open, layers, busy, setBusy, close, glyph, onLayers, onHighlight, onApply, request, components }) {
     const [catalog, setCatalog] = useState([]);
     const [nodes, setNodes] = useState([]);
     const [edges, setEdges] = useState([]);
@@ -74,12 +74,12 @@ export function MapFlow({ open, layers, busy, setBusy, close, glyph, onLayers, o
     const [selected, select] = useState(null);
     const [diagram, setDiagram] = useState(null);
     const [search, setSearch] = useState('');
-    const [templates, setTemplates] = useState([]);
+    const [savedFlows, setSavedFlows] = useState(null);
     const [name, setName] = useState('');
-    const [templateId, setTemplateId] = useState(null);
+    const [flowId, setFlowId] = useState(null);
     const [saveOpen, setSaveOpen] = useState(false);
-    const [templateOpen, setTemplateOpen] = useState(false);
-    const [deleteTemplate, setDeleteTemplate] = useState(null);
+    const [listOpen, setListOpen] = useState(false);
+    const [deleting, setDeleting] = useState(null);
     const [lastRequest, setLastRequest] = useState(null);
     const [pending, setPending] = useState(false);
     const [running, setRunning] = useState(false);
@@ -335,7 +335,8 @@ export function MapFlow({ open, layers, busy, setBusy, close, glyph, onLayers, o
                 if (!bindings[id]) add('请选择图层');
                 if (!used.has(id)) add('请把图层连到工具节点，或移除此节点');
             } else if (form.missing.length) add('请连接' + form.missing.join('、'));
-            else if (missingRaster && operation.startsWith('raster.')) add('请先安装栅格处理组件');
+            else if (missingRaster && operation.startsWith('raster.'))
+                add('请在「设置 → 按需组件」安装栅格处理组件');
             else if (form.issue) add(form.issue);
             else if (!form.valid && !form.waitingForInput) add('请补齐节点参数，或检查填写的值');
         }
@@ -387,19 +388,19 @@ export function MapFlow({ open, layers, busy, setBusy, close, glyph, onLayers, o
         if (item.model.nodes.some(node => !definition(node.operation) ||
             node.operation === 'table.calculate_field' && node.settings?.operator === 'sql' ||
             node.operation === 'data.select_by_attribute' && node.settings?.method === 'sql')) {
-            setTemplateOpen(false);
-            setError('此模板含有已停用的手写表达式，请用「查询条件」或「计算字段」重新配置。');
+            setListOpen(false);
+            setError('此流程含有已停用的手写表达式，请用「查询条件」或「计算字段」重新配置。');
             return;
         }
         setNodes(item.model.nodes.map(node => graphNode(node, definition(node.operation))));
         setEdges(item.model.connections.map(link => edge(link.source, link.target, link.port)));
-        setTemplateId(item.id);
+        setFlowId(item.id);
         setName(item.title);
         setBindings({});
         setResults({});
         select(null);
         clearResults([]);
-        setTemplateOpen(false);
+        setListOpen(false);
         requestAnimationFrame(() => diagram?.fitView());
     }
     async function save() {
@@ -408,26 +409,27 @@ export function MapFlow({ open, layers, busy, setBusy, close, glyph, onLayers, o
         setPending(true);
         setError('');
         try {
-            const item = await api.map({ action: 'flow-save', title, id: templateId,
+            const item = await api.map({ action: 'flow-save', title, id: flowId,
                 model: cleanGraph(nodes, edges, forms) });
-            setTemplateId(item.id);
+            setFlowId(item.id);
             setSaveOpen(false);
             setMessage('已保存「' + item.title + '」');
         } catch (problem) { reportError(problem); }
         finally { setPending(false); }
     }
-    async function showTemplates(open) {
-        setTemplateOpen(open);
+    async function showSavedFlows(open) {
+        setListOpen(open);
         if (!open) return;
-        try { setTemplates(await api.map({ action: 'flow-templates' })); }
-        catch (problem) { setTemplateOpen(false); reportError(problem); }
+        setSavedFlows(null);
+        try { setSavedFlows(await api.map({ action: 'flow-list' })); }
+        catch (problem) { setListOpen(false); reportError(problem); }
     }
-    async function removeTemplate(item) {
+    async function removeFlow(item) {
         await perform(async () => {
             await api.map({ action: 'flow-delete', id: item.id });
-            setTemplates(list => list.filter(value => value.id !== item.id));
-            if (templateId === item.id) setTemplateId(null);
-            setDeleteTemplate(null);
+            setSavedFlows(list => list?.filter(value => value.id !== item.id));
+            if (flowId === item.id) setFlowId(null);
+            setDeleting(null);
             setMessage('已删除「' + item.title + '」');
         });
     }
@@ -436,7 +438,7 @@ export function MapFlow({ open, layers, busy, setBusy, close, glyph, onLayers, o
         setEdges([]);
         setBindings({});
         setResults({});
-        setTemplateId(null);
+        setFlowId(null);
         setName('');
         select(null);
         clearResults([]);
@@ -465,26 +467,28 @@ export function MapFlow({ open, layers, busy, setBusy, close, glyph, onLayers, o
         className: 'gis-dialog gis-flow-dialog', rootClassName: 'gis-modal-root', footer: null, maskClosable: false,
         onCancel: close },
     h('div', { className: 'gis-flow-toolbar' },
-        h(Button, { type: 'primary', disabled: lock || !forms.size, onClick: () => run() }, '运行流程'),
-        h(Button, { disabled: lock || !forms.has(selected), onClick: () => run(selected) }, '运行至选中节点'),
-        h(Button, { disabled: lock || !nodes.length, onClick: check }, '检查流程'),
-        running && h(Button, { disabled: stopping, onClick: stop }, stopping ? '正在停止' : '停止'),
-        h('span', { className: 'gis-flow-space' }),
-        h(Button, { disabled: lock || !nodes.length, onClick: reset }, '新建'),
-        h(Popover, { open: templateOpen, onOpenChange: showTemplates, trigger: 'click', placement: 'bottomRight',
-            content: h('div', { className: 'gis-choice-list gis-flow-templates' },
-                templates.length ? templates.map(item => h('div', { className: 'gis-flow-template-row', key: item.id },
-                    h(Button, { type: 'text', onClick: () => load(item) }, item.title),
-                    h(Button, { type: 'text', danger: true, icon: glyph('trash'), 'aria-label': '删除模板 ' + item.title,
-                        title: '删除模板', onClick: () => { setTemplateOpen(false); setDeleteTemplate(item); } })))
-                    : h('span', { className: 'muted' }, '暂无模板')) },
-        h(Button, { disabled: lock || !catalog.length }, '模板')),
-        h(Popover, { open: saveOpen, onOpenChange: setSaveOpen, trigger: 'click', placement: 'bottomRight',
-            content: h('div', { className: 'gis-flow-save' }, h(Input, { value: name, 'aria-label': '模板名称',
-                maxLength: 100, placeholder: '模板名称', onChange: event => setName(event.target.value), onPressEnter: save }),
-            h(Button, { disabled: !name.trim() || pending, onClick: save }, '保存')) },
-        h(Button, { disabled: lock || !nodes.length }, '保存模板')),
-        missingRaster && h(Button, { disabled: lock, onClick: () => { close(); openComponents(); } }, '安装栅格组件')),
+        h('div', { className: 'gis-flow-toolgroup', role: 'group', 'aria-label': '流程文件' },
+            h(Button, { icon: glyph('add'), 'aria-label': '新建流程', disabled: lock || !nodes.length, onClick: reset }, '新建'),
+            h(Popover, { open: listOpen, onOpenChange: showSavedFlows, trigger: 'click', placement: 'bottomLeft',
+                content: h('div', { className: 'gis-choice-list gis-flow-saved' },
+                    savedFlows?.length ? savedFlows.map(item => h('div', { className: 'gis-flow-saved-row', key: item.id },
+                        h(Button, { type: 'text', title: item.title, onClick: () => load(item) }, item.title),
+                        h(Button, { type: 'text', danger: true, icon: glyph('trash'), 'aria-label': '删除流程 ' + item.title,
+                            title: '删除流程', onClick: () => { setListOpen(false); setDeleting(item); } })))
+                        : h('span', { className: 'muted', role: 'status' }, savedFlows ? '暂无已保存流程' : '正在读取…')) },
+                h(Button, { icon: glyph('folder'), 'aria-label': '打开流程', 'aria-expanded': listOpen,
+                    disabled: lock || !catalog.length }, '打开')),
+            h(Popover, { open: saveOpen, onOpenChange: setSaveOpen, trigger: 'click', placement: 'bottomLeft',
+                content: h('div', { className: 'gis-flow-save' }, h(Input, { value: name, 'aria-label': '流程名称',
+                    maxLength: 100, placeholder: '流程名称', onChange: event => setName(event.target.value), onPressEnter: save }),
+                h(Button, { disabled: !name.trim() || pending, onClick: save }, '保存')) },
+                h(Button, { icon: glyph('save'), 'aria-label': '保存流程', 'aria-expanded': saveOpen,
+                    disabled: lock || !nodes.length }, '保存'))),
+        h('div', { className: 'gis-flow-toolgroup', role: 'group', 'aria-label': '检查和运行' },
+            h(Button, { disabled: lock || !nodes.length, onClick: check }, '检查流程'),
+            h(Button, { type: 'primary', disabled: lock || !forms.size, onClick: () => run() }, '运行流程'),
+            h(Button, { disabled: lock || !forms.has(selected), onClick: () => run(selected) }, '运行至选中节点'),
+            running && h(Button, { disabled: stopping, onClick: stop }, stopping ? '正在停止' : '停止'))),
     h('div', { className: 'gis-flow-layout' },
         h('aside', { className: 'gis-flow-library', 'aria-label': '流程节点' },
             h(Input, { placeholder: '搜索图层和工具', 'aria-label': '搜索图层和工具', value: search, onChange: event => setSearch(event.target.value) }),
@@ -496,9 +500,9 @@ export function MapFlow({ open, layers, busy, setBusy, close, glyph, onLayers, o
                 libraryButton(item.title, toolIcon(item.operation), { operation: item.operation }))),
         h('div', { className: 'gis-flow-canvas', 'aria-label': '流程画布' }, graph,
             !nodes.length && h('p', { className: 'gis-flow-empty' }, '从左侧添加图层和工具，再拖动端口连接处理步骤。'))),
-    deleteTemplate && h(Modal, { open: true, centered: true, title: '删除模板', okText: '删除', cancelText: '取消',
-        confirmLoading: pending, okButtonProps: { danger: true }, onOk: () => removeTemplate(deleteTemplate),
-        onCancel: () => { if (!pending) setDeleteTemplate(null); } }, '删除「' + deleteTemplate.title + '」？'),
+    deleting && h(Modal, { open: true, centered: true, title: '删除流程', okText: '删除', cancelText: '取消',
+        confirmLoading: pending, okButtonProps: { danger: true }, onOk: () => removeFlow(deleting),
+        onCancel: () => { if (!pending) setDeleting(null); } }, '删除「' + deleting.title + '」？'),
     h('div', { className: 'gis-flow-status', role: error || issues.length ? 'alert' : 'status' },
         issues.length > 0 ? h('ul', { className: 'gis-flow-issues' }, issues.map(({ node, message }) => {
             const item = nodes.find(value => value.id === node);

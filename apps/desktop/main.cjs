@@ -477,7 +477,7 @@ async function startDesktop(options) {
         let archive;
         if (method === 'offline') {
             const pick = await dialog.showOpenDialog(window, { properties: ['openFile'],
-                filters: [{ name: '小六组件包', extensions: ['zip'] }] });
+                filters: [{ name: '离线组件包', extensions: ['zip'] }] });
             if (pick.canceled) return;
             archive = pick.filePaths[0];
         }
@@ -490,7 +490,7 @@ async function startDesktop(options) {
     bind('arcgisInstall', async () => {
         const source = bridge();
         const file = source && path.join(path.dirname(source), 'Guizhi.esriaddin');
-        if (!file || !fs.existsSync(file)) throw new Error('请先安装小六的 ArcGIS 组件');
+        if (!file || !fs.existsSync(file)) throw new Error('请先安装 ArcGIS 组件');
         if (await shell.openPath(file)) throw new Error('无法打开 ArcGIS 扩展安装程序');
     });
     bind('arcgisConfigure', carrier => sync.configure(carrier));
@@ -510,7 +510,7 @@ async function startDesktop(options) {
     bind('map', async (surface, input) => {
         if (surface !== window || !input || !mapReads.has(input.action) &&
                 !['assign', 'reproject', 'transform', 'edit', 'edit-sketch', 'edit-transfer-plan', 'tool', 'step-layers',
-                    'flow-tools', 'flow-templates', 'flow-save', 'flow-delete'].includes(input.action)) {
+                    'flow-tools', 'flow-list', 'flow-save', 'flow-delete'].includes(input.action)) {
             throw new Error('地图请求无效');
         }
         if (!controller.settings.workspace) throw new Error('请先选择成果保存位置');
@@ -565,7 +565,7 @@ async function startDesktop(options) {
     let currentMxd;
     function requireMxdBridge() {
         const executable = bridge();
-        if (!executable) throw new Error('本版缺少 MXD 桥接程序，请使用完整的小六发行包');
+        if (!executable) throw new Error('本版缺少 MXD 桥接程序，请使用正式安装包');
         return executable;
     }
     bind('mxdRead', async surface => {
@@ -599,7 +599,7 @@ async function startDesktop(options) {
         if (surface !== window || !Array.isArray(input?.layers) || input.layers.length > 256 ||
                 input.layers.some(item => !mapLayers.has(mapKey(item.ref)))) throw new Error('请从地图工作区保存有效图层');
         const executable = requireMxdBridge();
-        const pick = await dialog.showSaveDialog(window, { defaultPath: '小六地图.mxd',
+        const pick = await dialog.showSaveDialog(window, { defaultPath: '地图工程.mxd',
             filters: [{ name: 'ArcGIS 地图工程', extensions: ['mxd'] }] });
         if (pick.canceled) return null;
         const output = externalPath(pick.filePath);
@@ -688,7 +688,7 @@ async function startDesktop(options) {
             broadcast(controller.state());
             return true;
         }
-        const title = String(name || '').slice(0, 80).replace(/[<>:"/\\|?*\x00-\x1f]/g, '-').replace(/[ .]+$/, '') || '小六地图';
+        const title = String(name || '').slice(0, 80).replace(/[<>:"/\\|?*\x00-\x1f]/g, '-').replace(/[ .]+$/, '') || '地图';
         const pick = await dialog.showSaveDialog(window, { defaultPath: title + '.' + format,
             filters: [{ name: '地图图片', extensions: [format] }] });
         if (pick.canceled) return false;
@@ -742,7 +742,7 @@ async function startDesktop(options) {
             .sort((a, b) => prompt.indexOf(a.name) - prompt.indexOf(b.name));
     }
     async function submitTask(task) {
-        if (updater.handoff) throw new Error('小六正在重启更新');
+        if (updater.handoff) throw new Error('系统正在重启更新');
         if (controller.active || controller.modelTesting) throw new Error('已有任务在运行');
         if (!controller.settings.modelVision) {
             reveal();

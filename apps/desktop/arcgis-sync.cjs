@@ -41,7 +41,7 @@ class ArcGisSync {
 
     get carrier() { return this.bridge ? this.controller.settings.carrier || 'none' : 'none'; }
     get bridge() { return this.controller.bundledArcmap; }
-    get view() { return this.file ? path.join(path.dirname(this.file), 'host-exchanges', '小六数据视图.mxd') : ''; }
+    get view() { return this.file ? path.join(path.dirname(this.file), 'host-exchanges', '成果数据视图.mxd') : ''; }
 
     installed() {
         if (!fs.existsSync(this.addIns)) return false;
