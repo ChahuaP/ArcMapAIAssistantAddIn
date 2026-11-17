@@ -71,7 +71,6 @@ svg { flex: none; vertical-align: middle; }
     background: linear-gradient(180deg, var(--photo-wash) 0 220px, var(--panel) 410px),
         url('/luhe-banner.png') center top / max(2050px, 100%) auto no-repeat; }
 .conversation-empty .welcome { margin: auto auto 0; }
-.conversation-empty .compose-wrap { flex: none; }
 .task-head { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); padding: var(--space-4) var(--column-inset); border-bottom: 1px solid var(--line); }
 .task-head h1 { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .task-head-actions { display: flex; flex: none; align-items: center; gap: var(--space-2); }
@@ -107,9 +106,9 @@ svg { flex: none; vertical-align: middle; }
 .metrics small { font-size: 12px; font-weight: 500; }
 .report { color: var(--accent); }
 .pulse { display: inline-block; width: 8px; height: 8px; border-radius: 100%; background: var(--accent); margin-right: 8px; }
-.compose-wrap { padding: 0 var(--column-inset) var(--space-4); }
+.compose-wrap { flex: none; padding: var(--space-3) var(--column-inset); }
 .composer { background: var(--photo-input); border: 1px solid var(--border); border-radius: 12px; }
-.composer:focus-within { outline: 1px solid var(--focus); outline-offset: 1px; }
+.composer:focus-within { border-color: var(--focus); box-shadow: inset 0 0 0 1px var(--focus); }
 .composer textarea { display: block; width: 100%; border: 0; background: transparent; padding: var(--space-3) var(--space-4); max-height: 135px; }
 .composer textarea:focus-visible { outline: 0; }
 .composer .error { padding: 8px 12px 0; }
@@ -123,7 +122,7 @@ svg { flex: none; vertical-align: middle; }
 .material-row small { overflow-wrap: anywhere; }
 .skill-materials, .unassigned { display: grid; gap: 8px; }
 .composer .skill-materials { max-height: none; overflow: visible; }
-.compose-wrap .composer-skill { max-height: min(54vh, 520px); overflow: auto; }
+.compose-wrap .composer-skill, .workbench-chat-dock .composer-skill { max-height: min(54vh, 520px); overflow: auto; }
 .unassigned-material { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .business-suggestion { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 8px 10px; }
 .composer .error { white-space: pre-line; }
@@ -640,11 +639,15 @@ dialog label { display: grid; gap: 5px; }
 
 .gis-modal-root .gis-dialog .ant-modal-content {
     background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
-    padding: 18px 20px; box-shadow: 0 14px 48px var(--shadow);
+    padding: clamp(16px, 3vw, 24px); box-shadow: 0 14px 48px var(--shadow);
 }
-.gis-modal-root .gis-dialog .ant-modal-header { background: transparent; margin-bottom: 12px; }
-.gis-modal-root .gis-dialog .ant-modal-title { color: var(--ink); }
-.gis-modal-root .gis-dialog .ant-modal-footer { margin-top: 16px; }
+.gis-modal-root .gis-dialog .ant-modal-header { background: transparent; margin-bottom: var(--space-4); padding-inline-end: 28px; }
+.gis-modal-root .gis-dialog .ant-modal-title { color: var(--ink); overflow-wrap: anywhere; }
+.gis-modal-root .gis-dialog .ant-modal-footer {
+    display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: var(--space-2);
+    margin-top: var(--space-4); padding-top: var(--space-4); border-top: 1px solid var(--line);
+}
+.gis-modal-root .gis-dialog .ant-modal-footer > .ant-btn + .ant-btn { margin-inline-start: 0; }
 .gis-dialog .gis-result-cancel { display: none; }
 .gis-layer-tabs { margin-bottom: 12px; }
 .gis-layer-properties { display: grid; margin: 0; }
@@ -656,13 +659,32 @@ dialog label { display: grid; gap: 5px; }
 .gis-layer-properties dd { margin: 0; overflow-wrap: anywhere; user-select: text; }
 .gis-layer-extent { font-variant-numeric: tabular-nums; }
 .gis-tool-fields, .gis-tool-field, .gis-mapping { display: grid; gap: 6px; min-width: 0; }
-.gis-tool-fields { margin: 0; padding: 0; border: 0; gap: 12px; }
+.gis-tool-fields {
+    margin: 0; padding: 3px; border: 0; gap: var(--space-4);
+    max-height: min(59vh, 560px); overflow: auto; scrollbar-gutter: stable;
+}
 .gis-tool-fields, .gis-tool-field { grid-template-columns: minmax(0, 1fr); }
 .gis-tool-fields :is(.ant-select, .ant-input, .ant-segmented, .gis-token) { min-width: 0; max-width: 100%; }
 .gis-tool-distance.ant-input { width: 112px; }
 .gis-tool-values { margin: 0; padding-left: 20px; max-height: 150px; overflow: auto; overflow-wrap: anywhere; }
 .gis-tool-field > span:first-child { font-weight: 600; }
 .gis-tool-field .ant-select, .map-field-editor .role-material > .ant-select { width: 100%; }
+.gis-tool-field > .gis-token { justify-self: start; }
+.gis-tool-description { margin: 0; color: var(--muted); }
+.gis-tool-options, .gis-result-details { border-top: 1px solid var(--line); padding-top: var(--space-2); }
+.gis-tool-options summary, .gis-result-details summary {
+    padding: var(--space-2) 0; cursor: pointer; font-weight: 600; color: var(--accent);
+}
+.gis-tool-options[open] > :not(summary), .gis-result-details[open] > :not(summary) { margin-top: var(--space-2); }
+.gis-result-body, .gis-result-section { display: grid; gap: var(--space-4); min-width: 0; }
+.gis-result-body { max-height: min(56vh, 460px); overflow: auto; scrollbar-gutter: stable; }
+.gis-result-layers { display: grid; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
+.gis-result-layers > li {
+    display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px var(--space-2);
+    padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-radius: 8px;
+    background: var(--sub); overflow-wrap: anywhere;
+}
+.gis-result-layers > li > strong { min-width: 0; }
 .gis-skill-parameters, .gis-result-metrics { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; }
 .gis-mapping { grid-column: 1 / -1; grid-template-columns: repeat(2, minmax(0,1fr)); }
 .gis-result-metrics { margin: 0; }
@@ -674,7 +696,6 @@ dialog label { display: grid; gap: 5px; }
 .gis-delivery, .gis-component-message { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .gis-delivery > span { display: inline-flex; align-items: center; gap: 7px; min-width: 0; overflow-wrap: anywhere; }
 .gis-delivery svg { flex: none; }
-.gis-added-layers { margin: 0; color: var(--muted); }
 .gis-dialog .map-panel { height: 200px; }
 .gis-dialog .map-panel .map-head { display: none; }
 .gis-dialog .role-material { display: grid; gap: 6px; }
@@ -691,7 +712,7 @@ dialog label { display: grid; gap: 5px; }
     border-bottom: 1px solid var(--line); background: var(--panel); }
 .workbench-modes .ant-btn { width: 30px; height: 28px; }
 .workbench-mode-active.ant-btn { background: var(--soft); }
-.workbench-chat-dock { flex: none; padding: 4px 12px 8px; background: var(--panel); border-top: 1px solid var(--line); }
+.workbench-chat-dock { flex: none; padding: var(--space-2); background: var(--panel); border-top: 1px solid var(--line); }
 .workbench-chat-dock .composer textarea { min-height: 36px; max-height: 110px; }
 .workbench-content .welcome .skill-tiles { grid-template-columns: 1fr; }
 .workbench-interaction { display: contents; }

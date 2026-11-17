@@ -169,7 +169,7 @@ function CoordinateTools({ layer, display, setDisplay, entries, openTool, fail, 
     const plans = entries.filter(entry => entry.kind === 'plan');
     const prefix = layer?.kind === 'raster' ? 'raster.' : 'crs.';
     return h('div', { className: 'map-coordinate' },
-        h('span', null, layer ? layer.crsName || '图层未定义坐标系' : '暂无图层'),
+        h('span', null, layer ? layer.name + ' · ' + (layer.crsName || '未定义坐标系') : '暂无图层'),
         h(Choice, { showSearch: true, filterOption: false, allowClear: true, onSearch: search,
             placeholder: '地图显示坐标系', 'aria-label': '地图显示坐标系',
             options: [...options, ...(display?.value && !catalog.some(item => item.value === display.value) ? [display] : [])],
@@ -191,7 +191,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
     const node = useRef(null);
     const graph = useRef(null);
     const [properties, setProperties] = useState(null);
-    const [mapProperties, setMapProperties] = useState(false);
+    const [mapProperties, setMapProperties] = useState(null);
     const [layout, setLayout] = useState(null);
     const [layoutDraft, setLayoutDraft] = useState(null);
     const [document, setDocument] = useState(null);
@@ -924,10 +924,11 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         ['数据与影像', ['shared-delivery', 'cad-coordinates', 'imagery-change'], 'image'],
     ];
     const customSkills = catalog.filter(item => !skillGroups.some(([, ids]) => ids.includes(item.id)));
-    const menuGroup = (title, icon, items, onClick) => h('section', { className: 'ribbon-group ribbon-menu' }, h(antd.Dropdown, {
+    const menuGroup = (title, icon, items, onClick, accessibleName = title) => h('section', { className: 'ribbon-group ribbon-menu' }, h(antd.Dropdown, {
         trigger: ['click'], menu: { items: items.map(item => ({ key: item.id, label: item.title, icon: glyph(item.icon || icon) })),
             onClick: ({ key: id }) => onClick(id) },
-    }, h(Button, { size: 'small', icon: glyph(icon), disabled: busy }, title, glyph('chevron', 13))));
+    }, h(Button, { size: 'small', icon: glyph(icon), disabled: busy,
+        'aria-label': accessibleName, title: accessibleName }, title, glyph('chevron', 13))));
 
     const editable = Boolean(layer?.crs && !hidden.includes(active) &&
         /^(Multi)?(Point|LineString|Polygon)$/.test(layer.geometry));
@@ -1312,7 +1313,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
             { key: 'fit', label: '缩放至图层', icon: glyph('target') },
             { key: 'table', label: '打开属性表', icon: glyph('table'), disabled: raster },
             { key: 'rename', label: '重命名', icon: glyph('pencil') },
-            { key: 'style', label: raster ? '显示' : '符号化', icon: glyph(raster ? 'image' : 'swatches') },
+            { key: 'style', label: raster ? '影像显示' : '符号化', icon: glyph(raster ? 'image' : 'swatches') },
             { key: 'export', label: '导出', icon: glyph('download'), children: [
                 { key: 'export-data', label: '导出为…' },
                 ...(!raster ? [{ key: 'export-table', label: '导出属性表' }] : []),
@@ -1386,10 +1387,18 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
     for (const message of [document ? '' : ioStatus, issue]) {
         if (message && !notices.has(message)) notices.set(message, []);
     }
-    const coordinateTools = () => h(CoordinateTools, { layer, display,
-        setDisplay: item => { setDisplayPlans({}); setDisplay(item); },
-        displayPlan: displayPlans[active], setDisplayPlan: value => setDisplayPlans(old => ({ ...old, [active]: value })),
-        entries, openTool: operation => { setMapProperties(false); openTool(operation); }, fail });
+    const coordinateTools = () => h(CoordinateTools, { layer, display: mapProperties.display,
+        setDisplay: item => setMapProperties({ display: item, plan: undefined }),
+        displayPlan: mapProperties.plan, setDisplayPlan: value => setMapProperties(old => ({ ...old, plan: value })),
+        entries, openTool: operation => { setMapProperties(null); openTool(operation); }, fail });
+    function applyMapProperties(color) {
+        const sameDisplay = mapProperties.display === display;
+        setBackground(color);
+        if (!sameDisplay) setDisplay(mapProperties.display);
+        if (!sameDisplay || displayPlans[active] !== mapProperties.plan) {
+            setDisplayPlans(old => ({ ...(sameDisplay ? old : {}), ...(active && mapProperties.display && { [active]: mapProperties.plan }) }));
+        }
+    }
     const commands = {
         地图: [group('导航',
             command('平移', () => { toggleIdentify(false); setPointSelect(false); setBoxSelect(false); },
@@ -1406,7 +1415,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                     { disabled: busy || !layer?.geometry }),
                 command('按位置选择', () => { toggleIdentify(false); openTool('data.select_by_location'); },
                     { disabled: busy || !layer?.geometry || layers.filter(item => item.geometry).length < 2 })),
-            group('显示', command('地图属性', () => setMapProperties(true), { disabled: busy }))],
+            group('显示', command('地图属性', () => setMapProperties({ display, plan: displayPlans[active] }), { disabled: busy }))],
         数据: [group('地图工程', command('打开', () => mxd(api.mxdRead(), value => { setLocateMxd(null); setDocument(value); }),
             { disabled: busy, 'aria-label': '打开地图工程' }),
             command('保存', () => mxd(api.mxdWrite({ crs: target, bounds: graph.current?.view.calculateExtent(graph.current.ol.getSize()),
@@ -1439,7 +1448,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
             return prominent ? group(title, ...tools.slice(0, prominent).map(item => command(item.title, () => openTool(item.id),
                 { key: item.id, icon: glyph(item.icon), disabled: busy,
                     'data-ai-focus': activity?.operation === item.id ? 'true' : undefined })),
-                ...(tools.length > prominent ? [menuGroup('更多', icon, tools.slice(prominent), openTool)] : []))
+                ...(tools.length > prominent ? [menuGroup('更多', icon, tools.slice(prominent), openTool, '更多' + title + '工具')] : []))
                 : menuGroup(title, icon, tools, openTool);
         }),
         业务: [...skillGroups.map(([title, ids, icon]) => [title, catalog.filter(item => ids.includes(item.id)), icon]),
@@ -1568,8 +1577,8 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         tableDialog?.cell && h(AttributeCell, { cell: tableDialog.cell, busy, close: () => setTableDialog(null), save: saveAttribute }),
         properties && h(LayerProperties, { ...properties, close: () => setProperties(null), glyph,
             save: value => styleLayer(key(properties.item), value) }),
-        mapProperties && h(MapProperties, { background: backgroundColor, save: setBackground, coordinates: coordinateTools(),
-            close: () => setMapProperties(false), glyph }),
+        mapProperties && h(MapProperties, { background: backgroundColor, save: applyMapProperties, coordinates: coordinateTools(),
+            close: () => setMapProperties(null), glyph }),
         layout && !layout.signal?.aborted && h(MapLayout, { key: layout.key, initial: layout.config,
             change: saveLayout, draw: drawLayout, layerChoices: layers.map(item => ({ value: key(item), label: item.name })),
             onRendered: layout.taskId ? issue => {
@@ -1618,8 +1627,8 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
             rootClassName: 'gis-modal-root', okText: '合并', cancelText: '取消', confirmLoading: busy,
             onOk: () => void shapeEdit('merge', picked, mergeTarget), onCancel: () => { if (!busy) setMergeTarget(null); } },
             h('div', { className: 'map-field-editor' },
-                h('label', null, '保留属性', h(Choice, { value: mergeTarget, 'aria-label': '保留属性', disabled: busy,
-                    options: picked.map((id, index) => ({ value: id, label: typeof id === 'number' ? 'FID ' + id : '新建要素 ' + (index + 1) })),
+                h('label', null, '属性来源', h(Choice, { value: mergeTarget, 'aria-label': '属性来源', disabled: busy,
+                    options: picked.map((id, index) => ({ value: id, label: typeof id === 'number' ? '要素 ' + id : '新建要素 ' + (index + 1) })),
                     onChange: setMergeTarget })), editDialogError && h('p', { role: 'alert', className: 'error' }, editDialogError))),
         confirmExit && h(Modal, { open: true, centered: true, title: '放弃未保存的编辑？', className: 'gis-dialog',
             rootClassName: 'gis-modal-root', okText: '放弃', cancelText: '继续编辑', okButtonProps: { danger: true },

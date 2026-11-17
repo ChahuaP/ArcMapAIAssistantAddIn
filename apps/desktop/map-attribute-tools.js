@@ -108,13 +108,14 @@ export function fieldCalculation(layer, values, update, controls) {
     const { field } = controls;
     const type = typeOf(layer, values.field);
     const action = values.operator || 'constant';
-    const operations = { constant: '填入固定值', copy: '复制其他字段', add: '加上数值', subtract: '减去数值',
+    const operations = { constant: '填入固定值', copy: '复制其他字段的值', add: '加上数值', subtract: '减去数值',
         multiply: '乘以数值', divide: '除以数值' };
-    const parts = [h('div', { className: 'gis-condition-line' }, h('span', null, '写入'),
-        token('写入字段', values.field, fieldsOf(layer), name => {
+    const parts = [
+        field('写入字段', token('写入字段', values.field, fieldsOf(layer), name => {
             update('field', name); update('value', undefined); update('source_field', undefined);
-        }, !layer, 'application/x-guizhi-field'), h('span', { 'aria-hidden': true }, '='),
-        token('计算操作', action, options(operations), value => update('operator', value)))];
+        }, !layer, 'application/x-guizhi-field')),
+        field('填值方式', token('填值方式', action, options(operations), value => update('operator', value))),
+    ];
     const parameters = { field: values.field };
     if (action === 'constant') {
         const change = value => update('value', value);
@@ -124,8 +125,9 @@ export function fieldCalculation(layer, values, update, controls) {
     }
     const sources = layer?.fields.filter(item => action === 'copy' ? item.name !== values.field : numeric(item.type)) || [];
     const source = sources.find(item => item.name === values.source_field);
-    parts.push(token('使用字段', source?.name, sources.map(item => ({ value: item.name, label: item.name })),
-        name => update('source_field', name), !layer, 'application/x-guizhi-field'));
+    const sourceLabel = action === 'copy' ? '从哪个字段复制' : '参与计算的字段';
+    parts.push(field(sourceLabel, token(sourceLabel, source?.name, sources.map(item => ({ value: item.name, label: item.name })),
+        name => update('source_field', name), !layer, 'application/x-guizhi-field')));
     const amount = values.operand?.trim() || '';
     if (action !== 'copy') parts.push(valueInput('数值', values.operand, value => update('operand', value), false, 'float64', field));
     return { parts, parameters: { ...parameters, source_field: source?.name, operator: action,
@@ -134,7 +136,7 @@ export function fieldCalculation(layer, values, update, controls) {
         (action === 'copy' || numericLiteral(amount) && (action !== 'divide' || Number(amount) !== 0))) };
 }
 
-export function geometryCalculation(layer, values, update) {
+export function geometryCalculation(layer, values, update, { field }) {
     const properties = geometryProperties(layer);
     const property = values.property || Object.keys(properties)[0];
     const units = property === 'area' ? { square_meters: '平方米', mu: '亩', hectares: '公顷', square_kilometers: '平方千米' } :
@@ -148,13 +150,15 @@ export function geometryCalculation(layer, values, update) {
     const destinations = (layer?.fields || []).filter(item => item.type.startsWith('float')).map(item => ({ value: item.name, label: item.name }));
     if (generated) destinations.push({ value: generated, label: '新建字段 ' + generated });
     const destination = values.field || generated;
-    const parts = [h('div', { className: 'gis-condition-line' }, token('几何属性', property, options(properties), value => {
-        update('property', value); update('unit', undefined); update('field', undefined);
-    }, !layer), Object.keys(units).length > 1 && token('单位', unit, options(units), value => {
-        update('unit', value); update('field', undefined);
-    }, !layer)),
-    h('div', { className: 'gis-condition-line' }, h('span', null, '写入'),
-        token('写入字段', destination, destinations, value => update('field', value), !destinations.length))];
+    const parts = [
+        field('计算内容', token('计算内容', property, options(properties), value => {
+            update('property', value); update('unit', undefined); update('field', undefined);
+        }, !layer)),
+        Object.keys(units).length > 1 && field('结果单位', token('结果单位', unit, options(units), value => {
+            update('unit', value); update('field', undefined);
+        }, !layer)),
+        field('写入字段', token('写入字段', destination, destinations, value => update('field', value), !destinations.length)),
+    ];
     return { parts, parameters: { property, unit, field: destination }, valid: Boolean(properties[property] && units[unit] &&
         destinations.some(item => item.value === destination)) };
 }

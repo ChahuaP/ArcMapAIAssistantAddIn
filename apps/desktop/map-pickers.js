@@ -34,7 +34,7 @@ export function UniquePicker({ layer, field, onPick, display, label = '唯一值
     const [result, setResult] = useState(null);
     const [error, setError] = useState('');
     useEffect(() => {
-        if (!open || !layer?.ref || layer.unavailable || !field) return;
+        if (!open || !layer?.ref || !field) return;
         let alive = true;
         setResult(null);
         setError('');
@@ -42,7 +42,7 @@ export function UniquePicker({ layer, field, onPick, display, label = '唯一值
             .then(value => { if (alive) setResult(value); })
             .catch(issue => { if (alive) setError(window.GuizhiErrorText(issue)); }), query ? 220 : 0);
         return () => { alive = false; clearTimeout(timer); };
-    }, [open, layer?.ref, layer?.unavailable, field, query, page]);
+    }, [open, layer?.ref, field, query, page]);
     return h(Popover, { open, trigger: 'click', placement: 'bottomLeft', onOpenChange: next => {
         setOpen(next); setQuery(''); setPage(0);
     }, content: h('div', { className: 'gis-choice-panel' },
@@ -53,7 +53,7 @@ export function UniquePicker({ layer, field, onPick, display, label = '唯一值
             result?.values.length ? result.values.map((value, index) => h(Button, { type: 'text', size: 'small', key: index,
                 onClick: () => { onPick(value); setOpen(false); } }, display(value))) :
                 h('span', { role: error ? 'alert' : 'status', className: error ? 'error' : 'muted' },
-                    layer?.unavailable ? '运行上游节点后可读取唯一值' : error || (result ? '没有匹配值' : '正在读取…'))),
+                    error || (result ? '没有匹配的值' : '正在读取…'))),
         (page > 0 || result?.more || manual) && h('div', { className: 'gis-choice-pages' },
             manual && h(Button, { size: 'small', onClick: () => { onPick(query); setOpen(false); } }, '使用输入值'),
             (page > 0 || result?.more) && h(Button, { size: 'small', disabled: !page, onClick: () => setPage(page - 1) }, '上一页'),

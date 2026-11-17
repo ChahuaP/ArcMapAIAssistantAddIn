@@ -8,7 +8,7 @@ export function AttributeSort({ columns, order, apply, close }) {
         setRows(current => current.map((item, i) => i === index ? { ...item, ...patch } : item));
     }
     return h(Modal, { open: true, centered: true, title: '高级排序', okText: '应用', cancelText: '取消',
-        rootClassName: 'gis-modal-root', onCancel: close,
+        className: 'gis-dialog', rootClassName: 'gis-modal-root', onCancel: close,
         onOk: () => { apply(rows.filter(item => item.field).map(item => ({ ...item, direction: item.direction || 'ascend' }))); close(); } },
         h('div', { className: 'map-field-editor' }, ...rows.map((item, index) => h('div', { className: 'gis-sort-row', key: index },
             h(Select, { 'aria-label': '排序字段 ' + (index + 1), placeholder: '排序字段', value: item.field,
@@ -35,7 +35,7 @@ export function AttributeStatistics({ source, selected, columns, close }) {
             .then(value => { if (alive) setData(value); }, issue => { if (alive) setError(window.GuizhiErrorText(issue)); });
         return () => { alive = false; };
     }, [field, only]);
-    return h(Modal, { open: true, centered: true, title: '字段统计', rootClassName: 'gis-modal-root',
+    return h(Modal, { open: true, centered: true, title: '字段统计', className: 'gis-dialog', rootClassName: 'gis-modal-root',
         onCancel: close, footer: h(Button, { onClick: close }, '关闭') },
         h('div', { className: 'map-field-editor' },
             h(Select, { 'aria-label': '统计字段', value: field, options: columns, onChange: setField }),
@@ -51,8 +51,9 @@ export function AttributeStatistics({ source, selected, columns, close }) {
 export function AttributeCell({ cell, busy, save, close }) {
     const [value, setValue] = useState(cell.value == null ? '' : String(cell.value));
     const [isNull, setNull] = useState(cell.value == null);
-    return h(Modal, { open: true, centered: true, title: cell.field + ' · FID ' + cell.fid, rootClassName: 'gis-modal-root',
-        okText: '保存', cancelText: '关闭', onCancel: () => { if (!busy) close(); },
+    return h(Modal, { open: true, centered: true, title: cell.field + ' · 要素 ' + cell.fid,
+        className: 'gis-dialog', rootClassName: 'gis-modal-root',
+        okText: '保存', cancelText: cell.readonly ? '关闭' : '取消', onCancel: () => { if (!busy) close(); },
         onOk: () => save(isNull ? null : value), confirmLoading: busy,
         okButtonProps: { disabled: cell.readonly } },
         h('div', { className: 'map-field-editor' },

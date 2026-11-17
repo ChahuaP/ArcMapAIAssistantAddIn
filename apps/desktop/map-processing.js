@@ -18,52 +18,55 @@ const numeric = (label, value, change, min) => field(label, h(Input, {
     type: 'number', step: 'any', min, value: value ?? '', onChange: event => change(event.target.value),
 }));
 const number = value => value === '' || value == null ? NaN : Number(value);
-const tool = (id, title, icon, ...accepts) => ({ id, title, icon, accepts });
-const area = tool('vector.area', '面积汇总', 'area', polygon);
-const count = tool('data.describe', '要素计数', 'count', vector);
-const selectAttr = tool('data.select_by_attribute', '按属性选择', 'filter', vector);
-const selectLocation = tool('data.select_by_location', '按位置选择', 'spatialSelect', vector, vector);
+const tool = (id, title, icon, action, ...inputs) => ({ id, title, icon, action, inputs });
+const area = tool('vector.area', '面积汇总', 'area', '计算', ['统计图层', polygon]);
+const count = tool('data.describe', '要素计数', 'count', '统计', ['统计图层', vector]);
+const selectAttr = tool('data.select_by_attribute', '按属性选择', 'filter', '选择要素', ['待选择图层', vector]);
+const selectLocation = tool('data.select_by_location', '按位置选择', 'spatialSelect', '选择要素',
+    ['待选择图层', vector], ['参照图层', vector]);
 const tools = [
     { title: '统计', icon: 'statistics', tools: [area, count,
-        tool('flow.unique_values', '唯一值', 'filter', vector), tool('flow.calculate', '数值计算', 'calculator')] },
+        tool('flow.unique_values', '唯一值', 'filter', '查询', ['查询图层', vector]),
+        tool('flow.calculate', '数值计算', 'calculator', '计算')] },
     { title: '矢量处理', icon: 'layers', tools: [
-        tool('vector.buffer', '缓冲分析', 'buffer', vector),
-        tool('vector.dissolve', '融合', 'dissolve', vector),
-        tool('geometry.repair', '修复几何', 'pencil', vector),
+        tool('vector.buffer', '缓冲分析', 'buffer', '生成缓冲区', ['输入图层', vector]),
+        tool('vector.dissolve', '融合', 'dissolve', '融合', ['待融合图层', vector]),
+        tool('geometry.repair', '修复几何', 'pencil', '修复', ['待修复图层', vector]),
     ] },
     { title: '叠加分析', icon: 'layers', tools: [
-        tool('vector.intersect', '相交', 'intersect', vector, vector),
-        tool('vector.erase', '擦除', 'erase', vector, polygon),
-        tool('vector.clip', '裁剪', 'clip', vector, polygon),
-        tool('vector.union', '联合', 'union', polygon, polygon),
-        tool('vector.identity', '标识叠加', 'overlayIdentity', polygon, polygon),
-        tool('vector.update_overlay', '更新叠加', 'refresh', polygon, polygon),
-        tool('vector.symmetric_difference', '对称差集', 'difference', polygon, polygon),
-        tool('vector.spatial_join', '空间连接', 'spatialJoin', vector, vector),
+        tool('vector.intersect', '相交', 'intersect', '相交', ['图层一', vector], ['图层二', vector]),
+        tool('vector.erase', '擦除', 'erase', '擦除', ['待擦除图层', vector], ['擦除范围', polygon]),
+        tool('vector.clip', '裁剪', 'clip', '裁剪', ['待裁剪图层', vector], ['裁剪范围', polygon]),
+        tool('vector.union', '联合', 'union', '联合', ['图层一', polygon], ['图层二', polygon]),
+        tool('vector.identity', '标识叠加', 'overlayIdentity', '叠加', ['输入图层', polygon], ['标识图层', polygon]),
+        tool('vector.update_overlay', '更新叠加', 'refresh', '更新', ['待更新图层', polygon], ['更新图层', polygon]),
+        tool('vector.symmetric_difference', '对称差集', 'difference', '计算差集', ['图层一', polygon], ['图层二', polygon]),
+        tool('vector.spatial_join', '空间连接', 'spatialJoin', '连接', ['目标图层', vector], ['提供属性的图层', vector]),
     ] },
     { title: '坐标系', icon: 'globe', tools: [
-        tool('crs.reproject', '投影转换', 'globe', vector),
-        tool('crs.assign', '定义坐标系', 'target', vector),
-        tool('crs.transform', '按方案转换', 'globe', vector),
+        tool('crs.reproject', '投影转换', 'globe', '转换', ['待转换图层', vector]),
+        tool('crs.assign', '定义坐标系', 'target', '定义', ['待定义图层', vector]),
+        tool('crs.transform', '按方案转换', 'globe', '转换', ['待转换图层', vector]),
     ] },
     { title: '栅格处理', icon: 'grid', tools: [
-        tool('raster.statistics', '栅格与波段统计', 'statistics', raster),
-        tool('raster.clip', '裁切栅格', 'clip', raster, polygon),
-        tool('raster.reproject', '栅格重投影', 'globe', raster),
-        tool('raster.assign', '定义影像坐标系', 'target', raster),
-        { ...tool('raster.mosaic', '拼接栅格', 'merge', raster), multiple: true },
+        tool('raster.statistics', '栅格与波段统计', 'statistics', '统计', ['统计影像', raster]),
+        tool('raster.clip', '裁剪栅格', 'clip', '裁剪', ['待裁剪影像', raster], ['裁剪范围', polygon]),
+        tool('raster.reproject', '栅格重投影', 'globe', '转换', ['待转换影像', raster]),
+        tool('raster.assign', '定义影像坐标系', 'target', '定义', ['待定义影像', raster]),
+        { ...tool('raster.mosaic', '拼接栅格', 'merge', '拼接', ['待拼接影像', raster]), multiple: true },
     ] },
 ];
 export const TOOL_GROUPS = tools;
 const definitions = Object.fromEntries([...tools.flatMap(group => group.tools), selectAttr, selectLocation,
-    tool('data.copy', '复制图层', 'copy', vector),
-    { ...tool('data.merge', '合并图层', 'merge', vector), multiple: true },
-    tool('geometry.create_dataset', '新建图层', 'newLayer'),
-    tool('table.add_field', '添加字段', 'columnAdd', vector),
-    tool('table.delete_field', '删除字段', 'columnRemove', vector),
-    tool('table.calculate_field', '字段计算器', 'calculator', vector),
-    tool('table.calculate_geometry', '计算几何', 'area', item => Object.keys(geometryProperties(item)).length > 0),
-    tool('presentation.export_table', '导出属性表', 'download', vector),
+    tool('data.copy', '复制图层', 'copy', '复制', ['待复制图层', vector]),
+    { ...tool('data.merge', '合并图层', 'merge', '合并', ['待合并图层', vector]), multiple: true },
+    tool('geometry.create_dataset', '新建图层', 'newLayer', '创建'),
+    tool('table.add_field', '添加字段', 'columnAdd', '确定', ['图层', vector]),
+    tool('table.delete_field', '删除字段', 'columnRemove', '删除', ['图层', vector]),
+    tool('table.calculate_field', '字段计算器', 'calculator', '计算', ['计算图层', vector]),
+    tool('table.calculate_geometry', '计算几何', 'area', '计算',
+        ['计算图层', item => Object.keys(geometryProperties(item)).length > 0]),
+    tool('presentation.export_table', '导出属性表', 'download', '导出', ['导出图层', vector]),
 ].map(item => [item.id, item]));
 export const toolIcon = id => definitions[id]?.icon;
 
@@ -109,13 +112,13 @@ export const roleLayerPicker = (layers, busy) => (role, items, append, pending) 
         'aria-label': '选择' + role.label + '图层' });
 };
 const locationGuide = {
-    intersect: ['有任何公共部分，包括只碰到边或点。', 'overlap'],
-    contain: ['输入要素包住查询要素。', 'contain'],
-    within: ['输入要素完全落在查询要素内。', 'within'],
+    intersect: ['与参照要素有交集，包括边界或点接触。', 'overlap'],
+    contain: ['完全包含参照要素。', 'contain'],
+    within: ['完全位于参照要素内。', 'within'],
     touch: ['边界相碰，内部没有交集。', 'touch'],
-    overlap: ['同维度要素共享部分范围，双方均有未重叠的部分。例如两个面部分盖住。', 'overlap'],
-    cross: ['要素穿过另一个要素，交集维度低于其中较高的维度。例如一条路穿过一个地块。两个面不会判为穿越。', 'cross'],
-    within_a_distance: ['两要素之间最短距离小于或等于设定值。', 'distance'],
+    overlap: ['同类要素部分重叠，双方各有一部分位于交集外。', 'overlap'],
+    cross: ['与参照要素交叉，例如道路穿过地块或两条道路相交。', 'cross'],
+    within_a_distance: ['与参照要素的最短距离在设定值以内。', 'distance'],
 };
 function SpatialExample({ predicate }) {
     const [text, shape] = locationGuide[predicate] || locationGuide.overlap;
@@ -219,12 +222,13 @@ function toolForm(definition, inputs, values, update, entries) {
                 className: 'gis-tool-distance', 'aria-label': '缓冲距离', value: values.distance ?? '',
                 onChange: event => update('distance', event.target.value) }),
             choice('unit', '距离单位', 'meters', { meters: '米', kilometers: '千米', map_units: '图层单位' })),
-        h('details', null, h('summary', null, '高级参数'),
-            h('div', { className: 'gis-condition-line' },
-                choice('cap', '端点形状', 'round', { round: '圆头', flat: '平头', square: '方头' }),
-                choice('join', '拐角形状', 'round', { round: '圆角', mitre: '尖角', bevel: '斜角' })),
+        h('details', { className: 'gis-tool-options' }, h('summary', null, '高级参数'),
+            /LineString|Polygon/.test(input?.geometry) && h('div', { className: 'gis-condition-line' },
+                /LineString/.test(input.geometry) &&
+                    choice('cap', '线端样式', 'round', { round: '圆头', flat: '平头', square: '方头' }),
+                choice('join', '转角样式', 'round', { round: '圆角', mitre: '尖角', bevel: '斜角' })),
             h(Checkbox, { checked: values.dissolve === 'all',
-                onChange: event => update('dissolve', event.target.checked ? 'all' : 'keep') }, '融合缓冲区')));
+                onChange: event => update('dissolve', event.target.checked ? 'all' : 'keep') }, '合并为一个要素')));
         parameters = { distance: number(values.distance), unit: values.unit || 'meters', cap: values.cap || 'round',
             join: values.join || 'round', dissolve: values.dissolve === 'all' };
         valid &&= Number.isFinite(parameters.distance) && parameters.distance > 0;
@@ -240,7 +244,8 @@ function toolForm(definition, inputs, values, update, entries) {
             valid &&= Number.isFinite(parameters.distance) && parameters.distance > 0;
         }
     } else if (id === 'vector.dissolve' || id === 'presentation.export_table') {
-        controls.push(columns('fields', '字段（选填）', { mode: 'multiple', maxTagCount: 'responsive' }));
+        controls.push(columns('fields', id === 'vector.dissolve' ? '分组字段（选填）' : '导出字段（选填）',
+            { mode: 'multiple', maxTagCount: 'responsive', placeholder: id === 'vector.dissolve' ? '留空则融合全部要素' : '留空则导出全部字段' }));
         if (values.fields?.length) {
             parameters = { fields: values.fields };
             valid &&= values.fields.every(name => names.includes(name));
@@ -253,7 +258,7 @@ function toolForm(definition, inputs, values, update, entries) {
         parameters = { field: { name, type: values.type } };
         valid &&= Boolean(name && values.type && ![...names, input?.fidField].some(field => field?.toLowerCase() === name.toLowerCase()));
     } else if (id === 'table.delete_field') {
-        controls.push(columns('field', '删除字段'));
+        controls.push(columns('field', '待删除字段'));
         parameters = { field: values.field };
         valid &&= names.includes(values.field);
     } else if (id === 'vector.spatial_join') {
@@ -273,7 +278,7 @@ function toolForm(definition, inputs, values, update, entries) {
         parameters = { target_crs: values.coordinate?.value };
         valid &&= Boolean(parameters.target_crs);
     } else if (id === 'raster.reproject') {
-        controls.push(coordinates('目标坐标系'), select('resampling', '重采样',
+        controls.push(coordinates('目标坐标系'), select('resampling', '重采样方法',
             { nearest: '最邻近', bilinear: '双线性', cubic: '三次卷积' }, 'nearest'));
         parameters = { target_crs: values.coordinate?.value, resampling: values.resampling || 'nearest' };
         valid &&= Boolean(parameters.target_crs);
@@ -284,18 +289,26 @@ function toolForm(definition, inputs, values, update, entries) {
     } else if (id === 'flow.calculate') {
         controls.push(field('运算', h(Segmented, { block: true, value: values.operator || 'add',
             options: options({ add: '+', subtract: '−', multiply: '×', divide: '÷' }), onChange: value => update('operator', value) })),
-        numeric('左操作数', values.left, value => update('left', value)), numeric('右操作数', values.right, value => update('right', value)));
+        numeric('第一个数', values.left, value => update('left', value)), numeric('第二个数', values.right, value => update('right', value)));
         parameters = { operator: values.operator || 'add', left: number(values.left), right: number(values.right) };
         valid &&= Number.isFinite(parameters.left) && Number.isFinite(parameters.right);
     }
     return { controls, valid, parameters };
 }
 
-const toolInputs = {
-    'data.select_by_location': ['待选择图层', '参照图层'],
-    'vector.clip': ['输入图层', '裁切范围'], 'vector.erase': ['输入图层', '擦除范围'],
-    'vector.spatial_join': ['目标图层', '连接图层'], 'vector.update_overlay': ['输入图层', '更新图层'],
-    'raster.clip': ['输入影像', '裁切范围'], 'raster.mosaic': ['拼接影像'], 'data.merge': ['合并图层'],
+const toolDescription = {
+    'vector.area': '计算图层中各面合并后的总面积，重叠部分只计一次。',
+    'vector.intersect': '提取两个图层相交的部分。',
+    'vector.erase': '保留待擦除图层中位于擦除范围之外的部分。',
+    'vector.clip': '保留待裁剪图层中位于裁剪范围内的部分。',
+    'vector.union': '保留两个面图层的全部范围，并沿重叠边界拆分。',
+    'vector.identity': '保留输入图层的范围，并从标识图层补充重叠部分的属性。',
+    'vector.update_overlay': '用更新图层替换重叠部分，并保留两个图层其余的区域。',
+    'vector.symmetric_difference': '保留两个面图层各自未重叠的部分。',
+    'vector.spatial_join': '按相交关系把属性连接到目标图层。目标图层的形状保持原样。',
+    'data.merge': '把多个图层的要素汇集到一个新图层。',
+    'crs.assign': '为已有坐标标注其实际使用的坐标系。',
+    'raster.assign': '为现有影像标注其实际使用的坐标系。',
 };
 
 export function toolError(result) {
@@ -312,8 +325,9 @@ function ResultSummary({ result }) {
             metrics.map(([name, value]) => h('div', { key: name }, h('dt', null, stats[name]), h('dd', null, format(value))))),
         result.statistics?.band_statistics?.map(band => h('p', { key: band.band }, '波段 ' + band.band + ' · 有效像元 ' + band.valid_count +
             ' · 无数据像元 ' + band.nodata_count + ' · 最小 ' + (band.min ?? '—') + ' · 最大 ' + (band.max ?? '—') + ' · 平均 ' + (band.mean ?? '—'))),
-        Array.isArray(result.value) ? h('ul', { className: 'gis-tool-values', 'aria-label': '唯一值' },
+        Array.isArray(result.value) ? result.value.length ? h('ul', { className: 'gis-tool-values', 'aria-label': '唯一值' },
             result.value.map((value, index) => h('li', { key: index }, value === null ? '空值' : value === '' ? '空字符串' : String(value))))
+            : h('p', { className: 'muted' }, '没有找到匹配的值。')
             : !metrics.length && result.value !== undefined && h('output', null, String(result.value)));
 }
 
@@ -322,32 +336,28 @@ export function MapTool({ operation, active, layers, entries, components, openCo
     const definition = definitions[operation];
     const initial = operation === 'geometry.create_dataset' ? { geometry_type: 'polygon' }
         : operation === 'data.select_by_location' ? { predicate: 'intersect' } : {};
-    const [ids, setIds] = useState(() => definition.accepts[0]?.(layers.find(item => key(item) === active)) ? [active] : []);
+    const [ids, setIds] = useState(() => definition.inputs[0]?.[1](layers.find(item => key(item) === active)) ? [active] : []);
     const [values, setValues] = useState(initial);
     const [result, setResult] = useState(null);
     const [error, setError] = useState('');
     const update = (name, value) => setValues(old => ({ ...old, [name]: value }));
     const inputs = ids.map(id => layers.find(item => key(item) === id));
-    const names = toolInputs[operation] || (definition.accepts.length > 1 ? ['输入图层', '叠加图层'] : ['图层']);
-    const pickLayer = (index, records) => field(names[index], dropdown(definition.multiple ? ids : ids[index], layerOptions(records), value => {
+    const pickLayer = (name, index, records) => field(name, dropdown(definition.multiple ? ids : ids[index], layerOptions(records), value => {
         if (definition.multiple) setIds(value);
         else setIds(old => Object.assign([...old], { [index]: value }));
         if (!index) setValues(initial);
         setError('');
     }, { showSearch: true, optionFilterProp: 'label', notFoundContent: records.length ? '没有匹配的图层' : '暂无图层',
         ...(definition.multiple && { mode: 'multiple', maxCount: 32, maxTagCount: 'responsive' }) }));
-    const selectors = definition.accepts.map((accepts, index) => pickLayer(index, layers.filter(item => accepts(item) &&
+    const selectors = definition.inputs.map(([name, accepts], index) => pickLayer(name, index, layers.filter(item => accepts(item) &&
         (definition.multiple || !ids.some((id, slot) => slot !== index && key(item) === id)))));
     const form = toolForm(definition, inputs, values, update, entries);
-    const minimum = definition.multiple ? 2 : definition.accepts.length;
+    const minimum = definition.multiple ? 2 : definition.inputs.length;
     const validInputs = inputs.length >= minimum && Array.from({ length: inputs.length }, (_, i) =>
-        (definition.accepts[i] || definition.accepts.at(-1))(inputs[i])).every(Boolean);
+        (definition.inputs[i] || definition.inputs.at(-1))[1](inputs[i])).every(Boolean);
     const problem = validInputs ? toolInputIssue(operation, inputs, form.parameters) : '';
     const missing = operation.startsWith('raster.') && components?.raster?.installed === false;
     const valid = validInputs && form.valid && !problem && !missing;
-    const verb = { 'geometry.create_dataset': '确定', 'table.add_field': '确定', 'table.delete_field': '删除',
-        'table.calculate_field': '计算', 'table.calculate_geometry': '计算', 'flow.calculate': '计算',
-        'data.select_by_attribute': '选择', 'data.select_by_location': '选择', 'presentation.export_table': '导出' }[operation] || '运行';
     async function run() {
         if (busy || !valid) return;
         setError('');
@@ -369,26 +379,38 @@ export function MapTool({ operation, active, layers, entries, components, openCo
     return h(Modal, { open: true, centered: true, width: 480, className: 'gis-dialog', rootClassName: 'gis-modal-root',
         title: h('span', { className: 'gis-dialog-title' }, glyph(definition.icon), definition.title),
         closable: !busy, keyboard: !busy, maskClosable: false, onCancel: () => { if (!busy) close(); }, onOk: result ? close : run,
-        okText: result ? '完成' : verb, cancelText: '取消', confirmLoading: busy,
+        okText: result ? '关闭' : definition.action, cancelText: '取消', confirmLoading: busy,
         okButtonProps: { disabled: !result && !valid }, cancelButtonProps: { disabled: busy, className: result ? 'gis-result-cancel' : undefined } },
-        result ? h(ResultSummary, { result }) : h('fieldset', { className: 'gis-tool-fields', disabled: busy, 'aria-busy': busy },
+        result ? h('div', { className: 'gis-result-body' }, h(ResultSummary, { result }))
+            : h('fieldset', { className: 'gis-tool-fields', disabled: busy, 'aria-busy': busy },
+            toolDescription[operation] && h('p', { className: 'gis-tool-description' }, toolDescription[operation]),
+            definition.multiple && h('p', { className: 'gis-tool-description' }, '选择两个或更多图层。'),
             ...[...selectors, ...form.controls].map((control, index) => h(window.React.Fragment, { key: index }, control)),
             missing && h('div', { className: 'gis-component-message' }, '请先安装栅格处理组件',
                 h(Button, { size: 'small', onClick: openComponents }, '打开组件设置')),
             (error || problem) && h('p', { className: 'error', role: 'alert' }, error || problem)));
 }
 
+function ResultLayers({ layers }) {
+    const rows = layers.map(item => {
+        const system = item.crs?.startsWith('EPSG:') ? item.crs : item.crsName || (item.crs && '自定义坐标系');
+        return h('li', { key: key(item) }, h('strong', null, item.name), system && h('small', null, system));
+    });
+    return h('ul', { className: 'gis-result-layers', 'aria-label': '成果图层' }, rows);
+}
+
 export function MapResultDialog({ result, close, add, replace }) {
     const [preview, setPreview] = useState(false);
     const layer = result.layers.length === 1 ? result.layers[0] : null;
-    return h(Modal, { open: true, centered: true, width: 480, className: 'gis-dialog', rootClassName: 'gis-modal-root',
-        title: '加入地图？', onCancel: close, maskClosable: false,
+    return h(Modal, { open: true, centered: true, width: 540, className: 'gis-dialog', rootClassName: 'gis-modal-root',
+        title: '将成果加入地图？', onCancel: close, maskClosable: false,
         footer: [h(Button, { key: 'decline', onClick: close }, '不加入'), replace && h(Button, { key: 'replace', onClick: replace }, '替换原图层'),
             h(Button, { key: 'add', type: 'primary', onClick: add }, '加入地图')] },
-        h('div', { className: 'map-field-editor' }, h('ul', { className: 'gis-tool-values', 'aria-label': '成果图层' },
-            result.layers.map(item => h('li', { key: key(item) }, item.name, item.crs && ' · ' + (/^EPSG:\d+$/.test(item.crs) ? item.crs : item.crsName || '')))),
-            h(ResultSummary, { result }), layer?.geometry && h('div', null,
-                h(Button, { size: 'small', onClick: () => setPreview(!preview) }, preview ? '收起预览' : '预览属性'),
+        h('div', { className: 'gis-result-body' },
+            h(ResultLayers, { layers: result.layers }),
+            h(ResultSummary, { result }),
+            layer?.geometry && h('details', { className: 'gis-result-details', onToggle: event => setPreview(event.currentTarget.open) },
+                h('summary', null, '预览属性'),
                 preview && h(AttributePreview, { layer }))));
 }
 
@@ -520,7 +542,7 @@ export function MapProcessing({ skill, layers, entries, components, openComponen
         rootClassName: 'gis-modal-root', closable: !busy, keyboard: !busy, maskClosable: false,
         title: h('span', { className: 'gis-dialog-title' }, glyph(window.GuizhiShell.businessIcon(skill.id)), skill.title),
         onCancel: dismiss, onOk: offer ? () => { onAddLayers(pendingLayers); dismiss(); } : result ? dismiss : run,
-        okText: offer ? '加入地图' : result ? '完成' : '办理',
+        okText: offer ? '加入地图' : result ? '关闭' : '开始办理',
         cancelText: offer ? '不加入' : '取消', confirmLoading: busy, okButtonProps: { disabled: !result && !valid },
         cancelButtonProps: { disabled: busy, className: result && !offer ? 'gis-result-cancel' : undefined } },
         h('div', { className: 'map-field-editor', 'aria-busy': busy },
@@ -530,7 +552,8 @@ export function MapProcessing({ skill, layers, entries, components, openComponen
             result ? h(window.React.Fragment, null,
                 metrics.length > 0 && h('dl', { className: 'gis-result-metrics', role: 'status' },
                     ...metrics.map(([name, value]) => h('div', { key: name }, h('dt', null, stats[name]), h('dd', null, metric(name, value))))),
-                offer && h('p', { role: 'status' }, '是否将 ' + pendingLayers.length + ' 个成果图层加入地图？'),
+                offer && h('section', { className: 'gis-result-section' },
+                    h('strong', null, '将成果加入地图？'), h(ResultLayers, { layers: pendingLayers })),
                 result.map && h(Preview, { map: result.map }),
                 result.business?.reportDigest && h(window.GuizhiBusinessLog.ReportPanel, { id: result.business.id })) :
                 h(window.React.Fragment, null,
