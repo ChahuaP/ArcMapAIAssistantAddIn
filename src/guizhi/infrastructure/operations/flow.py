@@ -1,4 +1,4 @@
-"""Typed reusable values produced by map workflow nodes."""
+"""Read distinct attribute values and evaluate typed conditions and arithmetic."""
 from math import isfinite
 from operator import add, mul, sub, truediv
 from typing import Literal

@@ -10,7 +10,7 @@ from guizhi.infrastructure.materials import bound_layer_metadata
 from guizhi.infrastructure.workspace import Workspace
 
 
-def format_operation(record, parameters):
+def format_operation(workspace, record, parameters):
     result = {"operation": "workflow.execute", "parameters": parameters,
               "status": record["status"], "run_id": record["id"],
               "local_elapsed_ms": round((datetime.fromisoformat(record["updated_at"]) -
@@ -18,8 +18,10 @@ def format_operation(record, parameters):
     if record["status"] == "succeeded":
         data = record["result"]
         result.update(statistics=data["statistics"], mode=data["workflow"]["mode"], steps=data["workflow"]["steps"])
-    elif record["error"]:
-        result["error"] = record["error"]
+    else:
+        from guizhi.application.diagnostics import failure_summary
+
+        result.update(error=record["error"], failure=failure_summary(workspace, record))
     return result
 
 
@@ -104,4 +106,4 @@ def replay(root, request_path):
     plan["materials"] = materials
     result = skills.submit(workspace, plan, cancel_requested=(directory / "cancelled").exists, key=directory.name)
     remember_plan(workspace, key, result)
-    return {"key": key, "operation": format_operation(result, {"plan_run": previous["id"]})}
+    return {"key": key, "operation": format_operation(workspace, result, {"plan_run": previous["id"]})}

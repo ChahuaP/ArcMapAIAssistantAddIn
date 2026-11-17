@@ -88,7 +88,7 @@ def register(server, job=None):
             result = {"operation": operation, "parameters": parameters}
             try:
                 record = run()
-                result = format_operation(record, parameters)
+                result = format_operation(workspace, record, parameters)
                 remember_plan(workspace, job["planKey"], record)
             except (ValueError, OSError) as exc:
                 message = str(exc)

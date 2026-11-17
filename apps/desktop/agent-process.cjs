@@ -15,14 +15,14 @@ class AgentProcess {
                 else if (message.type === 'event') this.current?.onEvent(message.event);
                 else if (message.type === 'result') this.current?.finish(message.result);
             });
-            const failed = () => {
-                const error = new Error('模型调度进程已退出');
+            const failed = error => {
                 reject(error);
-                this.current?.finish({ status: 'interrupted', error: error.message });
+                this.current?.finish({ status: 'interrupted', error: error.message,
+                    error_code: error.code, failureStep: 'agent_process_exit' });
             };
             this.child.on('error', failed);
-            this.child.once('close', failed);
-            this.child.send({ type: 'warm', options }, error => { if (error) failed(); });
+            this.child.once('close', (code, signal) => failed(new Error('模型调度进程已退出（' + (signal || code) + '）')));
+            this.child.send({ type: 'warm', options }, error => { if (error) failed(error); });
         });
     }
 
@@ -42,7 +42,8 @@ class AgentProcess {
             };
             this.current = { onEvent, finish };
             this.child.send({ type: 'run', options }, error => {
-                if (error) finish({ status: 'interrupted', error: '无法提交任务到模型调度进程' });
+                if (error) finish({ status: 'interrupted', error: error.message,
+                    error_code: error.code, failureStep: 'send_agent_request' });
             });
         });
     }

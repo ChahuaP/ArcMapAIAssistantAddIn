@@ -232,6 +232,7 @@ export async function dispatch(options, { signal, onEvent = () => {}, getService
     let ran = false;
     let result;
     let attempted = false;
+    let failureStep = 'prepare_workflow';
     try {
         const cancelled = join(directory, 'cancelled');
         stopListener = addAbortListener(stop, () => writeFileSync(cancelled, ''));
@@ -252,6 +253,7 @@ export async function dispatch(options, { signal, onEvent = () => {}, getService
         } else if (stop.aborted) {
             result = { status: deadline.aborted ? 'timed_out' : 'cancelled' };
         } else {
+            failureStep = 'bind_model_runtime';
             stopProgress = watchRun(workspace, id, event);
             event({ kind: 'dispatch', id, provider, model });
             const service = getService ? await getService() :
@@ -301,6 +303,7 @@ export async function dispatch(options, { signal, onEvent = () => {}, getService
                     event(item);
                 },
             });
+            failureStep = 'run_model';
             let response = await run(context + conversation + speech + '用户请求：' + options.prompt, true);
             ran = true;
             const needsSelectedWorkflow = options.skill && roles.length > 0 && /^请办理/u.test(options.prompt.trim());
@@ -319,6 +322,7 @@ export async function dispatch(options, { signal, onEvent = () => {}, getService
                 writeFileSync(join(directory, 'cancelled'), '');
                 result = { status: deadline.aborted ? 'timed_out' : 'cancelled' };
             } else {
+                failureStep = 'read_dispatch_result';
                 if (!existsSync(budgetPath)) throw new Error('本轮模型预算未初始化');
                 const issuePath = join(directory, 'input-issue.json');
                 const receipt = existsSync(operationPath) ? readJson(operationPath) : null;
@@ -348,13 +352,13 @@ export async function dispatch(options, { signal, onEvent = () => {}, getService
                             : status === 'no_result' ? '本轮没有生成可核验的成果。可以继续让我重新办理。' : answer),
                     operation: receipt, ...(issue && !receipt ? { input_issue: issue } : {}),
                     ...(status === 'answered' && existsSync(candidatePath) ? { candidate: readJson(candidatePath) } : {}),
-                    ...(failure ? { error: safeError(failure.message), error_code: failure.code } : {}) };
+                    ...(failure ? { error: safeError(failure.message), error_code: failure.code, failureStep: 'run_model' } : {}) };
             }
         }
     } catch (error) {
         writeFileSync(join(directory, 'cancelled'), '');
         result = stop.aborted ? { status: deadline.aborted ? 'timed_out' : 'cancelled' }
-            : { status: 'failed', error: safeError(error.message) };
+            : { status: 'failed', error: safeError(error.message), error_code: error.code };
     } finally {
         stopListener?.[Symbol.dispose]();
         try {
@@ -364,6 +368,7 @@ export async function dispatch(options, { signal, onEvent = () => {}, getService
             }
             await owned?.close();
         } catch (error) {
+            if (!result.error && !result.operation?.error) failureStep = 'archive_dispatch';
             result = { ...result, status: 'failed', shutdown_error: safeError(error.message) };
         }
         stopProgress?.();
@@ -379,7 +384,7 @@ export async function dispatch(options, { signal, onEvent = () => {}, getService
             ? null : accounting.total_tokens + tokens.totalTokens;
     }
     if (typeof result.response === 'string') result.response = safeError(result.response);
-    const receipt = { ...result, id, directory, provider, model, workflow_attempted: attempted,
+    const receipt = { failureStep, ...result, id, directory, provider, model, workflow_attempted: attempted,
         elapsed_ms: Math.round(performance.now() - started), execution: { gis: 'local', model: modelConfig.mode },
         budget: existsSync(budgetPath) ? readJson(budgetPath) : null,
         sdk_version: versions['@deepseek-ai/dsh-sdk-client'], usage: usage.size ? accounting : null };

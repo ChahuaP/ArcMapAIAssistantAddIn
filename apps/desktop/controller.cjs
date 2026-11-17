@@ -186,7 +186,10 @@ class DesktopController {
                 message = JSON.parse(error.stderr || error.stdout).error;
                 if (message?.startsWith('{')) message = JSON.parse(message).error;
             } catch { /* Process failed before producing a record. */ }
-            throw new Error(message?.replace(/^(ValueError|ValidationError|Fault): /, '').trim() || '无法读取材料或成果');
+            const failure = new Error(message?.replace(/^(ValueError|ValidationError|Fault): /, '').trim() || '无法读取材料或成果');
+            failure.diagnosticMessage = message || error.stderr?.trim() || error.message;
+            failure.code = error.code;
+            throw failure;
         }
     }
 
@@ -212,7 +215,8 @@ class DesktopController {
         try { return await this.reader.read(this.settings.workspace, files, kind); }
         catch (error) {
             if (error.message !== '已停止读取材料') this.diagnostics?.record({ stage: 'material_read', status: 'failed',
-                code: error.message.includes('超时') ? 'timeout' : 'reader_failure', files, elapsedMs: performance.now() - at });
+                code: error.message.includes('超时') ? 'timeout' : 'reader_failure', step: 'read_material',
+                error: error.diagnosticMessage || error.message, errorCode: error.code, files, elapsedMs: performance.now() - at });
             throw error;
         }
     }
@@ -257,7 +261,8 @@ class DesktopController {
         this.persist(next);
         this.tasks = next;
         const stop = new AbortController();
-        const active = { stop, task, config, files: Object.values(bindings).flat().map(item => item.file) };
+        const active = { stop, task, config, secret: key, started: performance.now(),
+            files: Object.values(bindings).flat().map(item => item.file) };
         this.active = active;
         const options = { workspace: this.settings.workspace, modelConfig: config, apiKey: key,
             prompt: task.prompt, skill, skillParameters, materials: bindings, layerLabels, previousRun, history, dialogue, images: imageBlocks, mapContext,
@@ -265,7 +270,17 @@ class DesktopController {
             controlPlan: control?.plan || materials.control?.[0]?.plan };
         active.done = this.dispatch(options, { signal: stop.signal, onEvent: event => {
             if (task.status !== 'running') return;
+            if (event.kind === 'dispatch_step') { active.failureStep = event.step; return; }
+            if (event.kind === 'dispatch') active.dispatchId = event.id;
             const details = event.details;
+            if (event.kind === 'operation_progress') {
+                active.runId = event.runId;
+                if (event.phase === 'workflow_step_started' ||
+                    event.phase === 'workflow_step_finished' && ['failed', 'interrupted'].includes(details?.status)) {
+                    active.failedOperation = { stepId: details?.step_id, childRunId: details?.child_run_id,
+                        operation: details?.operation };
+                } else if (event.phase === 'workflow_step_finished') active.failedOperation = undefined;
+            }
             const label = details?.role && layerLabels?.[details.role]?.name;
             const visual = visualRecipe(label ? { ...event, details: { ...details, layer: label } } : event);
             if (visual) {
@@ -280,7 +295,7 @@ class DesktopController {
                 this.onChange(this.state());
             }
         } }).then(receipt => this.complete(task, receipt), error => this.complete(task, {
-            status: stop.signal.aborted ? 'cancelled' : 'failed', error: error.message,
+            status: stop.signal.aborted ? 'cancelled' : 'failed', error: error.message, error_code: error.code,
         }));
         try { if (suppliedMaterials) this.onStarted?.(task); }
         catch (error) { console.error('ArcGIS display:', error.message); }
@@ -289,7 +304,9 @@ class DesktopController {
 
     async dispatch(options, callbacks) {
         const { modelConfig, apiKey, ...request } = options;
+        callbacks?.onEvent?.({ kind: 'dispatch_step', step: 'start_agent' });
         const service = await this.modelService(modelConfig, apiKey);
+        callbacks?.onEvent?.({ kind: 'dispatch_step', step: 'send_agent_request' });
         return service.run(request, callbacks);
     }
 
@@ -332,6 +349,8 @@ class DesktopController {
         active.settling = true;
         let status = active.stop.signal.aborted ? 'cancelled' : receipt.status;
         let stage = 'dispatch';
+        let publicationStep = 'inspect_result';
+        let publicationError;
         let record;
         try {
             task.runId = receipt.operation?.run_id;
@@ -343,6 +362,7 @@ class DesktopController {
             if (status === 'succeeded' && this.tasks.includes(task)) {
                 record = await this.python('inspect', task.runId);
                 if (record.status !== 'succeeded') throw new Error('成果未发布');
+                publicationStep = 'read_result_artifacts';
                 const map = checkedArtifact(record, 'map');
                 if (map) task.map = JSON.parse(map.bytes);
                 const layout = checkedArtifact(record, 'layout');
@@ -351,7 +371,11 @@ class DesktopController {
                 if (actions) task.mapActions = JSON.parse(actions.bytes);
                 const hasLayer = record.result.evidence.some(item =>
                     ['export', 'boundaries'].includes(item.step) && /\.(gpkg|tiff?|img)$/i.test(item.path));
-                if (hasLayer) task.mapLayers = await this.request('map', { action: 'workflow-layers', run: task.runId });
+                if (hasLayer) {
+                    publicationStep = 'read_result_layers';
+                    task.mapLayers = await this.request('map', { action: 'workflow-layers', run: task.runId });
+                }
+                publicationStep = 'read_result_artifacts';
                 task.outputImages = record.result.evidence.filter(item => item.step === 'raster_preview')
                     .map(item => ({ run: task.runId, artifact: item.step }));
                 const findings = checkedArtifact(record, 'case');
@@ -359,6 +383,7 @@ class DesktopController {
                 const definition = record.result.workflow?.skill;
                 const report = checkedArtifact(record, 'report', true);
                 if (!active.stop.signal.aborted && (definition || task.skill || report)) {
+                    publicationStep = 'save_business_log';
                     const groups = { ...task.materials, ...(task.project && { project: [task.project] }),
                         ...(task.control && { control: [task.control] }) };
                     task.business = await this.recordBusiness({ id: task.id, startedAt: task.createdAt, operator: task.operator,
@@ -366,9 +391,10 @@ class DesktopController {
                     task.hasReport = Boolean(task.business.reportDigest);
                 }
             }
-        } catch {
+        } catch (error) {
             status = 'failed';
             stage = 'publish';
+            publicationError = error;
             task.response = '办理成果已生成，但工作台读取失败。请到成果保存位置查看本轮作业记录。';
         } finally {
             if (active.stop.signal.aborted) {
@@ -381,9 +407,18 @@ class DesktopController {
                 interrupted: 'interrupted', timed_out: 'timeout', budget_exhausted: 'budget_exhausted',
                 no_result: receipt.workflow_attempted === false ? 'tool_not_called' : 'no_result',
             }[status];
-            if (code && task.status !== 'cancelling') task.diagnosticId = this.diagnostics?.record({ stage, status, code,
-                taskId: task.id, dispatchId: receipt.id, runId: task.runId, elapsedMs: receipt.elapsed_ms,
-                config: active.config, skill: task.skill, files: active.files });
+            if (code && task.status !== 'cancelling') {
+                const failure = receipt.operation?.failure || (stage === 'dispatch' ? active.failedOperation : undefined);
+                task.diagnosticId = this.diagnostics?.record({ stage, status, code,
+                    taskId: task.id, dispatchId: receipt.id || active.dispatchId, runId: task.runId || active.runId,
+                    elapsedMs: receipt.elapsed_ms ?? performance.now() - active.started,
+                    step: publicationError ? publicationStep : failure?.step || receipt.failureStep || active.failureStep,
+                    stepId: failure?.stepId, childRunId: failure?.childRunId, operation: failure?.operation || receipt.operation?.operation,
+                    error: publicationError?.diagnosticMessage || publicationError?.message || failure?.error ||
+                        receipt.operation?.error || receipt.error || receipt.shutdown_error || receipt.input_issue?.error,
+                    errorCode: publicationError?.code || failure?.errorCode || receipt.error_code,
+                    config: active.config, skill: task.skill, files: active.files, secret: active.secret });
+            }
             task.status = status;
             delete task.visual;
             const current = this.tasks.includes(task);

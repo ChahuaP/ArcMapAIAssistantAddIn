@@ -15,7 +15,6 @@
         statistics: 'M3 3v18h18M8 16v-4m5 4V8m5 8V5',
         briefcase: 'M3 7h18v13H3zM8 7V4h8v3M3 12c6 3 12 3 18 0m-9 1v3',
         book: 'M5 4h14v17H7a2 2 0 0 1-2-2zm0 15a2 2 0 0 1 2-2h12M9 8h6m-6 4h6',
-        workflow: 'M3 9h5v6H3zm13-6h5v5h-5zm0 13h5v5h-5zM8 12h4m4-6h-4v12h4',
         shield: 'M12 3 4 6v6c0 4 4 7 8 9 4-2 8-5 8-9V6zm-3 9 2 2 4-4',
         balance: 'M12 3v17m-5 0h10M4 7h16M6 7l-3 7h6zm12 0-3 7h6z',
         share: 'M6 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm12-6a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm0 12a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM8 11l8-4m-8 6 8 4',

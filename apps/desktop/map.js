@@ -1,6 +1,6 @@
 import 'ol/ol.css';
-import { MapProcessing, TOOL_GROUPS, toolIcon, roleLayerPicker, layerMatches, mapLayerMaterial } from './map-processing.js';
-import { MapFlow } from './map-flow.js';
+import { MapProcessing, MapResultDialog, MapTool, TOOL_GROUPS, toolError, toolIcon,
+    roleLayerPicker, layerMatches, mapLayerMaterial } from './map-processing.js';
 import { geometryProperties } from './map-attribute-tools.js';
 import { AttributeSort, AttributeStatistics, AttributeCell } from './map-table-ui.js';
 import { MapLayout, amendLayout, drawMapLayers, layoutDefaults, mapCanvas, mapImage, sheetSize } from './map-layout.js';
@@ -145,10 +145,9 @@ function Preview({ map, choose, selected, open, hasLayers }) {
             h('input', { type: 'checkbox', checked: visible, onChange: event => show(event.target.checked) }), '重叠范围'));
 }
 
-function CoordinateTools({ layer, display, setDisplay, entries, request, onLayer, fail, displayPlan, setDisplayPlan }) {
+function CoordinateTools({ layer, display, setDisplay, entries, openTool, fail, displayPlan, setDisplayPlan }) {
     const [query, search] = useState('');
     const [standard, setStandard] = useState([]);
-    const [plan, setPlan] = useState('');
     useEffect(() => {
         let current = true;
         const timer = setTimeout(() => api.map({ action: 'crs-search', query }).then(items => {
@@ -156,7 +155,6 @@ function CoordinateTools({ layer, display, setDisplay, entries, request, onLayer
         }).catch(error => { if (current) fail(error); }), 180);
         return () => { current = false; clearTimeout(timer); };
     }, [query]);
-    useEffect(() => setPlan(''), [layer]);
     const definitions = entries.filter(entry => entry.kind === 'definition');
     const catalog = [...definitions.map(entry => ({ value: entry.id + '@' + entry.revision, label: entry.title,
         wkt: entry.definition.wkt, units: { degree: 'degrees', metre: 'm', meter: 'm' }[entry.definition.axes?.[0]?.unit] })),
@@ -168,9 +166,8 @@ function CoordinateTools({ layer, display, setDisplay, entries, request, onLayer
         ...['地理坐标系', '投影坐标系'].map(label => ({ label, options: catalog.filter(item => (item.kind ||
             (item.units === 'degrees' ? '地理坐标系' : '投影坐标系')) === label) })).filter(group => group.options.length),
     ];
-    const [destination, setDestination] = useState(null);
-    useEffect(() => setDestination(null), [layer]);
     const plans = entries.filter(entry => entry.kind === 'plan');
+    const prefix = layer?.kind === 'raster' ? 'raster.' : 'crs.';
     return h('div', { className: 'map-coordinate' },
         h('span', null, layer?.crsName || '尚未添加图层'),
         h(Choice, { showSearch: true, filterOption: false, allowClear: true, onSearch: search,
@@ -178,20 +175,14 @@ function CoordinateTools({ layer, display, setDisplay, entries, request, onLayer
             options: [...options, ...(display?.value && !catalog.some(item => item.value === display.value) ? [display] : [])],
             value: display?.value, onChange: (value, item) => setDisplay(value ? item : null) }),
         layer && h('div', { className: 'map-coordinate-actions' },
-            h(Choice, { showSearch: true, filterOption: false, onSearch: search, options,
-                value: destination?.value, placeholder: layer.crs ? '选择目标坐标系' : '选择图层已有坐标系',
-                'aria-label': layer.crs ? '目标坐标系' : '图层已有坐标系', onChange: (value, item) => setDestination(item) }),
-            h(Button, { disabled: !destination, onClick: () => request({ action: layer.crs ? 'reproject' : 'assign',
-                ref: layer.ref, crs: destination.value }).then(onLayer).catch(fail) }, layer.crs ? '转换投影' : '定义坐标系')),
-        layer?.crs && layer.kind !== 'raster' && plans.length > 0 && h('div', { className: 'map-coordinate-actions' },
-            display && h(Choice, { value: displayPlan || undefined, placeholder: '为该图层选择显示转换',
+            h(Button, { onClick: () => openTool(prefix + (layer.crs ? 'reproject' : 'assign')) },
+                layer.crs ? '投影转换' : '定义坐标系'),
+            layer.crs && layer.kind !== 'raster' && plans.length > 0 &&
+                h(Button, { onClick: () => openTool('crs.transform') }, '按方案转换')),
+        display && layer?.crs && layer.kind !== 'raster' && plans.length > 0 &&
+            h(Choice, { value: displayPlan || undefined, placeholder: '为该图层选择显示转换',
                 'aria-label': '显示转换方案', allowClear: true, onChange: setDisplayPlan,
-                options: plans.map(entry => ({ value: entry.id + '@' + entry.revision, label: entry.title })) }),
-            h(Choice, { value: plan || undefined, placeholder: '选择已保存转换方案', 'aria-label': '选择已保存转换方案',
-                options: plans.map(entry => ({ value: entry.id + '@' + entry.revision, label: entry.title })), onChange: setPlan }),
-            h(Button, { disabled: !plan, onClick: () => request({ action: 'transform', ref: layer.ref, plan }).then(onLayer).catch(fail) },
-                '转换并保存')));
-
+                options: plans.map(entry => ({ value: entry.id + '@' + entry.revision, label: entry.title })) }));
 }
 
 function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer, active, hidden, toggle, entries, catalog, components,
@@ -234,8 +225,8 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
     const mapBasis = useRef(null);
     const [expandedLegends, setExpandedLegends] = useState({});
     const [analysis, setAnalysis] = useState(null);
-    const [flowOpen, setFlowOpen] = useState(null);
-    const [flowRequest, setFlowRequest] = useState(null);
+    const [tool, setTool] = useState(null);
+    const [toolResult, setToolResult] = useState(null);
     const [lastResult, setLastResult] = useState(null);
     const [count, setCount] = useState(0);
     const [fieldEdit, setFieldEdit] = useState(null);
@@ -883,23 +874,48 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         try {
             const result = await api.map({ action: 'tool', operation: 'table.edit_cell', refs: [layer.ref],
                 parameters: { fid, field, value } });
+            const error = toolError(result);
+            if (error) { fail(error); return; }
             replaceAttributes(layer, result.layers[0]);
             setTableDialog(null);
         } catch (error) { fail(error); }
         finally { setBusy(false); }
     }
-    const openTool = operation => {
-        setFlowRequest({ id: crypto.randomUUID(), operation, layer: active });
-        setFlowOpen(true);
+    const openTool = (operation, source = active) => {
+        if (busy || edit) return;
+        setTool({ operation, active: source });
     };
+    function addResultLayers(items) {
+        const fresh = items.filter(item => !layers.some(existing => key(existing) === key(item)));
+        if (!fresh.length) return;
+        graph.current.fitNeeded = true;
+        add(fresh);
+    }
+    function showToolResult(result, input) {
+        if (result.selection) {
+            setPointSelect(false);
+            setBoxSelect(false);
+            toggleIdentify(false);
+            selectLayer(key(input));
+            setSelection({ key: key(input), ids: result.selection.fids });
+        }
+        if (!result.layers.length) return;
+        const operation = tool?.operation;
+        const attributes = ['table.add_field', 'table.delete_field', 'table.calculate_field', 'table.calculate_geometry'].includes(operation);
+        const replaceLayer = input && result.layers.length === 1 && (attributes || ['crs.assign', 'raster.assign'].includes(operation))
+            ? () => (attributes ? replaceAttributes : replace)(input, result.layers[0]) : undefined;
+        setTool(null);
+        setToolResult({ result, replaceLayer });
+    }
     async function saveSelectedLayer() {
         if (busy || !layer || !picked.length || picked.length > 500) return;
         setBusy(true);
         try {
             const result = await api.map({ action: 'tool', operation: 'data.export_selection',
                 refs: [layer.ref], parameters: { fids: picked } });
-            add(result.layers);
-            setIoStatus('已将所选要素另存为图层');
+            const error = toolError(result);
+            if (error) { fail(error); return; }
+            showToolResult(result);
         } catch (error) { fail(error); }
         finally { setBusy(false); }
     }
@@ -1310,13 +1326,13 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         ], onClick: ({ key: action }) => {
             if (action === 'remove') { remove(id); return; }
             if (action === 'rename') { setRenamingLayer(id); return; }
-            if (action.startsWith('export-')) {
-                const table = action === 'export-table';
-                const appearance = !table && !raster && layerSymbol({ ...item.style, opacity: item.style?.opacity ?? item.opacity },
+            if (action === 'export-table') { openTool('presentation.export_table', id); return; }
+            if (action === 'export-data') {
+                const appearance = !raster && layerSymbol({ ...item.style, opacity: item.style?.opacity ?? item.opacity },
                     palette[index % palette.length]);
                 const pointIcon = appearance && /Point/.test(item.geometry) ?
                     style('#ffffff', { ...appearance, color: '#ffffff' }).getImage().getImage(1).toDataURL('image/png') : undefined;
-                api.mapExport(item.ref, table, appearance || undefined, pointIcon).catch(fail);
+                api.mapExport(item.ref, false, appearance || undefined, pointIcon).catch(fail);
                 return;
             }
             if (action === 'properties' || action === 'style') {
@@ -1373,7 +1389,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
     const coordinateTools = () => h(CoordinateTools, { layer, display,
         setDisplay: item => { setDisplayPlans({}); setDisplay(item); },
         displayPlan: displayPlans[active], setDisplayPlan: value => setDisplayPlans(old => ({ ...old, [active]: value })),
-        entries, request: api.map, onLayer: item => replace(layer, item), fail });
+        entries, openTool: operation => { setMapProperties(false); openTool(operation); }, fail });
     const commands = {
         地图: [group('导航',
             command('平移', () => { toggleIdentify(false); setPointSelect(false); setBoxSelect(false); },
@@ -1418,16 +1434,14 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         制图: [group('图件', command('版面布局', () => setLayout({ key: 'manual', config: prepareLayout(
             layoutDraft || { ...layoutDefaults, title: layer?.name || '地图' }) }),
         { icon: glyph('layout'), disabled: busy || !viewReady || !layers.length }))],
-        分析: [group('流程', command('流程编辑器', () => setFlowOpen(true), {
-            icon: glyph('workflow'), disabled: Boolean(edit),
-        })), ...TOOL_GROUPS.map(({ title, icon, tools }) => {
+        分析: TOOL_GROUPS.map(({ title, icon, tools }) => {
             const prominent = { '统计': 2, '矢量处理': 2, '叠加分析': 2 }[title] || 0;
             return prominent ? group(title, ...tools.slice(0, prominent).map(item => command(item.title, () => openTool(item.id),
                 { key: item.id, icon: glyph(item.icon), disabled: busy,
                     'data-ai-focus': activity?.operation === item.id ? 'true' : undefined })),
                 ...(tools.length > prominent ? [menuGroup('更多', icon, tools.slice(prominent), openTool)] : []))
                 : menuGroup(title, icon, tools, openTool);
-        })],
+        }),
         业务: [...skillGroups.map(([title, ids, icon]) => [title, catalog.filter(item => ids.includes(item.id)), icon]),
             ['自定义业务', customSkills, 'briefcase']].filter(([, items]) => items.length)
             .map(([title, items, icon]) => menuGroup(title, icon, items.map(item => ({ ...item, icon: businessIcon(item.id) })),
@@ -1591,26 +1605,15 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 onClick: () => setImportIssues([]), type: 'primary' }, '关闭') },
             h('ul', { className: 'map-field-editor' }, ...importIssues.map((item, index) =>
                 h('li', { key: index }, item.name + '：' + window.GuizhiErrorText(item.message))))),
-        flowOpen !== null && h(MapFlow, { open: flowOpen, layers, busy, setBusy, glyph, request: flowRequest, components,
-            onApply: replaceAttributes,
-            close: () => setFlowOpen(false), onLayers: items => {
-                graph.current.fitNeeded = true;
-                add(items.filter(item => !layers.some(existing => key(existing) === key(item))));
-            }, onHighlight: (layer, ids) => {
-                setPointSelect(false);
-                setBoxSelect(false);
-                toggleIdentify(false);
-                selectLayer(key(layer));
-                setSelection({ key: key(layer), ids });
-            } }),
+        tool && h(MapTool, { ...tool, layers, entries, components, openComponents: () => { setTool(null); openComponents(); },
+            glyph, busy, setBusy, close: () => setTool(null), onResult: showToolResult }),
+        toolResult && h(MapResultDialog, { result: toolResult.result,
+            close: () => setToolResult(null),
+            add: () => { addResultLayers(toolResult.result.layers); setToolResult(null); },
+            replace: toolResult.replaceLayer && (() => { toolResult.replaceLayer(); setToolResult(null); }) }),
         analysis && h(MapProcessing, { ...analysis, layers, entries, components, openComponents, glyph, busy,
-            setBusy, close: () => setAnalysis(null), Preview, onResult: result => {
-                setLastResult({ skill: analysis.skill, initialResult: result });
-                if (result.layers.length) {
-                    graph.current.fitNeeded = true;
-                    add(result.layers);
-                }
-            } }),
+            setBusy, close: () => setAnalysis(null), Preview, onAddLayers: addResultLayers,
+            onResult: result => setLastResult({ skill: analysis.skill, initialResult: result }) }),
         mergeTarget !== null && h(Modal, { open: true, centered: true, title: '合并要素', className: 'gis-dialog',
             rootClassName: 'gis-modal-root', okText: '合并', cancelText: '取消', confirmLoading: busy,
             onOk: () => void shapeEdit('merge', picked, mergeTarget), onCancel: () => { if (!busy) setMergeTarget(null); } },

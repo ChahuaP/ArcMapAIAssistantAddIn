@@ -162,10 +162,7 @@ async function startDesktop(options) {
     app.on('second-instance', reveal);
     let quitting = false;
     let closing = false;
-    let flowJob;
-    function cancelFlow() {
-        if (flowJob) fs.writeFileSync(flowJob.cancel, '');
-    }
+    let toolJob;
     window.on('close', event => {
         if (!quitting) { event.preventDefault(); window.hide(); }
     });
@@ -177,9 +174,10 @@ async function startDesktop(options) {
         desktop.close();
         sync.close();
         speech.cancel();
-        diagnostics.close();
-        cancelFlow();
-        void Promise.allSettled([controller.close(), flowJob?.promise]).finally(() => { quitting = true; tray.destroy(); app.quit(); });
+        void Promise.allSettled([toolJob]).then(() => {
+            diagnostics.close();
+            return controller.close();
+        }).finally(() => { quitting = true; tray.destroy(); app.quit(); });
     });
     const pages = new Map([[window, workbenchUrl], [launcher, launcherUrl], [portrait, portraitUrl]]);
     for (const [surface, url] of pages) {
@@ -187,7 +185,9 @@ async function startDesktop(options) {
         surface.webContents.on('will-navigate', (event, target) => { if (target !== url) event.preventDefault(); });
         surface.webContents.on('render-process-gone', (_, details) => {
             if (!closing && !['clean-exit', 'killed'].includes(details.reason)) {
-                diagnostics.record({ stage: 'desktop', status: 'failed', code: 'renderer_gone' });
+                diagnostics.record({ stage: 'desktop', status: 'failed', code: 'renderer_gone',
+                    step: surface === window ? 'workbench_renderer' : surface === launcher ? 'launcher_renderer' : 'portrait_renderer',
+                    errorCode: details.reason, error: '渲染进程退出（' + details.reason + '，退出码 ' + details.exitCode + '）' });
             }
         });
     }
@@ -206,7 +206,7 @@ async function startDesktop(options) {
     bind('updatePrepare', () => updater.prepare());
     bind('updateCancel', () => updater.cancel());
     bind('updateApply', async () => {
-        if (flowJob || controller.active || controller.modelTesting || controller.hostBusy || controller.skillBusy || components.active.size) {
+        if (toolJob || controller.active || controller.modelTesting || controller.hostBusy || controller.skillBusy || components.active.size) {
             throw new Error('请在当前操作结束后重启更新');
         }
         await updater.apply();
@@ -533,40 +533,31 @@ async function startDesktop(options) {
     });
     bind('materialPaths', (paths, kind) => controller.intake(paths, kind));
     const mapReads = new Set(['describe', 'features', 'table', 'table-complement', 'table-statistics', 'table-unique-values', 'table-feature',
-        'crs-search', 'raster-preview', 'raster-display', 'categories', 'flow-check']);
+        'crs-search', 'raster-preview', 'raster-display', 'categories']);
     bind('map', async (surface, input) => {
         if (surface !== window || !input || !mapReads.has(input.action) &&
-                !['assign', 'reproject', 'transform', 'edit', 'edit-sketch', 'edit-transfer-plan', 'tool',
-                    'flow-tools', 'flow-list', 'flow-save', 'flow-delete'].includes(input.action)) {
+                !['edit', 'edit-sketch', 'edit-transfer-plan', 'tool'].includes(input.action)) {
             throw new Error('地图请求无效');
         }
         if (!controller.settings.workspace) throw new Error('请先选择成果保存位置');
-        return mapReads.has(input.action)
-            ? controller.reader.map(controller.settings.workspace, input) : controller.request('map', input);
-    }, true);
-    bind('mapFlowRun', async (surface, { model, bindings, target }) => {
-        if (surface !== window || !controller.settings.workspace || flowJob || controller.active) throw new Error('请在空闲的地图工作区运行流程');
-        if (!bindings || Object.values(bindings).some(ref => !ref || !mapLayers.has(mapKey(ref)))) throw new Error('流程中有图层已移除');
-        const token = randomUUID().replaceAll('-', '');
-        const cancel = path.join(controller.settings.workspace, 'flow-' + token + '.cancel');
-        const promise = controller.request('map', { action: 'flow-run', model, bindings, target, token });
-        flowJob = { cancel, promise, token, workspace: controller.settings.workspace };
-        try { return await promise; }
-        finally { flowJob = undefined; fs.rmSync(cancel, { force: true }); }
-    }, true);
-    bind('mapFlowCancel', surface => { if (surface === window) cancelFlow(); }, true);
-    bind('mapFlowProgress', surface => {
-        if (surface === window && flowJob) return controller.reader.map(flowJob.workspace, { action: 'flow-progress', token: flowJob.token });
-    }, true);
-    bind('mapFlowTable', async (surface, flow, run) => {
-        if (surface !== window || !controller.settings.workspace) throw new Error('请从地图工作区导出表格');
-        const pick = await dialog.showSaveDialog(window, { defaultPath: '流程成果.csv', filters: [{ name: 'CSV', extensions: ['csv'] }] });
-        if (pick.canceled) return;
-        const output = externalPath(pick.filePath);
-        const relative = path.relative(path.join(controller.settings.workspace, 'runs'), output);
-        if (!path.isAbsolute(relative) && relative.split(path.sep)[0] !== '..') throw new Error('请选择成果目录以外的位置');
-        await controller.request('map', { action: 'flow-export-table', flow, run, output });
-        shell.showItemInFolder(output);
+        if (mapReads.has(input.action)) return controller.reader.map(controller.settings.workspace, input);
+        if (input.action !== 'tool') return controller.request('map', input);
+        if (toolJob || controller.active || closing) throw new Error('请等待当前操作结束后再运行工具');
+        const started = performance.now();
+        function report(result) {
+            const failure = result.failure;
+            const diagnosticId = diagnostics.record({ stage: 'tool', status: result.status,
+                code: result.run ? 'operation_failed' : 'tool_failed', runId: result.run, operation: input.operation,
+                elapsedMs: performance.now() - started, ...failure, step: failure?.step || 'run_map_tool',
+                error: failure?.error || result.message });
+            return { ...result, diagnosticId };
+        }
+        toolJob = controller.request('map', input).then(result =>
+            ['failed', 'interrupted'].includes(result.status) ? report(result) : result,
+        error => report({ status: 'failed', message: error.message,
+            failure: { error: error.diagnosticMessage, errorCode: error.code } }));
+        try { return await toolJob; }
+        finally { toolJob = undefined; }
     }, true);
     bind('mapSkill', async (surface, input) => {
         if (surface !== window || !input || typeof input.skill !== 'string' ||
@@ -675,7 +666,7 @@ async function startDesktop(options) {
         if (surface !== window || typeof value !== 'string' || value.length > 1_000_000) throw new Error('属性值无法复制');
         clipboard.writeText(value);
     }, true);
-    bind('mapExport', async (surface, ref, table, style, pointIcon) => {
+    bind('mapExport', async (surface, ref, table, style, pointIcon, fields) => {
         if (surface !== window) throw new Error('请从工作台导出图层');
         const item = mapLayers.get(mapKey(ref));
         if (!item) throw new Error('请选择地图中的图层');
@@ -693,7 +684,8 @@ async function startDesktop(options) {
         if (!filters.some(filter => filter.extensions.includes(extension)) ||
                 !path.isAbsolute(relative) && relative.split(path.sep)[0] !== '..') throw new Error('请选择有效的导出位置与格式');
         const result = await controller.request('map', { action: 'export', ref, output, format: extension,
-            ...(extension === 'kml' && { name: item.name, style, pointIcon }) });
+            ...(extension === 'kml' && { name: item.name, style, pointIcon }),
+            ...(extension === 'csv' && { fields }) });
         shell.showItemInFolder(output);
         return result;
     }, true);

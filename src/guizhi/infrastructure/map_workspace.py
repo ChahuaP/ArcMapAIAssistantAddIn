@@ -18,6 +18,7 @@ from pyproj.aoi import AreaOfInterest
 from pyproj.enums import TransformDirection
 from pyproj.transformer import TransformerGroup
 
+from guizhi.application.diagnostics import failure_summary
 from guizhi.application.skills import execute as execute_skill
 from guizhi.application.tasks import run_operation
 from guizhi.infrastructure.crs_catalog import get_plan
@@ -33,11 +34,11 @@ VECTOR_ARTIFACTS = {"import", "export", "boundaries", "transfer-source"}
 MANUAL_OPERATIONS = {
     "data.describe", "vector.area", "vector.buffer", "vector.clip", "vector.intersect",
     "vector.erase", "vector.dissolve", "vector.union", "vector.identity", "vector.symmetric_difference", "vector.update_overlay",
-    "vector.spatial_join", "data.copy", "data.merge", "data.append", "data.select_by_attribute",
+    "vector.spatial_join", "data.copy", "data.merge", "data.select_by_attribute",
     "data.select_by_location", "data.export_selection", "geometry.create_dataset", "geometry.repair",
-    "crs.assign", "crs.reproject",
-    "geometry.explode", "table.add_field", "table.delete_field", "table.add_coordinates",
-    "presentation.export_table", "raster.statistics", "raster.clip", "raster.reproject", "raster.mosaic",
+    "crs.assign", "crs.reproject", "crs.transform",
+    "table.add_field", "table.delete_field", "flow.unique_values", "flow.calculate",
+    "raster.statistics", "raster.clip", "raster.reproject", "raster.assign", "raster.mosaic",
     "table.calculate_field", "table.calculate_geometry", "table.edit_cell",
 }
 
@@ -145,8 +146,13 @@ def map_result(workspace, record, title, *, include_steps=False):
     for child, _ in records:
         statistics.update(child["result"].get("statistics", {}))
     statistics.update(data.get("statistics", {}))
-    return {"run": record["id"], "layers": layers, "statistics": statistics,
-            "selection": data.get("selection"), "map": map_data}
+    result = {"run": record["id"], "layers": layers, "statistics": statistics,
+              "selection": data.get("selection"), "map": map_data}
+    if "value" in data:
+        result["value"] = data["value"]
+    if band_statistics := data.get("raster", {}).get("band_statistics"):
+        statistics["band_statistics"] = band_statistics
+    return result
 
 
 def step_title(operation):
@@ -165,6 +171,10 @@ def manual_tool(workspace, payload):
         raise ValueError("一次最多选择 32 个图层")
     items = [map_material(workspace, ref) for ref in refs]
     parameters = dict(payload["parameters"])
+    if operation == "raster.reproject" and not parameters["target_crs"].startswith("EPSG:"):
+        from guizhi.infrastructure.crs_catalog import get
+
+        parameters["target_crs"] = get(workspace, "definition", parameters["target_crs"])["definition"]["wkt"]
     if operation == "data.export_selection":
         fids = parameters.get("fids")
         if len(items) != 1 or not isinstance(fids, list) or not 1 <= len(fids) <= 500:
@@ -178,7 +188,15 @@ def manual_tool(workspace, payload):
         title = name.strip()
     record = run_operation(workspace.root, {"operation": operation, "inputs": items,
                            "parameters": parameters, "idempotency_key": uuid4().hex})
-    return map_result(workspace, successful(record), title)
+    if record["status"] != "succeeded":
+        return {"status": record["status"], "run": record["id"], "message": record["error"],
+                "failure": failure_summary(workspace, record)}
+    try:
+        return map_result(workspace, record, title)
+    except (ValueError, OSError, RuntimeError) as error:
+        return {"status": "failed", "run": record["id"], "message": str(error),
+                "failure": {"step": "read_tool_output", "operation": operation, "error": str(error),
+                            "errorCode": type(error).__name__}}
 
 
 def manual_skill(workspace, payload):
@@ -384,21 +402,6 @@ def features(workspace, payload):
 
 def request(workspace, payload):
     action = payload["action"]
-    if action.startswith("flow-"):
-        from guizhi.infrastructure import map_flow
-
-        if action == "flow-tools":
-            return map_flow.catalog()
-        if action == "flow-check":
-            return map_flow.check(workspace, payload)
-        if action == "flow-run":
-            return map_flow.run(workspace, payload)
-        if action == "flow-progress":
-            return map_flow.progress(workspace, payload)
-        if action in {"flow-list", "flow-save", "flow-delete"}:
-            return map_flow.saved_flows(workspace, payload)
-        if action == "flow-export-table":
-            return map_flow.export_table(workspace, payload)
     if action in {"mxd-read", "mxd-import", "mxd-write"}:
         from guizhi.infrastructure import map_document
 
@@ -507,28 +510,9 @@ def request(workspace, payload):
         name = item["layer"]
         return {**item, "layers": [name] if name else [], "kind": "vector" if name else "raster",
                 "name": payload.get("name", name)}
-    if action in {"assign", "reproject"} and payload["ref"]["artifact"] == "raster_preview":
-        item = map_material(workspace, payload["ref"])
-        code = payload["crs"]
-        if action == "reproject" and not code.startswith("EPSG:"):
-            from guizhi.infrastructure.crs_catalog import get
-
-            code = get(workspace, "definition", code)["definition"]["wkt"]
-        record = successful(run_operation(workspace.root, {"operation": "raster." + action, "inputs": [item],
-            "parameters": {"target_crs": code, **({"resampling": payload.get("resampling", "nearest")} if action == "reproject" else {})}}))
-        return output_layers(workspace, record, "影像")[0]
     if action == "export":
         return export_layer(workspace, payload)
     file, name = source(workspace, payload["ref"])
-    if action == "assign":
-        code = payload["crs"]
-        if describe(workspace, payload["ref"])["crs"]:
-            raise ValueError("图层已有坐标系，请使用坐标转换")
-        return produce(workspace, "crs.assign", file, name, {"definition": code})
-    if action == "reproject":
-        return produce(workspace, "crs.reproject", file, name, {"definition": payload["crs"]})
-    if action == "transform":
-        return produce(workspace, "crs.transform", file, name, {"plan": payload["plan"]})
     if action == "edit":
         if material(file, name)["revision"] != payload.get("revision"):
             raise ValueError("图层版本已变化，请重新打开图层")
@@ -570,7 +554,7 @@ def export_layer(workspace, payload):
             return package_layer(workspace, file, output, name)
         if extension == "csv":
             record = successful(run_operation(workspace.root, {"operation": "presentation.export_table",
-                "inputs": [material(file, name)]}))
+                "inputs": [material(file, name)], "parameters": {"fields": payload.get("fields")}}))
             copyfile(read_artifact(workspace, record["id"], "table"), output)
         elif extension == "kml":
             from guizhi.infrastructure.map_kml import export_kml

@@ -646,6 +646,10 @@ dialog label { display: grid; gap: 5px; }
 .gis-layer-extent { font-variant-numeric: tabular-nums; }
 .gis-tool-fields, .gis-tool-field, .gis-mapping { display: grid; gap: 6px; min-width: 0; }
 .gis-tool-fields { margin: 0; padding: 0; border: 0; gap: 12px; }
+.gis-tool-fields, .gis-tool-field { grid-template-columns: minmax(0, 1fr); }
+.gis-tool-fields :is(.ant-select, .ant-input, .ant-segmented, .gis-token) { min-width: 0; max-width: 100%; }
+.gis-tool-distance.ant-input { width: 112px; }
+.gis-tool-values { margin: 0; padding-left: 20px; max-height: 150px; overflow: auto; overflow-wrap: anywhere; }
 .gis-tool-field > span:first-child { font-weight: 600; }
 .gis-tool-field .ant-select, .map-field-editor .role-material > .ant-select { width: 100%; }
 .gis-skill-parameters, .gis-result-metrics { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; }
@@ -778,62 +782,3 @@ dialog label { display: grid; gap: 5px; }
 .gis-preview-table th, .gis-preview-table td { padding: 5px 8px; border-bottom: 1px solid var(--line); text-align: left; }
 .gis-preview-table th { position: sticky; top: 0; background: var(--sub); }
 .gis-preview-table tr:last-child td { border-bottom: 0; }
-.gis-flow-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
-    gap: 10px 24px; padding: 0 0 12px; }
-.gis-flow-toolgroup { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; }
-.gis-flow-layout { display: grid; grid-template-columns: minmax(112px, 184px) minmax(190px, 1fr);
-    height: min(65vh, 650px); min-height: 260px; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; }
-.gis-flow-library { padding: 12px; overflow: auto; background: var(--panel); }
-.gis-flow-library { border-right: 1px solid var(--line); }
-.gis-flow-library .ant-btn { display: flex; width: 100%; justify-content: flex-start; gap: 6px; margin-bottom: 3px; padding-inline: 7px; }
-.gis-flow-library .ant-btn > span { min-width: 0; text-overflow: ellipsis; overflow: hidden; }
-.gis-flow-library .ant-btn[draggable=true] { cursor: grab; }
-.gis-flow-layout h3 { margin: 10px 0 6px; font-size: 13px; color: var(--ink); }
-.gis-flow-fields { border: 0; padding: 8px 10px; margin: 0; min-width: 0; display: grid;
-    grid-template-columns: minmax(0, 1fr); gap: 7px; }
-.gis-flow-fields :is(.gis-tool-field, .gis-filter-clause) { min-width: 0; grid-template-columns: minmax(0, 1fr); }
-.gis-flow-fields :is(.ant-select, .ant-input, .ant-segmented, .gis-token) { min-width: 0; max-width: 100%; }
-.gis-flow-fields .ant-select .ant-select-selection-wrap { min-width: 0; }
-.gis-flow-fields .gis-tool-help { align-items: flex-start; font-size: 12px; }
-.gis-flow-arithmetic > input { width: 76px; }
-.gis-flow-distance.ant-input { width: 96px; }
-.gis-flow-linked { min-width: 54px; color: var(--muted); }
-.gis-flow-result { border-top: 1px solid var(--line); padding: 8px 10px; display: grid;
-    grid-template-columns: minmax(0, 1fr); gap: 6px; font-size: 12px; }
-.gis-flow-result-layer { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; min-width: 0; }
-.gis-flow-result-layer > * { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.gis-flow-result-layer > span { color: var(--muted); }
-.gis-flow-result-actions { display: flex; flex-wrap: wrap; gap: 4px; }
-.gis-flow-values { max-height: 125px; overflow: auto; }
-.gis-flow-canvas { position: relative; min-width: 0; min-height: 0; background: var(--sub); }
-.gis-flow-canvas .react-flow { --xy-background-pattern-dots-color-default: var(--border);
-    --xy-edge-stroke-default: var(--accent); --xy-edge-stroke-selected-default: var(--primary);
-    --xy-edge-stroke-width-default: 2; --xy-controls-button-background-color-default: var(--panel);
-    --xy-controls-button-color-default: var(--ink); --xy-controls-button-background-color-hover-default: var(--soft);
-    --xy-controls-button-border-color-default: var(--line); }
-.gis-flow-canvas .react-flow__controls-button { padding: 4px; }
-.gis-flow-empty { position: absolute; top: 38%; left: 16px; right: 16px; pointer-events: none; text-align: center; color: var(--muted); }
-.gis-flow-node { width: 255px; position: relative; border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
-    box-shadow: 0 2px 6px var(--shadow); color: var(--ink); overflow-wrap: anywhere; }
-.gis-flow-node > strong { display: block; height: 37px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    padding: 8px 11px; border-bottom: 1px solid var(--line); }
-.gis-flow-node .gis-flow-port { position: relative; padding: 2px 12px; height: 23px; font-size: 11px; color: var(--muted); }
-.gis-flow-node .gis-flow-port:is([data-port-type=condition],[data-port-type=values],[data-port-type=number]) .react-flow__handle,
-.gis-flow-node:is([data-kind=condition],[data-kind=values],[data-kind=number]) .react-flow__handle.source { background: var(--tile-violet); }
-.gis-flow-node .react-flow__handle { width: 11px; height: 11px; background: var(--primary); border: 2px solid var(--panel); }
-.gis-flow-node .react-flow__handle.connectable::after { content: ""; position: absolute; inset: -5px; }
-.gis-flow-node .react-flow__handle.connectable:hover { outline: 1px solid var(--focus); }
-.gis-flow-output { position: relative; text-align: right; color: var(--tile-blue); padding: 3px 11px; font-size: 11px; }
-.gis-flow-node[data-kind=selection] .gis-flow-output { color: var(--tile-ochre); }
-.gis-flow-node[data-state=done] { border-color: var(--success); }
-.gis-flow-node[data-state=error] { border-color: var(--error); }
-.react-flow__node.selected .gis-flow-node, .react-flow__node:focus-visible .gis-flow-node { outline: 2px solid var(--focus); outline-offset: 2px; }
-.gis-flow-status { min-height: 28px; padding-top: 6px; color: var(--muted); }
-.gis-flow-issues { margin: 0; padding: 0; max-height: 100px; overflow: auto; list-style: none; color: var(--error); }
-.gis-flow-issues button { min-height: 26px; padding: 2px 6px; border: 0; border-radius: 4px; background: transparent;
-    color: inherit; font: inherit; text-align: start; cursor: pointer; }
-.gis-flow-issues button:hover, .gis-flow-issues button:focus-visible { background: var(--soft); }
-.gis-flow-save { display: flex; gap: 6px; width: min(240px, 75vw); }
-.gis-flow-saved { width: min(260px, 75vw); }
-.gis-flow-saved-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; }
-.gis-flow-saved-row > .ant-btn:first-child { overflow-wrap: anywhere; }

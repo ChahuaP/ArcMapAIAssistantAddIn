@@ -4,10 +4,9 @@ const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
-const { validReport, uuid } = require('../../apps/desktop/diagnostic-schema.cjs');
+const { validReport, uuid, maxReportBytes } = require('../../apps/desktop/diagnostic-schema.cjs');
 
-const root = '/data';
-const maxBytes = 4096;
+const root = process.env.GUIZHI_REPORT_DIRECTORY || '/data';
 const capacity = 10_000;
 const retention = 14 * 86_400_000;
 const validName = name => name.endsWith('.json') && uuid.test(name.slice(0, -5));
@@ -59,7 +58,7 @@ async function receive(request, response) {
     if (limited(isIP(client) ? client : request.socket.remoteAddress)) return respond(response, 429);
     if (request.headers['content-type'] !== 'application/json') return respond(response, 415);
     const length = Number(request.headers['content-length']);
-    if (!Number.isSafeInteger(length) || length < 1 || length > maxBytes) return respond(response, 413);
+    if (!Number.isSafeInteger(length) || length < 1 || length > maxReportBytes) return respond(response, 413);
     const chunks = [];
     for await (const chunk of request) chunks.push(chunk);
     let report;
@@ -93,4 +92,5 @@ server.setTimeout(5000, socket => socket.destroy());
 const prune = () => void expire().catch(error => console.error('Report expiration failed:', error.code));
 prune();
 setInterval(prune, 60 * 60_000).unref();
-server.listen(9444, '0.0.0.0');
+if (require.main === module) server.listen(9444, '0.0.0.0');
+module.exports = server;

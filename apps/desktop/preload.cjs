@@ -3,7 +3,7 @@ const { contextBridge, ipcRenderer, webUtils } = require('electron');
 const api = {};
 for (const name of ['state', 'updateCheck', 'updatePrepare', 'updateCancel', 'updateApply', 'configure', 'workspace', 'material', 'submit', 'cancel', 'reportPage', 'businessLog', 'businessDetail', 'businessDelete',
     'skills', 'capabilities', 'capability', 'skillShow', 'skillPreview', 'skillTrial', 'skillPublish', 'skillOpen', 'skillTemplate',
-    'map', 'mapFlowRun', 'mapFlowCancel', 'mapFlowProgress', 'mapFlowTable', 'mapSkill', 'mxdRead', 'mxdImport', 'mxdWrite', 'mapImport', 'mapReferences', 'mapCatalog', 'mapSnapshot', 'addImages', 'pasteImages', 'imageReferences', 'conversationImage', 'mapImage', 'mapTaskInputs', 'mapExport', 'copyAttribute', 'diagnostics', 'diagnosticsUpload',
+    'map', 'mapSkill', 'mxdRead', 'mxdImport', 'mxdWrite', 'mapImport', 'mapReferences', 'mapCatalog', 'mapSnapshot', 'addImages', 'pasteImages', 'imageReferences', 'conversationImage', 'mapImage', 'mapTaskInputs', 'mapExport', 'copyAttribute', 'diagnostics', 'diagnosticsUpload',
     'coordinates', 'coordinateFile', 'importCoordinate', 'coordinateRename', 'coordinateRemove', 'coordinateSolve', 'coordinateApply',
     'resetConversation', 'approvalSource', 'workbench', 'finishMapDelivery', 'mapLayout', 'mapLayoutDraft', 'mapLayoutReady', 'mapLayoutError', 'openMapLayout',
     'appearance', 'shortcutCapture', 'readDraft', 'saveDraft', 'openLauncher', 'fitLauncher', 'hideLauncher', 'portraitVoice', 'voiceTurn',

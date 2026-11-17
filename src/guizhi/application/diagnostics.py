@@ -50,6 +50,28 @@ def failure_node(workspace, root):
     return record
 
 
+def failure_summary(workspace, record):
+    try:
+        node = failure_node(workspace, record)
+    except (ValueError, OSError):
+        node = record
+    event = next((item for item in reversed(record["events"]) if item["step"] in {
+        "material_reading", "material_resolved", "workflow_step_started", "workflow_step_finished", "workflow_publishing",
+    }), None)
+    details = event["details"] if event else {}
+    if details.get("status") == "succeeded":
+        event, details = None, {}
+    fault = next((item["details"] for item in reversed(node["events"]) if item["step"] == "diagnostic_failure"), {})
+    summary = {"step": event["step"] if event else "execute_operation",
+               "operation": details.get("operation", node["task"]["operation"])}
+    for field, value in {"stepId": details.get("step_id"), "errorCode": fault.get("code"),
+                         "childRunId": node["id"] if node["id"] != record["id"] else details.get("child_run_id"),
+                         "error": node["error"] or record["error"]}.items():
+        if value:
+            summary[field] = value
+    return summary
+
+
 def impact(workspace, run_ids):
     with workspace.connect() as db:
         rows = db.execute("SELECT id, task, result FROM runs WHERE status='succeeded' ORDER BY created_at DESC LIMIT ?",

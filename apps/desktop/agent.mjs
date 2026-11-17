@@ -35,6 +35,6 @@ process.on('message', message => {
             onEvent: event => send({ type: 'event', event }) });
         const finish = result => { running = undefined; stop = undefined; send({ type: 'result', result }); };
         void running.then(finish, error => finish({ status: stop.signal.aborted ? 'cancelled' : 'failed',
-            error: redact(error.message, modelOptions.apiKey) }));
+            error: redact(error.message, modelOptions.apiKey), error_code: error.code, failureStep: 'initialize_dispatch' }));
     }
 });

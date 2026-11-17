@@ -14,11 +14,11 @@ class MaterialReader {
         const child = spawn(this.python, ['-I', '-B', this.cli, '_material-reader'],
             { windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'] });
         this.process = child;
-        const failed = () => {
-            if (this.process === child) this.close('本地材料读取进程已退出，请重新添加材料');
+        const failed = error => {
+            if (this.process === child) this.close('本地材料读取进程已退出，请重新添加材料', error);
         };
         child.once('error', failed);
-        child.once('exit', failed);
+        child.once('exit', (code, signal) => failed(new Error('材料读取进程退出（' + (signal || code) + '）')));
         child.stdin.on('error', failed);
         createInterface({ input: child.stdout }).on('line', line => {
             if (this.process !== child) return;
@@ -53,11 +53,16 @@ class MaterialReader {
         });
     }
 
-    close(message = '已停止读取材料') {
+    close(message = '已停止读取材料', cause) {
         const child = this.process;
         this.process = undefined;
         child?.kill();
-        for (const request of this.pending.values()) request.finish(new Error(message));
+        const error = new Error(message);
+        if (cause) {
+            error.diagnosticMessage = cause.message;
+            error.code = cause.code;
+        }
+        for (const request of this.pending.values()) request.finish(error);
     }
 }
 
