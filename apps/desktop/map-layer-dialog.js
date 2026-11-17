@@ -4,6 +4,11 @@ const h = window.React.createElement;
 const { useState } = window.React;
 const { Button, Checkbox, ColorPicker, InputNumber, Modal, Segmented, Select } = window.antd;
 const hex = /^#[0-9a-f]{6}$/i;
+const geometryNames = { Point: '点', LineString: '线', Polygon: '面',
+    MultiPoint: '多点', MultiLineString: '多线', MultiPolygon: '多面' };
+export const geometryName = type => geometryNames[type?.split(' ')[0]];
+export const canSplitParts = layer => /^(MultiPoint|MultiLineString|MultiPolygon)$/.test(layer?.geometry) ||
+    (/\.shp$/i.test(layer?.sourceName) && /^(LineString|Polygon)$/.test(layer.geometry));
 export const opacity = (value, defaultValue = 100) => Number.isFinite(value)
     ? Math.round(Math.min(100, Math.max(0, value))) : defaultValue;
 export function symbol(value, color) {
@@ -141,8 +146,7 @@ export function LayerProperties({ item, color, close, save, glyph, start = 'info
     const format = value => value.toLocaleString('zh-CN', { maximumFractionDigits: 6, useGrouping: false });
     const info = [
         ['数据源', item.sourceName || '工作区成果'], ...(item.group ? [['图层组', item.group]] : []),
-        ['数据类型', image ? '栅格影像' : /Point/.test(item.geometry || '') ? '点要素' :
-            /Line/.test(item.geometry || '') ? '线要素' : polygon ? '面要素' : '矢量要素'],
+        ['数据类型', image ? '栅格影像' : geometryName(item.geometry) || '矢量要素'],
         ['坐标系', item.crsName || '未定义坐标系'],
         ...(/^EPSG:/.test(item.crs || '') ? [['坐标系代码', item.crs]] : []),
         ...(image ? [['像元尺寸', item.width + ' × ' + item.height], ['波段数', item.bands]]

@@ -1,5 +1,6 @@
 import { attributeFilter, fieldCalculation, geometryCalculation, geometryProperties } from './map-attribute-tools.js';
 import { AttributePreview, TokenPicker } from './map-pickers.js';
+import { canSplitParts, geometryName } from './map-layer-dialog.js';
 
 const h = window.React.createElement;
 const { useEffect, useState } = window.React;
@@ -61,6 +62,8 @@ const definitions = Object.fromEntries([...tools.flatMap(group => group.tools), 
     tool('data.copy', '复制图层', 'copy', '复制', ['待复制图层', vector]),
     { ...tool('data.merge', '合并图层', 'merge', '合并', ['待合并图层', vector]), multiple: true },
     tool('geometry.create_dataset', '新建图层', 'newLayer', '创建'),
+    tool('geometry.multipart', '合并为多部件', 'union', '合并', ['源图层', item => Boolean(geometryName(item?.geometry))]),
+    tool('geometry.explode', '拆分多部件', 'split', '拆分', ['待拆分图层', canSplitParts]),
     tool('table.add_field', '添加字段', 'columnAdd', '确定', ['图层', vector]),
     tool('table.delete_field', '删除字段', 'columnRemove', '删除', ['图层', vector]),
     tool('table.calculate_field', '字段计算器', 'calculator', '计算', ['计算图层', vector]),
@@ -134,7 +137,7 @@ const skillHints = {
 const stats = {
     project_area_m2: '项目面积（平方米）', covered_area_m2: '重叠面积（平方米）', coverage_ratio: '覆盖率',
     updated: '已计算要素数',
-    area_m2: '合并面积（平方米）', file_count: '交付文件数', year_count: '统计年份数', feature_count: '要素数', selected_count: '选中要素数', row_count: '统计记录数',
+    area_m2: '合并面积（平方米）', file_count: '交付文件数', year_count: '统计年份数', feature_count: '要素数', selected_count: '选中要素数', source_feature_count: '源要素数', part_count: '部件数', row_count: '统计记录数',
     removed_area_m2: '调出面积（平方米）', replacement_area_m2: '补划面积（平方米）',
     qualified_area_m2: '符合质量阈值面积（平方米）', required_area_m2: '要求补划面积（平方米）',
     unrated_area_m2: '未评级面积（平方米）', meets_declared_ratio: '达到本次比例要求',
@@ -183,7 +186,7 @@ function CoordinateChoice({ value, onPick, placeholder, standardOnly }) {
         } });
 }
 
-function toolForm(definition, inputs, values, update, entries) {
+function toolForm(definition, inputs, values, update, entries, selection) {
     const { id } = definition;
     const input = inputs[0];
     const names = input?.fields?.map(item => item.name) || [];
@@ -209,11 +212,19 @@ function toolForm(definition, inputs, values, update, entries) {
     }
     if (id === 'geometry.create_dataset') {
         controls.push(field('图层名称', h(Input, { maxLength: 120, value: values.name ?? '', onChange: event => update('name', event.target.value) })),
-            select('geometry_type', '要素类型', { point: '点', polyline: '线', polygon: '面' }),
+            select('geometry_type', '要素类型', { point: '点', polyline: '线', polygon: '面',
+                multi_point: '多点', multi_polyline: '多线', multi_polygon: '多面' }),
             coordinates('图层坐标系'));
         parameters = { geometry_type: values.geometry_type,
             epsg: number(values.coordinate?.value.slice(5)) };
         valid = Boolean(values.name?.trim() && values.geometry_type && Number.isInteger(parameters.epsg) && parameters.epsg > 0);
+    } else if (id === 'geometry.multipart') {
+        const fids = selection?.key === key(input) ? selection.ids : [];
+        const attribute_fid = values.attribute_fid ?? fids[0];
+        controls.push(field('属性来源', dropdown(attribute_fid, fids.map(fid => ({ value: fid, label: '要素 ' + fid })),
+            value => update('attribute_fid', value))));
+        parameters = { fids, attribute_fid };
+        valid = fids.length >= 2 && fids.length <= 500 && fids.every(Number.isSafeInteger) && fids.includes(attribute_fid);
     } else if (id === 'data.merge') {
         const name = values.name ?? '合并图层';
         controls.push(field('结果图层名称', h(Input, { maxLength: 120, value: name,
@@ -312,6 +323,8 @@ const toolDescription = {
     'vector.symmetric_difference': '保留两个面图层各自未重叠的部分。',
     'vector.spatial_join': '按相交关系把属性连接到目标图层。目标图层的形状保持原样。',
     'data.merge': '把多个图层的要素汇集到一个新图层。',
+    'geometry.multipart': '把所选要素组成一条多部件要素，生成新图层。',
+    'geometry.explode': '逐个拆开图层中要素的部件，生成单部件图层。每个部件继承原要素的属性。',
     'crs.assign': '为已有坐标标注其实际使用的坐标系。',
     'raster.assign': '为现有影像标注其实际使用的坐标系。',
 };
@@ -336,7 +349,7 @@ function ResultSummary({ result }) {
             : !metrics.length && result.value !== undefined && h('output', null, String(result.value)));
 }
 
-export function MapTool({ operation, active, layers, entries, components, openComponents, glyph, busy, setBusy, close, onResult }) {
+export function MapTool({ operation, active, layers, selection, entries, components, openComponents, glyph, busy, setBusy, close, onResult }) {
     const api = window.guizhi;
     const definition = definitions[operation];
     const initial = operation === 'geometry.create_dataset' ? { geometry_type: 'polygon' }
@@ -354,9 +367,11 @@ export function MapTool({ operation, active, layers, entries, components, openCo
         setError('');
     }, { showSearch: true, optionFilterProp: 'label', notFoundContent: records.length ? '没有匹配的图层' : '暂无图层',
         ...(definition.multiple && { mode: 'multiple', maxCount: 32, maxTagCount: 'responsive' }) }));
-    const selectors = definition.inputs.map(([name, accepts], index) => pickLayer(name, index, layers.filter(item => accepts(item) &&
-        (definition.multiple || !ids.some((id, slot) => slot !== index && key(item) === id)))));
-    const form = toolForm(definition, inputs, values, update, entries);
+    const selectors = operation === 'geometry.multipart'
+        ? [h('div', { className: 'gis-tool-field' }, h('span', null, '源图层'), h('strong', null, inputs[0]?.name))]
+        : definition.inputs.map(([name, accepts], index) => pickLayer(name, index, layers.filter(item => accepts(item) &&
+            (definition.multiple || !ids.some((id, slot) => slot !== index && key(item) === id)))));
+    const form = toolForm(definition, inputs, values, update, entries, selection);
     const minimum = definition.multiple ? 2 : definition.inputs.length;
     const validInputs = inputs.length >= minimum && Array.from({ length: inputs.length }, (_, i) =>
         (definition.inputs[i] || definition.inputs.at(-1))[1](inputs[i])).every(Boolean);
@@ -400,7 +415,8 @@ export function MapTool({ operation, active, layers, entries, components, openCo
 function ResultLayers({ layers }) {
     const rows = layers.map(item => {
         const system = item.crs?.startsWith('EPSG:') ? item.crs : item.crsName || (item.crs && '自定义坐标系');
-        return h('li', { key: key(item) }, h('strong', null, item.name), system && h('small', null, system));
+        const details = [geometryName(item.geometry), system].filter(Boolean).join(' · ');
+        return h('li', { key: key(item) }, h('strong', null, item.name), details && h('small', null, details));
     });
     return h('ul', { className: 'gis-result-layers', 'aria-label': '成果图层' }, rows);
 }

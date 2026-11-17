@@ -36,6 +36,7 @@ MANUAL_OPERATIONS = {
     "vector.erase", "vector.dissolve", "vector.union", "vector.identity", "vector.symmetric_difference", "vector.update_overlay",
     "vector.spatial_join", "data.copy", "data.merge", "data.select_by_attribute",
     "data.select_by_location", "data.export_selection", "geometry.create_dataset", "geometry.repair",
+    "geometry.multipart", "geometry.explode",
     "crs.assign", "crs.reproject", "crs.transform",
     "table.add_field", "table.delete_field", "flow.unique_values", "flow.calculate",
     "raster.statistics", "raster.clip", "raster.reproject", "raster.assign", "raster.mosaic",

@@ -9,7 +9,7 @@ import pandas as pd
 from pandas.testing import assert_frame_equal
 import pyogrio
 from pyproj import CRS
-from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, PositiveInt
+from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, PositiveInt, StrictInt
 import shapely
 from shapely.geometry import LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon, box
 
@@ -21,6 +21,10 @@ Line = Annotated[list[XY], Field(min_length=2, max_length=100000)]
 Ring = Annotated[list[XY], Field(min_length=3, max_length=100000)]
 Sides = Annotated[int, Field(ge=3, le=360)]
 Radius = Annotated[FiniteFloat, Field(gt=0)]
+GeometryType = Literal["point", "polyline", "polygon", "multi_point", "multi_polyline", "multi_polygon"]
+GEOMETRY_TYPES = {"point": "Point", "polyline": "LineString", "polygon": "Polygon",
+                  "multi_point": "MultiPoint", "multi_polyline": "MultiLineString", "multi_polygon": "MultiPolygon"}
+MULTIPART = {"Point": MultiPoint, "LineString": MultiLineString, "Polygon": MultiPolygon}
 
 
 class Named(BaseModel):
@@ -85,10 +89,10 @@ def polygon(feature):
     return shapely.orient_polygons(Polygon(feature.coordinates, holes=feature.holes))
 
 
-def create_dataset(ctx, geometry_type: Literal["point", "polyline", "polygon"], epsg: PositiveInt | None = None,
+def create_dataset(ctx, geometry_type: GeometryType, epsg: PositiveInt | None = None,
                    name: str | None = None):
     crs = crs_for(ctx, epsg)
-    kind = {"point": "Point", "polyline": "LineString", "polygon": "Polygon"}[geometry_type]
+    kind = GEOMETRY_TYPES[geometry_type]
     ctx.publish(geopandas.GeoDataFrame({"name": pd.Series(dtype="str")}, geometry=[], crs=crs),
                 geometry_type=kind)
     if name is not None:
@@ -154,7 +158,7 @@ def append(ctx, features, builder, family):
             raise ValueError("Target has no name field")
         new = new.drop(columns="name")
     if target_type.startswith("Multi"):
-        wrap = {"Point": MultiPoint, "LineString": MultiLineString, "Polygon": MultiPolygon}[family]
+        wrap = MULTIPART[family]
         new.geometry = new.geometry.map(lambda shape: wrap([shape]))
     out = ctx.path("result.gpkg")
     shutil.copyfile(ctx.directory / ctx.evidence[0]["path"], out)
@@ -200,15 +204,53 @@ def append_stars(ctx, features: list[Star], unit: Unit):
     return append(ctx, features, lambda f: radial(f, ctx.frames[0].crs, unit), "Polygon")
 
 
+def part_family(frame, info):
+    family = info["geometry_type"].removeprefix("Multi")
+    if family not in MULTIPART or not frame.geom_type.isin({family, "Multi" + family}).all():
+        raise ValueError("请选择同类型的二维点、线或面要素")
+    geometry = frame.geometry
+    if geometry.has_z.any() or geometry.has_m.any():
+        raise ValueError("多部件编辑适用于二维图层")
+    if geometry.isna().any() or geometry.is_empty.any() or not geometry.is_valid.all():
+        raise ValueError("图层包含空几何或无效几何，请先修复")
+    return family
+
+
+def multipart(ctx, fids: Annotated[list[StrictInt], Field(min_length=2, max_length=500)] | None = None,
+              attribute_fid: StrictInt | None = None):
+    frame = ctx.frames[0]
+    if fids is not None:
+        if len(set(fids)) != len(fids) or not set(fids).issubset(frame.index):
+            raise ValueError("选中的要素已变化，请重新选择")
+        frame = frame.loc[fids]
+    if not 2 <= len(frame) <= 500:
+        raise ValueError("请选择 2 至 500 个待合并要素")
+    family = part_family(frame, ctx.info[0])
+    if attribute_fid is None:
+        attribute_fid = frame.index[0]
+    if attribute_fid not in frame.index:
+        raise ValueError("请选择一个参与合并的要素作为属性来源")
+    shape = MULTIPART[family](list(shapely.get_parts(frame.geometry.array)))
+    if not shape.is_valid:
+        raise ValueError("所选图形无法保留为独立部件。重叠或共边的面可先使用「合并要素」。")
+    result = frame.loc[[attribute_fid]].set_geometry([shape])
+    ctx.publish(result, geometry_type="Multi" + family)
+    return {"statistics": {"feature_count": 1, "source_feature_count": len(frame), "part_count": len(shape.geoms)}}
+
+
 def explode(ctx):
     frame = ctx.frames[0]
-    if "source_fid" in frame:
-        raise ValueError("Explode requires an unused source_fid field")
-    if frame.geometry.isna().any() or not frame.geometry.is_valid.all():
-        raise ValueError("Repair invalid or null geometries before splitting")
-    result = frame.assign(source_fid=frame.index).explode(index_parts=False)
-    ctx.publish(result, geometry_type=ctx.info[0]["geometry_type"].replace("Multi", "", 1) if result.empty else None)
-    return {"changeset": {"target_revision": ctx.selection_hashes[0], "parts": len(result)}}
+    family = part_family(frame, ctx.info[0])
+    if ctx.info[0]["geometry_type"] == family and not frame.geom_type.eq("Multi" + family).any():
+        raise ValueError("此图层没有多部件要素")
+    source_id = "source_fid"
+    fields = {name.casefold() for name in frame.columns}
+    while source_id.casefold() in fields:
+        source_id += "_"
+    result = frame.assign(**{source_id: frame.index}).explode(index_parts=False)
+    ctx.publish(result, geometry_type=family)
+    return {"statistics": {"feature_count": len(result), "source_feature_count": len(frame)},
+            "source_id_field": source_id}
 
 
 def repair(ctx, delete_null: bool = False):

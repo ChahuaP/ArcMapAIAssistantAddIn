@@ -4,7 +4,7 @@ import { MapProcessing, MapResultDialog, MapTool, TOOL_GROUPS, toolError, toolIc
 import { geometryProperties } from './map-attribute-tools.js';
 import { AttributeSort, AttributeStatistics, AttributeCell } from './map-table-ui.js';
 import { MapLayout, amendLayout, drawMapLayers, layoutDefaults, mapCanvas, mapImage, sheetSize } from './map-layout.js';
-import { LayerProperties, MapProperties, MxdOpen, categoryValue, classifyLayer, defaultMapBackground, layerSymbol, opacity, symbol } from './map-layer-dialog.js';
+import { LayerProperties, MapProperties, MxdOpen, canSplitParts, categoryValue, classifyLayer, defaultMapBackground, layerSymbol, opacity, symbol } from './map-layer-dialog.js';
 import Map from 'ol/Map.js';
 import Overlay from 'ol/Overlay.js';
 import View from 'ol/View.js';
@@ -41,7 +41,8 @@ const commandIcons = {
     编辑图层: 'pencil', 选择: 'select', 绘制: 'pencil', 编辑顶点: 'node', 移动: 'move',
     完成绘制: 'check', 撤销绘制点: 'undo', 编辑属性: 'table', 删除要素: 'trash',
     撤销: 'undo', 退出: 'close', 识别要素: 'info', 框选: 'box',
-    合并要素: 'merge', 拆分要素: 'split', 完成拆分: 'check', 复制: 'copy', 剪切: 'cut',
+    合并要素: 'merge', 按线分割: 'split', 完成分割: 'check', 复制: 'copy', 剪切: 'cut',
+    合并为多部件: toolIcon('geometry.multipart'), 拆分多部件: toolIcon('geometry.explode'),
     打开: 'folderOpen', 保存: 'save', 字段计算器: toolIcon('table.calculate_field'), 计算几何: toolIcon('table.calculate_geometry'),
 };
 const tabIcons = { 地图: 'map', 数据: 'layers', 编辑: 'pencil', 分析: 'analysis', 制图: 'layout', 业务: 'briefcase' };
@@ -1009,7 +1010,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         toggleIdentify(false);
         setEdit(mode);
         setBoxSelect(false);
-        setIssue(mode === 'split' ? '绘制穿过所选要素的拆分线，双击结束。' : '');
+        setIssue(mode === 'split' ? '绘制穿过所选要素的分割线，双击结束。' : '');
         setRibbon('编辑');
         node.current.focus();
     }
@@ -1265,11 +1266,11 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
             command(title, () => { setEdit(mode); if (mode === 'select') setBoxSelect(false); }, { key: mode, disabled: busy || (['modify', 'move'].includes(mode) && !picked.length),
                 type: edit === mode ? 'primary' : 'default' })),
             command('合并要素', () => { setEditDialogError(''); setMergeTarget(picked[0]); }, { disabled: !canReshape || picked.length < 2 }),
-            command('拆分要素', () => { setIssue('绘制穿过所选要素的拆分线，双击结束。'); setBoxSelect(false); setEdit('split'); node.current.focus(); },
+            command('按线分割', () => { setIssue('绘制穿过所选要素的分割线，双击结束。'); setBoxSelect(false); setEdit('split'); node.current.focus(); },
                 { type: edit === 'split' ? 'primary' : 'default', disabled: !canReshape || !picked.length }),
             edit === 'draw' && drawingPoints > 0 && command('完成绘制', () => drawingTool.current?.finishDrawing(),
                 { disabled: drawingPoints < (layer.geometry.endsWith('Polygon') ? 3 : 2) }),
-            edit === 'split' && drawingPoints >= 2 && command('完成拆分', () => drawingTool.current?.finishDrawing(), { disabled: busy }),
+            edit === 'split' && drawingPoints >= 2 && command('完成分割', () => drawingTool.current?.finishDrawing(), { disabled: busy }),
             edit === 'draw' && drawingPoints > 0 && command('撤销绘制点', () => drawingTool.current?.removeLastPoint())),
         group('属性与删除', command('编辑属性', openFields, { disabled: busy || picked.length !== 1 || !layer.fields.length }),
             command('删除要素', () => {
@@ -1279,9 +1280,15 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         command('保存', saveEdit, { disabled: busy || !count, loading: busy, type: 'primary', title: 'Ctrl+S', 'aria-keyshortcuts': 'Control+S' }),
         command('退出', () => count ? setConfirmExit(true) : leaveEdit(), { disabled: busy })),
     ] : [group('图层编辑', command('编辑图层', () => startEdit(), { disabled: !editable || busy || limited.includes(active) }),
-        command('拆分要素', () => startEdit('split'), { disabled: !editable || busy || limited.includes(active) ||
+        command('按线分割', () => startEdit('split'), { disabled: !editable || busy || limited.includes(active) ||
             !/^(LineString|Polygon)$/.test(geometryFamily(layer)) || !picked.length || picked.length > 500,
             title: '先选中线或面，再绘制拆分线' }))];
+    const partsReady = !busy && !count && (!edit || edit === 'select');
+    function openPartsTool(operation) {
+        if (!partsReady) return;
+        if (edit) stopEdit();
+        setTool({ operation, active });
+    }
     const showLayer = item => item.name.toLowerCase().includes(layerSearch.toLowerCase());
     const visibleLayers = layers.filter(showLayer);
     const canReorder = !edit && !busy && visibleLayers.length > 1;
@@ -1471,6 +1478,11 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                     title: !clipboard ? '请先复制或剪切要素' : count ? '请先保存或放弃当前编辑' :
                         !pasteTargets.length ? '请先添加同类型的目标图层' : '选择粘贴到哪个图层 · Ctrl+V', 'aria-keyshortcuts': 'Control+V' }),
                 clipboard && command('清空剪贴板', cancelClipboard, { icon: glyph('close'), disabled: busy })),
+            group('多部件',
+                command('合并为多部件', () => openPartsTool('geometry.multipart'),
+                    { disabled: !partsReady || !canCopy || picked.length < 2, title: '选择两个或更多同图层要素' }),
+                command('拆分多部件', () => openPartsTool('geometry.explode'),
+                    { disabled: !partsReady || !layers.some(canSplitParts) })),
             ...editCommands],
         制图: [group('图件', command('版面布局', () => setLayout({ key: 'manual', config: prepareLayout(
             layoutDraft || { ...layoutDefaults, title: layer?.name || '地图' }) }),
@@ -1652,7 +1664,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 onClick: () => setImportIssues([]), type: 'primary' }, '关闭') },
             h('ul', { className: 'map-field-editor' }, ...importIssues.map((item, index) =>
                 h('li', { key: index }, item.name + '：' + window.GuizhiErrorText(item.message))))),
-        tool && h(MapTool, { ...tool, layers, entries, components, openComponents: () => { setTool(null); openComponents(); },
+        tool && h(MapTool, { ...tool, layers, selection, entries, components, openComponents: () => { setTool(null); openComponents(); },
             glyph, busy, setBusy, close: () => setTool(null), onResult: showToolResult }),
         toolResult && h(MapResultDialog, { result: toolResult.result,
             close: () => setToolResult(null),
