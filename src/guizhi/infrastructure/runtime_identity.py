@@ -19,12 +19,17 @@ def source_fingerprint(root):
 
 
 @lru_cache(maxsize=1)
-def runtime_identity():
+def base_identity():
     packages = {name: version(name) for name in ("pydantic", "geopandas", "shapely", "pyogrio", "pyproj")}
+    return {"source_sha256": source_fingerprint(SOURCE_ROOT), "python": sys.version, "packages": packages}
+
+
+def runtime_identity():
+    base = base_identity()
+    packages = dict(base["packages"])
     for name in ("rasterio", "onnxruntime", "rapidocr-onnxruntime"):
         try:
             packages[name] = version(name)
         except PackageNotFoundError:
             pass
-    return {"source_sha256": source_fingerprint(SOURCE_ROOT), "python": sys.version,
-            "packages": packages}
+    return {**base, "packages": packages}

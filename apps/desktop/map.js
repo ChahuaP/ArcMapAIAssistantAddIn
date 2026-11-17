@@ -183,7 +183,6 @@ function CoordinateTools({ layer, display, setDisplay, entries, openTool, fail, 
             (item.units === 'degrees' ? '地理坐标系' : '投影坐标系')) === label) })).filter(group => group.options.length),
     ];
     const plans = entries.filter(entry => entry.kind === 'plan');
-    const prefix = layer?.kind === 'raster' ? 'raster.' : 'crs.';
     return h('div', { className: 'map-coordinate' },
         h('span', null, layer ? layer.name + ' · ' + (layer.crsName || '未定义坐标系') : '暂无图层'),
         h(Choice, { showSearch: true, filterOption: false, allowClear: true, onSearch: search,
@@ -191,10 +190,8 @@ function CoordinateTools({ layer, display, setDisplay, entries, openTool, fail, 
             options: [...options, ...(display?.value && !catalog.some(item => item.value === display.value) ? [display] : [])],
             value: display?.value, onChange: (value, item) => setDisplay(value ? item : null) }),
         layer && h('div', { className: 'map-coordinate-actions' },
-            h(Button, { onClick: () => openTool(prefix + (layer.crs ? 'reproject' : 'assign')) },
-                layer.crs ? '投影转换' : '定义坐标系'),
-            layer.crs && layer.kind !== 'raster' && plans.length > 0 &&
-                h(Button, { onClick: () => openTool('crs.transform') }, '按方案转换')),
+            h(Button, { onClick: () => openTool('crs.assign') }, '定义坐标系'),
+            h(Button, { disabled: !layer.crs, onClick: () => openTool('crs.reproject') }, '投影转换')),
         display && layer?.crs && layer.kind !== 'raster' && plans.length > 0 &&
             h(Choice, { value: displayPlan || undefined, placeholder: '为该图层选择显示转换',
                 'aria-label': '显示转换方案', allowClear: true, onChange: setDisplayPlan,
@@ -218,6 +215,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
     const [importIssues, setImportIssues] = useState([]);
     const [displayPlans, setDisplayPlans] = useState({});
     const [editLayer, setEditLayer] = useState(null);
+    const [pendingEdit, setPendingEdit] = useState(null);
     const [edit, setEdit] = useState('');
     const [boxSelect, setBoxSelect] = useState(false);
     const [pointSelect, setPointSelect] = useState(false);
@@ -276,7 +274,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
     const pasteSource = clipboard && layers.find(item => key(item) === clipboard.key);
     const pasteTargets = pasteSource ? layers.filter(item => key(item) !== clipboard.key && item.crs &&
         geometryFamily(item) === clipboard.kind) : [];
-    const canPaste = !busy && !count && (!edit || edit === 'select') && pasteTargets.length > 0;
+    const canPaste = !busy && !count && edit === 'select' && pasteTargets.length > 0;
     const openPaste = () => {
         if (!canPaste) return;
         setIssue('');
@@ -919,8 +917,9 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         finally { setBusy(false); }
     }
     const openTool = (operation, source = active) => {
-        if (busy || edit) return;
-        setTool({ operation, active: source });
+        const query = ['data.select_by_attribute', 'data.select_by_location'].includes(operation);
+        if (busy || edit && !(query && edit === 'select' && !count && source === active)) return;
+        setTool({ operation, active: source, lockInput: Boolean(edit) });
     };
     function addResultLayers(items) {
         const fresh = items.filter(item => !layers.some(existing => key(existing) === key(item)));
@@ -939,7 +938,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         if (!result.layers.length) return;
         const operation = tool?.operation;
         const attributes = ['table.add_field', 'table.delete_field', 'table.calculate_field', 'table.calculate_geometry'].includes(operation);
-        const replaceLayer = input && result.layers.length === 1 && (attributes || ['crs.assign', 'raster.assign'].includes(operation))
+        const replaceLayer = input && result.layers.length === 1 && (attributes || operation === 'crs.assign')
             ? () => (attributes ? replaceAttributes : replace)(input, result.layers[0]) : undefined;
         setTool(null);
         setToolResult({ result, replaceLayer });
@@ -992,11 +991,12 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         source.addFeatures([...items.values()].map(feature));
         restoreSelection(graph.current, selectionRef.current);
     }
-    function startEdit(mode = 'select') {
+    function startEdit() {
         if (display || target !== layer.crs) {
             setDisplay(null);
             setEditLayer(layer);
-            setIssue('已切换到图层坐标系，请在地图就绪后开始编辑。');
+            setPendingEdit(active);
+            setIssue('正在切换到图层坐标系…');
             return;
         }
         const source = graph.current.byKey.get(active)?.getSource();
@@ -1008,12 +1008,26 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         }));
         edits.current = [];
         toggleIdentify(false);
-        setEdit(mode);
+        setEdit('select');
         setBoxSelect(false);
-        setIssue(mode === 'split' ? '绘制穿过所选要素的分割线，双击结束。' : '');
+        setIssue('');
         setRibbon('编辑');
         node.current.focus();
     }
+    useEffect(() => {
+        if (!pendingEdit) return;
+        if (pendingEdit !== active) {
+            setPendingEdit(null);
+            setIssue('');
+        } else if (!busy && !tool && !toolResult && viewReady && !graph.current?.fitNeeded && target === layer?.crs) {
+            setPendingEdit(null);
+            if (limited.includes(active) || layerErrors.some(error => error.names.includes(layer.name))) {
+                setIssue('完整图层尚未加载，无法开始编辑。');
+                return;
+            }
+            startEdit();
+        }
+    }, [pendingEdit, active, layer, target, busy, tool, toolResult, viewReady, limited, layerErrors]);
     function stopEdit() {
         edits.current = [];
         setCount(0);
@@ -1157,7 +1171,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
 
     const pickedRef = useRef(picked);
     pickedRef.current = picked;
-    const canCopy = (!edit || edit === 'select' && !count) && !busy && Boolean(layer?.crs) && /^(Point|LineString|Polygon)$/.test(geometryFamily(layer)) &&
+    const canCopy = edit === 'select' && !count && !busy && Boolean(layer?.crs) && /^(Point|LineString|Polygon)$/.test(geometryFamily(layer)) &&
         picked.length >= 1 && picked.length <= 500 && picked.every(Number.isSafeInteger);
     const canReshape = Boolean(edit) && /^(LineString|Polygon)$/.test(geometryFamily(layer)) && !busy && picked.length <= 500;
     async function shapeEdit(mode, ids, value) {
@@ -1279,15 +1293,11 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         group('提交', command('撤销', undoEdit, { disabled: busy || !(count || drawingPoints), title: 'Ctrl+Z', 'aria-keyshortcuts': 'Control+Z' }),
         command('保存', saveEdit, { disabled: busy || !count, loading: busy, type: 'primary', title: 'Ctrl+S', 'aria-keyshortcuts': 'Control+S' }),
         command('退出', () => count ? setConfirmExit(true) : leaveEdit(), { disabled: busy })),
-    ] : [group('图层编辑', command('编辑图层', () => startEdit(), { disabled: !editable || busy || limited.includes(active) }),
-        command('按线分割', () => startEdit('split'), { disabled: !editable || busy || limited.includes(active) ||
-            !/^(LineString|Polygon)$/.test(geometryFamily(layer)) || !picked.length || picked.length > 500,
-            title: '先选中线或面，再绘制拆分线' }))];
-    const partsReady = !busy && !count && (!edit || edit === 'select');
+    ] : [group('图层编辑', command('编辑图层', startEdit, { disabled: !editable || busy || !viewReady || Boolean(pendingEdit) || limited.includes(active) }))];
+    const partsReady = !busy && !count && edit === 'select';
     function openPartsTool(operation) {
         if (!partsReady) return;
-        if (edit) stopEdit();
-        setTool({ operation, active });
+        setTool({ operation, active, lockInput: true });
     }
     const showLayer = item => item.name.toLowerCase().includes(layerSearch.toLowerCase());
     const visibleLayers = layers.filter(showLayer);
@@ -1443,18 +1453,10 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
             command('全图', () => position(false), { disabled: !layers.length }),
             command('定位图层', () => position(true), { disabled: !layer }),
             command('放大', () => graph.current.view.adjustZoom(1)), command('缩小', () => graph.current.view.adjustZoom(-1))),
-            group('查询',
-                command('点选', () => { toggleIdentify(false); setPointSelect(!pointSelect); setBoxSelect(false); },
-                    { icon: glyph('select'), 'aria-pressed': pointSelect && !identify, disabled: busy || !layer?.geometry }),
-                command('识别要素', () => toggleIdentify(!identify), { disabled: busy || !layers.some(item => item.geometry),
-                type: identify ? 'primary' : 'default', 'aria-pressed': identify }),
-                command('按属性选择', () => { toggleIdentify(false); openTool('data.select_by_attribute'); },
-                    { disabled: busy || !layer?.geometry }),
-                command('按位置选择', () => { toggleIdentify(false); openTool('data.select_by_location'); },
-                    { disabled: busy || !layer?.geometry || layers.filter(item => item.geometry).length < 2 }),
-                command('清除选择', clear, { disabled: busy || !picked.length })),
+            group('查询', command('识别要素', () => toggleIdentify(!identify), { disabled: busy || !layers.some(item => item.geometry),
+                type: identify ? 'primary' : 'default', 'aria-pressed': identify })),
             group('显示', command('地图属性', () => setMapProperties({ display, plan: displayPlans[active] }), { disabled: busy }))],
-        数据: [group('地图工程', command('打开', () => mxd(api.mxdRead(), value => { setLocateMxd(null); setDocument(value); }),
+        数据: [...(!edit ? [group('地图工程', command('打开', () => mxd(api.mxdRead(), value => { setLocateMxd(null); setDocument(value); }),
             { disabled: busy, 'aria-label': '打开地图工程' }),
             command('保存', () => mxd(api.mxdWrite({ crs: target, bounds: graph.current?.view.calculateExtent(graph.current.ol.getSize()),
                 background: backgroundColor,
@@ -1462,16 +1464,24 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                     style: item.kind === 'raster' ? null : layerSymbol(item.style, palette[(layers.length - index - 1) % palette.length]) })) }),
             result => setIoStatus('已保存 MXD 和配套数据 · ' + result.layers + ' 个图层')),
             { disabled: busy || !layers.length || !viewReady, 'aria-label': '保存地图工程' })),
-            group('图层管理', command('添加图层', () => load(api.mapImport()), { disabled: Boolean(edit) || busy }),
+            group('图层管理', command('添加图层', () => load(api.mapImport()), { disabled: busy }),
                 command('新建图层', () => openTool('geometry.create_dataset')),
                 command('复制图层', () => openTool('data.copy'), { disabled: !layer?.geometry }),
                 command('合并图层', () => openTool('data.merge'), { disabled: layers.filter(item => item.geometry).length < 2 })),
-            group('成果', command('最近成果', () => setAnalysis(lastResult), { disabled: !lastResult }))],
-        编辑: [group('选择',
-            command('框选', () => { toggleIdentify(false); setBoxSelect(!boxSelect); node.current.focus(); },
-                { title: '向右拖动选中相交要素，向左拖动仅选中完全框住的要素。Shift 追加，Ctrl 减选。', 'aria-pressed': boxSelect, type: boxSelect ? 'primary' : 'default',
-                    disabled: busy || edit && edit !== 'select' || !layer?.geometry || hidden.includes(active) }),
-            command('清除选择', clear, { disabled: busy || edit === 'split' || !picked.length })),
+            group('成果', command('最近成果', () => setAnalysis(lastResult), { disabled: !lastResult }))] : []),
+            group('选择',
+                command('点选', () => { toggleIdentify(false); setPointSelect(!pointSelect); setBoxSelect(false); },
+                    { icon: glyph('select'), 'aria-pressed': !identify && !boxSelect && (pointSelect || edit === 'select'),
+                        disabled: busy || Boolean(edit) && edit !== 'select' || !layer?.geometry || hidden.includes(active) }),
+                command('框选', () => { toggleIdentify(false); setBoxSelect(!boxSelect); setPointSelect(false); node.current.focus(); },
+                    { title: '向右拖动选中相交要素，向左拖动仅选中完全框住的要素。Shift 追加，Ctrl 减选。', 'aria-pressed': boxSelect, type: boxSelect ? 'primary' : 'default',
+                        disabled: busy || Boolean(edit) && edit !== 'select' || !layer?.geometry || hidden.includes(active) }),
+                command('按属性选择', () => { toggleIdentify(false); openTool('data.select_by_attribute'); },
+                    { disabled: busy || Boolean(edit) && (edit !== 'select' || count > 0) || !layer?.geometry }),
+                command('按位置选择', () => { toggleIdentify(false); openTool('data.select_by_location'); },
+                    { disabled: busy || Boolean(edit) && (edit !== 'select' || count > 0) || !layer?.geometry || layers.filter(item => item.geometry).length < 2 }),
+                command('清除选择', clear, { disabled: busy || edit === 'split' || !picked.length }))],
+        编辑: [...(edit ? [
             group('剪贴板', command('复制', () => copyFeatures('copy'), { disabled: !canCopy, title: 'Ctrl+C', 'aria-keyshortcuts': 'Control+C' }),
                 command('剪切', () => copyFeatures('cut'), { disabled: !canCopy, title: 'Ctrl+X', 'aria-keyshortcuts': 'Control+X' }),
                 command('粘贴', openPaste, { icon: glyph('paste'), disabled: !canPaste,
@@ -1482,13 +1492,13 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 command('合并为多部件', () => openPartsTool('geometry.multipart'),
                     { disabled: !partsReady || !canCopy || picked.length < 2, title: '选择两个或更多同图层要素' }),
                 command('拆分多部件', () => openPartsTool('geometry.explode'),
-                    { disabled: !partsReady || !layers.some(canSplitParts) })),
-            ...editCommands],
+                    { disabled: !partsReady || !canSplitParts(layer) })),
+        ] : []), ...editCommands],
         制图: [group('图件', command('版面布局', () => setLayout({ key: 'manual', config: prepareLayout(
             layoutDraft || { ...layoutDefaults, title: layer?.name || '地图' }) }),
         { icon: glyph('layout'), disabled: busy || !viewReady || !layers.length }))],
         分析: TOOL_GROUPS.map(({ title, icon, tools }) => {
-            const prominent = { '统计': 2, '矢量处理': 2, '叠加分析': 2 }[title] || 0;
+            const prominent = { '统计': 2, '矢量处理': 2, '叠加分析': 3 }[title] || 0;
             return prominent ? group(title, ...tools.slice(0, prominent).map(item => command(item.title, () => openTool(item.id),
                 { key: item.id, icon: glyph(item.icon), disabled: busy,
                     'data-ai-focus': activity?.operation === item.id ? 'true' : undefined })),
@@ -1513,7 +1523,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
             h('div', { className: 'ribbon-tabs' },
                 h('div', { role: 'tablist', 'aria-label': '地图工具' }, ...Object.keys(commands).map(tab => h(Button, {
                     key: tab, type: 'text', icon: glyph(tabIcons[tab], 16), role: 'tab', 'aria-selected': ribbon === tab,
-                    disabled: busy || Boolean(edit) && tab !== '编辑', onClick: () => setRibbon(tab),
+                    disabled: busy || Boolean(edit) && !['编辑', '数据'].includes(tab), onClick: () => setRibbon(tab),
                     'data-ai-focus': activity?.operation && tab === (/^(data|table)\./.test(activity.operation) ? '数据' :
                         activity.operation.startsWith('presentation.') ? '制图' : '分析') ? 'true' : undefined,
                 }, tab)))),
@@ -1664,11 +1674,11 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 onClick: () => setImportIssues([]), type: 'primary' }, '关闭') },
             h('ul', { className: 'map-field-editor' }, ...importIssues.map((item, index) =>
                 h('li', { key: index }, item.name + '：' + window.GuizhiErrorText(item.message))))),
-        tool && h(MapTool, { ...tool, layers, selection, entries, components, openComponents: () => { setTool(null); openComponents(); },
+        tool && h(MapTool, { ...tool, layers, selection, components, openComponents: () => { setTool(null); openComponents(); },
             glyph, busy, setBusy, close: () => setTool(null), onResult: showToolResult }),
         toolResult && h(MapResultDialog, { result: toolResult.result,
             close: () => setToolResult(null),
-            add: () => { addResultLayers(toolResult.result.layers); setToolResult(null); },
+            add: () => { if (edit) stopEdit(); addResultLayers(toolResult.result.layers); setToolResult(null); },
             replace: toolResult.replaceLayer && (() => { toolResult.replaceLayer(); setToolResult(null); }) }),
         analysis && h(MapProcessing, { ...analysis, layers, entries, components, openComponents, glyph, busy,
             setBusy, close: () => setAnalysis(null), Preview, onAddLayers: addResultLayers,

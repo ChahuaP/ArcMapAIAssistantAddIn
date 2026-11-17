@@ -101,7 +101,7 @@ def changes(ctx, changes: Annotated[list[Change], Field(min_length=1, max_length
 
 
 def transfer_rows(ctx, selection):
-    from guizhi.infrastructure.map_workspace import projection
+    from guizhi.infrastructure.crs_options import projection
 
     source, target = ctx.frames
     source_info, target_info = ctx.info

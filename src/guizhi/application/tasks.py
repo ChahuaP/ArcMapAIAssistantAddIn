@@ -1,5 +1,6 @@
-"""Submit, supervise and inspect vector tasks without a GIS host."""
+"""Submit, supervise and inspect isolated GIS runs."""
 from collections.abc import Callable
+from contextvars import ContextVar
 from hashlib import sha256
 import json
 import os
@@ -16,6 +17,10 @@ from guizhi.domain.operations import OPERATIONS
 from guizhi.infrastructure.workspace import SOURCE_ROOT, Workspace, supervisor_lock
 
 
+# Set by the dedicated desktop GIS process, scoped to each request.
+resident_gis = ContextVar("resident_gis", default=None)
+
+
 def product_version() -> str:
     version = (SOURCE_ROOT / "VERSION").read_text(encoding="ascii").strip()
     if not re.fullmatch(r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)", version):
@@ -23,7 +28,7 @@ def product_version() -> str:
     return version
 
 
-def worker(workspace: Workspace, run_id: str) -> dict:
+def worker(workspace: Workspace, run_id: str, *, resident_cancel=None) -> dict:
     from guizhi.infrastructure.control import check_control
     from guizhi.infrastructure.runtime_identity import runtime_identity
     from guizhi.infrastructure.vector import inventory
@@ -35,13 +40,23 @@ def worker(workspace: Workspace, run_id: str) -> dict:
     workflow = record["task"]["operation"] == "workflow.execute"
     # Exactly one worker can claim the artifact directory for a run.
     (directory / "artifacts").mkdir()
+    poll_after = 0.0
 
     def ensure_supervised():
-        with supervisor_lock(directory / "supervisor.lock") as acquired:
-            if acquired:
-                raise RuntimeError("Worker lost its supervisor")
-        if workflow and workspace.status(run_id) == "cancelling":
-            raise InterruptedError("Workflow cancelled")
+        nonlocal poll_after
+        if resident_cancel is None:
+            with supervisor_lock(directory / "supervisor.lock") as acquired:
+                if acquired:
+                    raise RuntimeError("Worker lost its supervisor")
+        elif resident_cancel():
+            workspace.request_cancel(run_id)
+            raise InterruptedError("GIS run cancelled")
+        if workflow or resident_cancel is not None:
+            now = monotonic()
+            if now >= poll_after:
+                poll_after = now + 0.1
+                if workspace.status(run_id) == "cancelling":
+                    raise InterruptedError("GIS run cancelled")
 
     def progress(step, **details):
         ensure_supervised()
@@ -137,6 +152,16 @@ def supervise(workspace: Workspace, run_id: str, cancel_requested: Callable[[], 
             raise
 
 
+def supervise_resident(workspace, run_id, stopped, cancel_requested):
+    def cancelled():
+        return stopped() or (cancel_requested is not None and cancel_requested())
+
+    result = worker(workspace, run_id, resident_cancel=cancelled)
+    if cancelled():
+        workspace.request_cancel(run_id)
+    workspace.finish(run_id, "succeeded", result=result)
+
+
 def run_vector(root: Path, source: Path, layer: str, object_id: str | None,
                cancel_requested: Callable[[], bool] | None = None, *,
                operation: str = "vector_inventory", control: tuple[Path, str] | None = None,
@@ -208,7 +233,11 @@ def submit(workspace, task, cancel_requested, *, key=None, fingerprint=None, pro
             published = workspace.start(task, run, job, key=key, fingerprint=fingerprint)
             if published == run.id:
                 try:
-                    supervise(workspace, run.id, cancel_requested, progress)
+                    stopped = resident_gis.get()
+                    if stopped is None:
+                        supervise(workspace, run.id, cancel_requested, progress)
+                    else:
+                        supervise_resident(workspace, run.id, stopped, cancel_requested)
                 except KeyboardInterrupt:
                     workspace.request_cancel(run.id)
                     workspace.finish(run.id, "cancelled")

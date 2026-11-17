@@ -36,6 +36,7 @@ def main() -> int:
     commands.add_parser("material-describe").add_argument("file", type=Path)
     commands.add_parser("material-intake").add_argument("request", type=Path)
     commands.add_parser("_material-reader")
+    commands.add_parser("_gis-worker")
     report_page = commands.add_parser("_report-page")
     report_page.add_argument("run_id")
     report_page.add_argument("digest")
@@ -105,9 +106,14 @@ def main() -> int:
     commands.add_parser("arcgis-view").add_argument("bridge", type=Path)
     commands.add_parser("_dispatch-replay").add_argument("request", type=Path)
     args = parser.parse_args()
-    if args.workspace is None and args.command != "_material-reader":
+    if args.workspace is None and args.command not in {"_material-reader", "_gis-worker"}:
         parser.error("the following arguments are required: --workspace")
     try:
+        if args.command == "_gis-worker":
+            from guizhi.infrastructure.gis_worker import serve
+
+            serve(sys.stdin.buffer, sys.stdout)
+            return 0
         if args.command == "_material-reader":
             from guizhi.infrastructure.materials import serve
 

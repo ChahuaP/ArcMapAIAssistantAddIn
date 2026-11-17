@@ -9,6 +9,7 @@ const key = item => item && item.ref.run + ':' + item.ref.artifact;
 const vector = item => Boolean(item?.geometry);
 const polygon = item => vector(item) && item.geometry.includes('Polygon');
 const raster = item => item?.kind === 'raster';
+const spatial = item => vector(item) || raster(item);
 const options = values => Object.entries(values).map(([value, label]) => ({ value, label }));
 const dropdown = (value, choices, onChange, extra = {}) => h(Select, {
     value: value ?? undefined, options: choices, onChange, placeholder: '请选择', ...extra,
@@ -31,12 +32,12 @@ const tools = [
         tool('flow.calculate', '数值计算', 'calculator', '计算')] },
     { title: '矢量处理', icon: 'layers', tools: [
         tool('vector.buffer', '缓冲分析', 'buffer', '生成缓冲区', ['输入图层', vector]),
-        tool('vector.dissolve', '融合', 'dissolve', '融合', ['待融合图层', vector]),
         tool('geometry.repair', '修复几何', 'pencil', '修复', ['待修复图层', vector]),
     ] },
     { title: '叠加分析', icon: 'layers', tools: [
         tool('vector.intersect', '相交', 'intersect', '相交', ['图层一', vector], ['图层二', vector]),
         tool('vector.erase', '擦除', 'erase', '擦除', ['待擦除图层', vector], ['擦除范围', polygon]),
+        tool('vector.dissolve', '融合', 'dissolve', '融合', ['待融合图层', vector]),
         tool('vector.clip', '裁剪', 'clip', '裁剪', ['待裁剪图层', vector], ['裁剪范围', polygon]),
         tool('vector.union', '联合', 'union', '联合', ['图层一', polygon], ['图层二', polygon]),
         tool('vector.identity', '标识叠加', 'overlayIdentity', '叠加', ['输入图层', polygon], ['标识图层', polygon]),
@@ -45,15 +46,12 @@ const tools = [
         tool('vector.spatial_join', '空间连接', 'spatialJoin', '连接', ['目标图层', vector], ['提供属性的图层', vector]),
     ] },
     { title: '坐标系', icon: 'globe', tools: [
-        tool('crs.reproject', '投影转换', 'globe', '转换', ['待转换图层', vector]),
-        tool('crs.assign', '定义坐标系', 'target', '定义', ['待定义图层', vector]),
-        tool('crs.transform', '按方案转换', 'globe', '转换', ['待转换图层', vector]),
+        tool('crs.reproject', '投影转换', 'globe', '转换', ['图层', spatial]),
+        tool('crs.assign', '定义坐标系', 'target', '定义', ['图层', spatial]),
     ] },
     { title: '栅格处理', icon: 'grid', tools: [
         tool('raster.statistics', '栅格与波段统计', 'statistics', '统计', ['统计影像', raster]),
         tool('raster.clip', '裁剪栅格', 'clip', '裁剪', ['待裁剪影像', raster], ['裁剪范围', polygon]),
-        tool('raster.reproject', '栅格重投影', 'globe', '转换', ['待转换影像', raster]),
-        tool('raster.assign', '定义影像坐标系', 'target', '定义', ['待定义影像', raster]),
         { ...tool('raster.mosaic', '拼接栅格', 'merge', '拼接', ['待拼接影像', raster]), multiple: true },
     ] },
 ];
@@ -77,14 +75,10 @@ const sameCrs = new Set(['vector.intersect', 'vector.erase', 'vector.clip', 'vec
     'vector.update_overlay', 'vector.symmetric_difference', 'vector.spatial_join', 'data.merge', 'raster.clip', 'raster.mosaic']);
 
 function toolInputIssue(operation, inputs, parameters) {
-    const assign = ['crs.assign', 'raster.assign'].includes(operation);
-    if (assign && inputs[0]?.crs) return '此图层已有坐标系，请使用投影转换';
+    const assign = operation === 'crs.assign';
     if (!assign && !['data.describe', 'raster.statistics'].includes(operation) && inputs.some(layer => layer?.crs === null))
         return '请先为输入图层定义实际坐标系';
-    const destination = parameters.definition || parameters.target_crs;
     const codes = inputs.map(layer => layer?.crs);
-    if (['crs.reproject', 'raster.reproject'].includes(operation) && destination && destination === codes[0])
-        return '请选择与源图层不同的目标坐标系';
     if (sameCrs.has(operation) && new Set(codes.filter(code => /^EPSG:\d+$/.test(code))).size > 1)
         return '输入图层的坐标系不同，请先转换为同一坐标系';
     if ((['vector.area', 'vector.buffer'].includes(operation) || operation === 'data.select_by_location' &&
@@ -186,7 +180,47 @@ function CoordinateChoice({ value, onPick, placeholder, standardOnly }) {
         } });
 }
 
-function toolForm(definition, inputs, values, update, entries, selection) {
+function ProjectionChoice({ layer, value, onPick }) {
+    const [query, setQuery] = useState('');
+    const [rows, setRows] = useState([]);
+    const [error, setError] = useState('');
+    const [loading, setLoading] = useState(true);
+    useEffect(() => {
+        let active = true;
+        setLoading(true);
+        const timer = setTimeout(async () => {
+            try {
+                const options = await window.guizhi.map({ action: 'crs-projection-options', ref: layer.ref, query });
+                if (active) { setRows(options); setError(''); }
+            } catch (problem) {
+                if (active) { setRows([]); setError(window.GuizhiErrorText(problem)); }
+            } finally {
+                if (active) setLoading(false);
+            }
+        }, 180);
+        return () => { active = false; clearTimeout(timer); };
+    }, [layer, query]);
+
+    const groups = ['地理坐标系', '投影坐标系', '其他坐标系'].map(label => ({
+        label, options: rows.filter(row => row.kind === label),
+    })).filter(group => group.options.length);
+    const choices = value?.target.plans || [];
+    return h(window.React.Fragment, null,
+        field('目标坐标系', h(Select, {
+            showSearch: true, filterOption: false, onSearch: setQuery, labelInValue: true, loading,
+            value: value ? { value: value.target.value, label: value.target.label } : undefined,
+            options: groups, placeholder: '选择或搜索坐标系（如 4548）',
+            notFoundContent: loading ? '正在匹配坐标系…' : error || '暂无适用的坐标系',
+            onChange: (_, target) => onPick({ target, plan: target.plans[0].value }),
+        })),
+        value?.target.outsideArea && value.plan === 'automatic' &&
+            h('p', { className: 'gis-tool-description', role: 'status' }, '图层超出该坐标系的标称适用范围，请确认项目要求。'),
+        choices.length > 0 && field('转换方案', dropdown(value.plan, choices,
+            plan => onPick({ target: value.target, plan }))),
+        error && h('p', { className: 'error', role: 'alert' }, error));
+}
+
+function toolForm(definition, inputs, values, update, selection) {
     const { id } = definition;
     const input = inputs[0];
     const names = input?.fields?.map(item => item.name) || [];
@@ -280,24 +314,29 @@ function toolForm(definition, inputs, values, update, entries, selection) {
     } else if (id === 'vector.spatial_join') {
         controls.push(select('mode', '连接方式', { one_to_one: '一对一', one_to_many: '一对多' }, 'one_to_one'));
         parameters = { mode: values.mode || 'one_to_one' };
-    } else if (id === 'crs.reproject' || id === 'crs.assign') {
-        controls.push(coordinates(id === 'crs.assign' ? '数据的实际坐标系' : '目标坐标系'));
-        parameters = { definition: values.coordinate?.value };
-        valid &&= Boolean(parameters.definition);
-    } else if (id === 'crs.transform') {
-        const plans = entries.filter(item => item.kind === 'plan').map(item => ({ value: item.id + '@' + item.revision, label: item.title }));
-        controls.push(field('转换方案', dropdown(values.plan, plans, value => update('plan', value))));
-        parameters = { plan: values.plan };
-        valid &&= Boolean(parameters.plan);
-    } else if (id === 'raster.assign') {
-        controls.push(coordinates('影像的实际坐标系'));
-        parameters = { target_crs: values.coordinate?.value };
-        valid &&= Boolean(parameters.target_crs);
-    } else if (id === 'raster.reproject') {
-        controls.push(coordinates('目标坐标系'), select('resampling', '重采样方法',
-            { nearest: '最邻近', bilinear: '双线性', cubic: '三次卷积' }, 'nearest'));
-        parameters = { target_crs: values.coordinate?.value, resampling: values.resampling || 'nearest' };
-        valid &&= Boolean(parameters.target_crs);
+    } else if (id === 'crs.assign' || id === 'crs.reproject') {
+        const rasterInput = raster(input);
+        const target = rasterInput ? 'target_crs' : 'definition';
+        if (input) controls.push(h('p', { className: 'gis-tool-description' }, '当前坐标系　' + (input.crsName || input.crs || '未定义')));
+        if (id === 'crs.assign') {
+            controls.push(coordinates('数据的实际坐标系'));
+            parameters = { [target]: values.coordinate?.value };
+            valid = Boolean(values.coordinate);
+        } else {
+            if (input?.crs) controls.push(h(ProjectionChoice, { key: key(input), layer: input,
+                value: values.projection, onPick: value => update('projection', value) }));
+            if (rasterInput && input.crs) {
+                controls.push(select('resampling', '重采样方法',
+                    { nearest: '最邻近', bilinear: '双线性', cubic: '三次卷积' }, 'nearest'));
+                parameters.resampling = values.resampling || 'nearest';
+            }
+            const projection = values.projection;
+            if (projection) {
+                if (projection.plan === 'automatic') parameters[target] = projection.target.value;
+                else parameters.plan = projection.plan;
+            }
+            valid = Boolean(input?.crs && projection);
+        }
     } else if (id === 'flow.unique_values') {
         controls.push(columns('field', '字段'), text('query', '匹配文字（选填）'));
         parameters = { field: values.field, query: values.query?.trim() || '' };
@@ -325,8 +364,8 @@ const toolDescription = {
     'data.merge': '把多个图层的要素汇集到一个新图层。',
     'geometry.multipart': '把所选要素组成一条多部件要素，生成新图层。',
     'geometry.explode': '逐个拆开图层中要素的部件，生成单部件图层。每个部件继承原要素的属性。',
-    'crs.assign': '为已有坐标标注其实际使用的坐标系。',
-    'raster.assign': '为现有影像标注其实际使用的坐标系。',
+    'crs.assign': '设置或覆盖坐标系定义，保留原坐标值和像元。',
+    'crs.reproject': '根据源图层匹配可用的内置转换和已保存的自定义方案。',
 };
 
 export function toolError(result) {
@@ -349,7 +388,7 @@ function ResultSummary({ result }) {
             : !metrics.length && result.value !== undefined && h('output', null, String(result.value)));
 }
 
-export function MapTool({ operation, active, layers, selection, entries, components, openComponents, glyph, busy, setBusy, close, onResult }) {
+export function MapTool({ operation, active, lockInput, layers, selection, components, openComponents, glyph, busy, setBusy, close, onResult }) {
     const api = window.guizhi;
     const definition = definitions[operation];
     const initial = operation === 'geometry.create_dataset' ? { geometry_type: 'polygon' }
@@ -367,16 +406,19 @@ export function MapTool({ operation, active, layers, selection, entries, compone
         setError('');
     }, { showSearch: true, optionFilterProp: 'label', notFoundContent: records.length ? '没有匹配的图层' : '暂无图层',
         ...(definition.multiple && { mode: 'multiple', maxCount: 32, maxTagCount: 'responsive' }) }));
-    const selectors = operation === 'geometry.multipart'
-        ? [h('div', { className: 'gis-tool-field' }, h('span', null, '源图层'), h('strong', null, inputs[0]?.name))]
-        : definition.inputs.map(([name, accepts], index) => pickLayer(name, index, layers.filter(item => accepts(item) &&
-            (definition.multiple || !ids.some((id, slot) => slot !== index && key(item) === id)))));
-    const form = toolForm(definition, inputs, values, update, entries, selection);
+    const selectors = definition.inputs.map(([name, accepts], index) => {
+        if (!index && lockInput) return h('div', { className: 'gis-tool-field' },
+            h('span', null, '编辑图层'), h('strong', null, inputs[0]?.name));
+        return pickLayer(name, index, layers.filter(item => accepts(item) &&
+            (definition.multiple || !ids.some((id, slot) => slot !== index && key(item) === id))));
+    });
+    const form = toolForm(definition, inputs, values, update, selection);
+    const executable = operation.startsWith('crs.') && raster(inputs[0]) ? operation.replace('crs.', 'raster.') : operation;
     const minimum = definition.multiple ? 2 : definition.inputs.length;
     const validInputs = inputs.length >= minimum && Array.from({ length: inputs.length }, (_, i) =>
         (definition.inputs[i] || definition.inputs.at(-1))[1](inputs[i])).every(Boolean);
     const problem = validInputs ? toolInputIssue(operation, inputs, form.parameters) : '';
-    const missing = operation.startsWith('raster.') && components?.raster?.installed === false;
+    const missing = executable.startsWith('raster.') && components?.raster?.installed === false;
     const valid = validInputs && form.valid && !problem && !missing;
     async function run() {
         if (busy || !valid) return;
@@ -387,7 +429,7 @@ export function MapTool({ operation, active, layers, selection, entries, compone
                 if (await api.mapExport(inputs[0].ref, true, undefined, undefined, form.parameters.fields)) close();
                 return;
             }
-            const output = await api.map({ action: 'tool', operation, refs: inputs.map(item => item.ref), parameters: form.parameters,
+            const output = await api.map({ action: 'tool', operation: executable, refs: inputs.map(item => item.ref), parameters: form.parameters,
                 ...(operation === 'geometry.create_dataset' && { name: values.name.trim() }),
                 ...(operation === 'data.merge' && { name: (values.name ?? '合并图层').trim() }) });
             const failure = toolError(output);

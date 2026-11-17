@@ -131,6 +131,7 @@ async function startDesktop(options) {
         installationRoot: options.installationRoot, diagnostics });
     if (!options.verifyStartup) {
         controller.reader.start();
+        controller.gis.start();
         controller.warmModel();
     }
     const hostRoot = process.env.GUIZHI_ARCGIS_HOSTS || path.join(process.env.LOCALAPPDATA, 'Guizhi', 'ArcGIS', 'hosts');
@@ -178,7 +179,7 @@ async function startDesktop(options) {
         desktop.close();
         sync.close();
         speech.cancel();
-        void Promise.allSettled([toolJob, feedbackSending]).then(() => {
+        void Promise.allSettled([controller.gis.stop(), toolJob, feedbackSending]).then(() => {
             diagnostics.close();
             return controller.close();
         }).finally(() => { quitting = true; tray.destroy(); app.quit(); });
@@ -561,18 +562,20 @@ async function startDesktop(options) {
     });
     bind('materialPaths', (paths, kind) => controller.intake(paths, kind));
     const mapReads = new Set(['describe', 'features', 'table', 'table-complement', 'table-statistics', 'table-unique-values', 'table-feature',
-        'crs-search', 'raster-preview', 'raster-display', 'categories']);
+        'crs-search', 'crs-projection-options', 'raster-preview', 'raster-display', 'categories']);
     bind('map', async (surface, input) => {
         if (surface !== window || !input || !mapReads.has(input.action) &&
                 !['edit', 'edit-sketch', 'edit-transfer', 'tool'].includes(input.action)) {
             throw new Error('地图请求无效');
         }
         if (!controller.settings.workspace) throw new Error('请先选择成果保存位置');
+        if (closing) throw new Error('软件正在退出');
         if (mapReads.has(input.action)) return controller.reader.map(controller.settings.workspace, input);
-        if (input.action !== 'tool') return controller.request('map', input);
+        if (input.action !== 'tool') return controller.gis.map(controller.settings.workspace, input);
         if (toolJob || controller.active || closing) throw new Error('请等待当前操作结束后再运行工具');
         const started = performance.now();
         function report(result) {
+            if (closing) return { status: 'cancelled', layers: [] };
             const failure = result.failure;
             const diagnosticId = diagnostics.record({ stage: 'tool', status: result.status,
                 code: result.run ? 'operation_failed' : 'tool_failed', runId: result.run, operation: input.operation,
@@ -581,7 +584,7 @@ async function startDesktop(options) {
             return { ...result, diagnosticId };
         }
         const work = input.operation === 'data.select_by_attribute'
-            ? controller.reader.map(controller.settings.workspace, input) : controller.request('map', input);
+            ? controller.reader.map(controller.settings.workspace, input) : controller.gis.map(controller.settings.workspace, input);
         toolJob = work.then(result =>
             ['failed', 'interrupted'].includes(result.status) ? report(result) : result,
         error => report({ status: 'failed', message: error.message,
@@ -604,7 +607,7 @@ async function startDesktop(options) {
         const id = randomUUID(), startedAt = new Date().toISOString();
         const display = Object.fromEntries(Object.entries(input.materials).map(([role, group]) => [role,
             group.map(item => item.ref ? { ...item, name: mapLayers.get(mapKey(item.ref)).name } : item)]));
-        const output = await controller.request('map', { action: 'skill', skill: input.skill, materials,
+        const output = await controller.gis.map(controller.settings.workspace, { action: 'skill', skill: input.skill, materials,
             parameters: input.parameters, coordinatePlans: input.coordinatePlans });
         const business = await controller.mapBusiness({ id, startedAt, materials: display, output });
         broadcast(controller.state());
@@ -673,7 +676,7 @@ async function startDesktop(options) {
         for (const [completed, [action, item]] of jobs.entries()) {
             const name = item.name || path.basename(item.file);
             window.webContents.send('guizhi:mapImportProgress', { label: '正在加载 ' + name, total: jobs.length > 1 ? jobs.length : 0, completed });
-            try { layers.push(...await controller.reader.map(controller.settings.workspace, { action, items: [item] })); }
+            try { layers.push(...await controller.gis.map(controller.settings.workspace, { action, items: [item] })); }
             catch (error) { intake.issues.push({ name, message: error.message }); }
         }
         if (jobs.length) window.webContents.send('guizhi:mapImportProgress', { label: '正在绘制图层',
@@ -960,7 +963,7 @@ async function startDesktop(options) {
         if (await shell.openPath(await controller.approvalSource(...args))) throw new Error('无法打开依据');
     });
     bind('coordinateFile', async kind => {
-        const titles = { definition: '选择带坐标系定义的地图数据', points: '选择控制点文件', vector: '选择待转换的矢量文件' };
+        const titles = { definition: '选择带坐标系定义的地图数据', points: '选择控制点文件' };
         if (!Object.hasOwn(titles, kind)) throw new Error('请选择有效的数据类型');
         const pick = await dialog.showOpenDialog(window, { title: titles[kind], properties: ['openFile'], filters: [
             { name: kind === 'definition' ? '地图数据' : '矢量数据',
@@ -982,7 +985,6 @@ async function startDesktop(options) {
         }
         return controller.python('crs-remove', reference);
     });
-    bind('coordinateApply', async (input, plan) => shell.showItemInFolder(await controller.transformMaterial(input, plan)));
     bind('coordinateSolve', input => controller.request('crs-solve', { ...input,
         ...Object.fromEntries(['source_points', 'target_points'].map(key => [key, {
             file: externalPath(input[key].file), layer: input[key].layer,

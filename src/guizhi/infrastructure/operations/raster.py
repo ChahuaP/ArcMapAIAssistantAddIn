@@ -8,7 +8,6 @@ from uuid import uuid4
 
 import numpy as np
 from pyproj import CRS
-from pyproj.transformer import TransformerGroup
 
 from guizhi.infrastructure.optional_components import require
 
@@ -176,28 +175,64 @@ def clip(ctx, all_touched: bool = False):
     return {**result, "scope_revision": ctx.selection_hashes[0]}
 
 
-def reproject_raster(ctx, target_crs, resampling, resolution):
+def raster_plan_pipeline(workspace, reference, source, extent):
+    from itertools import groupby
+
+    from guizhi.domain.crs import TransformPlan
+    from guizhi.infrastructure.coordinates import converter, pipeline_tokens
+    from guizhi.infrastructure.crs_catalog import get_plan
+    from guizhi.infrastructure.crs_options import area_of_interest, geographic_bounds, within_area
+
+    plan = TransformPlan.model_validate(get_plan(workspace, reference)["plan"])
+    if plan.dimension != 2:
+        raise ValueError("栅格投影转换需要二维方案")
+    expected, target, _ = converter(plan, workspace.root)
+    if not source.equals(expected, ignore_axis_order=True):
+        raise ValueError("源图层坐标系与转换方案不一致")
+    area = extent if plan.area_kind == "source" else geographic_bounds(area_of_interest(source, extent))
+    if not within_area(area, plan.area):
+        raise ValueError("栅格范围超出转换方案的适用范围")
+
+    tokens = pipeline_tokens(plan, workspace.root)
+    groups = [list(group) for separator, group in groupby(tokens, lambda token: token == "+step") if not separator]
+    header, *steps = groups
+    if plan.direction == "inverse":
+        steps.reverse()
+        for step in steps:
+            if "+inv" in step:
+                step.remove("+inv")
+            else:
+                step.insert(0, "+inv")
+            for index, token in enumerate(step):
+                if token in {"+omit_fwd", "+omit_inv"}:
+                    step[index] = "+omit_inv" if token == "+omit_fwd" else "+omit_fwd"
+    # Saved plans use GIS x/y. GDAL's explicit operation receives native CRS axis order.
+    xy = ["+proj=axisswap", "+order=2,1"]
+    if source.axis_info[0].direction == "north":
+        steps.insert(0, xy)
+    if target.axis_info[0].direction == "north":
+        steps.append(xy)
+    return target, " ".join(header + [token for step in steps for token in ["+step", *step]])
+
+
+def reproject_raster(ctx, target_crs, resampling, resolution, plan):
+    from guizhi.infrastructure.crs_options import describe_crs, projection, resolve_definition
+
     out = ctx.path("result.tif")
     source = ctx.rasters[0]
-    from guizhi.infrastructure.crs_catalog import get
-    from guizhi.infrastructure.crs_options import describe_crs
-
-    definition = get(ctx.workspace, "definition", target_crs)["definition"]["wkt"] if "@" in target_crs else target_crs
-    target = CRS.from_user_input(definition)
     with rio.open(source) as src:
         if src.crs is None:
             raise ValueError("请先为源影像定义实际坐标系")
         source_crs = CRS.from_user_input(src.crs)
-        if source_crs.equals(target, ignore_axis_order=True):
-            raise ValueError("目标与源影像的坐标系相同，请选择不同的目标坐标系")
-        if source_crs.is_compound or target.is_compound or not (target.is_geographic or target.is_projected):
-            raise ValueError("Raster reprojection supports horizontal geographic and projected coordinate systems")
-        # GDAL's explicit operation must honor the axis order of the source and target CRS.
-        transformer = TransformerGroup(source_crs, target, always_xy=False, allow_ballpark=False)
-        if not transformer.best_available or not transformer.transformers:
-            raise ValueError("No verified coordinate transformation is available for this grid")
-        # Select a concrete non-ballpark coordinate operation and use it for grid construction and warping.
-        pipeline = transformer.transformers[0].definition
+        if len(source_crs.axis_info) != 2 or not (source_crs.is_geographic or source_crs.is_projected):
+            raise ValueError("源影像必须使用二维地理或投影坐标系")
+        if plan:
+            target, pipeline = raster_plan_pipeline(ctx.workspace, plan, source_crs, src.bounds)
+        else:
+            target = resolve_definition(ctx.workspace, target_crs)
+            if source_crs.equals(target, ignore_axis_order=True):
+                raise ValueError("目标与源影像的坐标系相同，请选择不同的目标坐标系")
+            pipeline = projection(source_crs, target, src.bounds, always_xy=False).definition
         with rio.Env(PROJ_NETWORK="OFF"):
             grid, width, height = calculate_default_transform(
                 src.crs, target, src.width, src.height, *src.bounds, resolution=resolution,
@@ -213,27 +248,25 @@ def reproject_raster(ctx, target_crs, resampling, resolution):
             finally:
                 normalized.unlink(missing_ok=True)
     result = deliver(ctx, out, {"type": "reproject", "source_crs": source_crs.to_wkt(),
-                                "resampling": resampling, "coordinate_operation": pipeline})
+                                "resampling": resampling, "coordinate_operation": pipeline, "plan": plan})
     return {**result, "statistics": {**result["statistics"],
             "projection": {"source": describe_crs(source_crs), "target": describe_crs(target)}}}
 
 
-def reproject(ctx, target_crs: str, resampling: Literal["nearest", "bilinear", "cubic"] = "nearest",
-              resolution: tuple[float, float] | None = None):
+def reproject(ctx, target_crs: str | None = None, resampling: Literal["nearest", "bilinear", "cubic"] = "nearest",
+              resolution: tuple[float, float] | None = None, plan: str | None = None):
+    if bool(target_crs) == bool(plan):
+        raise ValueError("请选择目标坐标系或已验证的转换方案")
     if resolution is not None and any(not np.isfinite(value) or value <= 0 for value in resolution):
         raise ValueError("Target resolution must contain two positive finite numbers")
-    return reproject_raster(ctx, target_crs, resampling, resolution)
+    return reproject_raster(ctx, target_crs, resampling, resolution, plan)
 
 
 def assign(ctx, target_crs: str):
-    from guizhi.infrastructure.crs_catalog import get
+    from guizhi.infrastructure.crs_options import resolve_definition
 
     source = ctx.rasters[0]
-    target = (CRS.from_user_input(target_crs) if target_crs.startswith("EPSG:")
-              else CRS(get(ctx.workspace, "definition", target_crs)["definition"]["wkt"]))
-    with rio.open(source) as src:
-        if src.crs:
-            raise ValueError("图层已有坐标系，请使用投影转换")
+    target = resolve_definition(ctx.workspace, target_crs)
     out = ctx.path("result.tif")
     with rio.Env(GDAL_TIFF_INTERNAL_MASK=True):
         copy_dataset(source, out, driver="GTiff", strict=True, compress="deflate", BIGTIFF="IF_SAFER")

@@ -1,8 +1,14 @@
 """Shared EPSG choices and layer coordinate metadata."""
 from functools import lru_cache
 
-from pyproj import CRS
+from pyproj import CRS, network
+from pyproj.aoi import AreaOfInterest
 from pyproj.database import query_crs_info
+from pyproj.exceptions import ProjError
+from pyproj.transformer import TransformerGroup
+
+from guizhi.domain.crs import TransformPlan
+from guizhi.infrastructure.crs_catalog import catalog, get
 
 COMMON = {
     4490: "CGCS2000（国家大地坐标系 2000）", 4326: "WGS 84",
@@ -32,6 +38,132 @@ def describe_crs(crs):
 @lru_cache(maxsize=1)
 def epsg_list():
     return query_crs_info(auth_name="EPSG", allow_deprecated=False)
+
+
+def resolve_definition(workspace, reference):
+    if not reference:
+        raise ValueError("请选择坐标系")
+    value = get(workspace, "definition", reference)["definition"]["wkt"] if "@" in reference else reference
+    crs = CRS.from_user_input(value)
+    if not (crs.is_projected or crs.is_geographic) or len(crs.axis_info) != 2:
+        raise ValueError("请选择二维地理或投影坐标系")
+    return crs
+
+
+def area_of_interest(source, extent):
+    network.set_network_enabled(False)
+    if extent is None or source.geodetic_crs is None:
+        return None
+    # Undo the projection in the source datum before testing the transformation's area.
+    local = TransformerGroup(source, source.geodetic_crs, always_xy=True, allow_ballpark=False)
+    if not local.best_available or not local.transformers:
+        raise ValueError("无法从图层坐标系确定转换范围，请选择已验证的转换方案")
+    west, south, east, north = local.transformers[0].transform_bounds(*extent, errcheck=True)
+    if not (-180 <= west <= 180 and -180 <= east <= 180 and -90 <= south <= north <= 90):
+        raise ValueError("图层坐标超出坐标系适用范围，请检查图层坐标系")
+    return AreaOfInterest(west, south, east, north)
+
+
+def automatic_projection(source, target, area, *, always_xy=True):
+    group = TransformerGroup(source, target, always_xy=always_xy, allow_ballpark=False, area_of_interest=area)
+    if not group.best_available or not group.transformers:
+        raise ValueError("缺少可靠的坐标转换或所需格网，请选择已验证的转换方案")
+    return group.transformers[0]
+
+
+def projection(source, target, extent, *, always_xy=True):
+    return automatic_projection(source, target, area_of_interest(source, extent), always_xy=always_xy)
+
+
+def within_area(bounds, outer):
+    west, south, east, north = bounds
+    left, bottom, right, top = outer
+    if not bottom <= south <= north <= top:
+        return False
+    if left <= right:
+        return left <= west <= east <= right or west > east and left == -180 and right == 180
+    if west > east:
+        return west >= left and east <= right
+    return west >= left or east <= right
+
+
+def geographic_bounds(area):
+    return area.west_lon_degree, area.south_lat_degree, area.east_lon_degree, area.north_lat_degree
+
+
+def projection_options(workspace, layer, query):
+    if not layer["crs"]:
+        return []
+    source = CRS(layer["crs"])
+    extent = layer["bounds"]
+    area_error = None
+    try:
+        area = area_of_interest(source, extent)
+    except (ProjError, ValueError) as error:
+        area = None
+        area_error = error
+    geographic = geographic_bounds(area) if area is not None else None
+    rows = []
+    entries = catalog(workspace)
+    token = query.casefold().strip()
+
+    candidates = [(item, CRS(item["value"])) for item in coordinate_options(query)]
+    for entry in entries:
+        if entry["kind"] != "definition" or token not in entry["title"].casefold():
+            continue
+        target = CRS(entry["definition"]["wkt"])
+        if len(target.axis_info) == 2 and (target.is_geographic or target.is_projected):
+            candidates.append(({"value": entry["id"] + "@" + str(entry["revision"]), "label": entry["title"],
+                                "kind": describe_crs(target)["kind"]}, target))
+
+    def find(target):
+        return next((item for item, crs in rows if target.equals(crs, ignore_axis_order=True)), None)
+
+    requested_code = "".join(token.split()).removeprefix("epsg:").removeprefix("epsg：")
+    for item, target in candidates:
+        if area_error or target.equals(source, ignore_axis_order=True) or find(target):
+            continue
+        outside = bool(geographic and target.area_of_use and not within_area(geographic, target.area_of_use.bounds))
+        if outside and item["value"] != "EPSG:" + requested_code:
+            continue
+        try:
+            operation = automatic_projection(source, target, area)
+            if geographic and operation.area_of_use and not within_area(geographic, operation.area_of_use.bounds):
+                continue
+            if extent:
+                operation.transform_bounds(*extent, errcheck=True)
+        except (ProjError, ValueError):
+            continue
+        rows.append(({**item, "outsideArea": outside,
+                      "plans": [{"value": "automatic", "label": "自动匹配（PROJ）"}]}, target))
+
+    for entry in entries:
+        if entry["kind"] != "plan":
+            continue
+        plan = TransformPlan.model_validate(entry["plan"])
+        has_z = (layer.get("geometry") or "").endswith((" Z", " ZM", "25D"))
+        if plan.dimension != (3 if has_z else 2) or area_error and plan.area_kind == "geographic":
+            continue
+        if not source.equals(CRS(plan.source_wkt), ignore_axis_order=True):
+            continue
+        bounds = extent if plan.area_kind == "source" else geographic
+        if bounds is not None and not within_area(bounds, plan.area):
+            continue
+        target = CRS(plan.target_wkt)
+        row = find(target)
+        ref = entry["id"] + "@" + str(entry["revision"])
+        info = describe_crs(target)
+        code = info["code"]
+        label = info["name"] + (" · " + code if code else "")
+        if row is None:
+            if token and not any(token in value.casefold() for value in (label, entry["title"], code or "")):
+                continue
+            row = {"value": "plan:" + ref, "label": label, "kind": info["kind"], "plans": []}
+            rows.append((row, target))
+        row["plans"].append({"value": ref, "label": entry["title"]})
+    if area_error and not rows:
+        raise area_error
+    return [row for row, _ in rows]
 
 
 def coordinate_options(text):

@@ -123,7 +123,7 @@ def select_by_location(
             raise ValueError("存在空或无效的几何，请先检查图层") from error
     query = query.loc[~query.geometry.is_empty]
     if crs != query.crs and not query.empty:
-        from guizhi.infrastructure.map_workspace import projection
+        from guizhi.infrastructure.crs_options import projection
         import shapely
 
         tx = projection(query.crs, crs, query.total_bounds)

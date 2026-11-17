@@ -7,7 +7,7 @@ const path = require('node:path');
 const { promisify } = require('node:util');
 const { AgentProcess } = require('./agent-process.cjs');
 const { materialBindings } = require('./materials.cjs');
-const { MaterialReader } = require('./material-reader.cjs');
+const { LocalPython } = require('./local-python.cjs');
 const { visualRecipe } = require('./visual-recipes.cjs');
 const { modelConfig, modelKey, credentialScope, normalizeKey, route, modelFailure, modelFailureCode } = require('../../src/guizhi/infrastructure/dsh/model-config.cjs');
 
@@ -45,7 +45,8 @@ class DesktopController {
         this.settings = load(this.file, { workspace: '' });
         this.runtime = { python: path.join(runtime, 'python', 'python.exe'),
             node: path.join(runtime, 'node', 'node.exe'), runtime: dsh || path.join(runtime, 'dsh') };
-        this.reader = new MaterialReader(this.runtime.python, cli);
+        this.reader = new LocalPython(this.runtime.python, cli, '_material-reader', '材料读取', 240_000);
+        this.gis = new LocalPython(this.runtime.python, cli, '_gis-worker', '地图处理', 600_000);
         this.diagnostics = diagnostics;
         this.storage = safeStorage;
         this.bundledArcmap = bundledArcmap;
@@ -341,13 +342,6 @@ class DesktopController {
         return this.python('crs-define', this.externalPath(file), ...(layer ? ['--layer', layer] : []));
     }
 
-    async transformMaterial(input, plan) {
-        const file = this.externalPath(input.file);
-        const [material] = materialBindings({ input: [{ ...input, file }] }).input;
-        const run = await this.request('execute', { operation: 'crs.transform', inputs: [material], parameters: { plan } });
-        return checkedArtifact(run, 'export').file;
-    }
-
     async complete(task, receipt) {
         if (this.active?.task !== task || this.active.settling) return;
         const active = this.active;
@@ -519,11 +513,11 @@ class DesktopController {
     }
 
     async close() {
-        this.reader.close();
+        const localProcesses = [this.reader.stop(), this.gis.stop()];
         const active = this.active;
         this.cancel();
         this.modelTesting?.stop.abort();
-        try { await Promise.allSettled([active?.done, this.modelTesting?.done]); }
+        try { await Promise.allSettled([...localProcesses, active?.done, this.modelTesting?.done]); }
         finally { await this.service?.ready.then(service => service.close(), () => {}); }
     }
 }

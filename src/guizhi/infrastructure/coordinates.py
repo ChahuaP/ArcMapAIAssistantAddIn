@@ -45,7 +45,7 @@ def grid_path(root, grid):
     return path
 
 
-def resolved_pipeline(plan, root):
+def pipeline_tokens(plan, root):
     network.set_network_enabled(False)
     grids = {grid.name: grid for grid in plan.grids}
     if len(grids) != len(plan.grids):
@@ -71,7 +71,11 @@ def resolved_pipeline(plan, root):
         tokens.append(token)
     if used != grids.keys() or not tokens or tokens[0] != "+proj=pipeline":
         raise ValueError("Use an explicit pipeline and declare exactly its grids")
-    return Transformer.from_pipeline(" ".join(tokens))
+    return tokens
+
+
+def resolved_pipeline(plan, root):
+    return Transformer.from_pipeline(" ".join(pipeline_tokens(plan, root)))
 
 
 def converter(plan, root):

@@ -160,8 +160,6 @@
         const [wizard, setWizard] = useState(false);
         const [file, setFile] = useState(null);
         const [editing, setEditing] = useState(null);
-        const [applying, setApplying] = useState(null);
-        const [applyFile, setApplyFile] = useState(null);
         const [title, setTitle] = useState('');
         const [busy, setBusy] = useState(false);
         const [error, setError] = useState('');
@@ -197,7 +195,7 @@
                 help('可直接选择带坐标系定义的 SHP、GeoPackage、GeoJSON、GeoTIFF 或 IMG。SHP 需和同名的 .prj 放在同一文件夹。GeoTIFF 和 IMG 需要栅格处理组件。'),
                 file && button('folder', '导入坐标系', { disabled: busy || !file.layer, onClick: () => perform(() => importFile(file)) })) :
                 h('div', { className: 'coordinate-controls' },
-                    help('转换方案记录转换方向、适用范围和核验误差。保存后可在此转换矢量文件，也可在地图中使用「按方案转换」。'),
+                    help('转换方案记录转换方向、适用范围和核验误差。保存后，可在「分析 → 坐标系 → 投影转换」中选用。'),
                     button('plus', '创建转换方案', { disabled: busy || !definitions.length, onClick: () => setWizard(true) }),
                     !definitions.length && help('创建方案前，请先从转换前、后的数据中导入坐标系。')),
             ...list.map(entry => {
@@ -216,15 +214,6 @@
                                 onConfirm: () => perform(async () => { setEntries(await api.coordinateRemove(ref(entry))); setEditing(null); }) },
                                 button('trash', '删除', { type: 'text', danger: true, disabled: busy })))),
                     h('small', null, summary.filter(Boolean).join(' · ')),
-                    entry.plan && applying !== ref(entry) && button('map', '转换材料', { disabled: busy, onClick: () => {
-                        setApplying(ref(entry)); setApplyFile(null);
-                    } }),
-                    applying === ref(entry) && h(React.Fragment, null,
-                        help('选择处于转换前坐标系和方案适用范围内的矢量图层。转换完成后会打开成果所在文件夹。'),
-                        h(CoordinateFile, { label: '矢量文件', layerLabel: '待转换图层', item: applyFile, busy, change: setApplyFile,
-                            pick: () => perform(async () => { const picked = await api.coordinateFile('vector'); if (picked) setApplyFile(picked); }) }),
-                        button('map', '执行转换', { type: 'primary', disabled: busy || !applyFile?.layer,
-                            onClick: () => perform(async () => { await api.coordinateApply(applyFile, ref(entry)); setApplying(null); }) })),
                     editing === ref(entry) && h('div', { className: 'field-row' },
                         h('input', { 'aria-label': '新名称', value: title, maxLength: 120, onChange: event => setTitle(event.target.value) }),
                         button('plus', '保存名称', { disabled: !title.trim() || busy, onClick: () => perform(async () => {

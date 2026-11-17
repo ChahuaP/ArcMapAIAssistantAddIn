@@ -13,15 +13,14 @@ from uuid import uuid4
 import numpy as np
 import pyogrio
 import shapely
-from pyproj import CRS, network
-from pyproj.aoi import AreaOfInterest
+from pyproj import CRS
 from pyproj.enums import TransformDirection
-from pyproj.transformer import TransformerGroup
 
 from guizhi.application.diagnostics import failure_summary
 from guizhi.application.skills import execute as execute_skill
 from guizhi.application.tasks import run_operation
 from guizhi.infrastructure.crs_catalog import get_plan
+from guizhi.infrastructure.crs_options import projection
 from guizhi.infrastructure.coordinates import apply_plan
 from guizhi.infrastructure.export import package_layer
 from guizhi.infrastructure.operations.evidence import artifact_path, read_artifact
@@ -37,7 +36,7 @@ MANUAL_OPERATIONS = {
     "vector.spatial_join", "data.copy", "data.merge", "data.select_by_attribute",
     "data.select_by_location", "data.export_selection", "geometry.create_dataset", "geometry.repair",
     "geometry.multipart", "geometry.explode",
-    "crs.assign", "crs.reproject", "crs.transform",
+    "crs.assign", "crs.reproject",
     "table.add_field", "table.delete_field", "flow.unique_values", "flow.calculate",
     "raster.statistics", "raster.clip", "raster.reproject", "raster.assign", "raster.mosaic",
     "table.calculate_field", "table.calculate_geometry", "table.edit_cell",
@@ -183,10 +182,6 @@ def manual_tool(workspace, payload):
         return {"layers": [], "selection": {"layer": name, "revision": material(file, name)["revision"],
                                              "fids": fids}, "statistics": {"selected_count": len(fids)}}
     items = [map_material(workspace, ref) for ref in refs]
-    if operation == "raster.reproject" and not parameters["target_crs"].startswith("EPSG:"):
-        from guizhi.infrastructure.crs_catalog import get
-
-        parameters["target_crs"] = get(workspace, "definition", parameters["target_crs"])["definition"]["wkt"]
     if operation == "data.export_selection":
         fids = parameters.get("fids")
         if len(items) != 1 or not isinstance(fids, list) or not 1 <= len(fids) <= 500:
@@ -303,26 +298,6 @@ def bounds(value):
             or value[0] > value[2] or value[1] > value[3]):
         raise ValueError("地图范围无效")
     return tuple(value)
-
-
-def projection(source_crs, target_crs, extent):
-    network.set_network_enabled(False)
-    area = None
-    geodetic = source_crs.geodetic_crs
-    if extent is not None and geodetic is not None:
-        # An AOI needs longitude and latitude. Undo the source projection in its own datum.
-        # A separate WGS 84 datum transformation can require grids unrelated to the map.
-        local = TransformerGroup(source_crs, geodetic, always_xy=True, allow_ballpark=False)
-        if not local.best_available or not local.transformers:
-            raise ValueError("无法从图层坐标系确定转换范围，请选择已验证的转换方案")
-        west, south, east, north = local.transformers[0].transform_bounds(*extent, errcheck=True)
-        if not (-180 <= west <= 180 and -180 <= east <= 180 and -90 <= south <= north <= 90):
-            raise ValueError("图层坐标超出坐标系适用范围，请检查图层坐标系")
-        area = AreaOfInterest(west, south, east, north)
-    group = TransformerGroup(source_crs, target_crs, always_xy=True, allow_ballpark=False, area_of_interest=area)
-    if not group.best_available or not group.transformers:
-        raise ValueError("缺少可靠的坐标转换或所需格网，请选择已验证的转换方案")
-    return group.transformers[0]
 
 
 def category_value(value):
@@ -514,10 +489,15 @@ def request(workspace, payload):
                   "table-statistics": map_attributes.statistics, "table-unique-values": map_attributes.unique_values,
                   "table-feature": map_attributes.feature_attributes}[action]
         return reader(file, name, payload)
-    if action == "crs-search":
-        from guizhi.infrastructure.crs_options import coordinate_options
+    if action in {"crs-search", "crs-projection-options"}:
+        from guizhi.infrastructure.crs_options import coordinate_options, projection_options
 
-        return coordinate_options(str(payload.get("query", "")))
+        query = str(payload.get("query", ""))
+        if action == "crs-search":
+            return coordinate_options(query)
+        ref = payload["ref"]
+        layer = raster_layer(workspace, ref, None) if ref.get("artifact") == "raster_preview" else describe(workspace, ref)
+        return projection_options(workspace, layer, query)
     if action == "material":
         item = map_material(workspace, payload["ref"])
         name = item["layer"]
