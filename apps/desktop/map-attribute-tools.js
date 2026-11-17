@@ -12,8 +12,7 @@ const valueLabel = (value, type) => value === null ? '空值' : value === '' ? '
 
 const axes = { center_x: '质心 X 坐标', center_y: '质心 Y 坐标' };
 export function geometryProperties(layer) {
-    if (!layer?.crs) return {};
-    const shape = layer.geometry?.split(' ')[0];
+    const shape = layer?.geometry?.split(' ')[0];
     if (/^(Multi)?Polygon$/.test(shape)) return { area: '面积', perimeter: '周长', ...axes };
     if (/^(Multi)?LineString$/.test(shape)) return { length: '长度', ...axes };
     if (shape === 'Point') return { point_x: 'X 坐标', point_y: 'Y 坐标' };

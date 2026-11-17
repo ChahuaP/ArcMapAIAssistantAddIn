@@ -25,7 +25,7 @@ def describe(ctx):
         from pyproj import CRS
 
         crs = CRS(crs).to_string()
-    return {"statistics": {"feature_count": info["features"], "coordinate_system": coordinates,
+    return {"value": info["features"], "statistics": {"feature_count": info["features"], "coordinate_system": coordinates,
                            "layer": ctx.request.inputs[0].layer}, "revision": ctx.selection_hashes[0],
             "layer": ctx.request.inputs[0].layer, "bounds": bounds if bounds and np.isfinite(bounds).all() else None,
             "crs": crs, "crs_name": info.get("source_crs_name"),

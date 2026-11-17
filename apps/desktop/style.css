@@ -821,9 +821,10 @@ dialog label { display: grid; gap: 5px; }
 .gis-flow-node .gis-flow-port:is([data-port-type=condition],[data-port-type=values],[data-port-type=number]) .react-flow__handle,
 .gis-flow-node:is([data-kind=condition],[data-kind=values],[data-kind=number]) .react-flow__handle.source { background: var(--tile-violet); }
 .gis-flow-node .react-flow__handle { width: 11px; height: 11px; background: var(--primary); border: 2px solid var(--panel); }
+.gis-flow-node .react-flow__handle.connectable::after { content: ""; position: absolute; inset: -5px; }
+.gis-flow-node .react-flow__handle.connectable:hover { outline: 1px solid var(--focus); }
 .gis-flow-output { position: relative; text-align: right; color: var(--tile-blue); padding: 3px 11px; font-size: 11px; }
 .gis-flow-node[data-kind=selection] .gis-flow-output { color: var(--tile-ochre); }
-.gis-flow-node[data-kind=statistics] .gis-flow-output, .gis-flow-node[data-kind=table] .gis-flow-output { color: var(--tile-violet); }
 .gis-flow-node[data-state=done] { border-color: var(--success); }
 .gis-flow-node[data-state=error] { border-color: var(--error); }
 .react-flow__node.selected .gis-flow-node, .react-flow__node:focus-visible .gis-flow-node { outline: 2px solid var(--focus); outline-offset: 2px; }

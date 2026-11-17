@@ -33,8 +33,8 @@ TOOLS = {
     "vector.update_overlay": (["输入图层", "更新图层"], "layer"),
     "vector.symmetric_difference": (["输入图层", "叠加图层"], "layer"),
     "vector.spatial_join": (["目标图层", "连接图层"], "layer"),
-    "vector.area": (["面图层"], "statistics"),
-    "data.describe": (["图层"], "statistics"),
+    "vector.area": (["面图层"], "number"),
+    "data.describe": (["图层"], "number"),
     "data.copy": (["图层"], "layer"),
     "data.merge": (["输入图层", "合并图层"], "layer"),
     "table.add_field": (["图层"], "layer"),
@@ -43,7 +43,7 @@ TOOLS = {
     "geometry.repair": (["图层"], "layer"),
     "crs.reproject": (["矢量图层"], "layer"),
     "crs.assign": (["矢量图层"], "layer"),
-    "raster.statistics": (["影像"], "statistics"),
+    "raster.statistics": (["影像"], "number"),
     "raster.clip": (["影像", "裁切范围"], "layer"),
     "raster.reproject": (["影像"], "layer"),
     "raster.mosaic": (["影像", "拼接影像"], "layer"),
@@ -52,6 +52,8 @@ TOOLS = {
     "flow.condition": (["图层"], "condition"),
     "flow.calculate": ([], "number"),
 }
+
+OUTPUT_LABELS = {"vector.area": "面积（平方米）", "data.describe": "要素数", "raster.statistics": "波段数"}
 
 # These ports are optional when the node has a literal value in its editor.
 VALUE_PORTS = {
@@ -95,7 +97,8 @@ class FlowIssue(ValueError):
 
 def catalog():
     return [{"operation": name, "inputs": inputs, "valuePorts": [label for label, _, _ in VALUE_PORTS.get(name, ())],
-             "inputTypes": input_types(name), "output": output, "title": CAPABILITIES[name].title}
+             "inputTypes": input_types(name), "output": output, "outputLabel": OUTPUT_LABELS.get(name),
+             "title": CAPABILITIES[name].title}
             for name, (inputs, output) in TOOLS.items()]
 
 

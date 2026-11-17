@@ -112,7 +112,7 @@ def statistics(ctx, observed_on: date | None = None):
                           "mean": fsum(sums) / (count / (src.width * src.height)) if count else None})
     info.update(observed_on=observed_on.isoformat() if observed_on else None, band_statistics=bands)
     ctx.json("raster.json", info, "raster")
-    return {"raster": info, "statistics": {"band_count": info["bands"],
+    return {"raster": info, "value": info["bands"], "statistics": {"band_count": info["bands"],
             "valid_samples": sum(item["valid_count"] for item in bands),
             "nodata_samples": sum(item["nodata_count"] for item in bands)}}
 

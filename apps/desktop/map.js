@@ -1525,7 +1525,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 command('删除字段', () => openTool('table.delete_field'), { disabled: busy || Boolean(edit) || !layer.fields?.length }),
                 command('字段计算器', () => openTool('table.calculate_field'), { disabled: busy || Boolean(edit) || !layer.fields?.length }),
                 command('计算几何', () => openTool('table.calculate_geometry'), {
-                    disabled: busy || Boolean(edit) || !Object.keys(geometryProperties(layer)).length }),
+                    disabled: busy || Boolean(edit) || !layer.crs || !Object.keys(geometryProperties(layer)).length }),
                 command('高级排序', () => setTableDialog({ kind: 'sort' }), { icon: glyph('sort'), disabled: busy }),
                 command('统计', () => setTableDialog({ kind: 'stats' }), { icon: glyph('statistics'), disabled: busy || !tableFields.length }),
                 command('切换选择', invertSelection, { icon: glyph('select'), disabled: busy }),

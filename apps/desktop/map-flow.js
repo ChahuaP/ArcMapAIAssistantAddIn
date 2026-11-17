@@ -9,12 +9,13 @@ const { Button, Input, Modal, Popover } = window.antd;
 const api = window.guizhi;
 const layerKey = layer => layer.ref.run + ':' + layer.ref.artifact;
 const dragType = 'application/x-guizhi-flow';
-const outputs = { layer: '图层', selection: '筛选结果', statistics: '统计结果', table: '属性表',
+const outputs = { layer: '输出图层', selection: '筛选图层', table: '属性表',
     values: '唯一值', condition: '查询条件', number: '数值' };
 const headings = { area_m2: '合并面积（平方米）', feature_count: '要素数', selected_count: '选中要素数',
     updated: '计算要素数', row_count: '记录数', distinct_count: '唯一值数', width: '宽度（像元）',
     height: '高度（像元）', band_count: '波段数' };
 const writesFields = new Set(['table.add_field', 'table.delete_field', 'table.calculate_geometry', 'table.calculate_field']);
+const overlayFields = new Set(['vector.intersect', 'vector.union', 'vector.identity', 'vector.symmetric_difference', 'vector.spatial_join']);
 const inputTool = { title: '图层来源', inputs: [], inputTypes: [], output: 'layer' };
 const graphNode = (node, definition, result, failed) => ({ id: node.id, type: 'operation', position: { x: node.x, y: node.y },
     data: { ...node, definition, result, failed }, ariaLabel: node.label || definition.title });
@@ -35,6 +36,7 @@ function OperationNode({ id, data }) {
     const [renaming, rename] = useState(false);
     useEffect(() => { updateHandles(id); }, [id, showOutput, updateHandles]);
     const layer = result?.layers[0];
+    const outputLabel = definition.outputLabel || outputs[definition.output];
     const coordinate = result?.statistics?.projection?.target || result?.statistics?.coordinate_system;
     const crsLabel = coordinate?.code || (/^EPSG:\d+$/.test(layer?.crs) ? layer.crs : layer?.crsName);
     return h('div', { className: 'gis-flow-node', 'data-kind': definition.output,
@@ -49,14 +51,14 @@ function OperationNode({ id, data }) {
                     title: label, 'aria-label': label }), label)),
         editor.length > 0 && h('fieldset', { className: 'gis-flow-fields nodrag nopan nowheel', disabled: lock },
             editor.map((control, index) => h(window.React.Fragment, { key: index }, control))),
-        showOutput && h('div', { className: 'gis-flow-output' }, outputs[definition.output],
-            h(Handle, { type: 'source', position: Position.Right, title: '连接到下游节点', 'aria-label': outputs[definition.output] + '输出' })),
+        showOutput && h('div', { className: 'gis-flow-output' }, outputLabel,
+            h(Handle, { type: 'source', position: Position.Right, title: '拖到下一个节点的输入端口', 'aria-label': outputLabel })),
         result && h('div', { className: 'gis-flow-result nodrag nopan nowheel' },
             layer && h('div', { className: 'gis-flow-result-layer' }, h('strong', { title: layer.name }, layer.name),
                 crsLabel && h('span', { title: coordinate?.name || layer.crsName || crsLabel }, crsLabel)),
             Object.entries(result.statistics || {}).filter(([name, value]) => headings[name] && typeof value === 'number').map(([name, value]) =>
                 h('div', { key: name }, headings[name] + ' ' + metric(value))),
-            definition.output !== 'condition' && Object.hasOwn(result, 'value') && (Array.isArray(result.value)
+            !definition.outputLabel && definition.output !== 'condition' && Object.hasOwn(result, 'value') && (Array.isArray(result.value)
                 ? h('details', null, h('summary', null, '查看唯一值'), h('div', { className: 'gis-flow-values' },
                     result.value.map((value, i) => h('div', { key: i }, value == null ? '空值' : value === '' ? '空字符串' : String(value)))))
                 : h('output', null, String(result.value))),
@@ -77,6 +79,33 @@ const nodeTypes = { operation: OperationNode };
 
 function metric(value) {
     return typeof value === 'number' ? value.toLocaleString('zh-CN', { maximumFractionDigits: 3 }) : '—';
+}
+
+function combineLayerMetadata(operation, output, other) {
+    const family = geometry => geometry.split(' ')[0].replace(/^Multi/, '');
+    if (operation === 'vector.intersect') {
+        const dimension = geometry => ['Point', 'LineString', 'Polygon'].indexOf(family(geometry));
+        const second = dimension(other.geometry);
+        if (second >= 0 && second < dimension(output.geometry)) output.geometry = other.geometry;
+    }
+    if (operation === 'data.merge' || operation === 'vector.update_overlay') {
+        if (family(output.geometry) !== family(other.geometry)) output.geometry = 'Unknown';
+        const fields = new Map(output.fields.map(field => [field.name, field]));
+        for (const field of other.fields) {
+            if (!fields.has(field.name)) fields.set(field.name, field);
+        }
+        output.fields = [...fields.values()];
+    } else if (overlayFields.has(operation)) {
+        const used = new Set(['geometry']);
+        output.fields = [output.fields, other.fields].flatMap((fields, i) => fields.map(field => {
+            let name = field.name;
+            while (used.has(name.toLowerCase())) name += '_' + (i + 1);
+            used.add(name.toLowerCase());
+            return { ...field, name };
+        }));
+        if (operation === 'vector.spatial_join') output.fields.push(
+            { name: 'join_count', type: 'int64' }, { name: 'join_fid', type: 'float64' });
+    }
 }
 
 export function MapFlow({ open, layers, busy, setBusy, close, glyph, onLayers, onHighlight, onApply, request, components }) {
@@ -188,7 +217,10 @@ export function MapFlow({ open, layers, busy, setBusy, close, glyph, onLayers, o
             crs: 'EPSG:' + form.parameters.epsg, units: node.data.settings.coordinate?.units, fields: [], unavailable: true,
         });
         else if (inputs[0] && ['layer', 'selection'].includes(tool.output)) {
-            const inherited = { ...inputs[0], unavailable: true };
+            const inherited = { ...inputs[0], fields: inputs[0].fields || [], unavailable: true };
+            if (inputs[0].geometry && inputs[1]?.geometry) {
+                combineLayerMetadata(operation, inherited, inputs[1]);
+            }
             if (['crs.reproject', 'crs.assign', 'raster.reproject'].includes(operation)) {
                 inherited.crs = form.parameters.definition || form.parameters.target_crs;
                 inherited.units = node.data.settings.coordinate?.units;

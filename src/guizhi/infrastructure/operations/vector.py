@@ -16,7 +16,8 @@ def area(ctx):
     if crs is None or not crs.is_projected or len(crs.axis_info) != 2:
         raise ValueError("请先将图层转换到适用的投影坐标系，再汇总面积")
     scale = crs.axis_info[0].unit_conversion_factor * crs.axis_info[1].unit_conversion_factor
-    return {"statistics": {"feature_count": len(frame), "area_m2": float(shapely.area(shapely.union_all(frame.geometry)) * scale)}}
+    area_m2 = float(shapely.area(shapely.union_all(frame.geometry)) * scale)
+    return {"statistics": {"feature_count": len(frame), "area_m2": area_m2}, "value": area_m2}
 
 
 def buffer(ctx, distance: float, unit: Unit, cap: Literal["round", "flat", "square"] = "round",
@@ -59,14 +60,14 @@ def overlay(ctx, how, polygons=False):
     for frame in ctx.frames:
         valid(frame, polygon=polygons)
     frames = separate_fields(ctx.frames)
+    order = list(range(len(frames)))
     if how == "intersection":
-        frames.sort(key=lambda frame: shapely.get_dimensions(frame.geometry.to_numpy()).max(initial=2)
-                    if frame.empty else shapely.get_dimensions(frame.geometry.to_numpy()).min())
-    left, *rest = frames
+        order.sort(key=lambda index: shapely.get_dimensions(frames[index].geometry.to_numpy()).min(initial=2))
+    left, *rest = [frames[index] for index in order]
     for other in rest:
         ctx.check()
         left = geopandas.overlay(left, other, how=how, keep_geom_type=True, make_valid=False)
-    ctx.publish(left, geometry_type=ctx.info[0]["geometry_type"] if left.empty else None)
+    ctx.publish(left, geometry_type=ctx.info[order[0]]["geometry_type"] if left.empty else None)
 
 
 def intersect(ctx):
