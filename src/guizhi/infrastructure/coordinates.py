@@ -134,7 +134,7 @@ def shp_definition(path):
     projections = [file for file in path.parent.iterdir()
                    if file.name.casefold() == projection_name.casefold() and file.is_file()]
     if not projections:
-        raise ValueError(f"未找到同名坐标文件 {projection_name}，请将它与 .shp 放在同一文件夹")
+        raise ValueError(f"SHP 缺少坐标系定义。请将同名的 {projection_name} 与 SHP 放在同一文件夹")
     if len(projections) != 1:
         raise ValueError(f"找到多个同名坐标文件 {projection_name}，请保留正确的一个")
     projection = projections[0]
@@ -154,6 +154,8 @@ def import_definition(workspace, path, layer=None):
 
         files = source_files(path)
         with rasterio.open(path) as src:
+            if src.crs is None:
+                raise ValueError(f"{path.name} 没有坐标系定义")
             raw = src.crs.to_wkt()
         evidence = {"source_sha256": source_revision(files), "source_files": [str(item) for item in files]}
     elif suffix in {".gpkg", ".geojson"}:

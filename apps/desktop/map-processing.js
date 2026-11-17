@@ -334,7 +334,8 @@ export function MapTool({ operation, active, layers, entries, components, openCo
         else setIds(old => Object.assign([...old], { [index]: value }));
         if (!index) setValues(initial);
         setError('');
-    }, { showSearch: true, optionFilterProp: 'label', ...(definition.multiple && { mode: 'multiple', maxCount: 32, maxTagCount: 'responsive' }) }));
+    }, { showSearch: true, optionFilterProp: 'label', notFoundContent: records.length ? '没有匹配的图层' : '暂无图层',
+        ...(definition.multiple && { mode: 'multiple', maxCount: 32, maxTagCount: 'responsive' }) }));
     const selectors = definition.accepts.map((accepts, index) => pickLayer(index, layers.filter(item => accepts(item) &&
         (definition.multiple || !ids.some((id, slot) => slot !== index && key(item) === id)))));
     const form = toolForm(definition, inputs, values, update, entries);

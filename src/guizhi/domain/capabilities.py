@@ -88,7 +88,7 @@ CAPABILITIES = {
     "geometry.explode": Capability("拆分多部件"),
     "geometry.repair": Capability("修复几何", edit=True),
     "map_raster.preview": Capability("生成影像预览", kinds=("raster",)),
-    "raster.statistics": Capability("栅格信息、波段统计与 NoData 检查", kinds=("raster",)),
+    "raster.statistics": Capability("栅格信息、波段统计与无数据像元检查", kinds=("raster",)),
     "raster.clip": Capability("按范围裁切栅格", 2, 2, kinds=("raster", "vector")),
     "raster.reproject": Capability("栅格重投影与重采样", version="1.1.0", kinds=("raster",)),
     "raster.assign": Capability("定义影像坐标系", kinds=("raster",)),

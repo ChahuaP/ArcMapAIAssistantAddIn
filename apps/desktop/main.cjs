@@ -13,6 +13,8 @@ const { listModels, checkModelConnection, testModel } = require('./model-service
 const { formats, materialBindings } = require('./materials.cjs');
 const { ArcGisSync } = require('./arcgis-sync.cjs');
 const { DiagnosticsUpload } = require('./diagnostics-upload.cjs');
+const { prepareConversation, uploadConversation } = require('./conversation-feedback.cjs');
+const { conversationRetentionDays } = require('./conversation-schema.cjs');
 const { Updater } = require('./updater.cjs');
 const { Components } = require('./components.cjs');
 const { action, parameterValues, parametersReady, isBusinessRequest, matchBusiness, reference } = require('./task-commands.js');
@@ -163,6 +165,8 @@ async function startDesktop(options) {
     let quitting = false;
     let closing = false;
     let toolJob;
+    let feedback;
+    let feedbackSending;
     window.on('close', event => {
         if (!quitting) { event.preventDefault(); window.hide(); }
     });
@@ -174,7 +178,7 @@ async function startDesktop(options) {
         desktop.close();
         sync.close();
         speech.cancel();
-        void Promise.allSettled([toolJob]).then(() => {
+        void Promise.allSettled([toolJob, feedbackSending]).then(() => {
             diagnostics.close();
             return controller.close();
         }).finally(() => { quitting = true; tray.destroy(); app.quit(); });
@@ -206,7 +210,8 @@ async function startDesktop(options) {
     bind('updatePrepare', () => updater.prepare());
     bind('updateCancel', () => updater.cancel());
     bind('updateApply', async () => {
-        if (toolJob || controller.active || controller.modelTesting || controller.hostBusy || controller.skillBusy || components.active.size) {
+        if (toolJob || feedbackSending || controller.active || controller.modelTesting || controller.hostBusy ||
+                controller.skillBusy || components.active.size) {
             throw new Error('请在当前操作结束后重启更新');
         }
         await updater.apply();
@@ -466,6 +471,29 @@ async function startDesktop(options) {
     bind('diagnosticsUpload', (surface, enabled) => {
         if (surface !== window) throw new Error('请在工作台修改故障上报设置');
         return diagnostics.enable(enabled);
+    }, true);
+    function checkFeedback(surface) {
+        if (surface !== window || closing) throw new Error('请从工作台上传会话');
+        if (feedbackSending) throw new Error('会话正在上传，请稍候');
+        if (controller.active || controller.delivery) throw new Error('请等待本轮结束后再上传会话');
+    }
+    bind('conversationPreview', surface => {
+        checkFeedback(surface);
+        feedback = { ...prepareConversation(controller.tasks, version), newest: controller.tasks[0].id };
+        const { id, text, turns } = feedback.preview;
+        return { id, text, turns, retentionDays: conversationRetentionDays };
+    }, true);
+    bind('conversationUpload', async (surface, id) => {
+        checkFeedback(surface);
+        if (!feedback || feedback.preview.id !== id || feedback.newest !== controller.tasks[0]?.id) {
+            throw new Error('会话内容已变化，请关闭后重新打开上传预览');
+        }
+        feedbackSending = uploadConversation(feedback.body);
+        try {
+            await feedbackSending;
+            feedback = undefined;
+            return id;
+        } finally { feedbackSending = undefined; }
     }, true);
     bind('speechConfigure', input => {
         const settings = speech.configure(input);
@@ -772,6 +800,7 @@ async function startDesktop(options) {
         desktop.notify('draft', draft);
     }
     function resetConversation(next = {}, fromVoice = false) {
+        feedback = undefined;
         const state = controller.resetConversation();
         clearImages();
         setVoiceReply(null);
@@ -928,13 +957,15 @@ async function startDesktop(options) {
         if (await shell.openPath(await controller.approvalSource(...args))) throw new Error('无法打开依据');
     });
     bind('coordinateFile', async kind => {
-        if (!['definition', 'points'].includes(kind)) throw new Error('请选择坐标材料类型');
-        const pick = await dialog.showOpenDialog(window, { properties: ['openFile'], filters: [
-            { name: '坐标材料', extensions: ['shp', 'gpkg', 'geojson', ...(kind === 'definition' ? ['tif', 'tiff', 'img'] : [])] },
+        const titles = { definition: '选择带坐标系定义的地图数据', points: '选择控制点文件', vector: '选择待转换的矢量文件' };
+        if (!Object.hasOwn(titles, kind)) throw new Error('请选择有效的数据类型');
+        const pick = await dialog.showOpenDialog(window, { title: titles[kind], properties: ['openFile'], filters: [
+            { name: kind === 'definition' ? '地图数据' : '矢量数据',
+                extensions: ['shp', 'gpkg', 'geojson', ...(kind === 'definition' ? ['tif', 'tiff', 'img'] : [])] },
         ] });
         if (pick.canceled) return null;
         const file = externalPath(pick.filePaths[0]);
-        return kind === 'points' || ['.gpkg', '.geojson'].includes(path.extname(file).toLowerCase())
+        return kind !== 'definition' || ['.gpkg', '.geojson'].includes(path.extname(file).toLowerCase())
             ? controller.describe(file) : { file, name: path.basename(file), layers: [], layer: null };
     });
     bind('importCoordinate', async (file, layer) => {

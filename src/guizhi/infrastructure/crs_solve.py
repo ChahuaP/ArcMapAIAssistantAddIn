@@ -224,7 +224,7 @@ def solve(workspace, payload):
         raise ValueError("控制点图层与所选源或目标坐标定义不一致")
     method = payload.get("method")
     if method not in METHODS:
-        raise ValueError("请选择已有转换、二维相似、二维仿射或三维相似")
+        raise ValueError("请选择标准转换、二维相似、二维仿射或三维相似")
     dimension = 3 if method == "similarity-3d" else 2
     units = [unit_for(item, dimension) for item in (source, target)]
     tolerance = float(payload["tolerance"])
@@ -247,7 +247,7 @@ def solve(workspace, payload):
                                                        for item in available], "missing_grids": missing}
         selected = next((item for item in available if item["id"] == choice), available[0] if not choice else None)
         if not selected:
-            raise ValueError("所选已有转换已变化，请重新查询")
+            raise ValueError("所选标准转换已变化，请重新核验")
         if selected["area"] and (area[0] < selected["area"][0] or area[1] < selected["area"][1] or
                                  area[2] > selected["area"][2] or area[3] > selected["area"][3]):
             raise ValueError("检查点范围超出所选转换的适用区域")
@@ -280,7 +280,7 @@ def solve(workspace, payload):
         tokens += [f"+s{i+1}{j+1}={matrix[i,j]:.17g}" for i in range(dimension) for j in range(dimension)]
         pipeline = "+proj=pipeline +step +proj=affine " + " ".join(tokens)
     if len(checks) < 3:
-        raise ValueError("已有转换也需要至少 3 个独立检查点")
+        raise ValueError("标准转换需要至少 3 对独立检查点")
     title = str(payload.get("title") or label).strip()
     previous = get(workspace, "plan", payload["replace"]) if payload.get("replace") else None
     identifier = previous["id"] if previous else uuid4().hex

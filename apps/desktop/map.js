@@ -169,7 +169,7 @@ function CoordinateTools({ layer, display, setDisplay, entries, openTool, fail, 
     const plans = entries.filter(entry => entry.kind === 'plan');
     const prefix = layer?.kind === 'raster' ? 'raster.' : 'crs.';
     return h('div', { className: 'map-coordinate' },
-        h('span', null, layer?.crsName || '尚未添加图层'),
+        h('span', null, layer ? layer.crsName || '图层未定义坐标系' : '暂无图层'),
         h(Choice, { showSearch: true, filterOption: false, allowClear: true, onSearch: search,
             placeholder: '地图显示坐标系', 'aria-label': '地图显示坐标系',
             options: [...options, ...(display?.value && !catalog.some(item => item.value === display.value) ? [display] : [])],
@@ -1523,7 +1523,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                             names.length > 0 && h('span', { className: 'muted' }, '（' + names.join('、') + '）')))
                         : '当前视野仅显示部分要素，放大后可查看更多。'))),
         h('footer', { className: 'map-status' },
-            h('span', null, layers.length + ' 个图层'),
+            h('span', null, layers.length ? layers.length + ' 个图层' : '暂无图层'),
             layer && h('span', null, layer.name),
             picked.length > 0 && h('span', null, '已选 ' + picked.length + ' 个要素'),
             h('span', { className: 'map-status-crs', title: display?.label || native?.crsName }, glyph('globe', 14),

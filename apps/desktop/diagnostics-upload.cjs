@@ -9,14 +9,18 @@ const { validReport, uuid, run, identifier, maxReportBytes, maxErrorBytes, forma
 const endpoint = 'https://123.56.108.57:8443/guizhi/v1/diagnostics';
 const retentionMs = 14 * 86_400_000;
 
-function reportError(error, secret) {
-    if (typeof error !== 'string' || !error.trim()) return;
-    let text = secret ? error.replaceAll(secret, '[已隐藏凭据]') : error;
-    // Child-process exceptions may include the full command and a JSON response from the provider.
-    text = text.replace(/^Command failed(?: with exit code [0-9]+)?: [^\r\n]*/i, '子进程执行失败')
+function redactCredentials(text) {
+    return text
         .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9+/_.~=-]+/gi, '$1 [已隐藏凭据]')
         .replace(/(["']?(?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|secret|password|authorization|cookie)["']?\s*[:=]\s*)(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;&}\]]+)/gi, '$1[已隐藏凭据]')
-        .replace(/\b(?:sk-|ghp_|github_pat_)[A-Za-z0-9_-]{8,}/g, '[已隐藏凭据]')
+        .replace(/\b(?:sk-|ghp_|github_pat_)[A-Za-z0-9_-]{8,}/g, '[已隐藏凭据]');
+}
+
+function reportError(error, secret) {
+    if (typeof error !== 'string' || !error.trim()) return;
+    // Child-process exceptions may include the full command and a JSON response from the provider.
+    const redacted = secret ? error.replaceAll(secret, '[已隐藏凭据]') : error;
+    const text = redactCredentials(redacted.replace(/^Command failed(?: with exit code [0-9]+)?: [^\r\n]*/i, '子进程执行失败'))
         .replace(/(["'](?:prompt|messages|request_body|response_body|payload)["']\s*:\s*)[^\r\n]*/gi, '$1[已隐藏请求内容]')
         .replace(/\b(?:https?|file):\/\/[^\s"'<>]+/gi, '[已隐藏地址]')
         .replace(/(["'])(?:[a-z]:[\\/]|\\\\|\/)[^"'\r\n]*\1/gi, '$1[已隐藏路径]$1')
@@ -151,4 +155,4 @@ class DiagnosticsUpload {
     }
 }
 
-module.exports = { DiagnosticsUpload };
+module.exports = { DiagnosticsUpload, redactCredentials };

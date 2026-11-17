@@ -74,6 +74,9 @@ svg { flex: none; vertical-align: middle; }
 .conversation-empty .compose-wrap { flex: none; }
 .task-head { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); padding: var(--space-4) var(--column-inset); border-bottom: 1px solid var(--line); }
 .task-head h1 { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.task-head-actions { display: flex; flex: none; align-items: center; gap: var(--space-2); }
+.conversation-feedback { display: grid; gap: var(--space-2); min-width: 0; }
+.conversation-feedback textarea { max-height: min(360px, 48vh); resize: vertical; }
 .status-tag { border-radius: 20px; padding: 4px 10px; color: var(--accent); background: var(--soft); white-space: nowrap; font-size: 12px; }
 .messages { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: var(--space-4); padding: var(--space-4) var(--column-inset); }
 .welcome { margin: auto; width: min(100%, 750px); text-align: center; padding: var(--space-4); }
@@ -233,6 +236,14 @@ dialog label { display: grid; gap: 5px; }
 }
 .coordinate-page { justify-items: start; }
 .coordinate-tabs, .coordinate-record { width: 100%; }
+.coordinate-controls, .coordinate-guide[open] { display: grid; justify-items: start; width: 100%; gap: var(--space-2); min-width: 0; }
+.coordinate-controls h3 { margin: 0; }
+.coordinate-help { margin: 0; line-height: 1.55; overflow-wrap: anywhere; }
+.coordinate-wizard label + .coordinate-help { margin-top: var(--space-2); }
+.coordinate-guide { width: 100%; }
+.coordinate-guide summary { cursor: pointer; }
+.coordinate-guide table { width: 100%; table-layout: fixed; border-collapse: collapse; }
+.coordinate-guide :is(th, td) { padding: var(--space-2); border-bottom: 1px solid var(--line); text-align: left; overflow-wrap: anywhere; }
 .shortcut-capture { min-width: 150px; }
 .shortcut-capture[aria-pressed=true] { border-color: var(--focus); background: var(--soft); }
 .about-product { display: grid; gap: var(--space-2); }

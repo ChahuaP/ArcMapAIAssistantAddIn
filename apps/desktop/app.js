@@ -110,6 +110,40 @@
             h('button', { className: 'report', onClick: () => retry(task) }, '继续处理'));
     }
 
+    function ConversationFeedback({ close }) {
+        const [preview, setPreview] = useState(null);
+        const [sending, setSending] = useState(false);
+        const [receipt, setReceipt] = useState('');
+        const [error, setError] = useState('');
+        useEffect(() => {
+            let mounted = true;
+            api.conversationPreview().then(value => { if (mounted) setPreview(value); })
+                .catch(issue => { if (mounted) setError(errorText(issue)); });
+            return () => { mounted = false; };
+        }, []);
+        async function send() {
+            setError('');
+            setSending(true);
+            try { setReceipt(await api.conversationUpload(preview.id)); }
+            catch (issue) { setError(errorText(issue)); }
+            finally { setSending(false); }
+        }
+        return h(antd.Modal, { open: true, centered: true, width: 640, title: '上传本次会话',
+            closable: !sending, keyboard: !sending, maskClosable: false,
+            onCancel: close, onOk: receipt ? close : send, confirmLoading: sending,
+            okText: receipt ? '完成' : '确认上传', okButtonProps: { disabled: !preview },
+            cancelText: '取消', cancelButtonProps: { disabled: sending, ...(receipt && { style: { display: 'none' } }) } },
+            h('div', { className: 'conversation-feedback' }, receipt
+                ? h('p', { role: 'status' }, '会话已上传。反馈编号 ', h('code', null, receipt))
+                : preview ? h(React.Fragment, null,
+                    h('p', null, '共 ' + preview.turns + ' 轮，包含提问、回复、办理过程、附件名称和故障编号。'
+                        + '内容将发送到项目服务器，保存 ' + preview.retentionDays + ' 天，用于改进软件。'),
+                    h('p', { className: 'muted' }, '请确认下方内容适合分享。'),
+                    h(antd.Input.TextArea, { rows: 10, readOnly: true, value: preview.text, 'aria-label': '待上传的会话内容' }))
+                    : !error && h('p', { role: 'status' }, '正在准备会话预览…'),
+            error && h('p', { className: 'error', role: 'alert' }, error)));
+    }
+
     function App() {
         const [state, setState] = useState(null);
         const currentWorkspace = useRef(null);
@@ -125,6 +159,7 @@
         const [parcel, selectParcel] = useState(null);
         const [settings, showSettings] = useState(false);
         const [showLog, setShowLog] = useState(false);
+        const [showFeedback, setShowFeedback] = useState(false);
         const [error, setError] = useState('');
         const [sending, setSending] = useState(false);
         const [coordinates, setCoordinates] = useState([]);
@@ -635,7 +670,10 @@
         };
         const conversation = h('section', { className: 'conversation' + (task ? '' : ' conversation-empty'), 'aria-label': '办理对话' },
             task && h('div', { className: 'task-head' }, h('h1', null, turns[0].title),
-                h('span', { className: 'status-tag' }, labels[task.status] || '未完成')),
+                h('div', { className: 'task-head-actions' },
+                    h('span', { className: 'status-tag' }, labels[task.status] || '未完成'),
+                    button('upload', '上传会话', { type: 'text', size: 'small', disabled: state.busy || sending,
+                        onClick: () => setShowFeedback(true) }))),
             h('div', { className: 'messages', ref: messages }, task ? turns.flatMap(item => [
                 h('article', { key: item.id + '-question', className: 'bubble user' },
                     item.images?.length > 0 && h(ImageAttachments, { images: item.images }), item.prompt),
@@ -771,6 +809,7 @@
             arcgis: () => { if (!mapEditing) showSettings('extensions'); },
             connected: Boolean(state?.arcgis?.host) });
         return h(Theme, { appearance }, layout,
+            showFeedback && h(ConversationFeedback, { close: () => setShowFeedback(false) }),
             business && h(Business, { catalog, choose, close: () => showBusiness('') }));
     }
     ReactDOM.createRoot(document.getElementById('app')).render(h(App));

@@ -7,6 +7,7 @@
         right: 'M3 4h18v16H3zM15 4v16', back: 'M19 12H5m6-6-6 6 6 6',
         splitView: 'M3 5h7v14H3zm11 0h7v14h-7z',
         plus: 'M12 5v14M5 12h14', send: 'M12 19V5M6 11l6-6 6 6',
+        upload: 'M12 16V3M7 8l5-5 5 5M4 16v5h16v-5',
         map: 'm3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3V6Zm6-3v15m6-12v15',
         mapView: 'M3 4h18v16H3zM16 11c0 2-4 6-4 6s-4-4-4-6a4 4 0 1 1 8 0Zm-4-1h.01',
         grid: 'M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z',
@@ -110,6 +111,7 @@
         const dark = appearance.dark;
         useEffect(() => { document.documentElement.dataset.theme = dark ? 'dark' : 'light'; }, [dark]);
         return h(ConfigProvider, { button: { autoInsertSpace: false },
+            locale: { Empty: { description: '暂无数据' } },
             csp: { nonce: document.querySelector('meta[name=style-nonce]').content },
             theme: { algorithm: dark ? theme.darkAlgorithm : theme.defaultAlgorithm,
                 token: { colorPrimary: dark ? '#8ec9ff' : '#086ca9', colorText: dark ? '#eef3fa' : '#152235',
