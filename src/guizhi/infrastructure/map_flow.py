@@ -185,31 +185,27 @@ def bind_values(node, inputs, ports):
         raise ValueError("一个工具节点只能连接一种计算来源")
     if node.operation == "data.select_by_attribute" and connected:
         if "where" in connected:
-            parameters = connected
-        else:
-            field = parameters.get("where", {}).get("field")
-            if not isinstance(field, str) or not field:
-                raise ValueError("请选择要与唯一值匹配的字段")
-            parameters = {"where": {"field": {"$literal": field}, "op": "in", **connected}}
-    elif node.operation == "table.calculate_field" and connected:
+            return connected
+        where = parameters.get("where")
+        field = where.get("field") if isinstance(where, dict) else None
+        if not isinstance(field, str) or not field:
+            raise ValueError("请选择要与唯一值匹配的字段")
+        return {"where": {"field": {"$literal": field}, "op": "in", **connected}}
+    if node.operation == "table.calculate_field" and connected:
         if not parameters.get("field"):
             raise ValueError("请选择写入字段")
-        parameters = {"field": {"$literal": parameters["field"]}, **connected}
-    else:
-        parameters.update(connected)
-    if connected:
-        # The registered operation validates the complete parameters after the upstream outputs resolve.
-        return parameters
+        parameters = {"field": parameters["field"]}
     if node.operation.startswith("raster."):
         from importlib.util import find_spec
 
         if find_spec("rasterio") is None:
             raise ValueError("请先安装栅格处理组件")
     try:
-        validated = parameter_model(handler(node.operation)).model_validate(parameters).model_dump(mode="json")
+        literals = {key: value for key, value in parameters.items() if key not in connected}
+        validated = parameter_model(handler(node.operation), skip=connected).model_validate(literals).model_dump(mode="json")
     except ValueError as error:
         raise ValueError("参数未填完整或类型有误") from error
-    if node.operation == "flow.calculate" and validated["operator"] == "divide" and validated["right"] == 0:
+    if node.operation == "flow.calculate" and validated["operator"] == "divide" and validated.get("right") == 0:
         raise ValueError("除数不能为 0")
     if node.operation == "data.select_by_attribute" and validated["where"] is None and validated["sql"] is None:
         raise ValueError("请填写属性查询条件或连接查询条件节点")
@@ -223,6 +219,8 @@ def bind_values(node, inputs, ports):
             CRS.from_user_input(epsg)
         except CRSError as error:
             raise ValueError("请选择有效的 EPSG 坐标系") from error
+    if connected:
+        return {**{key: {"$literal": value} for key, value in validated.items()}, **connected}
     return {"$literal": validated}
 
 
@@ -289,9 +287,16 @@ def run(workspace, payload):
         step = manifest[step_id]
         child = workspace.read(manifest[item.get("layerStep", step_id)]["run_id"])
         original = child["result"] if "layerStep" not in item else workspace.read(step["run_id"])["result"]
-        results.append({**item, "run": child["id"], "statistics": step["statistics"],
+        layers = output_layers(workspace, child, item["label"])
+        if TOOLS[item["operation"]][1] in {"layer", "selection"} and not layers:
+            return {"status": "failed", "message": "工具未生成可用的输出图层", "failedNode": item["node"]}
+        statistics = step["statistics"]
+        bands = original.get("raster", {}).get("band_statistics")
+        if bands is not None:
+            statistics = {**statistics, "band_statistics": bands}
+        results.append({**item, "run": child["id"], "statistics": statistics,
                         **{key: original[key] for key in ("value", "selection") if key in original},
-                        "layers": output_layers(workspace, child, item["label"]),
+                        "layers": layers,
                         "table": any(ref["step"] == "table" for ref in child["result"]["evidence"])})
     return {"status": "succeeded", "run": receipt["id"], "steps": results}
 

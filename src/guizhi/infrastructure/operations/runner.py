@@ -28,11 +28,12 @@ def handler(operation):
     return getattr(import_module(f"guizhi.infrastructure.operations.{domain}"), name)
 
 
-def parameter_model(function):
+def parameter_model(function, *, skip=()):
     fields = {}
     hints = get_type_hints(function, include_extras=True)
     for name, param in list(signature(function).parameters.items())[1:]:
-        fields[name] = (hints[name], ... if param.default is Parameter.empty else param.default)
+        if name not in skip:
+            fields[name] = (hints[name], ... if param.default is Parameter.empty else param.default)
     return create_model(function.__name__, __config__=ConfigDict(extra="forbid"), **fields)
 
 

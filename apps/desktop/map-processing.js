@@ -73,7 +73,7 @@ export function acceptsFlowLayer(operation, index, layer) {
 }
 
 const sameCrs = new Set(['vector.intersect', 'vector.erase', 'vector.clip', 'vector.union', 'vector.identity',
-    'vector.update_overlay', 'vector.symmetric_difference', 'vector.spatial_join', 'data.merge']);
+    'vector.update_overlay', 'vector.symmetric_difference', 'vector.spatial_join', 'data.merge', 'raster.clip', 'raster.mosaic']);
 
 export function flowInputIssue(operation, names, inputs, parameters, linked) {
     const invalid = inputs.findIndex((layer, index) => layer && !acceptsFlowLayer(operation, index, layer));
@@ -82,11 +82,13 @@ export function flowInputIssue(operation, names, inputs, parameters, linked) {
     if (!['data.describe', 'crs.assign'].includes(operation) && inputs.some(layer => layer?.crs === null))
         return '请先为输入图层定义实际坐标系';
     const destination = parameters.definition || parameters.target_crs;
-    if (['crs.reproject', 'raster.reproject'].includes(operation) && destination && destination === inputs[0]?.crs)
+    const codes = inputs.map(layer => layer?.crs);
+    if (['crs.reproject', 'raster.reproject'].includes(operation) && destination && destination === codes[0])
         return '请选择与源图层不同的目标坐标系';
-    if (sameCrs.has(operation) && inputs.every(layer => /^EPSG:\d+$/.test(layer?.crs)) && inputs[0].crs !== inputs[1].crs)
+    if (sameCrs.has(operation) && codes.every(code => /^EPSG:\d+$/.test(code)) && codes[0] !== codes[1])
         return '两个输入图层的坐标系不同，请先转换为同一坐标系';
-    if (['vector.area', 'vector.buffer'].includes(operation) && inputs[0]?.units === 'degrees')
+    if ((['vector.area', 'vector.buffer'].includes(operation) || operation === 'data.select_by_location' &&
+            parameters.predicate === 'within_a_distance') && inputs[0]?.units === 'degrees')
         return '请先将输入图层转换为投影坐标系';
     if (operation === 'flow.calculate' && parameters.operator === 'divide' && !linked[1] && parameters.right === 0)
         return '除数不能为 0';
@@ -189,8 +191,8 @@ function toolForm(definition, inputs, values, update, linked) {
     const input = inputs[0];
     const names = input?.fields?.map(item => item.name) || [];
     const fields = names.map(name => ({ value: name, label: name }));
-    const select = (name, label, choices, extra = {}) => field(label, dropdown(values[name], options(choices),
-        value => update(name, value), extra));
+    const select = (name, label, choices, defaultValue) => field(label, dropdown(values[name] ?? defaultValue, options(choices),
+        value => update(name, value)));
     const text = (name, label, placeholder) => field(label, h(Input, {
         value: values[name] ?? '', placeholder, onChange: event => update(name, event.target.value),
     }));
@@ -243,19 +245,24 @@ function toolForm(definition, inputs, values, update, linked) {
             valid &&= Number.isFinite(parameters.distance) && parameters.distance > 0;
         }
     } else if (id === 'vector.dissolve' || id === 'presentation.export_table') {
-        controls.push(columns('fields', '字段（选填）', { mode: 'multiple' }));
-        if (values.fields?.length) parameters = { fields: values.fields };
+        controls.push(columns('fields', '字段（选填）', { mode: 'multiple', maxTagCount: 'responsive' }));
+        if (values.fields?.length) {
+            parameters = { fields: values.fields };
+            valid &&= values.fields.every(name => names.includes(name));
+        }
+        if (id === 'presentation.export_table') valid &&= names.length > 0;
     } else if (id === 'table.add_field') {
         controls.push(text('name', '字段名称'), select('type', '字段类型', { string: '文本', integer: '整数',
             double: '小数', date: '日期时间' }));
-        parameters = { field: { name: values.name, type: values.type } };
-        valid &&= Boolean(values.name?.trim() && values.type);
+        const name = values.name?.trim();
+        parameters = { field: { name, type: values.type } };
+        valid &&= Boolean(name && values.type && ![...names, input?.fidField].some(field => field?.toLowerCase() === name.toLowerCase()));
     } else if (id === 'table.delete_field') {
         controls.push(columns('field', '删除字段'));
         parameters = { field: values.field };
         valid &&= names.includes(values.field);
     } else if (id === 'vector.spatial_join') {
-        controls.push(select('mode', '连接方式', { one_to_one: '一对一', one_to_many: '一对多' }));
+        controls.push(select('mode', '连接方式', { one_to_one: '一对一', one_to_many: '一对多' }, 'one_to_one'));
         parameters = { mode: values.mode || 'one_to_one' };
     } else if (id === 'crs.reproject' || id === 'crs.assign') {
         controls.push(coordinates(id === 'crs.assign' ? '数据的实际坐标系' : '目标坐标系'));
@@ -263,9 +270,9 @@ function toolForm(definition, inputs, values, update, linked) {
         valid &&= Boolean(parameters.definition);
     } else if (id === 'raster.reproject') {
         controls.push(coordinates('目标坐标系'), select('resampling', '重采样',
-            { nearest: '最邻近', bilinear: '双线性', cubic: '三次卷积' }));
-        parameters = { target_crs: values.coordinate?.value, resampling: values.resampling };
-        valid &&= Boolean(parameters.target_crs && parameters.resampling);
+            { nearest: '最邻近', bilinear: '双线性', cubic: '三次卷积' }, 'nearest'));
+        parameters = { target_crs: values.coordinate?.value, resampling: values.resampling || 'nearest' };
+        valid &&= Boolean(parameters.target_crs);
     }
     return { controls, valid, parameters };
 }

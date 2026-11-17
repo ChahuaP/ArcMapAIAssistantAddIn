@@ -29,12 +29,14 @@ const cleanGraph = (nodes, edges, forms, layerFor) => ({ nodes: nodes.map(node =
 })), connections: edges.map(connection) });
 
 function OperationNode({ id, data }) {
-    const { definition, failed, result, editor, name, lock, actions, showOutput } = data;
+    const { definition, failed, result, editor, name, lock, actions, showOutput, onMap } = data;
     const updateHandles = useUpdateNodeInternals();
     const [preview, showPreview] = useState(false);
     const [renaming, rename] = useState(false);
     useEffect(() => { updateHandles(id); }, [id, showOutput, updateHandles]);
     const layer = result?.layers[0];
+    const coordinate = result?.statistics?.projection?.target || result?.statistics?.coordinate_system;
+    const crsLabel = coordinate?.code || (/^EPSG:\d+$/.test(layer?.crs) ? layer.crs : layer?.crsName);
     return h('div', { className: 'gis-flow-node', 'data-kind': definition.output,
         'data-state': failed ? 'error' : result ? 'done' : undefined },
         renaming ? h(Input, { className: 'nodrag', size: 'small', autoFocus: true, maxLength: 100, 'aria-label': '节点名称',
@@ -47,27 +49,35 @@ function OperationNode({ id, data }) {
                     title: label, 'aria-label': label }), label)),
         editor.length > 0 && h('fieldset', { className: 'gis-flow-fields nodrag nopan nowheel', disabled: lock },
             editor.map((control, index) => h(window.React.Fragment, { key: index }, control))),
+        showOutput && h('div', { className: 'gis-flow-output' }, outputs[definition.output],
+            h(Handle, { type: 'source', position: Position.Right, title: '连接到下游节点', 'aria-label': outputs[definition.output] + '输出' })),
         result && h('div', { className: 'gis-flow-result nodrag nopan nowheel' },
+            layer && h('div', { className: 'gis-flow-result-layer' }, h('strong', { title: layer.name }, layer.name),
+                crsLabel && h('span', { title: coordinate?.name || layer.crsName || crsLabel }, crsLabel)),
             Object.entries(result.statistics || {}).filter(([name, value]) => headings[name] && typeof value === 'number').map(([name, value]) =>
-                h('div', { key: name }, headings[name] + ' ' + value.toLocaleString('zh-CN', { maximumFractionDigits: 3 }))),
+                h('div', { key: name }, headings[name] + ' ' + metric(value))),
             definition.output !== 'condition' && Object.hasOwn(result, 'value') && (Array.isArray(result.value)
                 ? h('details', null, h('summary', null, '查看唯一值'), h('div', { className: 'gis-flow-values' },
                     result.value.map((value, i) => h('div', { key: i }, value == null ? '空值' : value === '' ? '空字符串' : String(value)))))
                 : h('output', null, String(result.value))),
             result.statistics?.band_statistics && h('details', null, h('summary', null, '波段统计'),
-                result.statistics.band_statistics.map(band => h('p', { key: band.band },
-                    '波段 ' + band.band + ' · 有效像元 ' + band.valid_count + ' · 平均值 ' + (band.mean?.toFixed(3) ?? '—')))),
+                result.statistics.band_statistics.map(band => h('p', { key: band.band }, '波段 ' + band.band +
+                    ' · 有效像元 ' + band.valid_count + ' · 无数据像元 ' + band.nodata_count,
+                    h('br'), '最小 ' + metric(band.min) + ' · 最大 ' + metric(band.max) + ' · 平均 ' + metric(band.mean)))),
             h('div', { className: 'gis-flow-result-actions' },
-                layer && h(Button, { size: 'small', disabled: lock, onClick: () => actions.add() }, '加入地图'),
+                layer && h(Button, { size: 'small', type: onMap ? 'default' : 'primary', disabled: lock || onMap,
+                    onClick: actions.add }, onMap ? '已加入地图' : '加入地图'),
                 layer?.geometry && h(Button, { size: 'small', onClick: () => showPreview(!preview) }, preview ? '收起' : '预览'),
                 actions.apply && h(Button, { size: 'small', disabled: lock, onClick: actions.apply }, '应用到原图层'),
                 actions.highlight && h(Button, { size: 'small', disabled: lock, onClick: actions.highlight }, '高亮原图层'),
                 result.table && h(Button, { size: 'small', disabled: lock, onClick: actions.table }, '导出 CSV')),
-            preview && layer?.geometry && h(AttributePreview, { key: layerKey(layer), layer, field: data.field })),
-        showOutput && h('div', { className: 'gis-flow-output' }, outputs[definition.output],
-            h(Handle, { type: 'source', position: Position.Right, title: '连接到下游节点', 'aria-label': outputs[definition.output] + '输出' })));
+            preview && layer?.geometry && h(AttributePreview, { key: layerKey(layer), layer, field: data.field })));
 }
 const nodeTypes = { operation: OperationNode };
+
+function metric(value) {
+    return typeof value === 'number' ? value.toLocaleString('zh-CN', { maximumFractionDigits: 3 }) : '—';
+}
 
 export function MapFlow({ open, layers, busy, setBusy, close, glyph, onLayers, onHighlight, onApply, request, components }) {
     const [catalog, setCatalog] = useState([]);
@@ -118,6 +128,7 @@ export function MapFlow({ open, layers, busy, setBusy, close, glyph, onLayers, o
     }, [running]);
     const choices = layers.filter(layer => layer.geometry || layer.kind === 'raster')
         .map(layer => ({ value: layerKey(layer), label: layer.name, layer }));
+    const layerKeys = new Set(choices.map(item => item.value));
     const layerFor = id => choices.find(item => item.value === bindings[id])?.layer;
     const lock = running || pending || busy;
     const missingRaster = components?.raster?.installed === false;
@@ -194,23 +205,31 @@ export function MapFlow({ open, layers, busy, setBusy, close, glyph, onLayers, o
             if (operation === 'table.delete_field' && form.valid) {
                 inherited.fields = inherited.fields.filter(item => item.name !== form.parameters.field);
             }
-            if (operation === 'vector.buffer') inherited.geometry = 'MultiPolygon';
+            if (operation === 'vector.buffer') {
+                inherited.geometry = 'MultiPolygon';
+                if (form.parameters.dissolve) inherited.fields = [];
+            }
+            if (operation === 'vector.dissolve') {
+                inherited.fields = (inherited.fields || []).filter(item => form.parameters.fields?.includes(item.name));
+            }
             descriptors.set(id, inherited);
         }
         return descriptors.get(id);
     }
     nodes.forEach(node => describe(node.id));
+    const connectableOutputs = new Set(catalog.flatMap(tool => tool.inputTypes));
     const visibleNodes = nodes.map(node => {
         const id = node.id;
         const form = forms.get(id);
         const result = results[id];
         const isInput = node.data.operation === 'input';
         const currentInput = form?.input?.ref && !form.input.unavailable && choices.some(item => item.value === layerKey(form.input));
-        const showOutput = edges.some(link => link.source === id) || nodes.some(next =>
-            next.data.definition.inputTypes.some((_, port) => canConnect(id, next, String(port))));
+        const output = node.data.definition.output;
+        const showOutput = connectableOutputs.has(output === 'selection' ? 'layer' : output);
         return { ...node, selected: selected === id,
             data: { ...node.data, result, failed: failed === id || issues.some(issue => issue.node === id),
                 lock, showOutput, field: form?.parameters.field,
+                onMap: Boolean(result?.layers.length && result.layers.every(layer => layerKeys.has(layerKey(layer)))),
             name: label => setNodes(old => old.map(item => item.id === id ? { ...item,
                 ariaLabel: label || item.data.definition.title, data: { ...item.data, label } } : item)),
             label: isInput ? layerFor(id)?.name || node.data.label : node.data.label,
@@ -239,8 +258,7 @@ export function MapFlow({ open, layers, busy, setBusy, close, glyph, onLayers, o
         const tool = definition(request.operation);
         if (!tool) { setError('该工具尚未注册到流程'); return; }
         const layer = choices.find(item => item.value === request.layer)?.layer;
-        const bound = layer && tool.inputs.length &&
-            (!request.operation.startsWith('raster.') ? Boolean(layer.geometry) : layer.kind === 'raster') ? layer : null;
+        const bound = layer && tool.inputs.length && acceptsFlowLayer(request.operation, 0, layer) ? layer : null;
         if (nodes.length + 1 + Boolean(bound) > 16) { setError('请先为新工具留出流程节点'); return; }
         const row = nodes.length ? Math.max(...nodes.map(node => node.position.y + (node.measured?.height || 160))) + 44 : 36;
         const id = 'node-' + crypto.randomUUID().slice(0, 8);
@@ -383,7 +401,7 @@ export function MapFlow({ open, layers, busy, setBusy, close, glyph, onLayers, o
             } else {
                 setMessage('已完成 ' + result.steps.length + ' 个节点');
                 setResults(old => ({ ...old, ...Object.fromEntries(result.steps.map(step => [step.node, { ...step, flow: result.run }])) }));
-                select(target || result.steps.at(-1)?.node);
+                focusNode(target || result.steps.at(-1)?.node);
             }
         } catch (problem) { reportError(problem); }
         finally { setStopping(false); setRunning(false); setBusy(false); }
