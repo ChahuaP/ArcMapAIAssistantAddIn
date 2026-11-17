@@ -2,7 +2,7 @@ import { attributeFilter, fieldCalculation, geometryCalculation, geometryPropert
 import { TokenPicker } from './map-pickers.js';
 
 const h = window.React.createElement;
-const { useState } = window.React;
+const { useEffect, useState } = window.React;
 const { Button, Checkbox, Input, Modal, Segmented, Select } = window.antd;
 const key = item => item && item.ref.run + ':' + item.ref.artifact;
 const vector = item => Boolean(item?.geometry);
@@ -39,6 +39,10 @@ const tools = [
         tool('vector.symmetric_difference', '对称差集', 'difference', polygon, polygon),
         tool('vector.spatial_join', '空间连接', 'spatialJoin', vector, vector),
     ] },
+    { title: '坐标系', icon: 'globe', tools: [
+        tool('crs.reproject', '投影转换', 'globe', vector),
+        tool('crs.assign', '定义坐标系', 'target', vector),
+    ] },
     { title: '栅格处理', icon: 'grid', tools: [
         tool('raster.statistics', '栅格与波段统计', 'statistics', raster),
         tool('raster.clip', '裁切栅格', 'clip', raster, polygon),
@@ -74,7 +78,12 @@ const sameCrs = new Set(['vector.intersect', 'vector.erase', 'vector.clip', 'vec
 export function flowInputIssue(operation, names, inputs, parameters, linked) {
     const invalid = inputs.findIndex((layer, index) => layer && !acceptsFlowLayer(operation, index, layer));
     if (invalid >= 0) return '「' + names[invalid] + '」的图层类型不符合要求';
-    if (operation !== 'data.describe' && inputs.some(layer => layer?.crs === null)) return '请先为输入图层定义坐标系';
+    if (operation === 'crs.assign' && inputs[0]?.crs) return '此图层已有坐标系，请使用投影转换';
+    if (!['data.describe', 'crs.assign'].includes(operation) && inputs.some(layer => layer?.crs === null))
+        return '请先为输入图层定义实际坐标系';
+    const destination = parameters.definition || parameters.target_crs;
+    if (['crs.reproject', 'raster.reproject'].includes(operation) && destination && destination === inputs[0]?.crs)
+        return '请选择与源图层不同的目标坐标系';
     if (sameCrs.has(operation) && inputs.every(layer => /^EPSG:\d+$/.test(layer?.crs)) && inputs[0].crs !== inputs[1].crs)
         return '两个输入图层的坐标系不同，请先转换为同一坐标系';
     if (['vector.area', 'vector.buffer'].includes(operation) && inputs[0]?.units === 'degrees')
@@ -135,6 +144,46 @@ const stats = {
 };
 
 
+function CoordinateChoice({ value, onPick, placeholder, standardOnly }) {
+    const [query, setQuery] = useState('');
+    const [items, setItems] = useState([]);
+    const [custom, setCustom] = useState([]);
+    const [error, setError] = useState('');
+    useEffect(() => {
+        if (standardOnly) return;
+        let current = true;
+        window.guizhi.coordinates().then(entries => {
+            if (!current) return;
+            setCustom(entries.filter(item => item.kind === 'definition').map(item => {
+                const unit = item.definition.axes?.[0]?.unit;
+                return { value: item.id + '@' + item.revision, label: item.title,
+                    kind: unit === 'degree' ? '地理坐标系' : '投影坐标系',
+                    units: unit === 'degree' ? 'degrees' : ['metre', 'meter'].includes(unit) ? 'm' : undefined };
+            }));
+        }).catch(problem => { if (current) setError(window.GuizhiErrorText(problem)); });
+        return () => { current = false; };
+    }, [standardOnly]);
+    useEffect(() => {
+        let current = true;
+        const timer = setTimeout(async () => {
+            try {
+                const found = await window.guizhi.map({ action: 'crs-search', query });
+                if (current) { setItems(found); setError(''); }
+            } catch (problem) { if (current) setError(window.GuizhiErrorText(problem)); }
+        }, 160);
+        return () => { current = false; clearTimeout(timer); };
+    }, [query]);
+    const groups = ['地理坐标系', '投影坐标系'].map(label => ({
+        label, options: [...custom.filter(item => item.label.toLowerCase().includes(query.trim().toLowerCase())), ...items]
+            .filter(item => item.kind === label),
+    })).filter(group => group.options.length);
+    return h(Select, { showSearch: true, filterOption: false, onSearch: setQuery, labelInValue: true,
+        'aria-label': placeholder, placeholder, value: value || undefined, options: groups,
+        notFoundContent: error || '没有匹配的坐标系', onChange: (_, item) => {
+            onPick({ value: item.value, label: item.label, units: item.units, metresPerUnit: item.metresPerUnit });
+        } });
+}
+
 function toolForm(definition, inputs, values, update, linked) {
     const { id } = definition;
     const input = inputs[0];
@@ -147,6 +196,9 @@ function toolForm(definition, inputs, values, update, linked) {
     }));
     const columns = (name, label, extra = {}) => field(label, dropdown(values[name], fields, value => update(name, value), extra));
     const controls = [];
+    const coordinates = label => h('label', { className: 'gis-tool-field' }, h('span', null, label),
+        h(CoordinateChoice, { value: values.coordinate, placeholder: label, standardOnly: id === 'geometry.create_dataset',
+            onPick: value => update('coordinate', value) }));
     let parameters = {};
     let valid = inputs.every((layer, index) => acceptsFlowLayer(id, index, layer));
     const attributeTools = { 'data.select_by_attribute': attributeFilter, 'flow.condition': attributeFilter,
@@ -158,8 +210,9 @@ function toolForm(definition, inputs, values, update, linked) {
     }
     if (id === 'geometry.create_dataset') {
         controls.push(select('geometry_type', '要素类型', { point: '点', polyline: '线', polygon: '面' }),
-            numeric('EPSG', values.epsg, value => update('epsg', value), 1));
-        parameters = { geometry_type: values.geometry_type, epsg: number(values.epsg) };
+            coordinates('图层坐标系'));
+        parameters = { geometry_type: values.geometry_type,
+            epsg: number(values.coordinate?.value.slice(5) ?? values.epsg) };
         valid = Boolean(values.geometry_type && Number.isInteger(parameters.epsg) && parameters.epsg > 0);
     } else if (id === 'vector.buffer') {
         const choice = (name, label, defaultValue, labels) => h(TokenPicker, { label,
@@ -204,10 +257,14 @@ function toolForm(definition, inputs, values, update, linked) {
     } else if (id === 'vector.spatial_join') {
         controls.push(select('mode', '连接方式', { one_to_one: '一对一', one_to_many: '一对多' }));
         parameters = { mode: values.mode || 'one_to_one' };
+    } else if (id === 'crs.reproject' || id === 'crs.assign') {
+        controls.push(coordinates(id === 'crs.assign' ? '数据的实际坐标系' : '目标坐标系'));
+        parameters = { definition: values.coordinate?.value };
+        valid &&= Boolean(parameters.definition);
     } else if (id === 'raster.reproject') {
-        controls.push(text('target_crs', '目标坐标系', '例如 EPSG:4548'), select('resampling', '重采样',
+        controls.push(coordinates('目标坐标系'), select('resampling', '重采样',
             { nearest: '最邻近', bilinear: '双线性', cubic: '三次卷积' }));
-        parameters = { target_crs: values.target_crs?.trim(), resampling: values.resampling };
+        parameters = { target_crs: values.coordinate?.value, resampling: values.resampling };
         valid &&= Boolean(parameters.target_crs && parameters.resampling);
     }
     return { controls, valid, parameters };

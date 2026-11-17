@@ -1,7 +1,7 @@
 import { ReactFlow, Background, Controls, Handle, Position, applyEdgeChanges, applyNodeChanges, useUpdateNodeInternals } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { acceptsFlowLayer, flowForm, flowInputIssue, toolIcon, toolTitle } from './map-processing.js';
-import { AttributePreview, TokenPicker } from './map-pickers.js';
+import { AttributePreview } from './map-pickers.js';
 
 const h = window.React.createElement;
 const { useEffect, useState } = window.React;
@@ -15,14 +15,17 @@ const headings = { area_m2: '合并面积（平方米）', feature_count: '要�
     updated: '计算要素数', row_count: '记录数', distinct_count: '唯一值数', width: '宽度（像元）',
     height: '高度（像元）', band_count: '波段数' };
 const writesFields = new Set(['table.add_field', 'table.delete_field', 'table.calculate_geometry', 'table.calculate_field']);
-const inputTool = { title: '输入图层', inputs: [], inputTypes: [], output: 'layer' };
+const inputTool = { title: '图层来源', inputs: [], inputTypes: [], output: 'layer' };
 const graphNode = (node, definition, result, failed) => ({ id: node.id, type: 'operation', position: { x: node.x, y: node.y },
     data: { ...node, definition, result, failed }, ariaLabel: node.label || definition.title });
 const edge = (source, target, port) => ({ id: [source, target, port].join(':'), source, target, targetHandle: String(port) });
 const connection = link => ({ source: link.source, target: link.target, port: Number(link.targetHandle) });
-const cleanGraph = (nodes, edges, forms) => ({ nodes: nodes.map(node => ({
-    id: node.id, operation: node.data.operation, label: node.data.label?.trim() || node.data.definition.title, x: Math.round(node.position.x),
-    y: Math.round(node.position.y), settings: node.data.settings, parameters: forms.get(node.id)?.parameters || {},
+const cleanGraph = (nodes, edges, forms, layerFor) => ({ nodes: nodes.map(node => ({
+    id: node.id, operation: node.data.operation,
+    label: layerFor(node.id)?.name.slice(0, 100) || node.data.label?.trim() || node.data.definition.title, x: Math.round(node.position.x),
+    y: Math.round(node.position.y), settings: node.data.operation === 'input'
+        ? { layerRef: layerFor(node.id)?.ref || node.data.settings.layerRef } : node.data.settings,
+    parameters: forms.get(node.id)?.parameters || {},
 })), connections: edges.map(connection) });
 
 function OperationNode({ id, data }) {
@@ -37,7 +40,7 @@ function OperationNode({ id, data }) {
         renaming ? h(Input, { className: 'nodrag', size: 'small', autoFocus: true, maxLength: 100, 'aria-label': '节点名称',
             value: data.label ?? '', onChange: event => name(event.target.value), onBlur: () => rename(false),
             onPressEnter: () => rename(false) })
-            : h('strong', { title: '双击重命名', onDoubleClick: () => { if (!lock) rename(true); } }, data.label || definition.title),
+            : h('strong', { title: '双击重命名', onDoubleClick: () => { if (!lock && definition !== inputTool) rename(true); } }, data.label || definition.title),
         [...definition.inputs, ...definition.valuePorts || []].map((label, index) =>
             h('div', { key: index, className: 'gis-flow-port', 'data-port-type': definition.inputTypes[index] },
                 h(Handle, { id: String(index), type: 'target', position: Position.Left,
@@ -142,6 +145,10 @@ export function MapFlow({ open, layers, busy, setBusy, close, glyph, onLayers, o
     function bindLayer(id, ref) {
         clearResults([id]);
         setBindings(old => ({ ...old, [id]: ref }));
+        const layer = choices.find(item => item.value === ref)?.layer;
+        if (layer) setNodes(old => old.map(node => node.id === id ? {
+            ...node, data: { ...node.data, label: layer.name.slice(0, 100), settings: { layerRef: layer.ref } },
+        } : node));
     }
     const forms = new Map();
     const descriptors = new Map();
@@ -167,11 +174,14 @@ export function MapFlow({ open, layers, busy, setBusy, close, glyph, onLayers, o
         if (layer) descriptors.set(id, layer);
         else if (operation === 'geometry.create_dataset' && form.valid) descriptors.set(id, {
             geometry: { point: 'Point', polyline: 'LineString', polygon: 'Polygon' }[form.parameters.geometry_type],
-            crs: 'EPSG:' + form.parameters.epsg, fields: [], unavailable: true,
+            crs: 'EPSG:' + form.parameters.epsg, units: node.data.settings.coordinate?.units, fields: [], unavailable: true,
         });
         else if (inputs[0] && ['layer', 'selection'].includes(tool.output)) {
             const inherited = { ...inputs[0], unavailable: true };
-            if (operation === 'raster.reproject') inherited.crs = form.parameters.target_crs;
+            if (['crs.reproject', 'crs.assign', 'raster.reproject'].includes(operation)) {
+                inherited.crs = form.parameters.definition || form.parameters.target_crs;
+                inherited.units = node.data.settings.coordinate?.units;
+            }
             const field = operation === 'table.calculate_geometry' && form.parameters.field;
             if (field && !inherited.fields?.some(item => item.name === field)) {
                 inherited.fields = [...inherited.fields, { name: field, type: 'float64' }];
@@ -203,8 +213,8 @@ export function MapFlow({ open, layers, busy, setBusy, close, glyph, onLayers, o
                 lock, showOutput, field: form?.parameters.field,
             name: label => setNodes(old => old.map(item => item.id === id ? { ...item,
                 ariaLabel: label || item.data.definition.title, data: { ...item.data, label } } : item)),
-            editor: isInput ? [h(TokenPicker, { label: '选择图层', items: choices, selected: bindings[id],
-                onPick: value => bindLayer(id, value) })] : form?.controls || [],
+            label: isInput ? layerFor(id)?.name || node.data.label : node.data.label,
+            editor: isInput ? layerFor(id) ? [] : [h('small', { key: 'source' }, '从左侧拖入图层')] : form?.controls || [],
             actions: {
                 add: () => perform(async () => { await onLayers(result.layers); setMessage('已加入地图'); }),
                 highlight: result?.selection && currentInput &&
@@ -251,7 +261,7 @@ export function MapFlow({ open, layers, busy, setBusy, close, glyph, onLayers, o
     function addNode(operation, layer, position) {
         if (lock || nodes.length >= 16) return;
         const tool = definition(operation);
-        if (!tool) return;
+        if (!tool || operation === 'input' && !layer) return;
         const id = 'node-' + crypto.randomUUID().slice(0, 8);
         const location = position || { x: 36 + nodes.length % 3 * 305,
             y: nodes.reduce((bottom, node) => Math.max(bottom, node.position.y + (node.measured?.height || 120)), -10) + 40 };
@@ -322,7 +332,7 @@ export function MapFlow({ open, layers, busy, setBusy, close, glyph, onLayers, o
     async function verify(target) {
         const ids = required(target);
         clearResults([]);
-        const model = cleanGraph(nodes, edges, forms);
+        const model = cleanGraph(nodes, edges, forms, layerFor);
         model.nodes = model.nodes.filter(node => ids.has(node.id));
         model.connections = model.connections.filter(link => ids.has(link.source) && ids.has(link.target));
         const bindings = Object.fromEntries([...ids].flatMap(id => layerFor(id) ? [[id, layerFor(id).ref]] : []));
@@ -332,7 +342,7 @@ export function MapFlow({ open, layers, busy, setBusy, close, glyph, onLayers, o
             const form = forms.get(id);
             const add = message => problems.push({ node: id, message });
             if (operation === 'input') {
-                if (!bindings[id]) add('请选择图层');
+                if (!bindings[id]) add('从左侧拖入图层以替换此来源');
                 if (!used.has(id)) add('请把图层连到工具节点，或移除此节点');
             } else if (form.missing.length) add('请连接' + form.missing.join('、'));
             else if (missingRaster && operation.startsWith('raster.'))
@@ -396,7 +406,8 @@ export function MapFlow({ open, layers, busy, setBusy, close, glyph, onLayers, o
         setEdges(item.model.connections.map(link => edge(link.source, link.target, link.port)));
         setFlowId(item.id);
         setName(item.title);
-        setBindings({});
+        setBindings(Object.fromEntries(item.model.nodes.flatMap(node => node.operation === 'input' && node.settings?.layerRef
+            ? [[node.id, layerKey({ ref: node.settings.layerRef })]] : [])));
         setResults({});
         select(null);
         clearResults([]);
@@ -410,7 +421,7 @@ export function MapFlow({ open, layers, busy, setBusy, close, glyph, onLayers, o
         setError('');
         try {
             const item = await api.map({ action: 'flow-save', title, id: flowId,
-                model: cleanGraph(nodes, edges, forms) });
+                model: cleanGraph(nodes, edges, forms, layerFor) });
             setFlowId(item.id);
             setSaveOpen(false);
             setMessage('已保存「' + item.title + '」');
@@ -459,7 +470,10 @@ export function MapFlow({ open, layers, busy, setBusy, close, glyph, onLayers, o
             if (!value || !diagram) return;
             event.preventDefault();
             const item = JSON.parse(value);
-            addNode(item.operation, choices.find(choice => choice.value === item.layer)?.layer,
+            const source = choices.find(choice => choice.value === item.layer)?.layer;
+            const target = nodes.find(node => node.id === event.target.closest('.react-flow__node')?.dataset.id);
+            if (source && target?.data.operation === 'input' && !lock) { bindLayer(target.id, layerKey(source)); return; }
+            addNode(item.operation, source,
                 diagram.screenToFlowPosition({ x: event.clientX, y: event.clientY }));
         },
     }, h(Background, { gap: 20, size: 1.4 }), h(Controls, { showInteractive: false }));
@@ -494,7 +508,6 @@ export function MapFlow({ open, layers, busy, setBusy, close, glyph, onLayers, o
             h(Input, { placeholder: '搜索图层和工具', 'aria-label': '搜索图层和工具', value: search, onChange: event => setSearch(event.target.value) }),
             h('h3', null, '图层'),
             choices.filter(item => match(item.label)).map(item => libraryButton(item.label, 'layers', { operation: 'input', layer: item.value })),
-            !search && libraryButton('输入图层', 'add', { operation: 'input' }),
             h('h3', null, '工具'),
             catalog.filter(item => match(item.title)).map(item =>
                 libraryButton(item.title, toolIcon(item.operation), { operation: item.operation }))),

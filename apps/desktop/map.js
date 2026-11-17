@@ -196,7 +196,7 @@ function CoordinateTools({ layer, display, setDisplay, entries, request, onLayer
 
 function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer, active, hidden, toggle, entries, catalog, components,
     openComponents, display, setDisplay, background, setBackground, styleLayer, importFrame, fail, activity,
-    requestedLayout, openLayout, onLayout, mapActions, onMapActions, selection, setSelection, replace, replaceLayers, editing }) {
+    requestedLayout, openLayout, onLayout, onLayoutSettled, mapActions, onMapActions, selection, setSelection, replace, replaceLayers, editing }) {
     const node = useRef(null);
     const graph = useRef(null);
     const [properties, setProperties] = useState(null);
@@ -419,14 +419,22 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         return mapCanvas(Object.fromEntries(entries), config);
     }
 
-    async function exportImage(config, taskId) {
+    async function exportImage(config, taskId, signal) {
         setBusy(true);
         try {
             const image = await drawLayout(config);
+            if (signal?.aborted) return;
             await api.mapLayout({ format: config.format, paper: config.paper, orientation: config.orientation,
                 data: mapImage(image, config.format), name: config.fileName || config.title, taskId });
-        } catch (error) { if (taskId) await onLayout(taskId, window.GuizhiErrorText(error)); else fail(error); }
-        finally { setBusy(false); }
+        } catch (error) {
+            if (!signal?.aborted) {
+                if (taskId) await onLayout(taskId, window.GuizhiErrorText(error));
+                else fail(error);
+            }
+        } finally {
+            setBusy(false);
+            if (taskId && !signal?.aborted) onLayoutSettled(taskId);
+        }
     }
 
     function saveLayout(config) {
@@ -439,20 +447,32 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         return () => { mounted = false; };
     }, []);
     useEffect(() => {
-        if (!requestedLayout || mapActions || !viewReady || busy || !node.current?.clientWidth ||
+        if (!requestedLayout || requestedLayout.signal.aborted || mapActions ||
+                (!viewReady && layers.length > hidden.length) || busy || !node.current?.clientWidth ||
                 exportedLayout.current === requestedLayout.taskId) return;
-        exportedLayout.current = requestedLayout.taskId;
+        const { taskId, signal } = requestedLayout;
+        exportedLayout.current = taskId;
         try {
             const config = prepareLayout(amendLayout(layoutDraft, requestedLayout.layout));
             saveLayout(config);
-            if (requestedLayout.layout.export) void exportImage(config, requestedLayout.taskId);
+            if (requestedLayout.layout.export) void exportImage(config, taskId, signal);
             else {
-                setLayout({ key: requestedLayout.taskId, taskId: requestedLayout.taskId, config });
+                setLayout({ key: taskId, taskId, config, signal });
             }
-        } catch (error) { void onLayout(requestedLayout.taskId, window.GuizhiErrorText(error)); }
-    }, [requestedLayout, mapActions, viewReady, busy, layers]);
+        } catch (error) {
+            void onLayout(taskId, window.GuizhiErrorText(error)).finally(() => onLayoutSettled(taskId));
+        }
+    }, [requestedLayout, mapActions, viewReady, busy, layers, hidden]);
     useEffect(() => {
-        if (!mapActions || !viewReady || busy || edit || !node.current?.clientWidth || appliedActions.current === mapActions.id) return;
+        if (!layout?.taskId || !layout.signal) return;
+        const abort = () => setLayout(current => current?.taskId === layout.taskId ? null : current);
+        if (layout.signal.aborted) abort();
+        else layout.signal.addEventListener('abort', abort, { once: true });
+        return () => layout.signal.removeEventListener('abort', abort);
+    }, [layout?.taskId]);
+    useEffect(() => {
+        if (!mapActions || mapActions.signal.aborted || (!viewReady && layers.length > hidden.length) || busy ||
+                edit || !node.current?.clientWidth || appliedActions.current === mapActions.id) return;
         appliedActions.current = mapActions.id;
         const map = graph.current;
         async function apply() {
@@ -471,6 +491,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 return { action, item, classification: action.action === 'classify'
                     ? await classifyLayer(item, action.field, item.style?.classification) : null };
             }));
+            if (mapActions.signal.aborted) return;
             const visibility = new Set(hidden);
             for (const { action, item, classification } of actions) {
                 const id = item && key(item);
@@ -516,7 +537,8 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 }
             }
         }
-        void apply().catch(fail).finally(onMapActions);
+        void apply().catch(error => { if (!mapActions.signal.aborted) fail(error); })
+            .finally(() => { if (!mapActions.signal.aborted) onMapActions(mapActions.id); });
     }, [mapActions, viewReady, busy, edit, layers]);
 
     async function load(job) {
@@ -1534,12 +1556,14 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
             save: value => styleLayer(key(properties.item), value) }),
         mapProperties && h(MapProperties, { background: backgroundColor, save: setBackground, coordinates: coordinateTools(),
             close: () => setMapProperties(false), glyph }),
-        layout && h(MapLayout, { key: layout.key, initial: layout.config,
+        layout && !layout.signal?.aborted && h(MapLayout, { key: layout.key, initial: layout.config,
             change: saveLayout, draw: drawLayout, layerChoices: layers.map(item => ({ value: key(item), label: item.name })),
             onRendered: layout.taskId ? issue => {
+                if (layout.signal?.aborted) return;
                 const jobId = layout.taskId;
                 setLayout(previous => previous?.taskId === jobId ? { ...previous, taskId: null } : previous);
-                void (issue ? onLayout(jobId, issue) : api.mapLayoutReady(jobId)).catch(fail);
+                void (issue ? onLayout(jobId, issue) : api.mapLayoutReady(jobId)).catch(fail)
+                    .finally(() => onLayoutSettled(jobId));
             } : undefined,
             busy, close: () => setLayout(null), exportImage }),
         document && h(MxdOpen, { document, busy, glyph, locateAvailable: locateMxd, close: () => setDocument(null),

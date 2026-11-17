@@ -167,7 +167,14 @@ function createShell({ userData, icon, verifyStartup }) {
             y: clamp(bounds.y, area.y, area.y + area.height - next) });
     }
 
+    let agentLocked = false;
+    function setAgentLock(locked) {
+        agentLocked = locked;
+        if (locked && launcher.isVisible()) launcher.hide();
+    }
+
     function openLauncher() {
+        if (agentLocked) { reveal(); return; }
         const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
         const width = Math.min(944, area.width - 32);
         const height = launcherHeight(area);
@@ -245,7 +252,7 @@ function createShell({ userData, icon, verifyStartup }) {
     }
 
     return { window: workbench, launcher, portrait, windows, appearance, configureAppearance,
-        openLauncher, fitLauncher, reveal, showPortrait, voice, portraitHit, dragPortrait, registerShortcut, captureShortcut, notify, close };
+        openLauncher, fitLauncher, reveal, setAgentLock, showPortrait, voice, portraitHit, dragPortrait, registerShortcut, captureShortcut, notify, close };
 }
 
 module.exports = { createShell };

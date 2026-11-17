@@ -13,6 +13,7 @@ from uuid import UUID
 from fastmcp import FastMCP
 from fastmcp.server.middleware import Middleware
 from mcp.types import ImageContent
+from pyproj.exceptions import CRSError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
@@ -23,6 +24,7 @@ from guizhi.domain.capabilities import CAPABILITIES
 from guizhi.domain.semantics import Fact
 from guizhi.domain.skills import Step
 from guizhi.infrastructure.cache import reuse_job, verified_run
+from guizhi.infrastructure.crs_options import coordinate_options, describe_crs
 from guizhi.infrastructure.materials import bound_layer_metadata
 from guizhi.infrastructure.map_workspace import map_material, selection_material
 from guizhi.infrastructure.operations.evidence import read_artifact
@@ -183,6 +185,43 @@ def register(server, job=None):
                 for name, frame in layout["frames"].items()}}
         return {"layers": visible, "view": scene, "layout": layout}
 
+    def layer_coordinates(role):
+        role = role.removeprefix("material.")
+        layers = map_inputs({role}).get(role, [])
+        if len(layers) != 1:
+            raise ValueError("请选择要查看的图层")
+        metadata = bound_layer_metadata({role: layers})[role][0]
+        item = next((layer for layer in current_map().get("layers", []) if layer["id"] == role), None)
+        return {"role": role, "layer": (item or {}).get("name") or metadata["layer"] or "影像图层",
+                "coordinate_system": describe_crs(metadata["crs"]), "kind": metadata["kind"]}
+
+    def record_coordinate_lookup(value):
+        target = dispatch / "coordinate-lookup.json"
+        with mutex:
+            rows = json.loads(target.read_text(encoding="utf-8")) if target.exists() else {}
+            rows[value["role"]] = value
+            pending = target.with_suffix(".pending")
+            pending.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+            pending.replace(target)
+        return value
+
+    @server.tool
+    def inspect_layer_crs(role: str) -> dict:
+        """读取指定图层的实际坐标系、EPSG 编号、地理或投影类型及单位。坐标系问答用它，保持普通问答。"""
+        (dispatch / "discovery").touch()
+        try:
+            return record_coordinate_lookup(layer_coordinates(role))
+        except CRSError:
+            return {"status": "invalid_coordinates", "message": "图层的坐标系定义无法识别。"}
+        except (OSError, ValueError) as error:
+            return {"status": "unavailable", "message": redact(str(error))}
+
+    @server.tool
+    def list_coordinate_systems(query: str = "") -> list[dict]:
+        """查看常用坐标系，或搜索 EPSG 编号、中央经线、坐标系名称。"""
+        (dispatch / "discovery").touch()
+        return coordinate_options(query)
+
     @server.tool
     def read_current_map_image():
         """读取本轮当前地图的实际地图画面。在视觉检查图形、色彩或版面时使用。精确字段、面积和坐标仍须查询数据。"""
@@ -286,6 +325,37 @@ def register(server, job=None):
             params["where"] = {"field": match_field, "op": "is_null" if match_value is None else "eq", "value": match_value}
         return run_plan("free", None, [{"id": "lookup", "operation": "table.lookup", "inputs": ["material." + role],
                                         "parameters": params}])
+
+    @server.tool
+    def reproject_layer(role: str, target_crs: str | None = None, reference_role: str | None = None) -> dict:
+        """把源图层转换到用户指定的 EPSG，或使用明确参照图层的坐标系。用户没给目标时省略这两个参数。保留源图层。"""
+        (dispatch / "discovery").touch()
+        try:
+            source = layer_coordinates(role)
+            if not target_crs and reference_role:
+                target_crs = layer_coordinates(reference_role)["coordinate_system"].get("code")
+            if not target_crs:
+                return record_coordinate_lookup({"status": "target_required", **source,
+                         "message": "请选择确切目标坐标系，或提供参照图层。"})
+            existing = source["coordinate_system"]
+            if existing["kind"] == "未定义":
+                return {"status": "source_crs_required", **source, "message": "请先确认并定义源图层的实际坐标系。"}
+            from pyproj import CRS
+
+            target = describe_crs(CRS.from_user_input(target_crs.strip()))
+            if not target["code"] or target["kind"] not in {"地理坐标系", "投影坐标系"}:
+                return {"status": "target_required", "message": "请确认目标坐标系的 EPSG 编号。"}
+            if target["code"] == existing.get("code"):
+                return {"status": "same_crs", **source, "message": "图层已采用此坐标系。"}
+        except CRSError:
+            return {"status": "invalid_coordinates", "message": "未找到所选坐标系。请核对 EPSG 编号或指定参照图层。"}
+        except (OSError, ValueError) as error:
+            return {"status": "invalid_coordinates", "message": redact(str(error))}
+        operation = "raster.reproject" if source["kind"] == "raster" else "crs.reproject"
+        parameter = "target_crs" if source["kind"] == "raster" else "definition"
+        return run_plan("free", None, [{"id": "reproject", "operation": operation,
+                                         "inputs": ["material." + source["role"]],
+                                         "parameters": {parameter: target["code"]}}])
 
     @server.tool
     def define_crs_from_layer(target_role: str, reference_role: str) -> dict:

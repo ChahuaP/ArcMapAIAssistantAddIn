@@ -54,6 +54,7 @@ class DesktopController {
         this.onChange = onChange;
         this.tasks = [];
         this.active = null;
+        this.delivery = null;
         this.restore();
     }
 
@@ -99,7 +100,7 @@ class DesktopController {
         const { workspace, modelConfig, showOperation, screenHighlight, carrier, encryptedKey, modelVision } = this.settings;
         return { settings: { workspace, modelConfig, showOperation, screenHighlight,
             operator: this.settings.operator || '', carrier: carrier || 'none', modelVision: Boolean(modelVision), keyConfigured: Boolean(modelConfig && encryptedKey) },
-            tasks: this.tasks, busy: Boolean(this.active) };
+            tasks: this.tasks, busy: Boolean(this.active || this.delivery), delivery: this.delivery };
     }
 
     workspaceReady(value) {
@@ -225,7 +226,7 @@ class DesktopController {
 
     submit({ prompt, project, control, skill, materials = {}, skillParameters, parameterText, mentions, images = [], imageBlocks = [], dialogue = false, mapContext }) {
         if (!this.settings.workspace) throw new Error('请先选择成果保存位置');
-        if (this.active || this.modelTesting) throw new Error('已有任务在运行');
+        if (this.active || this.delivery || this.modelTesting) throw new Error('已有任务在运行');
         if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 4000) throw new Error('请输入办理事项');
         let bindings = materialBindings({ ...materials, ...(project ? { project: [project] } : {}),
             ...(control ? { control: [control] } : {}) });
@@ -293,6 +294,7 @@ class DesktopController {
     }
 
     resetConversation() {
+        this.delivery = null;
         this.persist([]);
         this.tasks = [];
         this.cancel();
@@ -328,7 +330,7 @@ class DesktopController {
         if (this.active?.task !== task || this.active.settling) return;
         const active = this.active;
         active.settling = true;
-        let status = receipt.status;
+        let status = active.stop.signal.aborted ? 'cancelled' : receipt.status;
         let stage = 'dispatch';
         let record;
         try {
@@ -356,7 +358,7 @@ class DesktopController {
                 if (findings) task.approval = JSON.parse(findings.bytes);
                 const definition = record.result.workflow?.skill;
                 const report = checkedArtifact(record, 'report', true);
-                if (definition || task.skill || report) {
+                if (!active.stop.signal.aborted && (definition || task.skill || report)) {
                     const groups = { ...task.materials, ...(task.project && { project: [task.project] }),
                         ...(task.control && { control: [task.control] }) };
                     task.business = await this.recordBusiness({ id: task.id, startedAt: task.createdAt, operator: task.operator,
@@ -369,6 +371,11 @@ class DesktopController {
             stage = 'publish';
             task.response = '办理成果已生成，但工作台读取失败。请到成果保存位置查看本轮作业记录。';
         } finally {
+            if (active.stop.signal.aborted) {
+                status = 'cancelled';
+                task.response = '已接管，小六已停止本轮操作。';
+                for (const field of ['map', 'mapLayers', 'layout', 'mapActions', 'outputImages', 'statistics']) delete task[field];
+            }
             const code = stage === 'publish' ? 'result_read_failed' : {
                 failed: receipt.operation ? 'operation_failed' : modelFailureCode(receipt.error || receipt.response) || 'agent_failure',
                 interrupted: 'interrupted', timed_out: 'timeout', budget_exhausted: 'budget_exhausted',
@@ -389,6 +396,9 @@ class DesktopController {
                 } catch (error) { console.error('业务日志写入失败：', error.message); }
             }
             this.active = null;
+            if (current && status === 'succeeded' && (task.map || task.mapLayers?.length || task.mapActions || task.layout)) {
+                this.delivery = task.id;
+            }
             if (this.tasks.includes(task)) this.persist();
             this.onChange(this.state());
             if (current && status === 'succeeded') {
@@ -398,14 +408,25 @@ class DesktopController {
         }
     }
 
-    cancel() {
+    cancel(id) {
         const active = this.active;
-        if (active && !active.settling && !active.stop.signal.aborted) {
+        if (active && (!id || id === active.task.id) && !active.stop.signal.aborted) {
             active.task.status = 'cancelling';
             if (this.tasks.includes(active.task)) this.persist();
             active.stop.abort();
+        } else if (!active && id && this.delivery === id && this.tasks[0]?.id === id) {
+            this.delivery = null;
+            this.tasks[0].status = 'cancelled';
+            this.tasks[0].response = '已接管，小六已停止应用本轮成果。';
+            this.persist();
         }
         return this.state();
+    }
+
+    finishMapDelivery(id) {
+        if (id !== this.delivery) return;
+        this.delivery = null;
+        this.onChange(this.state());
     }
 
     businessLog() {

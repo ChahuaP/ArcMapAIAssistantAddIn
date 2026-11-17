@@ -20,11 +20,38 @@ function assistantAnswer(text) {
     return text.replace(/^[\s\S]*<\/think\s*>/i, '').replace(/<think\b[^>]*>[\s\S]*$/i, '').trim();
 }
 
-function verifiedResponse(receipt, dialogue) {
+const coordinateQuestion = prompt => /坐标|4490|四四九零|投影|epsg/iu.test(prompt);
+const askingForProjection = prompt => /转换|转成|转为|投影到|投到|重投影/u.test(prompt);
+const coordinateLabel = value => [value.name, value.code, value.kind, value.unit && '单位为' + value.unit].filter(Boolean).join('，');
+
+function coordinateReply(layer, coordinate, projection) {
+    const name = layer ? '「' + layer + '」' : '图层';
+    const current = coordinate.kind === '未定义' ? name + '当前未定义坐标系。'
+        : name + '当前采用' + coordinateLabel(coordinate) + '。';
+    if (!projection) return current + '地图显示坐标系和图层坐标系可分别设置。';
+    if (coordinate.kind === '未定义') return current + '请先确认并定义源图层的实际坐标系。';
+    return current + '请告诉我目标投影坐标系的 EPSG 编号、中央经线或参照图层。';
+}
+
+function coordinateRead(receipt, prompt) {
+    return coordinateQuestion(prompt) && receipt.steps?.length && receipt.steps.every(step =>
+        ['data.describe', 'data.list_fields'].includes(step.operation));
+}
+
+function verifiedResponse(receipt, dialogue, prompt) {
     const stats = receipt.statistics;
     const area = value => value.toLocaleString('zh-CN', { maximumFractionDigits: 2 });
     const parts = [];
-    if (stats.reused_steps) parts.push(`其中复用 ${stats.reused_steps} 个步骤。`);
+    const steps = receipt.steps || [];
+    const projected = steps.findLast(step => step.statistics.projection)?.statistics.projection;
+    const coordinate = steps.findLast(step => step.statistics.coordinate_system)?.statistics;
+    if (projected) {
+        return '已完成投影转换，生成一个结果图层，源图层保留。\n\n源坐标系为' + coordinateLabel(projected.source) +
+            '。\n\n结果坐标系为' + coordinateLabel(projected.target) + '。';
+    }
+    if (coordinate && coordinateRead(receipt, prompt)) {
+        return coordinateReply(coordinate.layer, coordinate.coordinate_system, askingForProjection(prompt));
+    }
     if (stats.changed_parcels) parts.push(`更新涉及 ${stats.changed_parcels} 宗地。`);
     for (const item of receipt.steps ?? [{ statistics: stats }]) {
         const fact = item.statistics;
@@ -53,8 +80,17 @@ function verifiedResponse(receipt, dialogue) {
     if (receipt.steps?.some(step => step.operation === 'map_raster.preview')) parts.push('影像预览已生成。');
     if (receipt.steps?.some(step => step.operation === 'crs.assign_from' || step.operation === 'crs.assign')) {
         parts.push('已为目标图层定义坐标系，原始坐标值保持不变。');
+        if (coordinate) parts.push('图层当前采用' + coordinateLabel(coordinate.coordinate_system) + '。');
     }
     if (stats.area_m2 !== undefined) parts.push(`合并范围面积 ${area(stats.area_m2)} m²。`);
+    if (steps.some(step => step.operation === 'geometry.create_dataset')) {
+        parts.push(steps.some(step => step.operation.startsWith('geometry.append_'))
+            ? '已在新建图层中添加要素。' : '已创建新图层。');
+    } else if (steps.some(step => step.operation.startsWith('geometry.append_'))) {
+        parts.push('已向指定图层追加要素。');
+    } else if (steps.some(step => step.operation.startsWith('geometry.create_'))) {
+        parts.push('已绘制要素并生成图层。');
+    }
     if (stats.feature_count !== undefined) parts.push(`共 ${stats.feature_count} 个要素。`);
     if (stats.geometry_types && !dialogue) parts.push(Object.entries(stats.geometry_types)
         .map(([name, count]) => `${name} ${count} 个`).join('，') + '。');
@@ -208,9 +244,11 @@ export async function dispatch(options, { signal, onEvent = () => {}, getService
         if (prepared.operation) {
             event({ kind: 'plan_reused', run_id: prepared.operation.run_id });
             writeFileSync(operationPath, JSON.stringify(prepared.operation));
-            result = { status: prepared.operation.status, finish_reason: 'recorded_plan', plan_reused: true,
+            const status = prepared.operation.status === 'succeeded' && coordinateRead(prepared.operation, options.prompt)
+                ? 'answered' : prepared.operation.status;
+            result = { status, finish_reason: 'recorded_plan', plan_reused: true,
                 operation: prepared.operation, response: prepared.operation.status === 'succeeded'
-                    ? verifiedResponse(prepared.operation, options.dialogue) : prepared.operation.error };
+                    ? verifiedResponse(prepared.operation, options.dialogue, options.prompt) : prepared.operation.error };
         } else if (stop.aborted) {
             result = { status: deadline.aborted ? 'timed_out' : 'cancelled' };
         } else {
@@ -286,8 +324,18 @@ export async function dispatch(options, { signal, onEvent = () => {}, getService
                 const receipt = existsSync(operationPath) ? readJson(operationPath) : null;
                 const issue = existsSync(issuePath) ? readJson(issuePath) : null;
                 const stopped = existsSync(budgetPath) && readJson(budgetPath).status === 'exhausted';
-                const answer = assistantAnswer(response.finalResponse);
-                const status = receipt?.status ?? (stopped ? 'budget_exhausted' : response.finishReason !== 'completed' ? 'failed' : issue?.status ??
+                let answer = assistantAnswer(response.finalResponse);
+                const coordinatePath = join(directory, 'coordinate-lookup.json');
+                if (!receipt && existsSync(coordinatePath) && coordinateQuestion(options.prompt)) {
+                    const rows = Object.values(readJson(coordinatePath));
+                    const missing = rows.find(row => row.status === 'target_required');
+                    const requested = rows.length === 1 ? rows[0] : missing;
+                    if (requested && (!askingForProjection(options.prompt) || missing || /EPSG\s*[:：]?\s*\d{4,5}/iu.test(options.prompt) === false)) {
+                        answer = coordinateReply(requested.layer, requested.coordinate_system, askingForProjection(options.prompt));
+                    }
+                }
+                const coordinateAnswer = receipt?.status === 'succeeded' && coordinateRead(receipt, options.prompt);
+                const status = (coordinateAnswer ? 'answered' : receipt?.status) ?? (stopped ? 'budget_exhausted' : response.finishReason !== 'completed' ? 'failed' : issue?.status ??
                     (attempted ? 'no_result' : answer && (!needsSelectedWorkflow && (!needsMeasurement ||
                         /[？?]|请(?:提供|补充|确认|指定|选择|告诉)/u.test(answer))) ? 'answered'
                         : roles.length ? 'no_result' : 'missing_materials'));
@@ -295,7 +343,7 @@ export async function dispatch(options, { signal, onEvent = () => {}, getService
                 const failure = terminal?.data.reason.error;
                 const candidatePath = join(directory, 'candidate.json');
                 result = { status, finish_reason: response.finishReason,
-                    response: status === 'succeeded' ? verifiedResponse(receipt, options.dialogue)
+                    response: status === 'succeeded' || coordinateAnswer ? verifiedResponse(receipt, options.dialogue, options.prompt)
                         : receipt?.error ?? issue?.error ?? (stopped ? '模型预算已用完，已保存办理进度。'
                             : status === 'no_result' ? '本轮没有生成可核验的成果。可以继续让我重新办理。' : answer),
                     operation: receipt, ...(issue && !receipt ? { input_issue: issue } : {}),

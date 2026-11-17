@@ -35,6 +35,7 @@ MANUAL_OPERATIONS = {
     "vector.erase", "vector.dissolve", "vector.union", "vector.identity", "vector.symmetric_difference", "vector.update_overlay",
     "vector.spatial_join", "data.copy", "data.merge", "data.append", "data.select_by_attribute",
     "data.select_by_location", "data.export_selection", "geometry.create_dataset", "geometry.repair",
+    "crs.assign", "crs.reproject",
     "geometry.explode", "table.add_field", "table.delete_field", "table.add_coordinates",
     "presentation.export_table", "raster.statistics", "raster.clip", "raster.reproject", "raster.mosaic",
     "table.calculate_field", "table.calculate_geometry", "table.edit_cell",
@@ -498,22 +499,9 @@ def request(workspace, payload):
                   "table-feature": map_attributes.feature_attributes}[action]
         return reader(file, name, payload)
     if action == "crs-search":
-        from pyproj.database import query_crs_info
-        query = str(payload.get("query", "")).strip().casefold()
-        defaults = {"4490", "4326", "4548", "4550", "3857"}
-        entries = [item for item in query_crs_info(auth_name="EPSG", allow_deprecated=False)
-                   if (query and (query in item.name.casefold() or query.removeprefix("epsg:") == item.code)
-                       or not query and item.code in defaults)][:30]
-        result = []
-        for item in entries:
-            crs = CRS.from_epsg(item.code)
-            if not (crs.is_geographic or crs.is_projected) or len(crs.axis_info) != 2:
-                continue
-            units = "degrees" if crs.is_geographic else "m" if crs.axis_info[0].unit_conversion_factor == 1 else None
-            result.append({"value": "EPSG:" + item.code, "label": item.name + " · EPSG:" + item.code, "units": units,
-                           "metresPerUnit": crs.axis_info[0].unit_conversion_factor if crs.is_projected else None,
-                           "kind": "投影坐标系" if crs.is_projected else "地理坐标系"})
-        return result
+        from guizhi.infrastructure.crs_options import coordinate_options
+
+        return coordinate_options(str(payload.get("query", "")))
     if action == "material":
         item = map_material(workspace, payload["ref"])
         name = item["layer"]

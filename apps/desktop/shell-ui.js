@@ -133,11 +133,35 @@
     }
 
     function Workbench({ appearance, saveAppearance, sidebar, conversation, inspector, map, composer,
-        mode, setMode, activity, onCancel, arcgis, connected, fail, page }) {
+        mode, setMode, activity, ownership, onCancel, arcgis, connected, fail, page }) {
         const [width, setWidth] = useState(innerWidth);
         const [panels, setPanels] = useState(appearance.panels);
         const [drawer, showDrawer] = useState(false);
         const [split, setSplit] = useState(32);
+        const interaction = useRef(null);
+        const locked = Boolean(ownership);
+        useEffect(() => {
+            if (!locked) return;
+            const root = interaction.current;
+            const prior = document.activeElement;
+            root.inert = true;
+            const take = document.querySelector('[data-ai-takeover]');
+            take?.focus({ preventScroll: true });
+            const stop = event => {
+                if (take?.contains(event.target) && (['pointerdown', 'pointerup', 'click'].includes(event.type) ||
+                        ['keydown', 'keyup'].includes(event.type) && ['Enter', ' '].includes(event.key))) return;
+                if (event.cancelable) event.preventDefault();
+                event.stopImmediatePropagation();
+            };
+            const events = ['pointerdown', 'pointerup', 'click', 'dblclick', 'auxclick', 'contextmenu',
+                'keydown', 'keyup', 'beforeinput', 'dragstart', 'dragover', 'drop', 'wheel'];
+            for (const name of events) window.addEventListener(name, stop, { capture: true, passive: false });
+            return () => {
+                for (const name of events) window.removeEventListener(name, stop, true);
+                root.inert = false;
+                if (prior?.isConnected) prior.focus({ preventScroll: true });
+            };
+        }, [locked]);
         const restored = useRef(appearance.expandedPanels || [56, 362]);
         useEffect(() => { setPanels(appearance.panels); }, [appearance.panels]);
         useEffect(() => {
@@ -181,8 +205,8 @@
             ['map', 'mapView', '仅显示地图'],
         ].map(([value, glyph, label]) => iconButton(glyph, label, { key: value, 'aria-pressed': mode === value,
             className: mode === value ? 'workbench-mode-active' : '', onClick: () => setMode(value) }));
-        return h('div', { className: 'desktop-frame' },
-            h(Titlebar, { arcgis, connected, left: () => toggle(0), right: inspector && mode === 'chat' && (() => toggle(1)), resize }),
+        return h('div', { className: 'desktop-frame' + (locked ? ' workbench-locked' : '') },
+            h('div', { ref: interaction, className: 'workbench-interaction' }, h(Titlebar, { arcgis, connected, left: () => toggle(0), right: inspector && mode === 'chat' && (() => toggle(1)), resize }),
             h(Splitter, { className: 'workbench-panels', lazy: true,
                 onResizeEnd: sizes => persist(sideSizes(sizes)) },
                 h(Splitter.Panel, { size: left, min: left, max: left, resizable: false }, sidebar(left > 56)),
@@ -197,12 +221,14 @@
                     !chatVisible && h('div', { className: 'workbench-chat-dock' }, composer))),
                 h(Splitter.Panel, { size: right, min: right ? 250 : 0, max: 520, resizable: Boolean(right) }, right > 0 && inspector)),
             inspector && compact && mode === 'chat' && h(Drawer, { title: '材料与成果', width: 360, getContainer: false,
-                rootStyle: { position: 'absolute' }, open: drawer, onClose: () => showDrawer(false) }, inspector),
-            activity && h('div', { className: 'workbench-ai-edge', 'aria-hidden': true }),
-            activity && h('div', { className: 'workbench-ai-status', role: 'status' },
-                icon('layers'), h('span', null, activity.label),
-                activity.target && h('strong', null, activity.target),
-                button('close', '接管', { size: 'small', onClick: onCancel })));
+                rootStyle: { position: 'absolute' }, open: drawer, onClose: () => showDrawer(false) }, inspector)),
+            locked && h('div', { className: 'workbench-ai-edge', 'aria-hidden': true }),
+            locked && h('div', { className: 'workbench-ai-status' },
+                icon('layers'), h('span', { role: 'status' }, ownership.label),
+                activity?.target && h('strong', null, activity.target),
+                button('close', ownership.cancelling ? '正在接管' : '接管', {
+                    size: 'small', 'data-ai-takeover': true, disabled: ownership.cancelling, onClick: onCancel,
+                })));
     }
     window.GuizhiShell = { Theme, Workbench, Titlebar, brand, button, iconButton, icon, businessIcon, productName };
 })();

@@ -245,27 +245,64 @@
         const turns = (state?.tasks || []).slice().reverse();
         const task = turns.at(-1);
         const taskRunning = ['running', 'cancelling'].includes(task?.status);
-        const activity = taskRunning && task.visual && state?.settings.showOperation !== false
-            ? task.status === 'cancelling' ? { label: '正在停止任务' } : task.visual : null;
+        const activity = taskRunning && task.visual && state?.settings.showOperation !== false ? task.visual : null;
         const shownMapRuns = useRef(new Set());
-        useEffect(() => {
-            shownMapRuns.current.clear();
-        }, [state?.settings.workspace]);
+        const delivery = useRef(null);
+        const [delivering, setDelivering] = useState(null);
+        const [takingOver, setTakingOver] = useState(false);
         const [layoutReady, setLayoutReady] = useState(null);
         const [layoutOpen, setLayoutOpen] = useState(null);
+        const hasMapResult = Boolean(task?.map || task?.mapLayers?.length || task?.layout || task?.mapActions);
+        const pendingDelivery = !launcher && task?.status === 'succeeded' && hasMapResult && !shownMapRuns.current.has(task.id);
+        const locked = taskRunning || sending || Boolean(delivering || pendingDelivery || state?.delivery);
+        const cancelling = takingOver || task?.status === 'cancelling' || sending && !taskRunning;
+        const ownership = locked ? { cancelling, label: cancelling ? '正在停止小六' :
+            delivering || pendingDelivery || state?.delivery ? '正在应用地图成果' : activity?.label || '小六正在处理' } : null;
+
+        function settleDelivery(id) {
+            if (delivery.current?.id !== id) return;
+            delivery.current = null;
+            setDelivering(null);
+            setLayoutReady(null);
+            setMapActions(null);
+            void api.finishMapDelivery(id).catch(fail);
+        }
+        async function takeOver() {
+            if (cancelling || !task) return;
+            setTakingOver(true);
+            delivery.current?.stop.abort();
+            try {
+                setState(await api.cancel(task.id));
+                shownMapRuns.current.add(task.id);
+                settleDelivery(task.id);
+            } catch (error) { fail(error); }
+            finally { setTakingOver(false); }
+        }
         useEffect(() => {
-            if (launcher || showLog || task?.status !== 'succeeded' ||
-                !(task.map || task.mapLayers?.length || task.layout || task.mapActions) ||
-                shownMapRuns.current.has(task.id)) return;
+            shownMapRuns.current.clear();
+            delivery.current?.stop.abort();
+            delivery.current = null;
+            setDelivering(null);
+            setLayoutReady(null);
+            setMapActions(null);
+        }, [state?.settings.workspace]);
+        useEffect(() => {
+            if (launcher || !pendingDelivery || task?.status !== 'succeeded') return;
             shownMapRuns.current.add(task.id);
-            void openMap(task).then(opened => {
-                if (!opened) return;
-                if (task.layout && !task.layoutImage && !task.layoutError) setLayoutReady(task.id);
-                if (task.mapActions) setMapActions({ id: task.id, actions: task.mapActions.map(action => ({
+            const stop = new AbortController();
+            delivery.current = { id: task.id, stop };
+            setDelivering(task.id);
+            void openMap(task, stop.signal).then(opened => {
+                if (stop.signal.aborted) return;
+                if (!opened) { settleDelivery(task.id); return; }
+                const layout = task.layout && !task.layoutImage && !task.layoutError;
+                if (layout) setLayoutReady({ id: task.id, signal: stop.signal });
+                if (task.mapActions) setMapActions({ id: task.id, signal: stop.signal, actions: task.mapActions.map(action => ({
                     ...action, ...(task.mapTargets?.[action.layer] && { layerRef: task.mapTargets[action.layer] }),
                 })) });
-            });
-        }, [task?.id, task?.status]);
+                else if (!layout) settleDelivery(task.id);
+            }).catch(error => { if (!stop.signal.aborted) { fail(error); settleDelivery(task.id); } });
+        }, [task?.id, task?.status, pendingDelivery]);
         const resultTask = turns.find(item => item.id === viewed) ||
             turns.findLast(item => item.map || item.hasReport || item.mapLayers?.length) || task;
         useEffect(() => { viewResult(null); selectParcel(null); }, [task?.id]);
@@ -626,7 +663,8 @@
                     h(window.GuizhiMap.Preview, { key: resultTask?.id || 'empty', map: resultTask?.map, selected: parcel,
                         hasLayers: Boolean(resultTask?.mapLayers?.length), open: () => openMap(resultTask), choose: item => selectParcel(item.id) }),
                     resultTask?.hasReport && resultTask.business && h(ReportPanel, { id: resultTask.id }))));
-        async function openMap(item) {
+        async function openMap(item, signal) {
+            if (signal?.aborted) return false;
             setShowLog(false);
             if (item?.map || item?.mapLayers?.length) {
                 try {
@@ -645,10 +683,12 @@
                         replacements.push([before, result]);
                     }
                     const inputs = item.map ? await api.mapTaskInputs(item.id) : [];
+                    if (signal?.aborted) return false;
                     const current = new Set(layers.map(mapKey));
                     addLayers([...inputs.filter(input => !current.has(mapKey(input))), ...additions]);
                     if (replacements.length) replaceLayers(replacements);
                 } catch (error) {
+                    if (signal?.aborted) return false;
                     fail(error);
                     if (item.layout) await api.mapLayoutError(item.id, window.GuizhiErrorText(error));
                     return false;
@@ -704,9 +744,13 @@
                 setMapBackground(frame.background);
             },
             fail, activity: state.settings.screenHighlight !== false ? activity : null,
-            requestedLayout: task?.id === layoutReady && !task.layoutImage && !task.layoutError && task.layout
-                ? { taskId: task.id, layout: task.layout } : null,
-            openLayout: layoutOpen, onLayout: api.mapLayoutError, mapActions, onMapActions: () => setMapActions(null),
+            requestedLayout: layoutReady && task?.id === layoutReady.id && !task.layoutImage && !task.layoutError && task.layout
+                ? { taskId: task.id, layout: task.layout, signal: layoutReady.signal } : null,
+            openLayout: layoutOpen, onLayout: api.mapLayoutError, onLayoutSettled: settleDelivery, mapActions,
+            onMapActions: id => {
+                setMapActions(current => current?.id === id ? null : current);
+                if (layoutReady?.id !== id) settleDelivery(id);
+            },
             selection: mapSelection, setSelection: setMapSelection,
             replace: replaceLayer, replaceLayers, editing: setMapEditing });
         async function configure(value) {
@@ -715,7 +759,7 @@
             showSettings(false);
         }
         const layout = launcher ? quick : !state ? null : !ready ? h(window.GuizhiOnboarding, { state, save: configure })
-            : settings ? h(window.GuizhiSettings, {
+            : settings && !ownership ? h(window.GuizhiSettings, {
             state, appearance, saveAppearance, entries: coordinates, setEntries: setCoordinates,
             initial: settings, catalog, refresh, plans, initialMarkdown,
             close: () => { setInitialMarkdown(''); showSettings(false); },
@@ -723,7 +767,7 @@
         }) : h(Workbench, { appearance, saveAppearance, sidebar, conversation, inspector: showLog ? null : inspector, map: mapWorkspace, composer,
             page: showLog ? h(BusinessLog, { revision: state }) : null,
             mode: mapMode, setMode: mode => { if (mode !== 'chat') setMapMounted(true); setMapMode(mode); },
-            activity, onCancel: () => api.cancel().then(setState).catch(fail), fail,
+            activity, ownership, onCancel: takeOver, fail,
             arcgis: () => { if (!mapEditing) showSettings('extensions'); },
             connected: Boolean(state?.arcgis?.host) });
         return h(Theme, { appearance }, layout,

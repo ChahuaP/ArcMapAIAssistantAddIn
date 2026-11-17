@@ -679,18 +679,41 @@ dialog label { display: grid; gap: 5px; }
 .workbench-chat-dock { flex: none; padding: 4px 12px 8px; background: var(--panel); border-top: 1px solid var(--line); }
 .workbench-chat-dock .composer textarea { min-height: 36px; max-height: 110px; }
 .workbench-content .welcome .skill-tiles { grid-template-columns: 1fr; }
-.workbench-ai-edge { position: fixed; z-index: 1200; inset: 0; pointer-events: none;
-    border: 2px solid #54a9ff; border-radius: 9px; box-shadow: inset 0 0 30px #309aff64;
-    background: radial-gradient(circle, #eef8ffb0 1px, transparent 1.5px) 0 0 / 8px 8px;
-    mask-image: linear-gradient(#000, transparent 45px, transparent calc(100% - 45px), #000),
-        linear-gradient(90deg, #000, transparent 35px, transparent calc(100% - 35px), #000);
-    animation: guizhi-ai-flow 4s ease-in-out infinite alternate; }
-@keyframes guizhi-ai-flow { 0% { opacity: .44; background-position: 0 0; } 100% { opacity: .9; background-position: 32px 16px; } }
+.workbench-interaction { display: contents; }
+.workbench-locked .titlebar { app-region: no-drag; -webkit-app-region: no-drag; }
+.workbench-ai-edge {
+    position: fixed; z-index: 1600; inset: 0; pointer-events: auto; isolation: isolate;
+    box-shadow: inset 0 0 2px 2px #429cff, inset 0 0 42px 4px #2085e9a3;
+    background:
+        linear-gradient(180deg, #1779db9e, #2d92f244 8%, transparent 23%, transparent 73%, #2d92f254 91%, #247ee3ad),
+        linear-gradient(90deg, #277fe4a3, #388de234 9%, transparent 24%, transparent 76%, #388de234 91%, #277fe4a3);
+}
+.workbench-ai-edge::before, .workbench-ai-edge::after {
+    content: ""; position: absolute; inset: 0;
+    mask: radial-gradient(circle, #000 1px, transparent 1.65px) 0 0 / 9px 9px repeat;
+}
+.workbench-ai-edge::before {
+    background: linear-gradient(180deg, #eff9ffab, transparent 32%, transparent 66%, #edf8ffbd),
+        linear-gradient(90deg, #ecf7ffbb, transparent 26%, transparent 74%, #edf9ffbd);
+}
+.workbench-ai-edge::after {
+    background: radial-gradient(ellipse 21% 16% at 13% 8%, #fff, #cbeaff93 58%, transparent),
+        radial-gradient(ellipse 20% 27% at 42% 48%, #cdeaffc4, #dcefff54 46%, transparent),
+        radial-gradient(ellipse 23% 17% at 70% 91%, #fff, #d8efffa3 56%, transparent),
+        radial-gradient(ellipse 14% 22% at 91% 30%, #fff, #cae8ff94 50%, transparent);
+    background-size: 150% 125%;
+    animation: guizhi-ai-flow 6s ease-in-out infinite alternate;
+}
+@keyframes guizhi-ai-flow {
+    0% { opacity: .5; background-position: 0 0; }
+    48% { opacity: 1; }
+    100% { opacity: .72; background-position: 100% 92%; }
+}
 .workbench-ai-status, .map-ai-note, .map-import-progress {
     display: flex; align-items: center; gap: 8px; background: var(--panel); border: 1px solid var(--border);
     color: var(--ink); border-radius: 8px; padding: 8px 12px; box-shadow: 0 4px 18px var(--shadow);
 }
-.workbench-ai-status { position: fixed; z-index: 1201; bottom: 12px; left: 50%; transform: translateX(-50%); }
+.workbench-ai-status { position: fixed; z-index: 1601; bottom: 12px; left: 50%; transform: translateX(-50%); }
 .map-ai-note, .map-import-progress { position: absolute; z-index: 2; top: 10px; right: 10px; pointer-events: none; }
 .map-ai-note[data-kind=calculate], .map-ai-note[data-kind=transform] { border-color: #428ee2; }
 [data-ai-focus=true] { outline: 2px solid #438de4; outline-offset: -2px; background: var(--soft); }
@@ -714,7 +737,7 @@ dialog label { display: grid; gap: 5px; }
 .gis-layout-properties { padding: 12px; border-left: 1px solid var(--line); align-content: start; }
 .gis-layout-properties hr { width: 100%; border: 0; border-top: 1px solid var(--line); }
 .map-layout-result { align-self: flex-start; }
-@media (prefers-reduced-motion: reduce) { .workbench-ai-edge { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .workbench-ai-edge::after { animation: none; } }
 
 .gis-tool-help { display: flex; align-items: center; gap: 11px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); }
 .gis-spatial-example { position: relative; width: 74px; height: 46px; flex: none; }

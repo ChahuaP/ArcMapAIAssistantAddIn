@@ -179,12 +179,21 @@ def clip(ctx, all_touched: bool = False):
 def reproject_raster(ctx, target_crs, resampling, resolution):
     out = ctx.path("result.tif")
     source = ctx.rasters[0]
-    target = CRS.from_user_input(target_crs)
+    from guizhi.infrastructure.crs_catalog import get
+    from guizhi.infrastructure.crs_options import describe_crs
+
+    definition = get(ctx.workspace, "definition", target_crs)["definition"]["wkt"] if "@" in target_crs else target_crs
+    target = CRS.from_user_input(definition)
     with rio.open(source) as src:
+        if src.crs is None:
+            raise ValueError("请先为源影像定义实际坐标系")
         source_crs = CRS.from_user_input(src.crs)
+        if source_crs.equals(target, ignore_axis_order=True):
+            raise ValueError("目标与源影像的坐标系相同，请选择不同的目标坐标系")
         if source_crs.is_compound or target.is_compound or not (target.is_geographic or target.is_projected):
             raise ValueError("Raster reprojection supports horizontal geographic and projected coordinate systems")
-        transformer = TransformerGroup(source_crs, target, always_xy=True, allow_ballpark=False)
+        # GDAL's explicit operation must honor the axis order of the source and target CRS.
+        transformer = TransformerGroup(source_crs, target, always_xy=False, allow_ballpark=False)
         if not transformer.best_available or not transformer.transformers:
             raise ValueError("No verified coordinate transformation is available for this grid")
         # Select a concrete non-ballpark coordinate operation and use it for grid construction and warping.
@@ -203,8 +212,10 @@ def reproject_raster(ctx, target_crs, resampling, resolution):
                              resampling=Resampling[resampling], warp_mem_limit=64, COORDINATE_OPERATION=pipeline)
             finally:
                 normalized.unlink(missing_ok=True)
-    return deliver(ctx, out, {"type": "reproject", "source_crs": source_crs.to_wkt(),
-                             "resampling": resampling, "coordinate_operation": pipeline})
+    result = deliver(ctx, out, {"type": "reproject", "source_crs": source_crs.to_wkt(),
+                                "resampling": resampling, "coordinate_operation": pipeline})
+    return {**result, "statistics": {**result["statistics"],
+            "projection": {"source": describe_crs(source_crs), "target": describe_crs(target)}}}
 
 
 def reproject(ctx, target_crs: str, resampling: Literal["nearest", "bilinear", "cubic"] = "nearest",

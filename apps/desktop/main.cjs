@@ -121,6 +121,7 @@ async function startDesktop(options) {
         desktop.notify('voiceCaption', voiceReply);
     }
     function broadcast(state) {
+        desktop.setAgentLock(state.busy);
         desktop.notify('state', withSpeech(state));
     }
     const controller = new DesktopController({ userData: app.getPath('userData'), runtime, dsh,
@@ -360,6 +361,7 @@ async function startDesktop(options) {
             throw new Error('语音对话内容无效');
         }
         const command = action(text);
+        if (controller.active || controller.delivery) return { reply: '小六正在操作，请等本轮结束，或在工作台点击接管。' };
         if (command === 'workbench') { reveal(); return { reply: '好，工作台已经打开。' }; }
         if (command === 'reset') { resetConversation({}, true); return { reply: '好，我们开始新的对话。' }; }
         const prompt = command === 'send' ? draft.prompt : text;
@@ -737,7 +739,7 @@ async function startDesktop(options) {
         }
         if (taskId) {
             const task = controller.tasks.find(item => item.id === taskId && item.status === 'succeeded' && item.layout?.export);
-            if (!task || !/^[a-f0-9]{32}$/.test(task.runId)) throw new Error('制图任务已经失效');
+            if (!task || !/^[a-f0-9]{32}$/.test(task.runId)) throw new Error('制图任务已经结束');
             const file = path.join(controller.settings.workspace, 'runs', task.runId, 'map-layout.' + format);
             fs.writeFileSync(file, bytes, { flag: 'wx' });
             task.layout.format = format;
@@ -805,7 +807,7 @@ async function startDesktop(options) {
     }
     async function submitTask(task) {
         if (updater.handoff) throw new Error('系统正在重启更新');
-        if (controller.active || controller.modelTesting) throw new Error('已有任务在运行');
+        if (controller.active || controller.delivery || controller.modelTesting) throw new Error('已有任务在运行');
         if (!controller.settings.modelVision) {
             reveal();
             window.webContents.send('guizhi:settings', 'model');
@@ -899,11 +901,15 @@ async function startDesktop(options) {
         return withSpeech(state);
     }
     bind('submit', task => action(task.prompt) === 'reset' ? resetConversation() : submitTask({ ...task, dialogue: false }));
-    bind('cancel', () => {
-        const state = controller.cancel();
+    bind('cancel', id => {
+        const state = controller.cancel(id);
         broadcast(state);
         return withSpeech(state);
     });
+    bind('finishMapDelivery', (surface, id) => {
+        if (surface !== window || typeof id !== 'string') throw new Error('地图成果请求无效');
+        controller.finishMapDelivery(id);
+    }, true);
     bind('coordinates', () => controller.coordinateCatalog());
     bind('skills', () => controller.python('skills'));
     bind('capabilities', () => controller.python('capabilities'));

@@ -41,6 +41,8 @@ TOOLS = {
     "table.delete_field": (["图层"], "layer"),
     "geometry.create_dataset": ([], "layer"),
     "geometry.repair": (["图层"], "layer"),
+    "crs.reproject": (["矢量图层"], "layer"),
+    "crs.assign": (["矢量图层"], "layer"),
     "raster.statistics": (["影像"], "statistics"),
     "raster.clip": (["影像", "裁切范围"], "layer"),
     "raster.reproject": (["影像"], "layer"),
@@ -214,6 +216,8 @@ def bind_values(node, inputs, ports):
     epsg = validated.get("epsg") if node.operation == "geometry.create_dataset" else None
     if node.operation == "raster.reproject" and validated["target_crs"].startswith("EPSG:"):
         epsg = validated["target_crs"]
+    if node.operation in {"crs.reproject", "crs.assign"} and validated["definition"].startswith("EPSG:"):
+        epsg = validated["definition"]
     if epsg is not None:
         try:
             CRS.from_user_input(epsg)
