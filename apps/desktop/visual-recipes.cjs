@@ -7,6 +7,7 @@ function visualRecipe(event) {
             read_current_map_image: '正在查看当前地图画面',
             describe_bound_layers: '正在读取图层信息',
             lookup_layer_field: '正在查询属性值',
+            sum_layer_area: '正在汇总面积',
             inspect_layer_crs: '正在核对图层坐标系',
         };
         const label = labels[event.tool?.replace(/^mcp__guizhi__/, '')];

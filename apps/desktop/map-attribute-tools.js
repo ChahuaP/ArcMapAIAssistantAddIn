@@ -55,19 +55,48 @@ function typedValue(type, value, allowNull = false) {
 
 export function attributeFilter(layer, values, update) {
     const parts = [];
+    const makeClause = () => ({ id: crypto.randomUUID(), op: 'eq' });
     const filters = values.filters || [{ id: 'first', op: 'eq' }];
-    const logic = values.logic || 'and';
-    const clauses = filters.map((filter, index) => attributeClause(layer, filter, changes =>
-        update('filters', filters.map((item, i) => i === index ? { ...item, ...changes } : item))));
-    if (filters.length > 1) parts.push(token('匹配条件', logic,
-        options({ and: '全部条件（且）', or: '任一条件（或）' }), value => update('logic', value)));
-    parts.push(...clauses.map((clause, index) => h('fieldset', { key: filters[index].id, className: 'gis-filter-clause',
-        'aria-label': '条件 ' + (index + 1) }, ...clause.parts,
-        filters.length > 1 && h(Button, { size: 'small', onClick: () => update('filters', filters.filter((_, i) => i !== index)) }, '删除条件'))),
-    h(Button, { size: 'small', disabled: filters.length >= 32 || !layer, onClick: () =>
-        update('filters', [...filters, { id: crypto.randomUUID(), op: 'eq' }]) }, '添加条件'));
-    const parameters = { where: clauses.length === 1 ? clauses[0].where : { op: logic, conditions: clauses.map(clause => clause.where) } };
-    return { parts, parameters, valid: clauses.every(clause => clause.valid) };
+    const setFilters = change => update('filters', current => change(current || [{ id: 'first', op: 'eq' }]));
+    const logic = (label, value, onChange) => h(Select, { size: 'small', 'aria-label': label, value, onChange,
+        options: options({ and: '且（全部满足）', or: '或（任一满足）' }) });
+    function group(rows, operator, changeRows, setLogic, groupId) {
+        const clauses = rows.map((row, index) => {
+            const replace = change => changeRows(current =>
+                current.map(item => item.id === row.id ? change(item) : item));
+            const remove = rows.length > 1 && h(Button, { size: 'small',
+                onClick: () => changeRows(current => current.filter(item => item.id !== row.id)) },
+                row.filters ? '删除条件组' : '删除条件');
+            if (row.filters) {
+                const nested = group(row.filters, row.logic, change => replace(item => ({ ...item, filters: change(item.filters) })),
+                    next => replace(item => ({ ...item, logic: next })), row.id);
+                return { ...nested, view: h('fieldset', { key: row.id, className: 'gis-filter-group' },
+                    h('legend', null, '条件组'), nested.view, remove) };
+            }
+            const clause = attributeClause(layer, row, changes => replace(item => ({ ...item, ...changes })));
+            return { ...clause, view: h('fieldset', { key: row.id, className: 'gis-filter-clause',
+                'aria-label': '条件 ' + (index + 1) }, ...clause.parts, remove) };
+        });
+        return { where: clauses.length === 1 ? clauses[0].where : { op: operator, conditions: clauses.map(clause => clause.where) },
+            valid: clauses.every(clause => clause.valid),
+            view: h(window.React.Fragment, null,
+                rows.length > 1 && logic(groupId ? '组内关系' : '条件关系', operator, setLogic),
+                ...clauses.map(clause => clause.view),
+                h('div', { className: 'gis-condition-line' },
+                    h(Button, { size: 'small', disabled: rows.length >= 32 || !layer,
+                        onClick: () => {
+                            const clause = makeClause();
+                            changeRows(current => [...current, clause]);
+                        } }, '添加条件'),
+                    !groupId && h(Button, { size: 'small', disabled: rows.length >= 32 || !layer,
+                        onClick: () => {
+                            const nested = { id: crypto.randomUUID(), logic: 'or', filters: [makeClause(), makeClause()] };
+                            changeRows(current => [...current, nested]);
+                        } }, '添加条件组'))) };
+    }
+    const query = group(filters, values.logic || 'and', setFilters, value => update('logic', value));
+    parts.push(query.view);
+    return { parts, parameters: { where: query.where }, valid: query.valid };
 }
 
 function attributeClause(layer, filter, update) {

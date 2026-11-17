@@ -84,6 +84,7 @@
         copy: 'M8 8h12v12H8zM16 4H4v12',
         cut: 'M8 8a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm0 8a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm-1-6 14 10M7 14 21 4',
         paste: 'M9 4H5v17h14V4h-4m-6-1h6v4H9zM8 12h8m-8 4h8',
+        label: 'M4 6h16v12H4zM8 14l2-4 2 4m-3.4-1h2.8M14 10h3m-3 4h3',
         swatches: 'M4 4h7v7H4zm9 0h7v7h-7zm-9 9h7v7H4zm9 0h7v7h-7zm0 7 7-7',
     };
     const businessIcons = {

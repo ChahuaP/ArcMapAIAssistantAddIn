@@ -1,4 +1,4 @@
-import { existsSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 
 export const inject = ['llm'];
 
@@ -7,6 +7,7 @@ export function meter(config) {
     let charged = 0;
     let reserved = 0;
     let refused = null;
+    let synthesized = false;
 
     function checkpoint(status, estimate = 0) {
         const pending = config.checkpoint + '.pending';
@@ -17,10 +18,17 @@ export function meter(config) {
 
     checkpoint('ready');
     return async function* (options, next) {
-        // Verified workflows already have a deterministic delivery message.
         if (existsSync(config.operation)) {
-            yield { type: 'finish', reason: { kind: 'stop' } };
-            return;
+            const receipt = config.synthesize && !synthesized && JSON.parse(readFileSync(config.operation, 'utf8'));
+            const direct = receipt?.steps?.some(step => step.statistics?.area_summary || step.statistics?.lookup ||
+                step.statistics?.projection || step.statistics?.selected_count !== undefined || step.statistics?.coverage_ratio !== undefined);
+            if (receipt?.status !== 'succeeded' || direct) {
+                yield { type: 'finish', reason: { kind: 'stop' } };
+                return;
+            }
+            synthesized = true;
+            // The workflow already ran. The remaining response only explains its verified result.
+            options = { ...options, tools: [] };
         }
         const bytes = Buffer.byteLength(JSON.stringify([options.system, options.messages, options.tools, options.toolHistory]));
         const estimate = bytes + (options.maxTokens ?? 1024) + 512;

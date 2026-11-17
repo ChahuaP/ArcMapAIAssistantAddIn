@@ -2,6 +2,7 @@
 import json
 from pathlib import Path
 import re
+from shutil import copyfileobj
 from tempfile import TemporaryDirectory
 import warnings
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -44,8 +45,8 @@ def shapefile(workspace, run, kind, output):
 
 def package_layer(workspace, source, output, layer=None):
     output = external_root(Path(output))
-    if source.suffix.lower() != ".gpkg" or output.suffix.lower() != ".zip" or output.is_relative_to(workspace.runs):
-        raise ValueError("请选择独立位置保存 SHP 成果包（ZIP）")
+    if source.suffix.lower() != ".gpkg" or output.suffix.lower() not in {".zip", ".shp"} or output.is_relative_to(workspace.runs):
+        raise ValueError("请选择工作区成果目录外的 SHP 导出位置")
     layers = [name for name, geometry in pyogrio.list_layers(source) if geometry]
     if layer is None and len(layers) != 1:
         raise ValueError("SHP 成果包需要一个可导出的矢量图层")
@@ -53,7 +54,7 @@ def package_layer(workspace, source, output, layer=None):
     fields = dbf_fields(frame.drop(columns=frame.geometry.name).columns, frame.geometry.name)
     with TemporaryDirectory(prefix="guizhi-export-", dir=output.parent) as folder:
         root = Path(folder)
-        data = root / "result.shp"
+        data = root / (output.name if output.suffix.lower() == ".shp" else "result.shp")
         renamed = frame.rename(columns=fields)
         with warnings.catch_warnings():
             warnings.simplefilter("error", RuntimeWarning)
@@ -66,11 +67,26 @@ def package_layer(workspace, source, output, layer=None):
                                check_dtype=False, check_exact=True)
         except AssertionError as error:
             raise ValueError("SHP 字段值超出 DBF 精度或长度，请使用原始成果格式") from error
-        (root / "fields.json").write_text(json.dumps(fields, ensure_ascii=False, indent=2), encoding="utf-8")
-        pending = root / "package.zip"
-        with ZipFile(pending, "w", compression=ZIP_DEFLATED) as archive:
-            for file in sorted(root.iterdir()):
-                if file != pending:
-                    archive.write(file, file.name)
-        pending.replace(output)
+        if output.suffix.lower() == ".shp":
+            installed = []
+            try:
+                for part in sorted(root.iterdir(), key=lambda item: item.suffix.lower() == ".shp"):
+                    target = output.parent / part.name
+                    with target.open('xb') as destination, part.open('rb') as source_part:
+                        installed.append(target)
+                        copyfileobj(source_part, destination)
+            except OSError as error:
+                for target in reversed(installed):
+                    target.unlink()
+                if isinstance(error, FileExistsError):
+                    raise ValueError("同名 SHP 或配套文件已存在，请换一个文件名") from error
+                raise
+        else:
+            (root / "fields.json").write_text(json.dumps(fields, ensure_ascii=False, indent=2), encoding="utf-8")
+            pending = root / "package.zip"
+            with ZipFile(pending, "w", compression=ZIP_DEFLATED) as archive:
+                for file in sorted(root.iterdir()):
+                    if file != pending:
+                        archive.write(file, file.name)
+            pending.replace(output)
     return {"output": str(output), "features": len(reopened), "fields": fields}

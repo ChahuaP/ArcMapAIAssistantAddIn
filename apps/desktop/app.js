@@ -287,7 +287,7 @@
         const [takingOver, setTakingOver] = useState(false);
         const [layoutReady, setLayoutReady] = useState(null);
         const [layoutOpen, setLayoutOpen] = useState(null);
-        const hasMapResult = Boolean(task?.map || task?.mapLayers?.length || task?.layout || task?.mapActions);
+        const hasMapResult = Boolean(task?.map || task?.mapLayers?.length || task?.layout || task?.mapActions || task?.mapSelection);
         const pendingDelivery = !launcher && task?.status === 'succeeded' && hasMapResult && !shownMapRuns.current.has(task.id);
         const locked = taskRunning || sending || Boolean(delivering || pendingDelivery || state?.delivery);
         const cancelling = takingOver || task?.status === 'cancelling' || sending && !taskRunning;
@@ -730,6 +730,13 @@
                     fail(error);
                     if (item.layout) await api.mapLayoutError(item.id, window.GuizhiErrorText(error));
                     return false;
+                }
+            }
+            if (item?.mapSelection) {
+                const target = mapKey(item.mapSelection);
+                if (layers.some(layer => mapKey(layer) === target)) {
+                    setActiveLayer(target);
+                    setMapSelection({ key: target, ids: item.mapSelection.fids });
                 }
             }
             if (item?.layout && !item.mapLayers?.length && !layers.length) {

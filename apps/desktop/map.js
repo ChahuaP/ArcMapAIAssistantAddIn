@@ -22,7 +22,7 @@ import Translate from 'ol/interaction/Translate.js';
 import Snap from 'ol/interaction/Snap.js';
 import { never, primaryAction, singleClick, shiftKeyOnly, noModifierKeys } from 'ol/events/condition.js';
 import ScaleLine from 'ol/control/ScaleLine.js';
-import { Fill, Stroke, Style, Circle, RegularShape } from 'ol/style.js';
+import { Fill, Stroke, Style, Circle, RegularShape, Text } from 'ol/style.js';
 import { createEmpty, extend, isEmpty } from 'ol/extent.js';
 import { getPointResolution } from 'ol/proj.js';
 
@@ -41,7 +41,7 @@ const commandIcons = {
     编辑图层: 'pencil', 选择: 'select', 绘制: 'pencil', 编辑顶点: 'node', 移动: 'move',
     完成绘制: 'check', 撤销绘制点: 'undo', 编辑属性: 'table', 删除要素: 'trash',
     撤销: 'undo', 退出: 'close', 识别要素: 'info', 框选: 'box',
-    合并要素: 'merge', 分割要素: 'split', 完成分割: 'check', 复制: 'copy', 剪切: 'cut',
+    合并要素: 'merge', 拆分要素: 'split', 完成拆分: 'check', 复制: 'copy', 剪切: 'cut',
     打开: 'folderOpen', 保存: 'save', 字段计算器: toolIcon('table.calculate_field'), 计算几何: toolIcon('table.calculate_geometry'),
 };
 const tabIcons = { 地图: 'map', 数据: 'layers', 编辑: 'pencil', 分析: 'analysis', 制图: 'layout', 业务: 'briefcase' };
@@ -57,7 +57,7 @@ const style = (color, settings) => {
     const lineDash = appearance.pattern === 'dash' ? [9, 5] : appearance.pattern === 'dot' ? [2, 4] : undefined;
     const stroke = !appearance.noOutline ? new Stroke({ color: appearance.color, width: appearance.width, lineDash }) : undefined;
     const fill = new Fill({ color: appearance.fill ? fillColor(appearance.fill, appearance.fillOpacity) : 'rgba(0,0,0,0)' });
-    const point = { radius: appearance.size / 2, fill: new Fill({ color: appearance.color }),
+    const point = { radius: appearance.size / 2, declutterMode: 'none', fill: new Fill({ color: appearance.color }),
         stroke: new Stroke({ color: appearance.color, width: 1 }) };
     const shape = appearance.shape;
     const image = shape === 'circle' ? new Circle(point) : new RegularShape({ ...point,
@@ -65,8 +65,23 @@ const style = (color, settings) => {
     return new Style({ stroke, fill, image });
 };
 const layerFor = (items, color) => new VectorLayer({
-    source: new VectorSource({ features: items.map(feature) }), style: style(color),
+    declutter: 'map-labels', source: new VectorSource({ features: items.map(feature) }), style: style(color),
 });
+const displayFields = item => [...new Set([item.style?.classification?.field, item.style?.labelField].filter(Boolean))];
+function withLabels(render, labelField, geometry) {
+    if (!labelField) return render;
+    const text = new Text({ font: '13px "Microsoft YaHei", sans-serif', offsetY: /Point/.test(geometry) ? -15 : 0,
+        padding: [2, 3, 2, 3], fill: new Fill({ color: '#172536' }), stroke: new Stroke({ color: '#fff', width: 3 }),
+        overflow: true });
+    const labels = new Style({ text, zIndex: 10 });
+    return feature => {
+        const base = typeof render === 'function' ? render(feature) : render;
+        const value = feature.get(labelField);
+        if (value == null || value === '') return base;
+        text.setText(String(value).slice(0, 160));
+        return [base, labels];
+    };
+}
 function selectionStyle(size = 10) {
     return [['#312a05', 5.5], ['#fff000', 3]].map(([color, width], zIndex) => {
         const stroke = new Stroke({ color, width });
@@ -230,6 +245,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
     const [lastResult, setLastResult] = useState(null);
     const [count, setCount] = useState(0);
     const [fieldEdit, setFieldEdit] = useState(null);
+    const [pasteTarget, setPasteTarget] = useState(null);
     const edits = useRef([]);
     const drawingTool = useRef(null);
     const [drawingPoints, setDrawingPoints] = useState(0);
@@ -257,8 +273,14 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
     const layer = layers.find(item => key(item) === active);
     const geometryFamily = item => item?.geometry?.replace(/^Multi/, '');
     const pasteSource = clipboard && layers.find(item => key(item) === clipboard.key);
-    const canPaste = Boolean(edit === 'select' && !busy && layer?.crs && pasteSource && active !== clipboard.key &&
-        geometryFamily(layer) === clipboard.kind);
+    const pasteTargets = pasteSource ? layers.filter(item => key(item) !== clipboard.key && item.crs &&
+        geometryFamily(item) === clipboard.kind) : [];
+    const canPaste = !busy && !count && (!edit || edit === 'select') && pasteTargets.length > 0;
+    const openPaste = () => {
+        if (!canPaste) return;
+        setIssue('');
+        setPasteTarget(pasteTargets.some(item => key(item) === active) ? active : key(pasteTargets[0]));
+    };
     useEffect(() => {
         if (clipboard && !pasteSource) setClipboard(null);
     }, [layers, clipboard]);
@@ -324,7 +346,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         });
     }
 
-    async function renderFrame(items, bounds, size) {
+    async function renderFrame(items, bounds, size, zoom) {
         if (!items.length) throw new Error('请为地图框选择图层');
         const view = new View({ projection: projection(target, units), center: [0, 0], zoom: 0 });
         const offscreen = globalThis.document.createElement('div');
@@ -353,13 +375,14 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                     (entry.plan.source_wkt === item.crs || entry.source_reference === item.crs) &&
                     (entry.plan.target_wkt === target || entry.target_reference === display?.value));
                 const reply = await api.map({ action: 'features', ref: item.ref, bbox: bounds, target: target || null,
-                    fields: item.style?.classification ? [item.style.classification.field] : [],
+                    fields: displayFields(item),
                     plan: displayPlans[key(item)] || (plan && plan.id + '@' + plan.revision) });
                 const source = new VectorSource({ features: reply.features.map(feature) });
                 const fillLayer = previous?.get('fillLayer');
                 const layersForItem = fillLayer ? [new VectorLayer({ source, opacity: fillLayer.getOpacity(),
                     style: fillLayer.getStyle() })] : [];
-                const drawing = new VectorLayer({ ...options, source, style: previous?.getStyle() || style(appearance.color, appearance) });
+                const drawing = new VectorLayer({ ...options, source, declutter: 'layout-labels',
+                    style: previous?.getStyle() || withLabels(style(appearance.color, appearance), item.style?.labelField, item.geometry) });
                 drawing.set('dataExtent', reply.bounds);
                 drawing.set('limited', reply.limited);
                 return [...layersForItem, drawing];
@@ -370,7 +393,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 ol.addLayer(layer);
             });
             if (bounds) view.fit(bounds, { size, maxZoom: 25 });
-            else fit(view, draw, size);
+            else { fit(view, draw, size); if (zoom !== 1) view.setResolution(view.getResolution() / zoom); }
             await new Promise((resolve, reject) => {
                 const timer = setTimeout(() => reject(new Error('等待地图框渲染超时')), 10000);
                 ol.once('rendercomplete', () => { clearTimeout(timer); resolve(); });
@@ -396,12 +419,16 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
             const items = frame.layers?.map(frameLayer) || layers.filter(item => !hidden.includes(key(item)));
             const position = config.positions[id];
             const size = [Math.round(width * position.width), Math.round(height * position.height)];
-            const bounds = frame.extent === 'layers' ? null : config.viewBounds;
-            const stamp = JSON.stringify([items.map(key), bounds, size]);
+            const zoom = frame.zoom || 1;
+            const bounds = frame.extent === 'layers' ? null : config.viewBounds?.map((value, index, original) => {
+                const center = (value + original[(index + 2) % 4]) / 2;
+                return center + (value - center) / zoom;
+            });
+            const stamp = JSON.stringify([items.map(item => [key(item), item.style]), bounds, size, zoom]);
             let rendering = frameCache.current.get(stamp);
             if (!rendering) {
                 if (frameCache.current.size >= 12) frameCache.current.delete(frameCache.current.keys().next().value);
-                rendering = renderFrame(items, bounds, size);
+                rendering = renderFrame(items, bounds, size, zoom);
                 frameCache.current.set(stamp, rendering);
                 void rendering.catch(() => { if (frameCache.current.get(stamp) === rendering) frameCache.current.delete(stamp); });
             }
@@ -722,13 +749,13 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                     fillLayer.setOpacity(layerOpacity * appearance.fillOpacity / 100);
                     fillLayer.setZIndex(order - 1);
                     fillLayer.setVisible(visible);
-                    drawing.setStyle(render({ ...appearance, fillOpacity: 0 }));
+                    drawing.setStyle(withLabels(render({ ...appearance, fillOpacity: 0 }), item.style?.labelField, item.geometry));
                 } else {
                     if (fillLayer) {
                         state.ol.removeLayer(fillLayer);
                         drawing.unset('fillLayer');
                     }
-                    drawing.setStyle(render(appearance));
+                    drawing.setStyle(withLabels(render(appearance), item.style?.labelField, item.geometry));
                 }
             }
             drawing.setOpacity(layerOpacity);
@@ -752,11 +779,14 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
             const plan = entries.find(entry => entry.kind === 'plan' &&
                 (entry.plan.source_wkt === item.crs || entry.source_reference === item.crs) &&
                 (entry.plan.target_wkt === target || entry.target_reference === display?.value));
+            const planId = displayPlans[id] || (plan && plan.id + '@' + plan.revision);
+            const stamp = JSON.stringify([target, displayFields(item), planId]);
+            if (drawing.get('completeFeatures') === stamp) return Promise.resolve({ id, drawing, cached: true });
             const overviewTolerance = item.bounds && Math.max(item.bounds[2] - item.bounds[0], item.bounds[3] - item.bounds[1]) / 2000;
             return api.map({ action: 'features', ref: item.ref, bbox, tolerance: item.count > 8000
                 ? (bbox ? state.view.getResolution() * .5 : (!target || target === item.crs) ? overviewTolerance : undefined) : undefined,
-                target: target || null, fields: item.style?.classification ? [item.style.classification.field] : [], plan: displayPlans[id] || (plan && plan.id + '@' + plan.revision) })
-                .then(result => ({ id, drawing, result })).catch(error => ({ id, drawing, error }));
+                target: target || null, fields: displayFields(item), plan: planId })
+                .then(result => ({ id, drawing, result, full: !bbox && !result.limited ? stamp : null })).catch(error => ({ id, drawing, error }));
         }).filter(Boolean);
         state.byKey = next;
         Promise.all(jobs).then(items => {
@@ -779,8 +809,11 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                     }
                     continue;
                 }
+                if (item.cached) continue;
+                item.drawing.unset('completeFeatures');
                 item.drawing.getSource().clear();
                 if (item.result) {
+                    if (item.full) item.drawing.set('completeFeatures', item.full);
                     item.drawing.set('dataExtent', item.result.bounds);
                     item.drawing.getSource().addFeatures(item.result.features.map(feature));
                 }
@@ -841,7 +874,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         if (!layer || layer.kind === 'raster' || !table) return;
         let alive = true;
         const order = sort.key === key(layer) ? sort.order : [];
-        api.map({ action: 'table', ref: layer.ref, page, order, selection: emptyFilter ? [] : selectedRows }).then(result => {
+        api.map({ action: 'table', ref: layer.ref, page, order, selection: emptyFilter ? [] : selectedRows?.filter(Number.isSafeInteger) }).then(result => {
             if (alive) { setTable(result.rows); setTableLayer(key(layer)); }
         }).catch(error => { if (alive) fail(error); });
         return () => { alive = false; };
@@ -867,9 +900,13 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 output.fields.some(field => field.name === item.field)) });
         }
     }
-    async function saveAttribute(value) {
-        if (!tableDialog?.cell || busy) return;
-        const { fid, field } = tableDialog.cell;
+    async function saveAttribute(fid, field, value) {
+        if (busy) return;
+        if (edit) {
+            push([{ action: 'update', id: fid, fields: { [field]: value } }]);
+            applyDraft();
+            return;
+        }
         setBusy(true);
         try {
             const result = await api.map({ action: 'tool', operation: 'table.edit_cell', refs: [layer.ref],
@@ -877,7 +914,6 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
             const error = toolError(result);
             if (error) { fail(error); return; }
             replaceAttributes(layer, result.layers[0]);
-            setTableDialog(null);
         } catch (error) { fail(error); }
         finally { setBusy(false); }
     }
@@ -932,13 +968,15 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
 
     const editable = Boolean(layer?.crs && !hidden.includes(active) &&
         /^(Multi)?(Point|LineString|Polygon)$/.test(layer.geometry));
-    function push(changes, transfer) {
-        edits.current.push({ changes, selected: selectionRef.current, transfer });
+    function push(changes) {
+        edits.current.push({ changes, selected: selectionRef.current });
         setCount(edits.current.length);
     }
     function applyDraft() {
-        const source = graph.current?.byKey.get(active)?.getSource();
+        const drawing = graph.current?.byKey.get(active);
+        const source = drawing?.getSource();
         if (!source) return;
+        drawing.unset('completeFeatures');
         const items = new globalThis.Map(original.current);
         for (const group of edits.current) for (const change of group.changes) {
             const id = change.id ?? change.fid;
@@ -953,7 +991,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         source.addFeatures([...items.values()].map(feature));
         restoreSelection(graph.current, selectionRef.current);
     }
-    function startEdit() {
+    function startEdit(mode = 'select') {
         if (display || target !== layer.crs) {
             setDisplay(null);
             setEditLayer(layer);
@@ -969,8 +1007,9 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         }));
         edits.current = [];
         toggleIdentify(false);
-        setEdit('select');
-        setIssue('');
+        setEdit(mode);
+        setBoxSelect(false);
+        setIssue(mode === 'split' ? '绘制穿过所选要素的拆分线，双击结束。' : '');
         setRibbon('编辑');
         node.current.focus();
     }
@@ -1008,7 +1047,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         if (['c', 'x', 'v'].includes(key) && !busy && (key === 'v' ? canPaste : canCopy)) {
             if (key === 'c' && globalThis.getSelection()?.toString()) return;
             event.preventDefault();
-            if (!event.repeat) key === 'v' ? void pasteFeatures() : copyFeatures(key === 'x' ? 'cut' : 'copy');
+            if (!event.repeat) key === 'v' ? openPaste() : copyFeatures(key === 'x' ? 'cut' : 'copy');
             return;
         }
         if (!edit || key !== 'z' && key !== 's') return;
@@ -1057,6 +1096,8 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 const id = 'new-' + crypto.randomUUID();
                 push([{ action: 'add', id, geometry }]);
                 applyDraft();
+                setSelection({ key: active, ids: [id] });
+                if (table) { setPage(0); setTableFilter('selected'); }
                 setEdit('select');
             });
             interactions.push(draw);
@@ -1105,30 +1146,10 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         if (!merged.size) { stopEdit(); return; }
         setBusy(true);
         try {
-            const transfers = new globalThis.Map();
-            for (const group of edits.current) {
-                const cut = group.transfer;
-                if (!cut) continue;
-                const ids = transfers.get(cut.key) || new Set();
-                group.changes.forEach((addition, index) => {
-                    if (merged.has(addition.id)) ids.add(cut.fids[index]);
-                });
-                transfers.set(cut.key, ids);
-            }
             const saved = await api.map({ action: 'edit', ref: layer.ref, revision: layer.revision, changes: [...merged.values()] });
-            const pairs = [];
-            for (const [sourceKey, fids] of transfers) {
-                if (!fids.size) continue;
-                const source = layers.find(item => key(item) === sourceKey);
-                if (!source) throw new Error('剪切的源图层已移除');
-                const next = await api.map({ action: 'edit', ref: source.ref, revision: source.revision,
-                    changes: [...fids].map(fid => ({ action: 'delete', fid })) });
-                pairs.push([source, next]);
-            }
-            pairs.push([layer, saved]);
-            for (const [before, after] of pairs) if (key(before) === mapBasis.current) mapBasis.current = key(after);
+            if (active === mapBasis.current) mapBasis.current = key(saved);
             stopEdit();
-            replaceLayers(pairs);
+            replace(layer, saved);
         } catch (error) { fail(error); }
         finally { setBusy(false); }
     }
@@ -1181,20 +1202,22 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         setIoStatus('');
     }
     async function pasteFeatures() {
-        if (!canPaste) return;
-        setIssue('');
+        const destination = pasteTargets.find(item => key(item) === pasteTarget);
+        if (!canPaste || !destination) return;
         setBusy(true);
         try {
-            const prepared = await api.map({ action: 'edit-transfer-plan', ref: pasteSource.ref, revision: pasteSource.revision,
-                destination: layer.ref, destinationRevision: layer.revision, fids: clipboard.fids });
-            if (pendingChanges().size + prepared.length > 500) throw new Error('一次最多保存 500 个要素的编辑，请分批保存');
-            const changes = prepared.map(item => ({ action: 'add', id: 'new-' + crypto.randomUUID(),
-                geometry: item.geometry, fields: item.properties }));
-            push(changes, clipboard.mode === 'cut' ? { ...clipboard, fids: [...clipboard.fids].sort((a, b) => a - b) } : null);
-            applyDraft();
-            setSelection({ key: active, ids: changes.map(item => item.id) });
-            if (clipboard.mode === 'cut') cancelClipboard();
-            setIssue('已粘贴 ' + prepared.length + ' 个要素，可撤销或保存。');
+            const result = await api.map({ action: 'edit-transfer', ref: pasteSource.ref, revision: pasteSource.revision,
+                destination: destination.ref, destinationRevision: destination.revision, fids: clipboard.fids, mode: clipboard.mode });
+            const output = result.find(item => item.ref.artifact === 'export');
+            const moved = result.find(item => item.ref.artifact === 'transfer-source');
+            if (!output || clipboard.mode === 'cut' && !moved) throw new Error('未找到粘贴后的图层');
+            const replacements = moved ? [[pasteSource, moved], [destination, output]] : [[destination, output]];
+            for (const [before, after] of replacements) if (key(before) === mapBasis.current) mapBasis.current = key(after);
+            if (edit) stopEdit();
+            setPasteTarget(null);
+            replaceLayers(replacements);
+            if (moved) cancelClipboard();
+            setIoStatus('已粘贴 ' + clipboard.fids.length + ' 个要素到「' + destination.name + '」');
         } catch (error) { setIssue(window.GuizhiErrorText(error)); }
         finally { setBusy(false); }
     }
@@ -1216,15 +1239,17 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         sortOrder: cellOrder[0]?.field === value ? cellOrder[0].direction : null,
         render: (_, row) => {
             const raw = index ? row.values[value] : row.id;
-            return h('span', { className: 'gis-cell', tabIndex: 0, title: '双击编辑或复制',
-                onDoubleClick: () => setTableDialog({ cell: { value: raw, field: value, fid: row.id, readonly: !index || Boolean(edit), fail } }),
-                onKeyDown: event => {
-                    if (event.key !== 'F2' && event.key !== 'Enter') return;
-                    event.preventDefault();
-                    setTableDialog({ cell: { value: raw, field: value, fid: row.id, readonly: !index || Boolean(edit), fail } });
-                } }, String(raw ?? '—'));
+            return h(AttributeCell, { value: raw, field: value, fid: row.id,
+                disabled: !index || busy, fail, commit: saveAttribute });
         },
     }));
+    const draftChanges = edit ? pendingChanges() : new globalThis.Map();
+    const draftRows = [...draftChanges].filter(([id, change]) => change.action === 'add' &&
+        (tableFilter !== 'selected' || picked.includes(id))).map(([id, change]) => ({ id, values: change.fields || {} }));
+    const persistedRows = tableLayer === active ? (table || []).filter(row => draftChanges.get(row.id)?.action !== 'delete')
+        .map(row => ({ ...row, values: { ...row.values, ...draftChanges.get(row.id)?.fields } })) : [];
+    const countDraft = layer?.count + [...draftChanges.values()].reduce((total, change) =>
+        total + Number(change.action === 'add') - Number(change.action === 'delete'), 0);
     const command = (label, onClick, props = {}) => h(Button, { size: 'small', icon: glyph(commandIcons[label]),
         onClick, ...props }, label);
     const group = (label, ...items) => h('section', { className: 'ribbon-group', 'aria-label': label },
@@ -1240,11 +1265,11 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
             command(title, () => { setEdit(mode); if (mode === 'select') setBoxSelect(false); }, { key: mode, disabled: busy || (['modify', 'move'].includes(mode) && !picked.length),
                 type: edit === mode ? 'primary' : 'default' })),
             command('合并要素', () => { setEditDialogError(''); setMergeTarget(picked[0]); }, { disabled: !canReshape || picked.length < 2 }),
-            command('分割要素', () => { setIssue('绘制穿过所选要素的分割线，双击结束。'); setEdit('split'); node.current.focus(); },
+            command('拆分要素', () => { setIssue('绘制穿过所选要素的拆分线，双击结束。'); setBoxSelect(false); setEdit('split'); node.current.focus(); },
                 { type: edit === 'split' ? 'primary' : 'default', disabled: !canReshape || !picked.length }),
             edit === 'draw' && drawingPoints > 0 && command('完成绘制', () => drawingTool.current?.finishDrawing(),
                 { disabled: drawingPoints < (layer.geometry.endsWith('Polygon') ? 3 : 2) }),
-            edit === 'split' && drawingPoints >= 2 && command('完成分割', () => drawingTool.current?.finishDrawing(), { disabled: busy }),
+            edit === 'split' && drawingPoints >= 2 && command('完成拆分', () => drawingTool.current?.finishDrawing(), { disabled: busy }),
             edit === 'draw' && drawingPoints > 0 && command('撤销绘制点', () => drawingTool.current?.removeLastPoint())),
         group('属性与删除', command('编辑属性', openFields, { disabled: busy || picked.length !== 1 || !layer.fields.length }),
             command('删除要素', () => {
@@ -1253,7 +1278,10 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         group('提交', command('撤销', undoEdit, { disabled: busy || !(count || drawingPoints), title: 'Ctrl+Z', 'aria-keyshortcuts': 'Control+Z' }),
         command('保存', saveEdit, { disabled: busy || !count, loading: busy, type: 'primary', title: 'Ctrl+S', 'aria-keyshortcuts': 'Control+S' }),
         command('退出', () => count ? setConfirmExit(true) : leaveEdit(), { disabled: busy })),
-    ] : [group('图层编辑', command('编辑图层', startEdit, { disabled: !editable || busy || limited.includes(active) }))];
+    ] : [group('图层编辑', command('编辑图层', () => startEdit(), { disabled: !editable || busy || limited.includes(active) }),
+        command('拆分要素', () => startEdit('split'), { disabled: !editable || busy || limited.includes(active) ||
+            !/^(LineString|Polygon)$/.test(geometryFamily(layer)) || !picked.length || picked.length > 500,
+            title: '先选中线或面，再绘制拆分线' }))];
     const showLayer = item => item.name.toLowerCase().includes(layerSearch.toLowerCase());
     const visibleLayers = layers.filter(showLayer);
     const canReorder = !edit && !busy && visibleLayers.length > 1;
@@ -1314,6 +1342,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
             { key: 'table', label: '打开属性表', icon: glyph('table'), disabled: raster },
             { key: 'rename', label: '重命名', icon: glyph('pencil') },
             { key: 'style', label: raster ? '影像显示' : '符号化', icon: glyph(raster ? 'image' : 'swatches') },
+            ...(!raster ? [{ key: 'labels', label: '标注', icon: glyph('label') }] : []),
             { key: 'export', label: '导出', icon: glyph('download'), children: [
                 { key: 'export-data', label: '导出为…' },
                 ...(!raster ? [{ key: 'export-table', label: '导出属性表' }] : []),
@@ -1336,15 +1365,16 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 api.mapExport(item.ref, false, appearance || undefined, pointIcon).catch(fail);
                 return;
             }
-            if (action === 'properties' || action === 'style') {
-                setProperties({ item, color: palette[index % palette.length], start: action === 'style' ? 'style' : 'info' });
+            if (['properties', 'style', 'labels'].includes(action)) {
+                setProperties({ item, color: palette[index % palette.length], start: action === 'properties' ? 'info' : action });
                 return;
             }
             if (action === 'selection') { void saveSelectedLayer(); return; }
             if (action === 'table') {
                 if (id !== active) selectLayer(id);
                 setPage(0);
-                setTable([]);
+                setTableFilter('all');
+                setTable(current => current || []);
                 return;
             }
             const g = graph.current;
@@ -1414,7 +1444,8 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 command('按属性选择', () => { toggleIdentify(false); openTool('data.select_by_attribute'); },
                     { disabled: busy || !layer?.geometry }),
                 command('按位置选择', () => { toggleIdentify(false); openTool('data.select_by_location'); },
-                    { disabled: busy || !layer?.geometry || layers.filter(item => item.geometry).length < 2 })),
+                    { disabled: busy || !layer?.geometry || layers.filter(item => item.geometry).length < 2 }),
+                command('清除选择', clear, { disabled: busy || !picked.length })),
             group('显示', command('地图属性', () => setMapProperties({ display, plan: displayPlans[active] }), { disabled: busy }))],
         数据: [group('地图工程', command('打开', () => mxd(api.mxdRead(), value => { setLocateMxd(null); setDocument(value); }),
             { disabled: busy, 'aria-label': '打开地图工程' }),
@@ -1436,8 +1467,9 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
             command('清除选择', clear, { disabled: busy || edit === 'split' || !picked.length })),
             group('剪贴板', command('复制', () => copyFeatures('copy'), { disabled: !canCopy, title: 'Ctrl+C', 'aria-keyshortcuts': 'Control+C' }),
                 command('剪切', () => copyFeatures('cut'), { disabled: !canCopy, title: 'Ctrl+X', 'aria-keyshortcuts': 'Control+X' }),
-                command('粘贴', () => void pasteFeatures(), { icon: glyph('paste'), disabled: !canPaste,
-                    title: clipboard ? '编辑兼容图层后按 Ctrl+V 粘贴' : '请先复制或剪切要素', 'aria-keyshortcuts': 'Control+V' }),
+                command('粘贴', openPaste, { icon: glyph('paste'), disabled: !canPaste,
+                    title: !clipboard ? '请先复制或剪切要素' : count ? '请先保存或放弃当前编辑' :
+                        !pasteTargets.length ? '请先添加同类型的目标图层' : '选择粘贴到哪个图层 · Ctrl+V', 'aria-keyshortcuts': 'Control+V' }),
                 clipboard && command('清空剪贴板', cancelClipboard, { icon: glyph('close'), disabled: busy })),
             ...editCommands],
         制图: [group('图件', command('版面布局', () => setLayout({ key: 'manual', config: prepareLayout(
@@ -1550,11 +1582,11 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 command('计算几何', () => openTool('table.calculate_geometry'), {
                     disabled: busy || Boolean(edit) || !layer.crs || !Object.keys(geometryProperties(layer)).length }),
                 command('高级排序', () => setTableDialog({ kind: 'sort' }), { icon: glyph('sort'), disabled: busy }),
-                command('统计', () => setTableDialog({ kind: 'stats' }), { icon: glyph('statistics'), disabled: busy || !tableFields.length }),
-                command('切换选择', invertSelection, { icon: glyph('select'), disabled: busy }),
+                command('统计', () => setTableDialog({ kind: 'stats' }), { icon: glyph('statistics'), disabled: busy || !tableFields.length || Boolean(count) }),
+                command('切换选择', invertSelection, { icon: glyph('select'), disabled: busy || Boolean(count) }),
                 h(Button, { type: 'text', size: 'small', icon: glyph('close', 15),
                     'aria-label': '关闭属性表', onClick: () => { setTable(null); setTableDialog(null); } })),
-            h(Table, { className: 'map-attributes', size: 'small', columns, rowKey: 'id', dataSource: tableLayer === active ? table : [],
+            h(Table, { className: 'map-attributes', size: 'small', columns, rowKey: 'id', dataSource: [...(page === 0 ? draftRows : []), ...persistedRows],
                 onChange: (_, filters, sorter, { action }) => {
                     if (action !== 'sort') return;
                     setPage(0);
@@ -1563,10 +1595,10 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 scroll: { x: 'max-content', y: 146 }, rowSelection: { selectedRowKeys: picked, preserveSelectedRowKeys: true,
                     onChange: ids => { if (tableFilter === 'selected') setPage(0); setSelection({ key: active, ids }); } },
                 pagination: { current: page + 1, pageSize: 50,
-                    total: tableFilter === 'selected' ? picked.length : layer.count,
+                    total: tableFilter === 'selected' ? picked.length : countDraft,
                     showSizeChanger: false, onChange: value => setPage(value - 1) } }),
             h('div', { className: 'map-table-status' },
-                h('span', { role: 'status' }, '已选 ' + picked.length.toLocaleString('zh-CN') + ' / ' + layer.count.toLocaleString('zh-CN') + ' 个要素'),
+                h('span', { role: 'status' }, '已选 ' + picked.length.toLocaleString('zh-CN') + ' / ' + countDraft.toLocaleString('zh-CN') + ' 个要素'),
                 h(antd.Segmented, { size: 'small', 'aria-label': '显示要素', value: tableFilter,
                     options: [{ label: '全部', value: 'all' }, { label: '已选', value: 'selected' }],
                     onChange: value => { setTableFilter(value); setPage(0); } }))),
@@ -1574,7 +1606,13 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
             close: () => setTableDialog(null), apply: order => { setPage(0); setSort({ key: active, order }); } }),
         tableDialog?.kind === 'stats' && h(AttributeStatistics, { columns: tableFields, source: layer.ref,
             selected: picked, close: () => setTableDialog(null) }),
-        tableDialog?.cell && h(AttributeCell, { cell: tableDialog.cell, busy, close: () => setTableDialog(null), save: saveAttribute }),
+        pasteTarget !== null && h(Modal, { open: true, centered: true, title: '粘贴要素', className: 'gis-dialog',
+            rootClassName: 'gis-modal-root', okText: '粘贴', cancelText: '取消', confirmLoading: busy,
+            onOk: pasteFeatures, onCancel: () => { if (!busy) setPasteTarget(null); } },
+            h('div', { className: 'map-field-editor' },
+                h('label', null, '目标图层', h(Choice, { value: pasteTarget, 'aria-label': '目标图层', disabled: busy,
+                    options: pasteTargets.map(item => ({ value: key(item), label: item.name })), onChange: setPasteTarget })),
+                issue && h('p', { className: 'error', role: 'alert' }, issue))),
         properties && h(LayerProperties, { ...properties, close: () => setProperties(null), glyph,
             save: value => styleLayer(key(properties.item), value) }),
         mapProperties && h(MapProperties, { background: backgroundColor, save: applyMapProperties, coordinates: coordinateTools(),

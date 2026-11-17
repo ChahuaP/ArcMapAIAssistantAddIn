@@ -99,6 +99,12 @@ export function MapLayout({ initial, busy, close, exportImage, draw, change, lay
         if (gesture.current?.id === event.pointerId) gesture.current = null;
     }
     function nudge(event, name) {
+        if (event.key === 'Delete' && name !== 'frame' && !busy) {
+            event.preventDefault();
+            event.stopPropagation();
+            remove(name);
+            return;
+        }
         const vector = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[event.key];
         if (!vector || busy) return;
         event.preventDefault();
@@ -109,6 +115,12 @@ export function MapLayout({ initial, busy, close, exportImage, draw, change, lay
     const frameUpdate = (id, values) => setValue(old => ({ ...old, frames: {
         ...old.frames, [id]: { ...old.frames[id], ...values },
     } }));
+    function remove(name) {
+        if (name === 'frame2') update('frames', { frame: value.frames.frame });
+        else if (['legend', 'scale', 'north'].includes(name)) frameUpdate('frame', { [name]: false });
+        else update(name, '');
+        setActive('frame');
+    }
     const choose = name => {
         if (name === 'title' && !value.title) update('title', '地图');
         else if (name === 'note' && !value.note) update('note', '图件说明');
@@ -161,10 +173,13 @@ export function MapLayout({ initial, busy, close, exportImage, draw, change, lay
                         onChange: next => frameUpdate(active, { extent: next }) })),
                     h('label', null, '分图名', h(Input, { size: 'small', maxLength: 80, value: value.frames[active]?.caption || '',
                         onChange: event => frameUpdate(active, { caption: event.target.value }) })),
-                    active === 'frame2' && h(Button, { size: 'small', onClick: () => {
-                        update('frames', { frame: value.frames.frame });
-                        setActive('frame');
-                    } }, '移除第二地图框')),
+                    h('div', { className: 'gis-layout-zoom', role: 'group', 'aria-label': '地图内容缩放' },
+                        h(Button, { size: 'small', 'aria-label': '缩小地图内容', disabled: (value.frames[active]?.zoom || 1) <= .25,
+                            onClick: () => frameUpdate(active, { zoom: Math.max(.25, (value.frames[active]?.zoom || 1) / 1.25) }) }, '−'),
+                        h(Button, { size: 'small', 'aria-label': '重置地图缩放',
+                            onClick: () => frameUpdate(active, { zoom: 1 }) }, Math.round((value.frames[active]?.zoom || 1) * 100) + '%'),
+                        h(Button, { size: 'small', 'aria-label': '放大地图内容', disabled: (value.frames[active]?.zoom || 1) >= 8,
+                            onClick: () => frameUpdate(active, { zoom: Math.min(8, (value.frames[active]?.zoom || 1) * 1.25) }) }, '+'))),
                 active === 'north' && decoration('north', '显示指北针'),
                 active === 'note' && text('note', '注记', 160),
                 active === 'title' && text('title', '图名', 80),
@@ -172,6 +187,8 @@ export function MapLayout({ initial, busy, close, exportImage, draw, change, lay
                     options('legendStyle', { boxed: '带边框', plain: '无边框' }, '样式')),
                 active === 'scale' && h(window.React.Fragment, null, decoration('scale', '显示比例尺'),
                     options('scaleStyle', { line: '刻线', bar: '黑白分段' }, '样式')),
+                active !== 'frame' && visible(active) && h(Button, { size: 'small', disabled: busy, onClick: () => remove(active),
+                    'aria-keyshortcuts': 'Delete' }, '移除' + items[active]),
                 h('hr'), text('fileName', '文件名', 80), options('format', { png: 'PNG', jpg: 'JPG', pdf: 'PDF' }, '格式'))),
         error && h('p', { role: 'alert', className: 'error' }, error),
         !error && warnings && h('p', { role: 'status', className: 'muted' }, warnings));

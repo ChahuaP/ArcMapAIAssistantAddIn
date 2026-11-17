@@ -17,6 +17,24 @@ function close() {
     }).finally(() => { if (process.connected) process.disconnect(); });
 }
 
+async function warm(options) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+        if (closing) return;
+        service = new DispatchService(options);
+        try {
+            await service.ready;
+            if (!closing) send({ type: 'ready' });
+            return;
+        } catch (error) {
+            await service.close();
+            if (closing) return;
+            if (attempt === 0 && /initialize timed out.*sdk-minimal/i.test(error.message)) continue;
+            send({ type: 'error', error: redact(error.message, options.apiKey) });
+            close();
+        }
+    }
+}
+
 process.on('disconnect', close);
 process.on('message', message => {
     if (message.type === 'close') return close();
@@ -24,9 +42,8 @@ process.on('message', message => {
     if (message.type === 'cancel') return stop?.abort();
     if (message.type === 'warm' && !service) {
         modelOptions = message.options;
-        service = new DispatchService(modelOptions);
-        void service.ready.then(() => send({ type: 'ready' }), error => {
-            send({ type: 'error', error: redact(error.message, message.options.apiKey) });
+        void warm(modelOptions).catch(error => {
+            send({ type: 'error', error: redact(error.message, modelOptions.apiKey) });
             close();
         });
     } else if (message.type === 'run' && service && !running) {

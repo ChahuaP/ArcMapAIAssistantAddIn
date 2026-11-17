@@ -564,7 +564,7 @@ async function startDesktop(options) {
         'crs-search', 'raster-preview', 'raster-display', 'categories']);
     bind('map', async (surface, input) => {
         if (surface !== window || !input || !mapReads.has(input.action) &&
-                !['edit', 'edit-sketch', 'edit-transfer-plan', 'tool'].includes(input.action)) {
+                !['edit', 'edit-sketch', 'edit-transfer', 'tool'].includes(input.action)) {
             throw new Error('地图请求无效');
         }
         if (!controller.settings.workspace) throw new Error('请先选择成果保存位置');
@@ -580,7 +580,9 @@ async function startDesktop(options) {
                 error: failure?.error || result.message });
             return { ...result, diagnosticId };
         }
-        toolJob = controller.request('map', input).then(result =>
+        const work = input.operation === 'data.select_by_attribute'
+            ? controller.reader.map(controller.settings.workspace, input) : controller.request('map', input);
+        toolJob = work.then(result =>
             ['failed', 'interrupted'].includes(result.status) ? report(result) : result,
         error => report({ status: 'failed', message: error.message,
             failure: { error: error.diagnosticMessage, errorCode: error.code } }));
@@ -671,7 +673,7 @@ async function startDesktop(options) {
         for (const [completed, [action, item]] of jobs.entries()) {
             const name = item.name || path.basename(item.file);
             window.webContents.send('guizhi:mapImportProgress', { label: '正在加载 ' + name, total: jobs.length > 1 ? jobs.length : 0, completed });
-            try { layers.push(...await controller.request('map', { action, items: [item] })); }
+            try { layers.push(...await controller.reader.map(controller.settings.workspace, { action, items: [item] })); }
             catch (error) { intake.issues.push({ name, message: error.message }); }
         }
         if (jobs.length) window.webContents.send('guizhi:mapImportProgress', { label: '正在绘制图层',
@@ -701,7 +703,8 @@ async function startDesktop(options) {
         const raster = item.kind === 'raster';
         const filters = table && !raster ? [{ name: '属性表', extensions: ['csv'] }]
             : raster ? [{ name: 'GeoTIFF', extensions: ['tif'] }, { name: 'JPEG 影像', extensions: ['jpg'] }]
-                : [{ name: 'SHP 成果包', extensions: ['zip'] }, { name: 'GeoPackage', extensions: ['gpkg'] },
+                : [{ name: 'SHP 成果包', extensions: ['zip'] }, { name: 'Shapefile', extensions: ['shp'] },
+                    { name: 'GeoPackage', extensions: ['gpkg'] },
                     { name: 'GeoJSON', extensions: ['geojson'] }, { name: 'KML', extensions: ['kml'] }];
         const name = item.name.replace(/[<>:"/\\|?*\x00-\x1f]/g, '-').replace(/[ .]+$/, '') || '图层';
         const pick = await dialog.showSaveDialog(window, { defaultPath: name + '.' + filters[0].extensions[0], filters });

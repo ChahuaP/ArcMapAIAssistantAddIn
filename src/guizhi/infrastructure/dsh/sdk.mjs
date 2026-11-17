@@ -38,6 +38,47 @@ function coordinateRead(receipt, prompt) {
         ['data.describe', 'data.list_fields'].includes(step.operation));
 }
 
+function areaRequest(prompt) {
+    return /(?:面积.{0,5}(?:之和|总和|合计|累计)|(?:总|合计|合并|汇总|累计)(?:面积)|面积(?:一共|共计))/u.test(prompt);
+}
+
+function requestedOutcomes(prompt) {
+    const outcomes = [];
+    const add = (label, operations) => outcomes.push({ label, operations });
+    if (areaRequest(prompt) || /(?:多大面积|面积有多大|面积多少|(?:这块|这片|选中).{0,12}有多大)/u.test(prompt)) {
+        add('面积', ['vector.area', 'control_check', 'annual.summarize']);
+    }
+    if (/(?:多少|几个|几条|几宗|几块|数量|个数).{0,4}(?:要素|图斑|地块|宗地)|(?:要素|图斑|地块|宗地).{0,6}(?:多少|数量|个数)/u.test(prompt) &&
+            !/(?:重叠|相交|覆盖|范围内)/u.test(prompt)) {
+        add('要素数量', ['vector_inventory', 'data.describe', 'data.select_by_attribute', 'data.select_by_location', 'data.selection_count']);
+    }
+    if (/(?:帮我|请|把|将|为.+)(?:.{0,16})(?:投影转换|转换.{0,16}(?:坐标系|EPSG)|投影.{0,8}EPSG)/iu.test(prompt)) {
+        add('投影转换', ['crs.reproject', 'crs.transform', 'raster.reproject']);
+    }
+    if (/(?:帮我|请|把|将).{0,20}(?:裁剪|裁切).{0,24}(?:图层|范围)|(?:图层|范围).{0,20}(?:裁剪|裁切)/u.test(prompt)) {
+        add('裁剪', ['vector.clip', 'raster.clip', 'delivery.clip_vector']);
+    }
+    if (/(?:帮我|请|把|将).{0,20}(?:缓冲|缓冲区)/u.test(prompt)) {
+        add('缓冲区', ['vector.buffer']);
+    }
+    if (/(?:在地图上.{0,7}选出来|选出.{0,15}(?:图斑|要素|地块)|按属性选|按位置选)/u.test(prompt)) {
+        add('地图选区', ['data.select_by_attribute', 'data.select_by_location']);
+    }
+    if (/(?:导出|另存为).{0,24}(?:CSV|属性表)/iu.test(prompt)) add('导出属性表', ['presentation.export_table']);
+    return outcomes;
+}
+
+function filterLabel(filter) {
+    if (!filter) return '';
+    if (filter.conditions) return '(' + filter.conditions.map(filterLabel).join(filter.op === 'or' ? ' 或 ' : ' 且 ') + ')';
+    if (filter.op === 'not') return '不满足 ' + filterLabel(filter.condition);
+    if (filter.op === 'in') return filter.field + ' 属于 ' + filter.values.join('、');
+    if (filter.op === 'between') return filter.field + ' 介于 ' + filter.values.join(' 至 ');
+    const action = { eq: '=', ne: '≠', gt: '>', gte: '≥', lt: '<', lte: '≤', contains: '包含', like: '匹配',
+        is_null: '为空', is_not_null: '不为空' }[filter.op];
+    return [filter.field, action, filter.value_field ?? filter.value].filter(value => value != null).join(' ');
+}
+
 function verifiedResponse(receipt, dialogue, prompt) {
     const stats = receipt.statistics;
     const area = value => value.toLocaleString('zh-CN', { maximumFractionDigits: 2 });
@@ -55,6 +96,15 @@ function verifiedResponse(receipt, dialogue, prompt) {
     if (stats.changed_parcels) parts.push(`更新涉及 ${stats.changed_parcels} 宗地。`);
     for (const item of receipt.steps ?? [{ statistics: stats }]) {
         const fact = item.statistics;
+        if (fact.area_summary) {
+            const result = fact.area_summary;
+            const summary = result.count === 0 ? '没有找到符合条件的要素。' :
+                result.area_m2 == null ? '匹配了 ' + result.count + ' 个要素，所选面积字段均为空。' :
+                    `匹配 ${result.count} 个要素，面积合计 ${area(result.area_m2)} m²。` +
+                    (result.count === result.valid ? '' : `其中 ${result.count - result.valid} 个要素没有面积值。`);
+            const basis = result.field ? '面积字段 ' + result.field : '按几何计算';
+            return summary + '\n\n来源：' + [result.layer, filterLabel(result.where), basis].filter(Boolean).join(' · ') + '。';
+        }
         if (fact.lookup) {
             const { fields, rows, count, layer, filter } = fact.lookup;
             const label = field => /(?:^|_)M2$/i.test(field) ? field + '（平方米）' : field;
@@ -73,6 +123,12 @@ function verifiedResponse(receipt, dialogue, prompt) {
             const findings = [['inside', '完全覆盖'], ['overlap', '部分重叠'], ['touch_line', '线接触'],
                 ['touch_point', '点接触'], ['disjoint', '不相交']]
                 .filter(([key]) => counts[key]).map(([key, label]) => `${label} ${counts[key]} 宗`);
+            if (/(?:在|位于|超出).{0,15}(?:范围|红线|里面|以内)/u.test(prompt)) {
+                parts.push(fact.coverage_ratio >= 1 - 1e-9 ? '待核查区全部位于参照范围内。' :
+                    fact.covered_area_m2 > 0 ? '待核查区只有部分位于参照范围内。' :
+                        counts.touch_line || counts.touch_point ? '待核查区与参照范围边界接触，面积上没有重叠。' :
+                            '待核查区位于参照范围外。');
+            }
             parts.push(`项目范围 ${area(fact.project_area_m2)} m²，重叠 ${area(fact.covered_area_m2)} m²，覆盖率 ${(fact.coverage_ratio * 100).toFixed(2)}%。`);
             if (findings.length) parts.push(findings.join('、') + '。');
         }
@@ -91,7 +147,7 @@ function verifiedResponse(receipt, dialogue, prompt) {
     } else if (steps.some(step => step.operation.startsWith('geometry.create_'))) {
         parts.push('已绘制要素并生成图层。');
     }
-    if (stats.feature_count !== undefined) parts.push(`共 ${stats.feature_count} 个要素。`);
+    if (stats.feature_count !== undefined) parts.push(`共 ${stats.feature_count} 个${prompt.includes('图斑') ? '图斑' : '要素'}。`);
     if (stats.geometry_types && !dialogue) parts.push(Object.entries(stats.geometry_types)
         .map(([name, count]) => `${name} ${count} 个`).join('，') + '。');
     if (stats.selected_count !== undefined) parts.push(`已选中 ${stats.selected_count} 个要素。`);
@@ -110,6 +166,16 @@ function verifiedResponse(receipt, dialogue, prompt) {
     if (receipt.steps?.some(step => step.operation === 'presentation.map_view')) parts.push('地图操作已提交。');
     const answer = parts.join('') || '已完成处理。';
     return dialogue ? answer.replaceAll(' m²', '平方米') : answer;
+}
+
+function deliveredResponse(receipt, options, answer, coordinateAnswer) {
+    const verified = verifiedResponse(receipt, options.dialogue, options.prompt);
+    const goals = requestedOutcomes(options.prompt);
+    const straightforward = goals.length === 1 && ['要素数量', '地图选区'].includes(goals[0].label);
+    if (coordinateAnswer || receipt.mode !== 'free' || areaRequest(options.prompt) || straightforward ||
+            receipt.steps?.some(step => step.statistics?.area_summary || step.statistics?.lookup || step.statistics?.projection ||
+                step.statistics?.coverage_ratio !== undefined) || !answer?.trim()) return verified;
+    return answer.trim().replace(/\s*[（(]`?map-\d+`?[）)]/g, '');
 }
 
 function within(root, path) {
@@ -193,6 +259,7 @@ export async function dispatch(options, { signal, onEvent = () => {}, getService
         .map(name => readFileSync(join(source, 'src', 'guizhi', 'domain', name + '.py')));
     const history = options.history || [];
     const images = options.images || [];
+    const outcomes = options.skill ? [] : requestedOutcomes(options.prompt);
     const request = history.length || options.dialogue
         ? JSON.stringify({ prompt: options.prompt, history, dialogue: Boolean(options.dialogue) }) : options.prompt;
     const provenance = { provider, model, route_sha256: hash(JSON.stringify(modelConfig)),
@@ -264,9 +331,11 @@ export async function dispatch(options, { signal, onEvent = () => {}, getService
                 skill: prepared.selected?.reference ?? null, parameters: options.skillParameters ?? null,
                 plans: { project_plan: options.projectPlan, control_plan: options.controlPlan },
                 previousRun: options.previousRun ?? null, provenance, planKey: prepared.key, mapContext: options.mapContext,
+                outcomes,
                 selectionRoles: Object.entries(options.layerLabels || {}).filter(([, layer]) => layer.selected).map(([role]) => role),
                 flushRequest: join(directory, 'flush.request'), flushReceipt: join(directory, 'flush.receipt'),
-                budget: { tokens, calls, checkpoint: budgetPath, operation: operationPath } });
+                budget: { tokens, calls, checkpoint: budgetPath, operation: operationPath,
+                    synthesize: !prepared.selected && !(outcomes.length === 1 && ['要素数量', '地图选区'].includes(outcomes[0].label)) } });
             boundService = service;
             event({ kind: 'runtime_bound', runtime_id: service.id });
             const { harness } = service;
@@ -278,7 +347,13 @@ export async function dispatch(options, { signal, onEvent = () => {}, getService
             const selection = prepared.selected ? `已选技能和本轮材料摘要：${JSON.stringify(prepared.selected)}。`
                 : `本轮材料图层清单（键为 material. 后的引用）：${JSON.stringify(layers)}。已选技能无。`;
             const visualContext = images.length ? '本轮用户消息有图片附件。图片内容问题直接看图回答。\n' : '';
-            const context = `${visualContext}${selection}${bound}有已选历史成果：${Boolean(options.previousRun)}。当前地图图层数：${options.mapContext?.layers.length ?? 0}。\n`;
+            const maps = (options.mapContext?.layers || []).slice(0, 24).map(layer => ({
+                id: layer.id, name: layer.name, geometry: layer.geometry, count: layer.count, crs: layer.crs,
+                active: layer.active, visible: layer.visible, selected: layer.fids?.length || undefined,
+                fields: layer.fields?.slice(0, 45),
+            }));
+            const context = `${visualContext}${selection}${bound}有已选历史成果：${Boolean(options.previousRun)}。当前地图摘要：${JSON.stringify(maps)}。\n` +
+                (outcomes.length ? '本轮要提供的结果：' + outcomes.map(item => item.label).join('、') + '。\n' : '');
             const conversation = history.length ? '最近对话记录（每项为用户提问与智能体答复）：' + JSON.stringify(history) + '\n' : '';
             const speech = options.dialogue ? '本轮使用语音输入，用简洁口语回答。\n' : '';
             const run = (prompt, includeImages = false) => harness.run(includeImages && images.length
@@ -294,7 +369,7 @@ export async function dispatch(options, { signal, onEvent = () => {}, getService
                     if (fact.type === 'tool/call') {
                         item.tool = fact.data.name;
                         if (['mcp__guizhi__execute_workflow', 'mcp__guizhi__review_approval',
-                            'mcp__guizhi__update_approval'].includes(item.tool)) attempted = true;
+                            'mcp__guizhi__update_approval', 'mcp__guizhi__sum_layer_area'].includes(item.tool)) attempted = true;
                     }
                     if (fact.type === 'assistant/message' && fact.data.usage) {
                         item.usage = fact.data.usage;
@@ -307,13 +382,15 @@ export async function dispatch(options, { signal, onEvent = () => {}, getService
             let response = await run(context + conversation + speech + '用户请求：' + options.prompt, true);
             ran = true;
             const needsSelectedWorkflow = options.skill && roles.length > 0 && /^请办理/u.test(options.prompt.trim());
-            const needsMeasurement = roles.length > 0 &&
-                /统计|计算|清点|多少|数量|覆盖率|重叠面积|核查|缓冲|裁切|相交|导出|筛选|叠加/u.test(options.prompt);
+            const needsMeasurement = outcomes.length > 0 || ((roles.length > 0 || maps.length > 0) &&
+                /统计|计算|清点|多少|数量|覆盖率|重叠面积|核查|缓冲|裁切|相交|导出|筛选|叠加/u.test(options.prompt));
             const firstAnswer = assistantAnswer(response.finalResponse);
             const asks = /[？?]|请(?:提供|补充|确认|指定|选择|告诉)/u.test(firstAnswer);
             if ((needsSelectedWorkflow || needsMeasurement) && response?.finishReason === 'completed' &&
-                    !attempted && (needsSelectedWorkflow || !asks) && !stop.aborted && !existsSync(operationPath) &&
-                    !existsSync(join(directory, 'discovery')) && !existsSync(join(directory, 'input-issue.json'))) {
+                    (!attempted || outcomes.length > 0) && (needsSelectedWorkflow || !asks) && !stop.aborted &&
+                    !existsSync(operationPath) && !existsSync(join(directory, 'operation.claim')) &&
+                    (!existsSync(join(directory, 'discovery')) || outcomes.length > 0) &&
+                    !existsSync(join(directory, 'input-issue.json'))) {
                 event({ kind: 'workflow_retry', reason: needsSelectedWorkflow ? 'selected_workflow_without_tool' : 'spatial_request_without_tool' });
                 response = await run('请调用 execute_workflow，按本轮图层引用和用户要求实际办理，取得作业回执后再回答。' +
                     context + '用户请求：' + options.prompt);
@@ -347,7 +424,8 @@ export async function dispatch(options, { signal, onEvent = () => {}, getService
                 const failure = terminal?.data.reason.error;
                 const candidatePath = join(directory, 'candidate.json');
                 result = { status, finish_reason: response.finishReason,
-                    response: status === 'succeeded' || coordinateAnswer ? verifiedResponse(receipt, options.dialogue, options.prompt)
+                    response: status === 'succeeded' || coordinateAnswer
+                        ? deliveredResponse(receipt, options, answer, coordinateAnswer)
                         : receipt?.error ?? issue?.error ?? (stopped ? '模型预算已用完，已保存办理进度。'
                             : status === 'no_result' ? '本轮没有生成可核验的成果。可以继续让我重新办理。' : answer),
                     operation: receipt, ...(issue && !receipt ? { input_issue: issue } : {}),

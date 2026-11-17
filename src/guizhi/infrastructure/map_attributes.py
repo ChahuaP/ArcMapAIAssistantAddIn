@@ -46,6 +46,18 @@ def table_page(file, name, payload):
                        for field, value in zip(fields, row[1:], strict=True)}} for row in rows]}
 
 
+def filter_ids(file, name, where):
+    from guizhi.infrastructure.operations.data import AttributeFilter
+    from guizhi.infrastructure.operations.sql_expression import attribute_predicate, evaluate
+
+    info = pyogrio.read_info(file, layer=name)
+    fid = info["fid_column"]
+    fields = dict(zip(info["fields"], info["dtypes"], strict=True))
+    predicate, arguments = attribute_predicate(AttributeFilter.model_validate(where), fields)
+    rows = evaluate(file, name, fid, fields, predicate, predicate=True, arguments=arguments)
+    return sorted(row[0] for row in rows)
+
+
 def complement(file, name, payload):
     with attribute_table(file, name) as (db, table, fid, _):
         chosen(db, payload["fids"])

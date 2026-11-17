@@ -155,29 +155,29 @@ def snapshot_external(source, snapshot, layer, ensure_supervised, allow_undefine
 
 def convert_external(copied, snapshot, layer, allow_undefined, check, metadata_only):
     info = pyogrio.read_info(copied, layer=layer)
-    if metadata_only and copied.suffix.lower() == ".shp" and copied.stat().st_size >= 64 << 20:
+    if metadata_only and copied.suffix.lower() == ".shp":
         from guizhi.infrastructure.gdal_translate import vector_translate
 
-        defined = bool(info["crs"])
         names = {name.casefold() for name in info["fields"]}
         fid, geometry = "fid", "geom"
         while fid in names:
             fid += "_"
         while geometry in names:
             geometry += "_"
-        crs = shapefile_projection(source_files(copied))
+        crs = CRS(info["crs"]) if info["crs"] else shapefile_projection(source_files(copied))
         projection = ("-a_srs", crs.to_wkt()) if crs else ()
         vector_translate(copied, snapshot, "-f", "GPKG", "-preserve_fid", *projection,
                          "-lco", "FID=" + fid, "-lco", "GEOMETRY_NAME=" + geometry,
                          "-lco", "SPATIAL_INDEX=YES", layer)
         saved = pyogrio.read_info(snapshot, layer=layer)
-        same_bounds = all(isclose(a, b, rel_tol=1e-9, abs_tol=1e-8)
-                          for a, b in zip(saved["total_bounds"] or (), info["total_bounds"] or ()))
+        before, after = info["total_bounds"], saved["total_bounds"]
+        same_bounds = not info["features"] or before is None and after is None or before is not None and after is not None and all(
+            isclose(a, b, rel_tol=1e-9, abs_tol=1e-8) for a, b in zip(before, after, strict=True))
         if (saved["features"] != info["features"] or saved["fields"].tolist() != info["fields"].tolist() or not same_bounds
-                or (defined and not crs.equals(CRS(saved["crs"]), ignore_axis_order=True))):
+                or (crs is not None and not crs.equals(CRS(saved["crs"]), ignore_axis_order=True))):
             raise ValueError("矢量快照的要素数、字段、范围或坐标系校验失败")
         check()
-        return defined
+        return crs is not None
     with warnings.catch_warnings():
         warnings.simplefilter("error", RuntimeWarning)
         frame = pyogrio.read_dataframe(copied, layer=layer, fid_as_index=True)

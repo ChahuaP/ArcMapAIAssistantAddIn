@@ -71,6 +71,7 @@ function route(config) {
 }
 
 function modelFailureCode(reason = '') {
+    if (/initialize timed out.*sdk-minimal/i.test(reason)) return 'agent_startup_timeout';
     if (/\b(401|403)\b|unauthorized|authentication_error|invalid api.?key/i.test(reason)) {
         return 'model_auth';
     }
@@ -88,6 +89,7 @@ function modelFailureCode(reason = '') {
 
 function modelFailure(reason) {
     return {
+        agent_startup_timeout: '智能体本地服务启动超时，请稍后重试。若仍未启动，请重启工作台。',
         model_auth: '模型服务认证失败，请检查 API 密钥和模型权限。',
         model_limit: '模型服务限流或额度不足，请稍后重试或检查服务额度。',
         model_missing: '模型服务未找到所选模型，请在设置中重新查询并选择。',

@@ -305,7 +305,12 @@ class DesktopController {
     async dispatch(options, callbacks) {
         const { modelConfig, apiKey, ...request } = options;
         callbacks?.onEvent?.({ kind: 'dispatch_step', step: 'start_agent' });
-        const service = await this.modelService(modelConfig, apiKey);
+        let service;
+        try { service = await this.modelService(modelConfig, apiKey); }
+        catch (error) {
+            return { status: callbacks?.signal?.aborted ? 'cancelled' : 'failed', error: error.message,
+                error_code: error.code, failureStep: 'start_agent' };
+        }
         callbacks?.onEvent?.({ kind: 'dispatch_step', step: 'send_agent_request' });
         return service.run(request, callbacks);
     }
@@ -369,6 +374,10 @@ class DesktopController {
                 if (layout) task.layout = JSON.parse(layout.bytes);
                 const actions = checkedArtifact(record, 'map_actions');
                 if (actions) task.mapActions = JSON.parse(actions.bytes);
+                const selected = record.result.selection;
+                const inputRole = record.result.workflow?.steps.at(-1)?.inputs?.[0];
+                const target = inputRole?.startsWith('material.') && task.mapTargets?.[inputRole.slice(9)];
+                if (selected && target) task.mapSelection = { ref: target, fids: selected.fids };
                 const hasLayer = record.result.evidence.some(item =>
                     ['export', 'boundaries'].includes(item.step) && /\.(gpkg|tiff?|img)$/i.test(item.path));
                 if (hasLayer) {
@@ -400,7 +409,7 @@ class DesktopController {
             if (active.stop.signal.aborted) {
                 status = 'cancelled';
                 task.response = '已接管，小六已停止本轮操作。';
-                for (const field of ['map', 'mapLayers', 'layout', 'mapActions', 'outputImages', 'statistics']) delete task[field];
+                for (const field of ['map', 'mapLayers', 'layout', 'mapActions', 'mapSelection', 'outputImages', 'statistics']) delete task[field];
             }
             const code = stage === 'publish' ? 'result_read_failed' : {
                 failed: receipt.operation ? 'operation_failed' : modelFailureCode(receipt.error || receipt.response) || 'agent_failure',
@@ -431,7 +440,7 @@ class DesktopController {
                 } catch (error) { console.error('业务日志写入失败：', error.message); }
             }
             this.active = null;
-            if (current && status === 'succeeded' && (task.map || task.mapLayers?.length || task.mapActions || task.layout)) {
+            if (current && status === 'succeeded' && (task.map || task.mapLayers?.length || task.mapActions || task.mapSelection || task.layout)) {
                 this.delivery = task.id;
             }
             if (this.tasks.includes(task)) this.persist();

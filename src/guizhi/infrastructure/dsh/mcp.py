@@ -292,6 +292,12 @@ def register(server, job=None):
                 if not domain or name.startswith(domain + ".")}
 
     def run_plan(mode, selected, extra, bound=None, coordinate_plans=None, skill_parameters=None):
+        operations = {step["operation"] for step in extra}
+        missing = [goal["label"] for goal in job.get("outcomes", [])
+                   if not operations.intersection(goal["operations"])]
+        if missing:
+            return {"status": "incomplete_plan", "message": "当前步骤缺少本轮要求的成果：" + "、".join(missing),
+                    "next": "补齐实际操作后一次提交。面积求和调用 sum_layer_area，使用本轮条件；缺少影响结果的参数时询问用户。"}
         try:
             roles = {reference.split(".", 1)[1] for step in extra for reference in step["inputs"]
                      if reference.startswith("material.")}
@@ -325,6 +331,22 @@ def register(server, job=None):
             params["where"] = {"field": match_field, "op": "is_null" if match_value is None else "eq", "value": match_value}
         return run_plan("free", None, [{"id": "lookup", "operation": "table.lookup", "inputs": ["material." + role],
                                         "parameters": params}])
+
+    @server.tool
+    def sum_layer_area(role: str, where_json: str | None = None, area_field: str | None = None) -> dict:
+        """按本轮全部属性条件匹配要素后求面积之和。where_json 是结构化条件 JSON，例如 {"op":"and","conditions":[{"op":"contains","field":"社区","value":"秋韵社区"},{"op":"eq","field":"地类","value":"水田"}]}。仅求整层或已绑定选区时省略。只在字段确知为平方米时传入 area_field，否则按各宗几何面积加总。"""
+        if job["skill"]:
+            return input_issue("invalid_materials", "请使用本轮所选业务")
+        from guizhi.infrastructure.operations.data import AttributeFilter
+
+        params = {"method": "sum", "area_field": area_field}
+        if where_json is not None:
+            try:
+                params["where"] = AttributeFilter.model_validate_json(where_json).model_dump(exclude_none=True)
+            except ValueError:
+                return {"status": "invalid_conditions", "message": "请按结构化查询条件填写地类和区域"}
+        return run_plan("free", None, [{"id": "area", "operation": "vector.area",
+                                        "inputs": ["material." + role.removeprefix("material.")], "parameters": params}])
 
     @server.tool
     def reproject_layer(role: str, target_crs: str | None = None, reference_role: str | None = None) -> dict:

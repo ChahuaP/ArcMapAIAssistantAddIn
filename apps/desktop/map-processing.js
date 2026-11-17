@@ -214,6 +214,11 @@ function toolForm(definition, inputs, values, update, entries) {
         parameters = { geometry_type: values.geometry_type,
             epsg: number(values.coordinate?.value.slice(5)) };
         valid = Boolean(values.name?.trim() && values.geometry_type && Number.isInteger(parameters.epsg) && parameters.epsg > 0);
+    } else if (id === 'data.merge') {
+        const name = values.name ?? '合并图层';
+        controls.push(field('结果图层名称', h(Input, { maxLength: 120, value: name,
+            onChange: event => update('name', event.target.value) })));
+        valid = Boolean(name.trim());
     } else if (id === 'vector.buffer') {
         const choice = (name, label, defaultValue, labels) => h(TokenPicker, { label,
             selected: values[name] || defaultValue, items: options(labels), onPick: value => update(name, value) });
@@ -340,7 +345,7 @@ export function MapTool({ operation, active, layers, entries, components, openCo
     const [values, setValues] = useState(initial);
     const [result, setResult] = useState(null);
     const [error, setError] = useState('');
-    const update = (name, value) => setValues(old => ({ ...old, [name]: value }));
+    const update = (name, value) => setValues(old => ({ ...old, [name]: typeof value === 'function' ? value(old[name]) : value }));
     const inputs = ids.map(id => layers.find(item => key(item) === id));
     const pickLayer = (name, index, records) => field(name, dropdown(definition.multiple ? ids : ids[index], layerOptions(records), value => {
         if (definition.multiple) setIds(value);
@@ -368,7 +373,8 @@ export function MapTool({ operation, active, layers, entries, components, openCo
                 return;
             }
             const output = await api.map({ action: 'tool', operation, refs: inputs.map(item => item.ref), parameters: form.parameters,
-                ...(operation === 'geometry.create_dataset' && { name: values.name.trim() }) });
+                ...(operation === 'geometry.create_dataset' && { name: values.name.trim() }),
+                ...(operation === 'data.merge' && { name: (values.name ?? '合并图层').trim() }) });
             const failure = toolError(output);
             if (failure) { setError(failure); return; }
             if (output.layers.length || output.selection) onResult(output, inputs[0]);

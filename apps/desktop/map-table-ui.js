@@ -23,8 +23,9 @@ export function AttributeSort({ columns, order, apply, close }) {
 }
 
 export function AttributeStatistics({ source, selected, columns, close }) {
-    const [field, setField] = useState(columns[1]?.value || columns[0].value);
-    const [only, setOnly] = useState(false);
+    const [field, setField] = useState(columns.find(item => /^(shape_?area|mj|dkmj|area(?:_m2)?)$/i.test(item.value))?.value ||
+        columns[1]?.value || columns[0].value);
+    const [only, setOnly] = useState(selected.length > 0);
     const [data, setData] = useState(null);
     const [error, setError] = useState('');
     useEffect(() => {
@@ -39,7 +40,7 @@ export function AttributeStatistics({ source, selected, columns, close }) {
         onCancel: close, footer: h(Button, { onClick: close }, '关闭') },
         h('div', { className: 'map-field-editor' },
             h(Select, { 'aria-label': '统计字段', value: field, options: columns, onChange: setField }),
-            h(Checkbox, { checked: only, disabled: !selected.length, onChange: event => setOnly(event.target.checked) }, '仅统计已选要素'),
+            h(Checkbox, { className: 'gis-statistics-selection', checked: only, disabled: !selected.length, onChange: event => setOnly(event.target.checked) }, '仅统计已选要素'),
             error && h('p', { className: 'error', role: 'alert' }, error),
             !data && !error && h('p', { role: 'status' }, '正在统计…'),
             data && h('dl', { className: 'gis-result-metrics' },
@@ -48,18 +49,39 @@ export function AttributeStatistics({ source, selected, columns, close }) {
                         h('dd', null, data[key]?.toLocaleString('zh-CN', { maximumFractionDigits: 6 }) ?? '—'))))));
 }
 
-export function AttributeCell({ cell, busy, save, close }) {
-    const [value, setValue] = useState(cell.value == null ? '' : String(cell.value));
-    const [isNull, setNull] = useState(cell.value == null);
-    return h(Modal, { open: true, centered: true, title: cell.field + ' · 要素 ' + cell.fid,
-        className: 'gis-dialog', rootClassName: 'gis-modal-root',
-        okText: '保存', cancelText: cell.readonly ? '关闭' : '取消', onCancel: () => { if (!busy) close(); },
-        onOk: () => save(isNull ? null : value), confirmLoading: busy,
-        okButtonProps: { disabled: cell.readonly } },
-        h('div', { className: 'map-field-editor' },
-            h(Input, { 'aria-label': '属性值', value, autoFocus: true, readOnly: cell.readonly,
-                onChange: event => { setValue(event.target.value); setNull(false); } }),
-            h('div', { className: 'setting-row' },
-                h(Checkbox, { checked: isNull, disabled: cell.readonly, onChange: event => setNull(event.target.checked) }, '空值'),
-                h(Button, { onClick: () => window.guizhi.copyAttribute(isNull ? '' : value).catch(cell.fail) }, '复制值'))));
+export function AttributeCell({ field, value, fid, disabled, commit, fail }) {
+    const [editing, setEditing] = useState(false);
+    const [draft, setDraft] = useState('');
+    function open() {
+        if (disabled) return;
+        setDraft(value == null ? '' : String(value));
+        setEditing(true);
+    }
+    function save(event) {
+        setEditing(false);
+        if (event.target.dataset.cancel === 'true') return;
+        const next = event.target.value;
+        if (next !== (value == null ? '' : String(value))) commit(fid, field, next === '' ? null : next);
+    }
+    return editing ? h(Input, { className: 'gis-cell-edit', size: 'small', autoFocus: true, value: draft,
+        'aria-label': '编辑 ' + field, onChange: event => setDraft(event.target.value),
+        onFocus: event => event.target.select(), onBlur: save, onKeyDown: event => {
+            if (event.key !== 'Escape' && event.key !== 'Enter') return;
+            event.stopPropagation();
+            event.preventDefault();
+            if (event.key === 'Escape') event.currentTarget.dataset.cancel = 'true';
+            event.currentTarget.blur();
+        } }) : h('span', { className: 'gis-cell', tabIndex: 0,
+        title: disabled ? 'Ctrl+C 复制' : '双击编辑 · Ctrl+C 复制', onDoubleClick: open,
+        onClick: event => event.currentTarget.focus(),
+        onKeyDown: event => {
+            if (event.ctrlKey && event.key.toLowerCase() === 'c') {
+                event.preventDefault();
+                event.stopPropagation();
+                window.guizhi.copyAttribute(value == null ? '' : String(value)).catch(fail);
+            } else if (event.key === 'F2' || event.key === 'Enter') {
+                event.preventDefault();
+                open();
+            }
+        } }, String(value ?? '—'));
 }

@@ -26,7 +26,8 @@ export function categoryValue(value) {
 }
 export function layerSymbol(value, color) {
     const base = symbol(value, color);
-    return value?.classification ? { ...base, classification: value.classification } : base;
+    return { ...base, ...(value?.classification && { classification: value.classification }),
+        ...(value?.labelField && { labelField: value.labelField }) };
 }
 const commonColors = [
     ['白色', '#ffffff'], ['浅灰', '#d9d9d9'], ['灰色', '#808080'], ['深灰', '#434343'], ['黑色', '#000000'],
@@ -153,13 +154,14 @@ export function LayerProperties({ item, color, close, save, glyph, start = 'info
     const formatTab = tab === 'style';
     return h(Modal, { open: true, centered: true, width: 520, className: 'gis-dialog', rootClassName: 'gis-modal-root',
         title: h('span', { className: 'gis-dialog-title' }, glyph('layers'), item.name),
-        onCancel: close, footer: formatTab ? [h(Button, { key: 'cancel', onClick: close }, '取消'),
+        onCancel: close, footer: tab !== 'info' ? [h(Button, { key: 'cancel', onClick: close }, '取消'),
             h(Button, { key: 'save', type: 'primary', disabled: classificationBusy ||
                 (style.classification && !style.classification.classes.length),
                 onClick: () => { save(layerSymbol(style, color)); close(); } }, '应用')]
             : h(Button, { onClick: close }, '关闭') },
         h(Segmented, { className: 'gis-layer-tabs', value: tab, onChange: setTab, disabled: classificationBusy,
-            options: [{ value: 'info', label: '图层属性' }, { value: 'style', label: image ? '显示' : '符号化' }] }),
+            options: [{ value: 'info', label: '图层属性' }, { value: 'style', label: image ? '显示' : '符号化' },
+                ...(!image ? [{ value: 'labels', label: '标注' }] : [])] }),
         formatTab ? h('div', { className: 'gis-symbol-editor' },
             measure('opacity', '图层不透明度（%）', 0, 100, 1),
             !image && item.fields?.length > 0 && h(Segmented, { value: classified ? 'unique' : 'single',
@@ -183,7 +185,12 @@ export function LayerProperties({ item, color, close, save, glyph, start = 'info
                     points ? choices('shape', '形状', { circle: '圆形', square: '方形', diamond: '菱形', cross: '十字' })
                         : choices('pattern', '线型', lineOptions, style.noOutline),
                     points ? measure('size', '大小', 4, 28, 1) : measure('width', '线宽', .5, 8, .5, style.noOutline)))))
-            : h('dl', { className: 'gis-layer-properties' }, ...info.map(([label, value]) => prop(label, value))));
+            : tab === 'labels' ? h('div', { className: 'gis-symbol-editor' },
+                field('标注字段', h(Select, { 'aria-label': '标注字段', showSearch: true, value: style.labelField || '',
+                    options: [{ value: '', label: '不显示标注' },
+                        ...item.fields.map(entry => ({ value: entry.name, label: entry.name }))],
+                    onChange: field => update('labelField', field) })))
+                : h('dl', { className: 'gis-layer-properties' }, ...info.map(([label, value]) => prop(label, value))));
 }
 
 export function MapProperties({ background, close, save, glyph, coordinates }) {

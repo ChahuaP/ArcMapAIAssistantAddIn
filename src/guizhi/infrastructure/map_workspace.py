@@ -103,6 +103,8 @@ def workflow_layers(workspace, record):
     for step in steps:
         child = successful(workspace.read(step["run_id"]))
         operation = step["operation"]
+        if operation == "vector_inventory":
+            continue
         outputs = output_layers(workspace, child, child["result"].get("layer_name") or step_title(operation))
         change = child["result"].get("changeset", {})
         for layer in outputs:
@@ -169,8 +171,17 @@ def manual_tool(workspace, payload):
     refs = payload["refs"]
     if not isinstance(refs, list) or len(refs) > 32:
         raise ValueError("一次最多选择 32 个图层")
-    items = [map_material(workspace, ref) for ref in refs]
     parameters = dict(payload["parameters"])
+    if operation == "data.select_by_attribute":
+        from guizhi.infrastructure.map_attributes import filter_ids
+
+        if len(refs) != 1:
+            raise ValueError("请选择一个查询图层")
+        file, name = source(workspace, refs[0])
+        fids = filter_ids(file, name, parameters["where"])
+        return {"layers": [], "selection": {"layer": name, "revision": material(file, name)["revision"],
+                                             "fids": fids}, "statistics": {"selected_count": len(fids)}}
+    items = [map_material(workspace, ref) for ref in refs]
     if operation == "raster.reproject" and not parameters["target_crs"].startswith("EPSG:"):
         from guizhi.infrastructure.crs_catalog import get
 
@@ -231,13 +242,12 @@ def source(workspace, ref):
         raise ValueError("图层成果已变化")
     if file.suffix.lower() != ".gpkg":
         raise ValueError("该成果不是矢量图层")
-    layers = [(name, geom) for name, geom in pyogrio.list_layers(file) if geom]
     if kind == "import":
-        name = record["result"]["layer"]
-    elif len(layers) == 1:
-        name = layers[0][0]
-    else:
+        return file, record["result"]["layer"]
+    layers = [name for name, geometry in pyogrio.list_layers(file) if geometry]
+    if len(layers) != 1:
         raise ValueError("请选择一个矢量图层")
+    name = layers[0]
     return file, name
 
 
@@ -248,7 +258,9 @@ def successful(record):
 
 
 def material(file, name):
-    return {"file": str(file), "layer": name, "revision": data_revision(file)}
+    stat = file.stat()
+    _, revision = interactive_revision(file, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+    return {"file": str(file), "layer": name, "revision": revision}
 
 
 def numbers(values):
@@ -415,7 +427,7 @@ def request(workspace, payload):
         from guizhi.infrastructure.map_editing import sketch
 
         return sketch(payload)
-    if action == "edit-transfer-plan":
+    if action == "edit-transfer":
         if payload["ref"] == payload["destination"]:
             raise ValueError("请选择另一个图层")
         origin = material(*source(workspace, payload["ref"]))
@@ -423,9 +435,9 @@ def request(workspace, payload):
         if origin["revision"] != payload["revision"] or destination["revision"] != payload["destinationRevision"]:
             raise ValueError("图层已修改，请重新复制或剪切要素")
         selection = {"layer": origin["layer"], "revision": origin["revision"], "fids": payload["fids"]}
-        plan = successful(run_operation(workspace.root, {"operation": "edit.transfer_plan", "inputs": [origin, destination],
-            "parameters": {"selection": selection}}))
-        return plan["result"]["features"]
+        record = successful(run_operation(workspace.root, {"operation": "edit.transfer", "inputs": [origin, destination],
+            "parameters": {"selection": selection, "mode": payload["mode"]}, "idempotency_key": uuid4().hex}))
+        return output_layers(workspace, record, "粘贴要素")
     if action == "workflow-layers":
         return workflow_layers(workspace, successful(workspace.read(payload["run"])))
     if action == "import":
@@ -550,7 +562,7 @@ def export_layer(workspace, payload):
             raise ValueError("请选择 GeoTIFF 或 JPEG")
     else:
         file, name = source(workspace, ref)
-        if extension == "zip":
+        if extension in {"zip", "shp"}:
             return package_layer(workspace, file, output, name)
         if extension == "csv":
             record = successful(run_operation(workspace.root, {"operation": "presentation.export_table",

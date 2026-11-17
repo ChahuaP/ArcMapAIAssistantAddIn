@@ -5,19 +5,43 @@ import geopandas
 import shapely
 
 from guizhi.infrastructure.operations.common import (
-    Unit, compatible, concatenate, distance_in_crs, field, separate_fields, valid,
+    Unit, compatible, concatenate, condition, distance_in_crs, field, separate_fields, valid,
 )
+from guizhi.infrastructure.operations.data import AttributeFilter
 
 
-def area(ctx):
+def area(ctx, where: AttributeFilter | None = None, method: Literal["union", "sum"] = "union",
+         area_field: str | None = None):
     frame = ctx.frames[0]
-    valid(frame, polygon=True)
-    crs = frame.crs
-    if crs is None or not crs.is_projected or len(crs.axis_info) != 2:
-        raise ValueError("请先将图层转换到适用的投影坐标系，再汇总面积")
-    scale = crs.axis_info[0].unit_conversion_factor * crs.axis_info[1].unit_conversion_factor
-    area_m2 = float(shapely.area(shapely.union_all(frame.geometry)) * scale)
-    return {"statistics": {"feature_count": len(frame), "area_m2": area_m2}, "value": area_m2}
+    filters = where.model_dump(mode="json", exclude_none=True) if where is not None else None
+    if filters is not None:
+        frame = frame.loc[condition(frame, filters)]
+    if area_field is not None:
+        from math import fsum, isfinite
+        from pandas.api.types import is_bool_dtype, is_numeric_dtype
+
+        values = field(frame, area_field)
+        if not is_numeric_dtype(values) or is_bool_dtype(values) or any(not isfinite(n) or n < 0 for n in values.dropna()):
+            raise ValueError("请选择存有有效非负面积的数值字段")
+        valid_count = int(values.count())
+        area_m2 = fsum(values.dropna()) if valid_count else (0.0 if frame.empty else None)
+    else:
+        crs = frame.crs
+        if crs is None or not crs.is_projected or len(crs.axis_info) != 2:
+            raise ValueError("请先将图层转换到适用的投影坐标系，或选择已知单位为平方米的面积字段")
+        if not frame.empty:
+            valid(frame, polygon=True)
+        scale = crs.axis_info[0].unit_conversion_factor * crs.axis_info[1].unit_conversion_factor
+        area_m2 = float((shapely.area(frame.geometry).sum() if method == "sum" else
+                         shapely.area(shapely.union_all(frame.geometry))) * scale)
+        valid_count = len(frame)
+    stats = {"feature_count": len(frame)}
+    if where is not None or method == "sum" or area_field is not None:
+        stats["area_summary"] = {"area_m2": area_m2, "layer": ctx.request.inputs[0].layer,
+                                 "where": filters, "count": len(frame), "valid": valid_count, "field": area_field}
+    elif area_m2 is not None:
+        stats["area_m2"] = area_m2
+    return {"statistics": stats, "value": area_m2}
 
 
 def buffer(ctx, distance: float, unit: Unit, cap: Literal["round", "flat", "square"] = "round",
