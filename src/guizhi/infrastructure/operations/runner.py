@@ -1,5 +1,6 @@
 """Execute a registered operation against sealed input revisions."""
 from dataclasses import asdict
+from functools import lru_cache
 from hashlib import file_digest, sha256
 from importlib import import_module
 from inspect import Parameter, signature
@@ -13,7 +14,7 @@ import warnings
 from pandas.testing import assert_frame_equal
 import pyogrio
 import shapely
-from pydantic import ConfigDict, ValidationError, create_model
+from pydantic import BaseModel, ConfigDict, ValidationError, create_model, model_validator
 
 from guizhi.domain.capabilities import CAPABILITIES, OperationRequest
 from guizhi.domain.contracts import EvidenceRef
@@ -28,22 +29,56 @@ def handler(operation):
     return getattr(import_module(f"guizhi.infrastructure.operations.{domain}"), name)
 
 
+@lru_cache(maxsize=128)
 def parameter_model(function):
     fields = {}
     hints = get_type_hints(function, include_extras=True)
     for name, param in list(signature(function).parameters.items())[1:]:
         fields[name] = (hints[name], ... if param.default is Parameter.empty else param.default)
-    return create_model(function.__name__, __config__=ConfigDict(extra="forbid"), **fields)
+    validators = {}
+    from guizhi.domain.operation_catalog import EXCLUSIVE_PARAMETERS
+
+    operation = function.__module__.rsplit(".", 1)[-1] + "." + function.__name__
+    exclusive = EXCLUSIVE_PARAMETERS.get(operation)
+    if exclusive:
+        @model_validator(mode="before")
+        @classmethod
+        def one_filter(cls, values):
+            if sum(values.get(key) is not None for key in exclusive) != 1:
+                raise ValueError("须提供 " + " 或 ".join(exclusive) + " 其中一项")
+            return values
+        validators["one_filter"] = one_filter
+    return create_model(function.__name__, __config__=ConfigDict(extra="forbid"), __validators__=validators, **fields)
+
+
+class NoParameters(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class ControlParameters(NoParameters):
+    project_plan: str | None = None
+    control_plan: str | None = None
+    output_layer: bool = False
+
+
+def operation_parameters(operation):
+    if operation == "control_check":
+        return ControlParameters
+    if operation == "vector_inventory":
+        return NoParameters
+    return parameter_model(handler(operation))
 
 
 def capability(operation):
     from guizhi.application.skills import OPERATIONS
+    from guizhi.domain.operation_catalog import describe_contract
+    from guizhi.domain.operation_parameters import parameter_help
 
-    spec = OPERATIONS.get(operation)
-    if spec is None:
-        raise ValueError("Unknown operation")
-    schema = parameter_model(handler(operation)).model_json_schema() if operation in CAPABILITIES else {}
-    return {**asdict(spec), "parameters": schema}
+    spec = OPERATIONS[operation]
+    schema = operation_parameters(operation).model_json_schema()
+    for name, definition in schema["properties"].items():
+        definition.update(parameter_help(operation, name))
+    return {**asdict(spec), **describe_contract(operation, spec), "parameters": schema}
 
 
 def data_revision(path):
@@ -211,11 +246,11 @@ def execute(request, job, directory, workspace, progress, check):
     request = OperationRequest.model_validate(request)
     function = handler(request.operation)
     model = parameter_model(function)
-    ctx = Execution(request, job, directory, workspace, progress, check)
     try:
         params = model.model_validate(request.parameters)
     except ValidationError as exc:
         fields = [{"field": list(item["loc"]), "rule": item["type"]}
                   for item in exc.errors(include_input=False, include_url=False)]
         raise Fault("parameter", "parameter_schema", str(exc), fields=fields) from exc
+    ctx = Execution(request, job, directory, workspace, progress, check)
     return ctx.finish(function(ctx, **dict(params)))

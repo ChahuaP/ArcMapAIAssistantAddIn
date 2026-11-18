@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { meter } from './budget.mjs';
 
-export const inject = ['llm', 'tools', 'agents', 'sessions'];
+export const inject = ['llm', 'tools', 'agents', 'sessions', 'tokenMeter'];
 
 export function apply(ctx, { binding }) {
     let current;
@@ -17,10 +17,20 @@ export function apply(ctx, { binding }) {
         return value;
     }
 
+    ctx.on('agent/created', ({ agent }) => {
+        const active = bindingValue();
+        if (active?.id !== agent.session.id) return;
+        agent.ctx.systemPrompt.context({ name: 'guizhi-workspace', order: 10, required: true, interpolate: false,
+            text: JSON.stringify(active.modelContext) });
+        if (active.fixedInvocation) {
+            agent.ctx.tools.restrict({ allow: ['mcp__guizhi__execute_workflow'] });
+        }
+    });
+
     ctx.on('llm/stream', async function* (options, next) {
         const active = job(options.sessionId);
         if (existsSync(active.cancelled)) throw new Error('Guizhi dispatch cancelled');
-        if (current?.id !== active.id) current = { id: active.id, stream: meter(active.budget) };
+        if (current?.id !== active.id) current = { id: active.id, stream: meter(active.budget, () => ctx.tokenMeter.measure(ctx.agents.get(active.id).session).totalTokens) };
         yield* current.stream(options, next);
     });
 

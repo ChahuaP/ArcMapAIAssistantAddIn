@@ -5,23 +5,27 @@ from pathlib import Path
 import pyogrio
 
 
-def vector_translate(source, target, *arguments):
+def gdal_library(signatures):
     library = Path(pyogrio.__file__).parent.parent / "pyogrio.libs"
     binaries = list(library.glob("*gdal*.dll")) or list(library.glob("libgdal*.so*"))
     if len(binaries) != 1:
         raise RuntimeError("无法定位 GDAL 矢量转换运行库")
     gdal = CDLL(str(binaries[0]))
-    signatures = {
+    for name, (returns, *types) in signatures.items():
+        function = getattr(gdal, name)
+        function.restype, function.argtypes = returns, types
+    return gdal
+
+
+def vector_translate(source, target, *arguments):
+    gdal = gdal_library({
         "GDALOpenEx": (c_void_p, c_char_p, c_uint, c_void_p, c_void_p, c_void_p),
         "GDALClose": (c_int, c_void_p),
         "GDALVectorTranslateOptionsNew": (c_void_p, POINTER(c_char_p), c_void_p),
         "GDALVectorTranslateOptionsFree": (None, c_void_p),
         "GDALVectorTranslate": (c_void_p, c_char_p, c_void_p, c_int, POINTER(c_void_p), c_void_p, POINTER(c_int)),
         "CPLGetLastErrorMsg": (c_char_p,),
-    }
-    for name, (returns, *types) in signatures.items():
-        function = getattr(gdal, name)
-        function.restype, function.argtypes = returns, types
+    })
     args = (c_char_p * (len(arguments) + 1))(*(value.encode("utf-8") for value in arguments))
     options = gdal.GDALVectorTranslateOptionsNew(args, None)
     if not options:

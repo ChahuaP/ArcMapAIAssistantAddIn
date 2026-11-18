@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { addAbortListener } from 'node:events';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -20,53 +20,7 @@ function assistantAnswer(text) {
     return text.replace(/^[\s\S]*<\/think\s*>/i, '').replace(/<think\b[^>]*>[\s\S]*$/i, '').trim();
 }
 
-const coordinateQuestion = prompt => /坐标|4490|四四九零|投影|epsg/iu.test(prompt);
-const askingForProjection = prompt => /转换|转成|转为|投影到|投到|重投影/u.test(prompt);
 const coordinateLabel = value => [value.name, value.code, value.kind, value.unit && '单位为' + value.unit].filter(Boolean).join('，');
-
-function coordinateReply(layer, coordinate, projection) {
-    const name = layer ? '「' + layer + '」' : '图层';
-    const current = coordinate.kind === '未定义' ? name + '当前未定义坐标系。'
-        : name + '当前采用' + coordinateLabel(coordinate) + '。';
-    if (!projection) return current + '地图显示坐标系和图层坐标系可分别设置。';
-    if (coordinate.kind === '未定义') return current + '请先确认并定义源图层的实际坐标系。';
-    return current + '请告诉我目标投影坐标系的 EPSG 编号、中央经线或参照图层。';
-}
-
-function coordinateRead(receipt, prompt) {
-    return coordinateQuestion(prompt) && receipt.steps?.length && receipt.steps.every(step =>
-        ['data.describe', 'data.list_fields'].includes(step.operation));
-}
-
-function areaRequest(prompt) {
-    return /(?:面积.{0,5}(?:之和|总和|合计|累计)|(?:总|合计|合并|汇总|累计)(?:面积)|面积(?:一共|共计))/u.test(prompt);
-}
-
-function requestedOutcomes(prompt) {
-    const outcomes = [];
-    const add = (label, operations) => outcomes.push({ label, operations });
-    if (areaRequest(prompt) || /(?:多大面积|面积有多大|面积多少|(?:这块|这片|选中).{0,12}有多大)/u.test(prompt)) {
-        add('面积', ['vector.area', 'control_check', 'annual.summarize']);
-    }
-    if (/(?:多少|几个|几条|几宗|几块|数量|个数).{0,4}(?:要素|图斑|地块|宗地)|(?:要素|图斑|地块|宗地).{0,6}(?:多少|数量|个数)/u.test(prompt) &&
-            !/(?:重叠|相交|覆盖|范围内)/u.test(prompt)) {
-        add('要素数量', ['vector_inventory', 'data.describe', 'data.select_by_attribute', 'data.select_by_location', 'data.selection_count']);
-    }
-    if (/(?:帮我|请|把|将|为.+)(?:.{0,16})(?:投影转换|转换.{0,16}(?:坐标系|EPSG)|投影.{0,8}EPSG)/iu.test(prompt)) {
-        add('投影转换', ['crs.reproject', 'crs.transform', 'raster.reproject']);
-    }
-    if (/(?:帮我|请|把|将).{0,20}(?:裁剪|裁切).{0,24}(?:图层|范围)|(?:图层|范围).{0,20}(?:裁剪|裁切)/u.test(prompt)) {
-        add('裁剪', ['vector.clip', 'raster.clip', 'delivery.clip_vector']);
-    }
-    if (/(?:帮我|请|把|将).{0,20}(?:缓冲|缓冲区)/u.test(prompt)) {
-        add('缓冲区', ['vector.buffer']);
-    }
-    if (/(?:在地图上.{0,7}选出来|选出.{0,15}(?:图斑|要素|地块)|按属性选|按位置选)/u.test(prompt)) {
-        add('地图选区', ['data.select_by_attribute', 'data.select_by_location']);
-    }
-    if (/(?:导出|另存为).{0,24}(?:CSV|属性表)/iu.test(prompt)) add('导出属性表', ['presentation.export_table']);
-    return outcomes;
-}
 
 function filterLabel(filter) {
     if (!filter) return '';
@@ -79,7 +33,7 @@ function filterLabel(filter) {
     return [filter.field, action, filter.value_field ?? filter.value].filter(value => value != null).join(' ');
 }
 
-function verifiedResponse(receipt, dialogue, prompt) {
+function verifiedResponse(receipt, dialogue) {
     const stats = receipt.statistics;
     const area = value => value.toLocaleString('zh-CN', { maximumFractionDigits: 2 });
     const parts = [];
@@ -89,9 +43,6 @@ function verifiedResponse(receipt, dialogue, prompt) {
     if (projected) {
         return '已完成投影转换，生成一个结果图层，源图层保留。\n\n源坐标系为' + coordinateLabel(projected.source) +
             '。\n\n结果坐标系为' + coordinateLabel(projected.target) + '。';
-    }
-    if (coordinate && coordinateRead(receipt, prompt)) {
-        return coordinateReply(coordinate.layer, coordinate.coordinate_system, askingForProjection(prompt));
     }
     if (stats.changed_parcels) parts.push(`更新涉及 ${stats.changed_parcels} 宗地。`);
     for (const item of receipt.steps ?? [{ statistics: stats }]) {
@@ -123,12 +74,6 @@ function verifiedResponse(receipt, dialogue, prompt) {
             const findings = [['inside', '完全覆盖'], ['overlap', '部分重叠'], ['touch_line', '线接触'],
                 ['touch_point', '点接触'], ['disjoint', '不相交']]
                 .filter(([key]) => counts[key]).map(([key, label]) => `${label} ${counts[key]} 宗`);
-            if (/(?:在|位于|超出).{0,15}(?:范围|红线|里面|以内)/u.test(prompt)) {
-                parts.push(fact.coverage_ratio >= 1 - 1e-9 ? '待核查区全部位于参照范围内。' :
-                    fact.covered_area_m2 > 0 ? '待核查区只有部分位于参照范围内。' :
-                        counts.touch_line || counts.touch_point ? '待核查区与参照范围边界接触，面积上没有重叠。' :
-                            '待核查区位于参照范围外。');
-            }
             parts.push(`项目范围 ${area(fact.project_area_m2)} m²，重叠 ${area(fact.covered_area_m2)} m²，覆盖率 ${(fact.coverage_ratio * 100).toFixed(2)}%。`);
             if (findings.length) parts.push(findings.join('、') + '。');
         }
@@ -147,35 +92,20 @@ function verifiedResponse(receipt, dialogue, prompt) {
     } else if (steps.some(step => step.operation.startsWith('geometry.create_'))) {
         parts.push('已绘制要素并生成图层。');
     }
-    if (stats.feature_count !== undefined) parts.push(`共 ${stats.feature_count} 个${prompt.includes('图斑') ? '图斑' : '要素'}。`);
+    if (stats.feature_count !== undefined) parts.push(`共 ${stats.feature_count} 个要素。`);
     if (stats.geometry_types && !dialogue) parts.push(Object.entries(stats.geometry_types)
         .map(([name, count]) => `${name} ${count} 个`).join('，') + '。');
-    if (stats.selected_count !== undefined) parts.push(`已选中 ${stats.selected_count} 个要素。`);
+    if (stats.selected_count !== undefined) parts.push(receipt.delivery?.outputs.includes('selection')
+        ? `已选中 ${stats.selected_count} 个要素。` : `匹配 ${stats.selected_count} 个要素。`);
     if (stats.row_count !== undefined) parts.push(`共 ${stats.row_count} 行。`);
     if (stats.changed_area_m2 !== undefined && stats.evaluation) {
         if (stats.evaluation === 'simulation') parts.push('本轮使用模拟样本。');
         parts.push(`变化面积 ${area(stats.changed_area_m2)} m²，另有 ${area(stats.unknown_pixels)} 个未知像元和 ${area(stats.nodata_pixels)} 个缺测像元。`);
     }
-    if (receipt.mode === 'free' && stats.feature_count !== undefined) {
-        const operation = receipt.steps?.at(-1)?.operation;
-        const title = { 'vector.buffer': '缓冲分析', 'vector.clip': '裁切', 'vector.intersect': '相交',
-            'vector.dissolve': '融合', 'vector.spatial_join': '空间连接', 'data.export_selection': '导出选区' }[operation];
-        if (title) parts.unshift(title + '已完成。');
-    }
     if (receipt.steps?.some(step => step.operation === 'presentation.map_layout')) parts.push('版面设置已提交。');
     if (receipt.steps?.some(step => step.operation === 'presentation.map_view')) parts.push('地图操作已提交。');
     const answer = parts.join('') || '已完成处理。';
     return dialogue ? answer.replaceAll(' m²', '平方米') : answer;
-}
-
-function deliveredResponse(receipt, options, answer, coordinateAnswer) {
-    const verified = verifiedResponse(receipt, options.dialogue, options.prompt);
-    const goals = requestedOutcomes(options.prompt);
-    const straightforward = goals.length === 1 && ['要素数量', '地图选区'].includes(goals[0].label);
-    if (coordinateAnswer || receipt.mode !== 'free' || areaRequest(options.prompt) || straightforward ||
-            receipt.steps?.some(step => step.statistics?.area_summary || step.statistics?.lookup || step.statistics?.projection ||
-                step.statistics?.coverage_ratio !== undefined) || !answer?.trim()) return verified;
-    return answer.trim().replace(/\s*[（(]`?map-\d+`?[）)]/g, '');
 }
 
 function within(root, path) {
@@ -236,14 +166,12 @@ export async function dispatch(options, { signal, onEvent = () => {}, getService
     }
     const started = performance.now();
     const safeError = value => redact(value, apiKey);
-    const timeoutMs = options.timeoutMs ?? 180000;
-    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 900000) {
+    const { timeoutMs, maxModelCalls: calls, maxModelTokens: tokens } = options;
+    if (timeoutMs != null && (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 900000)) {
         throw new Error('Timeout must be between 1 and 900000 ms');
     }
-    const tokens = options.maxModelTokens ?? 180000;
-    const calls = options.maxModelCalls ?? 12;
-    if (!Number.isSafeInteger(tokens) || tokens < 1 || tokens > 1000000 ||
-            !Number.isSafeInteger(calls) || calls < 1 || calls > 40) {
+    if ((tokens != null && (!Number.isSafeInteger(tokens) || tokens < 1 || tokens > 1000000)) ||
+            (calls != null && (!Number.isSafeInteger(calls) || calls < 1 || calls > 40))) {
         throw new Error('Invalid model budget');
     }
     const { versions } = await loadHarness(options.python, options.runtime);
@@ -255,21 +183,21 @@ export async function dispatch(options, { signal, onEvent = () => {}, getService
     const id = randomUUID();
     const directory = join(parent, id);
     const profile = fileURLToPath(new URL('./profile.yml', import.meta.url));
-    const schema = ['capabilities', 'skills', 'semantics', 'knowledge']
+    const schema = ['capabilities', 'operation_catalog', 'skills', 'semantics', 'knowledge']
         .map(name => readFileSync(join(source, 'src', 'guizhi', 'domain', name + '.py')));
     const history = options.history || [];
     const images = options.images || [];
-    const outcomes = options.skill ? [] : requestedOutcomes(options.prompt);
     const request = history.length || options.dialogue
         ? JSON.stringify({ prompt: options.prompt, history, dialogue: Boolean(options.dialogue) }) : options.prompt;
     const provenance = { provider, model, route_sha256: hash(JSON.stringify(modelConfig)),
         profile_sha256: hash(readFileSync(profile)), request_sha256: hash(images.length ? JSON.stringify([request, images.map(image => hash(image.data))]) : request),
         schema_sha256: hash(Buffer.concat(schema)), retrieval_version: '1.0.0' };
-    const deadline = AbortSignal.timeout(timeoutMs);
-    const stop = signal ? AbortSignal.any([signal, deadline]) : deadline;
+    const deadline = timeoutMs != null ? AbortSignal.timeout(timeoutMs) : null;
+    const stop = AbortSignal.any([signal, deadline].filter(Boolean));
     stop.throwIfAborted();
     mkdirSync(parent, { recursive: true });
     mkdirSync(directory);
+    if (history.length) writeFileSync(join(directory, 'conversation.json'), JSON.stringify(history));
     const materials = { ...options.materials };
     if (options.input && options.layer) materials.project = [{ file: resolve(options.input), layer: options.layer }];
     if (options.control && options.controlLayer) materials.control = [{ file: resolve(options.control), layer: options.controlLayer }];
@@ -298,7 +226,6 @@ export async function dispatch(options, { signal, onEvent = () => {}, getService
     let boundService;
     let ran = false;
     let result;
-    let attempted = false;
     let failureStep = 'prepare_workflow';
     try {
         const cancelled = join(directory, 'cancelled');
@@ -312,13 +239,12 @@ export async function dispatch(options, { signal, onEvent = () => {}, getService
         if (prepared.operation) {
             event({ kind: 'plan_reused', run_id: prepared.operation.run_id });
             writeFileSync(operationPath, JSON.stringify(prepared.operation));
-            const status = prepared.operation.status === 'succeeded' && coordinateRead(prepared.operation, options.prompt)
-                ? 'answered' : prepared.operation.status;
+            const status = prepared.operation.status;
             result = { status, finish_reason: 'recorded_plan', plan_reused: true,
                 operation: prepared.operation, response: prepared.operation.status === 'succeeded'
-                    ? verifiedResponse(prepared.operation, options.dialogue, options.prompt) : prepared.operation.error };
+                    ? verifiedResponse(prepared.operation, options.dialogue) : prepared.operation.error };
         } else if (stop.aborted) {
-            result = { status: deadline.aborted ? 'timed_out' : 'cancelled' };
+            result = { status: deadline?.aborted ? 'timed_out' : 'cancelled' };
         } else {
             failureStep = 'bind_model_runtime';
             stopProgress = watchRun(workspace, id, event);
@@ -327,35 +253,35 @@ export async function dispatch(options, { signal, onEvent = () => {}, getService
                 (owned = new (await import('./service.mjs')).DispatchService(options));
             await service.ready;
             stop.throwIfAborted();
-            service.bind({ id, workspace, cancelled, materials: prepared.materials,
-                skill: prepared.selected?.reference ?? null, parameters: options.skillParameters ?? null,
-                plans: { project_plan: options.projectPlan, control_plan: options.controlPlan },
-                previousRun: options.previousRun ?? null, provenance, planKey: prepared.key, mapContext: options.mapContext,
-                outcomes,
-                selectionRoles: Object.entries(options.layerLabels || {}).filter(([, layer]) => layer.selected).map(([role]) => role),
-                flushRequest: join(directory, 'flush.request'), flushReceipt: join(directory, 'flush.receipt'),
-                budget: { tokens, calls, checkpoint: budgetPath, operation: operationPath,
-                    synthesize: !prepared.selected && !(outcomes.length === 1 && ['要素数量', '地图选区'].includes(outcomes[0].label)) } });
-            boundService = service;
-            event({ kind: 'runtime_bound', runtime_id: service.id });
-            const { harness } = service;
             const roles = Object.keys(prepared.materials);
-            const bound = options.skillParameters !== undefined ? '办理参数已在本机绑定，执行技能时省略 skill_parameters。' : '';
             const layers = Object.fromEntries(Object.entries(prepared.layers || {}).map(([role, items]) => [
                 role, items.map(item => ({ ...item, ...options.layerLabels?.[role] })),
             ]));
-            const selection = prepared.selected ? `已选技能和本轮材料摘要：${JSON.stringify(prepared.selected)}。`
-                : `本轮材料图层清单（键为 material. 后的引用）：${JSON.stringify(layers)}。已选技能无。`;
-            const visualContext = images.length ? '本轮用户消息有图片附件。图片内容问题直接看图回答。\n' : '';
-            const maps = (options.mapContext?.layers || []).slice(0, 24).map(layer => ({
-                id: layer.id, name: layer.name, geometry: layer.geometry, count: layer.count, crs: layer.crs,
+            const maps = [...(options.mapContext?.layers || [])].sort((a, b) => Number(b.active) - Number(a.active)).slice(0, 24).map(layer => ({
+                id: layer.id, input: 'material.' + layer.id, name: layer.name, kind: layer.kind, geometry: layer.geometry, count: layer.count,
+                crs: layer.crs?.length <= 120 ? layer.crs : undefined, crsName: layer.crsName, units: layer.units,
                 active: layer.active, visible: layer.visible, selected: layer.fids?.length || undefined,
-                fields: layer.fields?.slice(0, 45),
+                selection_role: layer.fids?.length ? 'selection-' + layer.id : undefined,
+                field_count: layer.fields?.length, fields: layer.fields?.slice(0, 45),
             }));
-            const context = `${visualContext}${selection}${bound}有已选历史成果：${Boolean(options.previousRun)}。当前地图摘要：${JSON.stringify(maps)}。\n` +
-                (outcomes.length ? '本轮要提供的结果：' + outcomes.map(item => item.label).join('、') + '。\n' : '');
-            const conversation = history.length ? '最近对话记录（每项为用户提问与智能体答复）：' + JSON.stringify(history) + '\n' : '';
-            const speech = options.dialogue ? '本轮使用语音输入，用简洁口语回答。\n' : '';
+            service.bind({ id, workspace, cancelled,
+                modelContext: { skill: prepared.selected ?? null, materials: layers, parametersBound: options.skillParameters !== undefined,
+                    previousResultAvailable: Boolean(options.previousRun), mapLayerCount: options.mapContext?.layers?.length || 0,
+                    mapLayers: maps, priorTurnCount: history.length, recentTurns: history.slice(-4).map(([user, assistant]) =>
+                        ({ user: user.slice(0, 600), assistant: assistant.slice(0, 600) })),
+                    inputMode: options.dialogue ? 'voice' : 'text' }, materials: prepared.materials,
+                fixedInvocation: Boolean(prepared.selected && options.prompt.trim() === '请办理' + prepared.selected.title
+                    && prepared.selected.roles.every(role => role.resource || (prepared.materials[role.id]?.length || 0) >= role.minimum)),
+                skill: prepared.selected?.reference ?? null, parameters: options.skillParameters ?? null,
+                plans: { project_plan: options.projectPlan, control_plan: options.controlPlan },
+                previousRun: options.previousRun ?? null, provenance, planKey: prepared.key, mapContext: options.mapContext,
+                mapAliases: Object.fromEntries(Object.entries(options.layerLabels || {}).filter(([, layer]) => layer.mapId)
+                    .map(([role, layer]) => [role, layer.mapId])),
+                flushRequest: join(directory, 'flush.request'), flushReceipt: join(directory, 'flush.receipt'),
+                budget: { tokens, calls, checkpoint: budgetPath, operation: operationPath } });
+            boundService = service;
+            event({ kind: 'runtime_bound', runtime_id: service.id });
+            const { harness } = service;
             const run = (prompt, includeImages = false) => harness.run(includeImages && images.length
                 ? [{ type: 'text', text: prompt }, ...images] : prompt, {
                 sessionId: id,
@@ -368,8 +294,6 @@ export async function dispatch(options, { signal, onEvent = () => {}, getService
                     const item = { kind: 'session_event', type: fact.type, seq: fact.seq, time: fact.time };
                     if (fact.type === 'tool/call') {
                         item.tool = fact.data.name;
-                        if (['mcp__guizhi__execute_workflow', 'mcp__guizhi__review_approval',
-                            'mcp__guizhi__update_approval', 'mcp__guizhi__sum_layer_area'].includes(item.tool)) attempted = true;
                     }
                     if (fact.type === 'assistant/message' && fact.data.usage) {
                         item.usage = fact.data.usage;
@@ -379,25 +303,18 @@ export async function dispatch(options, { signal, onEvent = () => {}, getService
                 },
             });
             failureStep = 'run_model';
-            let response = await run(context + conversation + speech + '用户请求：' + options.prompt, true);
+            let response = await run(options.prompt, true);
             ran = true;
-            const needsSelectedWorkflow = options.skill && roles.length > 0 && /^请办理/u.test(options.prompt.trim());
-            const needsMeasurement = outcomes.length > 0 || ((roles.length > 0 || maps.length > 0) &&
-                /统计|计算|清点|多少|数量|覆盖率|重叠面积|核查|缓冲|裁切|相交|导出|筛选|叠加/u.test(options.prompt));
-            const firstAnswer = assistantAnswer(response.finalResponse);
-            const asks = /[？?]|请(?:提供|补充|确认|指定|选择|告诉)/u.test(firstAnswer);
-            if ((needsSelectedWorkflow || needsMeasurement) && response?.finishReason === 'completed' &&
-                    (!attempted || outcomes.length > 0) && (needsSelectedWorkflow || !asks) && !stop.aborted &&
-                    !existsSync(operationPath) && !existsSync(join(directory, 'operation.claim')) &&
-                    (!existsSync(join(directory, 'discovery')) || outcomes.length > 0) &&
-                    !existsSync(join(directory, 'input-issue.json'))) {
-                event({ kind: 'workflow_retry', reason: needsSelectedWorkflow ? 'selected_workflow_without_tool' : 'spatial_request_without_tool' });
-                response = await run('请调用 execute_workflow，按本轮图层引用和用户要求实际办理，取得作业回执后再回答。' +
-                    context + '用户请求：' + options.prompt);
+            const needsSelectedWorkflow = Boolean(options.skill && roles.length);
+            const workAttempted = () => existsSync(join(directory, 'work-attempted'));
+            if ((needsSelectedWorkflow || workAttempted()) && response.finishReason === 'completed' &&
+                    !stop.aborted && !existsSync(operationPath) && !existsSync(join(directory, 'operation.claim'))) {
+                event({ kind: 'workflow_retry', reason: 'missing_delivery' });
+                response = await run('本轮尚未交付。核对刚才的回执与用户原意；需要时继续查证或更正，确认后交付。缺信息请询问用户。');
             }
             if (stop.aborted) {
                 writeFileSync(join(directory, 'cancelled'), '');
-                result = { status: deadline.aborted ? 'timed_out' : 'cancelled' };
+                result = { status: deadline?.aborted ? 'timed_out' : 'cancelled' };
             } else {
                 failureStep = 'read_dispatch_result';
                 if (!existsSync(budgetPath)) throw new Error('本轮模型预算未初始化');
@@ -406,27 +323,15 @@ export async function dispatch(options, { signal, onEvent = () => {}, getService
                 const issue = existsSync(issuePath) ? readJson(issuePath) : null;
                 const stopped = existsSync(budgetPath) && readJson(budgetPath).status === 'exhausted';
                 let answer = assistantAnswer(response.finalResponse);
-                const coordinatePath = join(directory, 'coordinate-lookup.json');
-                if (!receipt && existsSync(coordinatePath) && coordinateQuestion(options.prompt)) {
-                    const rows = Object.values(readJson(coordinatePath));
-                    const missing = rows.find(row => row.status === 'target_required');
-                    const requested = rows.length === 1 ? rows[0] : missing;
-                    if (requested && (!askingForProjection(options.prompt) || missing || /EPSG\s*[:：]?\s*\d{4,5}/iu.test(options.prompt) === false)) {
-                        answer = coordinateReply(requested.layer, requested.coordinate_system, askingForProjection(options.prompt));
-                    }
-                }
-                const coordinateAnswer = receipt?.status === 'succeeded' && coordinateRead(receipt, options.prompt);
-                const status = (coordinateAnswer ? 'answered' : receipt?.status) ?? (stopped ? 'budget_exhausted' : response.finishReason !== 'completed' ? 'failed' : issue?.status ??
-                    (attempted ? 'no_result' : answer && (!needsSelectedWorkflow && (!needsMeasurement ||
-                        /[？?]|请(?:提供|补充|确认|指定|选择|告诉)/u.test(answer))) ? 'answered'
-                        : roles.length ? 'no_result' : 'missing_materials'));
+                const status = receipt?.status ?? (stopped ? 'budget_exhausted' : response.finishReason !== 'completed' ? 'failed' :
+                    issue?.status ?? (answer && !workAttempted() && !needsSelectedWorkflow ? 'answered' : 'no_result'));
                 const terminal = response.events.findLast(fact => fact.type === 'turn/end');
                 const failure = terminal?.data.reason.error;
                 const candidatePath = join(directory, 'candidate.json');
                 result = { status, finish_reason: response.finishReason,
-                    response: status === 'succeeded' || coordinateAnswer
-                        ? deliveredResponse(receipt, options, answer, coordinateAnswer)
-                        : receipt?.error ?? issue?.error ?? (stopped ? '模型预算已用完，已保存办理进度。'
+                    response: status === 'succeeded'
+                        ? receipt.delivery?.answer || verifiedResponse(receipt, options.dialogue)
+                        : receipt?.question ?? receipt?.error ?? issue?.error ?? (stopped ? '本次调用达到指定限额，办理已停止。'
                             : status === 'no_result' ? '本轮没有生成可核验的成果。可以继续让我重新办理。' : answer),
                     operation: receipt, ...(issue && !receipt ? { input_issue: issue } : {}),
                     ...(status === 'answered' && existsSync(candidatePath) ? { candidate: readJson(candidatePath) } : {}),
@@ -435,7 +340,7 @@ export async function dispatch(options, { signal, onEvent = () => {}, getService
         }
     } catch (error) {
         writeFileSync(join(directory, 'cancelled'), '');
-        result = stop.aborted ? { status: deadline.aborted ? 'timed_out' : 'cancelled' }
+        result = stop.aborted ? { status: deadline?.aborted ? 'timed_out' : 'cancelled' }
             : { status: 'failed', error: safeError(error.message), error_code: error.code };
     } finally {
         stopListener?.[Symbol.dispose]();
@@ -449,6 +354,7 @@ export async function dispatch(options, { signal, onEvent = () => {}, getService
             if (!result.error && !result.operation?.error) failureStep = 'archive_dispatch';
             result = { ...result, status: 'failed', shutdown_error: safeError(error.message) };
         }
+        rmSync(join(directory, 'conversation.json'), { force: true });
         stopProgress?.();
     }
     const accounting = { input_tokens: 0, output_tokens: 0, cache_read_tokens: 0,
@@ -462,7 +368,7 @@ export async function dispatch(options, { signal, onEvent = () => {}, getService
             ? null : accounting.total_tokens + tokens.totalTokens;
     }
     if (typeof result.response === 'string') result.response = safeError(result.response);
-    const receipt = { failureStep, ...result, id, directory, provider, model, workflow_attempted: attempted,
+    const receipt = { failureStep, ...result, id, directory, provider, model, workflow_attempted: Boolean(result.operation?.run_id) || existsSync(join(directory, 'work-attempted')) || existsSync(join(directory, 'operation.claim')),
         elapsed_ms: Math.round(performance.now() - started), execution: { gis: 'local', model: modelConfig.mode },
         budget: existsSync(budgetPath) ? readJson(budgetPath) : null,
         sdk_version: versions['@deepseek-ai/dsh-sdk-client'], usage: usage.size ? accounting : null };

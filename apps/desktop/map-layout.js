@@ -336,7 +336,7 @@ export function mapCanvas(frames, config) {
         paintLegend(frames.frame.legend, ...rect('legend'), layout.legendTitle?.trim() || '图例');
     }
     const warnings = [];
-    if (Object.values(frames).some(frame => frame.limited)) warnings.push('部分要素超出显示上限，请缩小地图框范围。');
+    if (Object.values(frames).some(frame => frame.limited)) warnings.push('当前比例尺以覆盖范围显示密集图层。');
     const [, , , legendHeight] = rect('legend');
     if (mainDecoration(layout, 'legend') &&
             frames.frame.legend.length > Math.floor((legendHeight - 32) / 21)) warnings.push('图例空间不足，可放大图例框。');

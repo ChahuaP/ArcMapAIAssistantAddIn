@@ -21,6 +21,7 @@ FIELD_TYPES = {"smallinteger": "SMALLINT", "integer": "MEDIUMINT", "single": "FL
 
 
 def lookup(ctx, field: str, where: AttributeFilter | None = None):
+    """返回匹配记录数、指定列和有上限的实际属性行。不会改变地图选区。"""
     frame = ctx.frames[0]
     if field not in frame or field == frame.geometry.name:
         raise ValueError("请选择图层中实际存在的属性字段")

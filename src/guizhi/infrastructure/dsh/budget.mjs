@@ -1,47 +1,42 @@
-import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, renameSync, writeFileSync } from 'node:fs';
 
-export const inject = ['llm'];
+export const inject = ['llm', 'agents', 'tokenMeter'];
 
-export function meter(config) {
+export function meter(config, measure) {
     let calls = 0;
     let charged = 0;
     let reserved = 0;
+    let compactions = 0;
     let refused = null;
-    let synthesized = false;
 
-    function checkpoint(status, estimate = 0) {
+    function checkpoint(status) {
         const pending = config.checkpoint + '.pending';
-        writeFileSync(pending, JSON.stringify({ status, calls, charged, reserved, estimate,
-            token_limit: config.tokens, call_limit: config.calls }));
+        writeFileSync(pending, JSON.stringify({ status, calls, charged, reserved, compactions,
+            reason: refused, token_limit: config.tokens ?? null, call_limit: config.calls ?? null }));
         renameSync(pending, config.checkpoint);
     }
 
     checkpoint('ready');
     return async function* (options, next) {
-        if (existsSync(config.operation)) {
-            const receipt = config.synthesize && !synthesized && JSON.parse(readFileSync(config.operation, 'utf8'));
-            const direct = receipt?.steps?.some(step => step.statistics?.area_summary || step.statistics?.lookup ||
-                step.statistics?.projection || step.statistics?.selected_count !== undefined || step.statistics?.coverage_ratio !== undefined);
-            if (receipt?.status !== 'succeeded' || direct) {
-                yield { type: 'finish', reason: { kind: 'stop' } };
-                return;
-            }
-            synthesized = true;
-            // The workflow already ran. The remaining response only explains its verified result.
-            options = { ...options, tools: [] };
-        }
-        const bytes = Buffer.byteLength(JSON.stringify([options.system, options.messages, options.tools, options.toolHistory]));
-        const estimate = bytes + (options.maxTokens ?? 1024) + 512;
-        if (refused !== null || calls >= config.calls || charged + reserved + estimate > config.tokens) {
-            refused ??= estimate;
-            checkpoint('exhausted', refused);
-            yield { type: 'finish', reason: { kind: 'error', failure: {
-                code: 'GUIZHI_BUDGET', message: '任务模型预算已用完' } } };
+        if (config.operation && existsSync(config.operation)) {
+            yield { type: 'finish', reason: { kind: 'stop' } };
             return;
         }
-        calls += 1;
+        // Explicit QA/caller quotas concern cumulative usage. Context pressure is
+        // managed independently by the native DSH compactor at step boundaries.
+        const estimate = config.tokens == null ? 0 : measure(options) + (options.maxTokens ?? 0);
+        if (config.calls != null && calls >= config.calls) refused = 'call_limit';
+        if (config.tokens != null && charged + reserved + estimate > config.tokens) refused = 'token_limit';
+        if (refused) {
+            checkpoint('exhausted');
+            yield { type: 'finish', reason: { kind: 'error', failure: {
+                code: 'GUIZHI_BUDGET', message: refused === 'call_limit' ? '达到本次指定的模型调用次数' : '达到本次指定的模型用量限额' } } };
+            return;
+        }
+        calls++;
+        if (options.purpose === 'compaction') compactions++;
         reserved += estimate;
-        checkpoint('calling', estimate);
+        checkpoint('calling');
         let billed;
         try {
             for await (const chunk of next()) {
@@ -55,11 +50,11 @@ export function meter(config) {
         } finally {
             reserved -= estimate;
             charged += Number.isFinite(billed) ? billed : estimate;
-            checkpoint(refused === null ? 'ready' : 'exhausted', refused ?? 0);
+            checkpoint(refused ? 'exhausted' : 'ready');
         }
     };
 }
 
 export function apply(ctx, config) {
-    ctx.on('llm/stream', meter(config));
+    ctx.on('llm/stream', meter(config, options => ctx.tokenMeter.measure(ctx.agents.get(options.sessionId).session).totalTokens));
 }

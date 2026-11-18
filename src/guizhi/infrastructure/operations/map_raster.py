@@ -2,14 +2,13 @@
 import numpy as np
 
 from guizhi.infrastructure.operations import raster
-from rasterio.enums import ColorInterp, Resampling
-from rasterio.io import MemoryFile
-from rasterio.vrt import WarpedVRT
 from pyproj.transformer import TransformerGroup
 
 
 def image_preview(file, target=None):
-    with raster.rio.open(file) as source:
+    from guizhi.infrastructure.operations.raster_backend import Resampling, WarpedVRT, rio
+
+    with rio.open(file) as source:
         options = {}
         if target:
             if source.crs is None:
@@ -22,7 +21,7 @@ def image_preview(file, target=None):
                     raise ValueError("影像缺少可靠的坐标转换或所需格网")
                 options = {"crs": destination.to_wkt(),
                            "warp_extras": {"COORDINATE_OPERATION": group.transformers[0].definition}}
-        with raster.rio.Env(PROJ_NETWORK="OFF"), WarpedVRT(source, resampling=Resampling.nearest, **options) as src:
+        with rio.Env(PROJ_NETWORK="OFF"), WarpedVRT(source, resampling=Resampling.nearest, **options) as src:
             image = render(src)
             crs = raster.CRS(src.crs) if src.crs else None
             return image, {"bounds": list(src.bounds), "crs": crs.to_string() if crs else None, "crsName": crs.name if crs else "未定义坐标系",
@@ -32,6 +31,8 @@ def image_preview(file, target=None):
 
 
 def render(src):
+    from guizhi.infrastructure.operations.raster_backend import ColorInterp, MemoryFile, Resampling
+
     scale = min(1, 960 / max(src.width, src.height))
     width, height = max(1, round(src.width * scale)), max(1, round(src.height * scale))
     bands = [1, 2, 3] if src.count >= 3 else [1]

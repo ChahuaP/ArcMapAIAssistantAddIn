@@ -20,10 +20,10 @@ export function watchRun(workspace, requestId, emit) {
                 database = new DatabaseSync(file, { readOnly: true });
                 query = database.prepare(
                     'SELECT e.seq, e.run_id, e.time, e.step, e.details FROM operation_requests AS r ' +
-                    'JOIN events AS e ON e.run_id = r.run_id WHERE r.key = ? AND e.seq > ? ' +
+                    'JOIN events AS e ON e.run_id = r.run_id WHERE (r.key = ? OR r.key GLOB ?) AND e.seq > ? ' +
                     'AND e.step IN (' + visualSteps.map(() => '?').join(',') + ') ORDER BY e.seq LIMIT 100');
             }
-            for (const row of query.all(requestId, cursor, ...visualSteps)) {
+            for (const row of query.all(requestId, requestId + ".*", cursor, ...visualSteps)) {
                 cursor = row.seq;
                 emit({ kind: 'operation_progress', runId: row.run_id, at: row.time,
                     phase: row.step, details: JSON.parse(row.details) });

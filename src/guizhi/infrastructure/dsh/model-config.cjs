@@ -58,10 +58,12 @@ function modelKey(config, value) {
 
 function route(config) {
     const id = config.provider !== 'custom' ? config.provider : 'guizhi-' + config.mode;
-    const settings = { apiKeyEnv: 'GUIZHI_MODEL_KEY', models: [{ id: config.model, input: ['text', 'image'] }] };
+    // The adapter prefers the registered model's capacity. Unknown models need a conservative pressure threshold.
+    const settings = { apiKeyEnv: 'GUIZHI_MODEL_KEY', defaultContextWindow: config.mode === 'local' ? 8192 : 32768,
+        models: [{ id: config.model, input: ['text', 'image'] }] };
     if (config.provider === 'custom') {
         Object.assign(settings, { api: config.api, baseURL: config.baseUrl,
-            defaultContextWindow: config.mode === 'local' ? 8192 : 32768, defaultMaxTokens: 2048 });
+            defaultMaxTokens: 2048 });
         if (config.api === 'openai-completions') settings.compat = { supportsDeveloperRole: false };
     } else {
         const preset = presets[id];

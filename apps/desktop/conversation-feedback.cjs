@@ -6,7 +6,7 @@ const { maxConversationBytes } = require('./conversation-schema.cjs');
 const endpoint = 'https://123.56.108.57:8443/guizhi/v1/conversations';
 const label = { answered: '已答复', succeeded: '已完成', failed: '未完成', cancelled: '已停止',
     interrupted: '已中断', timed_out: '已超时', missing_materials: '待补材料',
-    invalid_materials: '材料有误', no_result: '待补信息', budget_exhausted: '已保存进度' };
+    invalid_materials: '材料有误', no_result: '待补信息', budget_exhausted: '达到限额' };
 
 function prepareConversation(tasks, version) {
     if (!tasks.length) throw new Error('本次会话暂无内容');

@@ -9,20 +9,10 @@ from uuid import uuid4
 import numpy as np
 from pyproj import CRS
 
-from guizhi.infrastructure.optional_components import require
-
-require("raster")
-
-import rasterio as rio
-from rasterio.shutil import copy as copy_dataset
-from rasterio.enums import Resampling
-from rasterio.features import geometry_mask, geometry_window
-from rasterio.merge import merge
-from rasterio.warp import calculate_default_transform, reproject as warp
-from rasterio.windows import Window, transform as window_transform
-
 
 def source_files(file):
+    from guizhi.infrastructure.operations.raster_backend import rio
+
     file = Path(file).absolute()
     with rio.open(file) as src:
         driver = "HFA" if file.suffix.lower() == ".img" else "GTiff"
@@ -50,6 +40,8 @@ def check_source(file):
 
 def normalize(source, target, check):
     # Copying the GDAL dataset includes georeferencing, masks, descriptions and metadata.
+    from guizhi.infrastructure.operations.raster_backend import copy_dataset, rio
+
     with rio.Env(GDAL_TIFF_INTERNAL_MASK=True):
         copy_dataset(source, target, driver="GTiff", strict=True, compress="deflate", BIGTIFF="IF_SAFER")
     with rio.open(source) as before:
@@ -73,6 +65,8 @@ def normalize(source, target, check):
 
 
 def metadata(file):
+    from guizhi.infrastructure.operations.raster_backend import rio
+
     check_source(file)
     with rio.open(file) as src:
         return {"crs": src.crs.to_wkt() if src.crs else None, "width": src.width, "height": src.height, "bands": src.count,
@@ -88,6 +82,8 @@ def samples(src, window):
 
 
 def statistics(ctx, observed_on: date | None = None):
+    from guizhi.infrastructure.operations.raster_backend import rio
+
     file = ctx.rasters[0]
     info = metadata(file)
     bands = []
@@ -123,6 +119,8 @@ def options(src, width, height, transform, crs):
 
 
 def write_windows(ctx, path, src, extent, shapes=None, all_touched=False):
+    from guizhi.infrastructure.operations.raster_backend import Window, geometry_mask, rio, window_transform
+
     profile = options(src, int(extent.width), int(extent.height), window_transform(extent, src.transform), src.crs)
     with rio.open(path, "w", **profile) as dst:
         for _, window in dst.block_windows(1):
@@ -142,6 +140,8 @@ def write_windows(ctx, path, src, extent, shapes=None, all_touched=False):
 
 
 def deliver(ctx, path, operation):
+    from guizhi.infrastructure.operations.raster_backend import rio
+
     ctx.check()
     info = metadata(path)
     with rio.open(path) as src:
@@ -158,6 +158,8 @@ def deliver(ctx, path, operation):
 
 
 def clip(ctx, all_touched: bool = False):
+    from guizhi.infrastructure.operations.raster_backend import geometry_window, rio
+
     if len(ctx.rasters) != 1 or len(ctx.frames) != 1:
         raise ValueError("Raster clipping requires one GeoTIFF and one polygon layer")
     frame = ctx.frames[0]
@@ -216,6 +218,8 @@ def raster_plan_pipeline(workspace, reference, source, extent):
 
 
 def reproject_raster(ctx, target_crs, resampling, resolution, plan):
+    from guizhi.infrastructure.operations.raster_backend import Resampling, Window, calculate_default_transform, rio, warp
+
     from guizhi.infrastructure.crs_options import describe_crs, projection, resolve_definition
 
     out = ctx.path("result.tif")
@@ -263,6 +267,8 @@ def reproject(ctx, target_crs: str | None = None, resampling: Literal["nearest",
 
 
 def assign(ctx, target_crs: str):
+    from guizhi.infrastructure.operations.raster_backend import copy_dataset, rio
+
     from guizhi.infrastructure.crs_options import resolve_definition
 
     source = ctx.rasters[0]
@@ -276,6 +282,8 @@ def assign(ctx, target_crs: str):
 
 
 def mosaic(ctx, overlap: Literal["first", "last"] = "first"):
+    from guizhi.infrastructure.operations.raster_backend import Window, merge, rio
+
     out = ctx.path("result.tif")
     with ExitStack() as stack:
         sources = [stack.enter_context(rio.open(path)) for path in ctx.rasters]

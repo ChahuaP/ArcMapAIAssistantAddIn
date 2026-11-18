@@ -18,6 +18,16 @@ from guizhi.infrastructure.operations.runner import data_revision
 from guizhi.infrastructure.vector import digest
 
 
+PUBLISHED_OUTPUTS = {
+    "export": "交付保存的数据文件；空间图层会加入工作区",
+    "selection": "在原图层上高亮匹配要素，更改当前选区",
+    "map_actions": "在当前地图应用已生成的操作", "layout": "应用地图版面",
+    "map": "显示成果地图", "raster_preview": "显示影像预览", "boundaries": "显示边界图层",
+    "table": "提供成果表", "report": "提供办理报告", "case": "提供核查记录",
+    "package": "提供成果包", "view": "提供视图",
+}
+
+
 def committed(record):
     if record["status"] != "succeeded":
         raise ValueError(record["error"] or record["status"])
@@ -50,10 +60,14 @@ def resolve_value(value, records, skill_parameters):
     return value
 
 
-def material_from(ctx, record):
+def material_from(ctx, name, record):
     data = committed(record)
     if not any(ref["step"] == "export" for ref in data["evidence"]):
-        raise Fault("workflow", "upstream_has_no_export", "Workflow step consumes a result without a data export",
+        references = [f"${kind}.{name}" for kind in ("selection", "value") if kind in data]
+        detail = f"step.{name} 没有输出图层，无法作为图层输入。"
+        if references:
+            detail += "可在参数中引用 " + "、".join(references) + "，图层输入使用原材料引用。"
+        raise Fault("workflow", "upstream_has_no_export", detail,
                     upstream_operation=record["task"]["operation"], upstream_run=record["id"])
     file = read_artifact(ctx.workspace, record["id"], "export")
     return {"file": str(file), "layer": data.get("export_layer"),
@@ -65,7 +79,8 @@ def execute(ctx, specification: dict):
     skill = specification["skill"]
     groups = specification["materials"]
     steps = [Step.model_validate(raw) for raw in specification["steps"]]
-    validate_steps(steps, groups.keys() | {item["id"] for item in skill["materials"]} if skill else groups.keys())
+    roles = set(groups) | ({item["id"] for item in skill["materials"]} if skill else set())
+    validate_steps(steps, roles, materials=groups, values=specification.get("skill_parameters", {}))
     if mode not in {"fixed", "free", "combined"}:
         raise ValueError("Unknown workflow mode")
     sealed, seals, records = {}, {}, {}
@@ -141,7 +156,7 @@ def execute(ctx, specification: dict):
             if kind == "material":
                 inputs.extend(sealed.get(name, []))
             else:
-                inputs.append(material_from(ctx, records[name]))
+                inputs.append(material_from(ctx, name, records[name]))
         parameters = resolve_value(step.parameters, records, specification.get("skill_parameters", {}))
         layers = {item["layer"] for item in inputs if item["layer"]}
         input_role = step.inputs[0].partition(".")[2] if len(step.inputs) == 1 and step.inputs[0].startswith("material.") else None
@@ -154,7 +169,8 @@ def execute(ctx, specification: dict):
             if len(inputs) != expected:
                 raise ValueError(f"{step.operation} requires {expected} input(s)")
             plans = {**(specification["coordinate_plans"] if expected == 2 else {}), **parameters}
-            if expected == 2 and any(f"step.{step.id}" in later.inputs for later in steps):
+            if expected == 2 and any(f"step.{step.id}" in later.inputs or
+                                     later.parameters.get("spatial_run") == f"$run.{step.id}" for later in steps):
                 plans["output_layer"] = True
             if (set(plans) - {"project_plan", "control_plan", "output_layer"} or (expected == 1 and plans)
                     or not isinstance(plans.get("output_layer", False), bool)):
@@ -193,7 +209,7 @@ def execute(ctx, specification: dict):
         for ref in record["result"]["evidence"]:
             if ref["step"] == "map_actions":
                 actions.extend(json.loads(read_artifact(ctx.workspace, record["id"], "map_actions").read_text(encoding="utf-8")))
-            elif ref["step"] in {"export", "report", "map", "table", "view", "selection", "case", "package", "boundaries", "raster_preview", "layout"}:
+            elif ref["step"] in PUBLISHED_OUTPUTS:
                 outputs[ref["step"]] = (record["id"], ref["sha256"])
     if actions:
         ctx.json("map-actions.json", actions, "map_actions")

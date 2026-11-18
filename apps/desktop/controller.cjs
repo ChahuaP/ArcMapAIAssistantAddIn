@@ -240,18 +240,14 @@ class DesktopController {
         if (!skill && bindings.inputs) {
             const { inputs, ...named } = bindings;
             layerLabels = Object.fromEntries((materials.inputs || []).map((item, index) => ['layer-' + (index + 1), {
-                name: item.name || item.layer, layer: item.layer, ...(item.mapSelection ? { selected: item.mapSelection.fids.length } : {}),
+                name: item.name || item.layer, layer: item.layer, mapId: mapContext?.layers.find(row =>
+                    item.ref && row.ref.run === item.ref.run && row.ref.artifact === item.ref.artifact)?.id, ...(item.mapSelection ? { selected: item.mapSelection.fids.length } : {}),
             }]));
             bindings = { ...named, ...Object.fromEntries(inputs.map((item, index) => ['layer-' + (index + 1), [item]])) };
         }
-        const history = [];
-        let previousRun;
-        for (const prior of this.tasks.slice(0, 4)) {
-            if (prior.status === 'succeeded') previousRun ??= prior.runId;
-            if (prior.response && ['answered', 'succeeded', 'missing_materials', 'no_result'].includes(prior.status)) {
-                history.unshift([prior.prompt.slice(0, 600), prior.response.slice(0, 600)]);
-            }
-        }
+        const previousRun = this.tasks.find(prior => prior.status === 'succeeded' && prior.runId)?.runId;
+        const history = this.tasks.filter(prior => prior.prompt && prior.response)
+            .map(prior => [prior.prompt, prior.response]).reverse();
         if (skill && !/^[a-z][a-z0-9_-]{0,39}@[1-9]\d*$/.test(skill)) throw new Error('请选择已发布的技能');
         if (skillParameters && Buffer.byteLength(JSON.stringify(skillParameters)) > 65536) throw new Error('办理参数最多 64 KB');
         const { config, key } = this.selectModel({ modelConfig: this.settings.modelConfig });
@@ -362,29 +358,39 @@ class DesktopController {
                 record = await this.python('inspect', task.runId);
                 if (record.status !== 'succeeded') throw new Error('成果未发布');
                 publicationStep = 'read_result_artifacts';
-                const map = checkedArtifact(record, 'map');
+                const outputs = receipt.operation.delivery?.outputs;
+                const requested = kind => !outputs || outputs.includes(kind);
+                const map = requested('map') && checkedArtifact(record, 'map');
                 if (map) task.map = JSON.parse(map.bytes);
-                const layout = checkedArtifact(record, 'layout');
+                const layout = requested('layout') && checkedArtifact(record, 'layout');
                 if (layout) task.layout = JSON.parse(layout.bytes);
-                const actions = checkedArtifact(record, 'map_actions');
+                const actions = requested('map_actions') && checkedArtifact(record, 'map_actions');
                 if (actions) task.mapActions = JSON.parse(actions.bytes);
-                const selected = record.result.selection;
-                const inputRole = record.result.workflow?.steps.at(-1)?.inputs?.[0];
-                const target = inputRole?.startsWith('material.') && task.mapTargets?.[inputRole.slice(9)];
-                if (selected && target) task.mapSelection = { ref: target, fids: selected.fids };
+                const delivery = receipt.operation.delivery;
+                if (delivery?.outputs.includes('selection')) {
+                    publicationStep = 'read_map_selection';
+                    const step = record.result.workflow.steps.find(item => item.id === delivery.step);
+                    const target = task.mapTargets?.[delivery.layer];
+                    const child = step && (step.run_id === record.result.final_run ? record : await this.python('inspect', step.run_id));
+                    const selected = child?.result.selection;
+                    if (!target || !Array.isArray(selected?.fids) || selected.fids.length !== step.statistics.selected_count) {
+                        throw new Error('未取得目标图层的完整选区');
+                    }
+                    task.mapSelection = { ref: target, fids: selected.fids };
+                }
                 const hasLayer = record.result.evidence.some(item =>
-                    ['export', 'boundaries'].includes(item.step) && /\.(gpkg|tiff?|img)$/i.test(item.path));
+                    requested(item.step) && ['export', 'boundaries'].includes(item.step) && /\.(gpkg|tiff?|img)$/i.test(item.path));
                 if (hasLayer) {
                     publicationStep = 'read_result_layers';
                     task.mapLayers = await this.request('map', { action: 'workflow-layers', run: task.runId });
                 }
                 publicationStep = 'read_result_artifacts';
-                task.outputImages = record.result.evidence.filter(item => item.step === 'raster_preview')
+                task.outputImages = record.result.evidence.filter(item => requested(item.step) && item.step === 'raster_preview')
                     .map(item => ({ run: task.runId, artifact: item.step }));
                 const findings = checkedArtifact(record, 'case');
                 if (findings) task.approval = JSON.parse(findings.bytes);
                 const definition = record.result.workflow?.skill;
-                const report = checkedArtifact(record, 'report', true);
+                const report = requested('report') && checkedArtifact(record, 'report', true);
                 if (!active.stop.signal.aborted && (definition || task.skill || report)) {
                     publicationStep = 'save_business_log';
                     const groups = { ...task.materials, ...(task.project && { project: [task.project] }),
@@ -461,8 +467,19 @@ class DesktopController {
         return this.state();
     }
 
-    finishMapDelivery(id) {
+    finishMapDelivery(id, applied, error) {
         if (id !== this.delivery) return;
+        const task = this.tasks.find(item => item.id === id);
+        const selected = task?.mapSelection;
+        const actual = new Set(applied?.ids);
+        const wrongSelection = selected && (selected.fids.length !== actual.size ||
+            (actual.size && applied.key !== selected.ref.run + ':' + selected.ref.artifact) ||
+            !selected.fids.every(fid => actual.has(fid)));
+        if (task && (error || wrongSelection)) {
+            task.status = 'failed';
+            task.response = error || '地图没有收到目标图层的完整选区，请重新选择。';
+            this.persist();
+        }
         this.delivery = null;
         this.onChange(this.state());
     }

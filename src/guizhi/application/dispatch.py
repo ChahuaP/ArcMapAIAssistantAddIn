@@ -26,7 +26,7 @@ def format_operation(workspace, record, parameters):
 
 
 def plan_fingerprint(workspace, request):
-    if request["previous_run"] or request.get("image_inputs") or not any(request["materials"].values()):
+    if request["previous_run"] or not request["skill"] or request.get("image_inputs") or not any(request["materials"].values()):
         return None, request["materials"]
     inputs = {}
     for role, items in request["materials"].items():

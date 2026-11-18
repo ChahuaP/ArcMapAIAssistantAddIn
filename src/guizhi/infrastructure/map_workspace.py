@@ -19,9 +19,10 @@ from pyproj.enums import TransformDirection
 from guizhi.application.diagnostics import failure_summary
 from guizhi.application.skills import execute as execute_skill
 from guizhi.application.tasks import run_operation
+from guizhi.infrastructure.cache import reuse_job
 from guizhi.infrastructure.crs_catalog import get_plan
 from guizhi.infrastructure.crs_options import projection
-from guizhi.infrastructure.coordinates import apply_plan
+from guizhi.infrastructure.map_overview import coverage, display_copy, many_in_view
 from guizhi.infrastructure.export import package_layer
 from guizhi.infrastructure.operations.evidence import artifact_path, read_artifact
 from guizhi.infrastructure.operations.runner import data_revision
@@ -82,11 +83,13 @@ def selection_material(workspace, ref, revision, fids):
     item = material(file, name)
     if item["revision"] != revision:
         raise ValueError("图层版本已变化，请重新选择要素")
-    if not isinstance(fids, list) or not 1 <= len(fids) <= 500 or any(type(fid) is not int for fid in fids):
-        raise ValueError("请选择 1 至 500 个地图要素")
-    selection = {"layer": name, "revision": revision, "fids": fids}
-    record = successful(run_operation(workspace.root, {"operation": "data.export_selection", "inputs": [item],
-        "parameters": {"selection": selection}}))
+    if not isinstance(fids, list) or not fids or any(type(fid) is not int for fid in fids):
+        raise ValueError("请选择有效的地图要素")
+    selection = {"layer": name, "revision": revision, "fids": sorted(set(fids))}
+    parameters = {"selection": selection}
+    record, _ = reuse_job(workspace, "data.export_selection", [item], parameters, lambda: run_operation(
+        workspace.root, {"operation": "data.export_selection", "inputs": [item], "parameters": parameters}))
+    record = successful(record)
     result = material(read_artifact(workspace, record["id"], "export"), record["result"]["export_layer"])
     return {**result, "layers": [result["layer"]], "kind": "vector",
             "mapSelection": {"source": ref, "revision": revision, "fids": fids}}
@@ -131,6 +134,8 @@ def workflow_layers(workspace, record):
                 targets[key] = key
                 rows[key] = layer
             last_result[key] = layer["ref"]
+    for row in rows.values():
+        row["stepReferences"] = [name for name, root in targets.items() if rows[root] is row]
     return list(rows.values())
 
 
@@ -184,8 +189,8 @@ def manual_tool(workspace, payload):
     items = [map_material(workspace, ref) for ref in refs]
     if operation == "data.export_selection":
         fids = parameters.get("fids")
-        if len(items) != 1 or not isinstance(fids, list) or not 1 <= len(fids) <= 500:
-            raise ValueError("请选择 1 至 500 个地图要素")
+        if len(items) != 1 or not isinstance(fids, list) or not fids or any(type(fid) is not int for fid in fids):
+            raise ValueError("请选择有效的地图要素")
         parameters = {"selection": {"layer": items[0]["layer"], "revision": items[0]["revision"], "fids": fids}}
     title = {"data.export_selection": "所选要素"}.get(operation) or step_title(operation)
     if operation == "geometry.create_dataset" or payload.get("name") is not None:
@@ -320,8 +325,16 @@ def features(workspace, payload):
         raise ValueError("请先为该图层指定已知坐标系")
     convert = target and current and not current.equals(target, ignore_axis_order=True)
     plan = get_plan(workspace, payload["plan"]) if convert and payload.get("plan") else None
-    fids = payload.get("fids")
-    tx = projection(current, target, info["bounds"]) if convert and not plan else None
+    if plan:
+        file = display_copy(workspace, file, name, info, plan, target)
+        info = {**info, "bounds": numbers(pyogrio.read_info(file, layer=name, force_total_bounds=True)["total_bounds"])}
+        convert = False
+    highlight = payload.get("selectionFids")
+    if highlight is not None and (not isinstance(highlight, list) or not highlight or
+                                  any(type(fid) is not int for fid in highlight)):
+        raise ValueError("请选择有效的地图要素")
+    fids = highlight if highlight is not None and len(highlight) <= 500 else payload.get("fids")
+    tx = projection(current, target, info["bounds"]) if convert else None
     display_bounds = info["bounds"]
     if tx and display_bounds:
         display_bounds = numbers(tx.transform_bounds(*display_bounds, errcheck=True))
@@ -339,38 +352,56 @@ def features(workspace, payload):
                                                      direction=TransformDirection.INVERSE, errcheck=True))
             if read_extent and read_extent[0] > read_extent[2]:
                 read_extent = (-180.0, read_extent[1], 180.0, read_extent[3])
+    def overview():
+        full = tuple(info["bounds"])
+        window = None
+        if read_extent is not None:
+            xmin, ymin = max(full[0], read_extent[0]), max(full[1], read_extent[1])
+            xmax, ymax = min(full[2], read_extent[2]), min(full[3], read_extent[3])
+            if xmin > xmax or ymin > ymax:
+                return {"features": [], "limited": False, "bounds": display_bounds}
+            # Reuse the whole-layer footprint at regional scales. Refine in a dense local view.
+            if (xmax - xmin) * (ymax - ymin) < (full[2]-full[0]) * (full[3]-full[1]) / 16:
+                window = (xmin, ymin, xmax, ymax)
+        where = None
+        if highlight:
+            from guizhi.infrastructure.operations.table import identifier
+            where = identifier(info["fidField"]) + " IN (" + ",".join(map(str, highlight)) + ")"
+        revision = file.stem if plan else info["revision"]
+        shapes = coverage(file, name, revision, full, window, workspace.root / "cache", where)
+        if tx and shapes:
+            shapes = shapely.transform(np.asarray(shapes, dtype=object), lambda x, y: tx.transform(x, y, errcheck=True),
+                                       interleaved=False)
+        return {"features": [], "overview": [shapely.geometry.mapping(shape) for shape in shapes],
+                "limited": True, "bounds": display_bounds}
+
     if fids is not None:
         if not isinstance(fids, list) or not fids or len(fids) > 500 or any(type(fid) is not int for fid in fids):
             raise ValueError("请选择有效的地图要素")
         options = {"fids": fids}
     else:
+        if highlight or many_in_view(file, name, info["count"], read_extent, MAX_VISIBLE):
+            return overview()
         options = {"bbox": tuple(read_extent) if read_extent is not None else None, "max_features": MAX_VISIBLE + 1}
-    frame = pyogrio.read_dataframe(file, layer=name, fid_as_index=True, columns=None if fids else payload.get("fields", []), **options)
-    limited = len(frame) > MAX_VISIBLE
-    if limited:
-        frame = frame.iloc[:MAX_VISIBLE]
-    if convert and len(frame):
-        if plan:
-            frame = apply_plan(frame, plan, workspace.root)
-            if not frame.crs.equals(target, ignore_axis_order=True):
-                raise ValueError("转换方案的目标坐标系与地图不一致")
-        else:
-            frame.geometry = shapely.transform(frame.geometry.array,
-                lambda x, y, z=None: tx.transform(x, y, z, errcheck=True),
-                interleaved=False, include_z=None)
+    frame = pyogrio.read_dataframe(file, layer=name, fid_as_index=True, columns=None if fids and not highlight else payload.get("fields", []), **options)
+    if len(frame) > MAX_VISIBLE:
+        return overview()
+    if tx and len(frame):
+        frame.geometry = shapely.transform(frame.geometry.array,
+            lambda x, y, z=None: tx.transform(x, y, z, errcheck=True), interleaved=False, include_z=None)
+    clipped = False
     if fids is None:
         if convert and extent and read_extent is None and len(frame):
             frame = frame.cx[extent[0]:extent[2], extent[1]:extent[3]]
-        # Bound each map response by vertex count; original geometries remain in the source.
-        if payload.get("tolerance") is not None and payload["tolerance"] > 0 and len(frame):
-            tolerance = float(payload["tolerance"])
-            if not math.isfinite(tolerance):
-                raise ValueError("地图分辨率无效")
-            frame = frame.set_geometry(shapely.simplify(frame.geometry.array, tolerance, preserve_topology=True))
-        points = np.cumsum(shapely.get_num_coordinates(frame.geometry.array))
-        limit = int(np.searchsorted(points, MAX_MAP_POINTS, side="right"))
-        limited = limited or limit < len(frame)
-        frame = frame.iloc[:limit]
+        if int(shapely.get_num_coordinates(frame.geometry.array).sum()) > MAX_MAP_POINTS:
+            if not extent or extent[2] <= extent[0] or extent[3] <= extent[1]:
+                return overview()
+            # Keep magnified portions of very long or complex features addressable by original FID.
+            # Editing reloads full geometries by FID before any change can be made.
+            frame = frame.set_geometry(shapely.clip_by_rect(frame.geometry.array, *extent))
+            if int(shapely.get_num_coordinates(frame.geometry.array).sum()) > MAX_MAP_POINTS:
+                return overview()
+            clipped = True
     records = frame.drop(columns=frame.geometry.name).to_json(orient="records", date_format="iso", force_ascii=False)
     attributes = json.loads(records) if len(frame.columns) > 1 else [{} for _ in frame.index]
     if fids:
@@ -385,7 +416,7 @@ def features(workspace, payload):
     items = [{"id": int(fid), "geometry": shapely.geometry.mapping(shape), "properties": attrs}
              for (fid, shape), attrs in zip(frame.geometry.items(), attributes, strict=True)
              if shape is not None and not shape.is_empty]
-    return {"features": items, "limited": limited, "bounds": display_bounds if not plan else numbers(frame.total_bounds)}
+    return {"features": items, "limited": False, "bounds": display_bounds, "clipped": clipped}
 
 
 def request(workspace, payload):
@@ -529,7 +560,7 @@ def export_layer(workspace, payload):
         raise ValueError("请选择尚未使用的导出文件名")
     ref = payload["ref"]
     if ref["artifact"] == "raster_preview":
-        from guizhi.infrastructure.operations import raster
+        from guizhi.infrastructure.operations import raster_backend as raster
 
         file = map_material(workspace, ref)["file"]
         if extension == "tif":

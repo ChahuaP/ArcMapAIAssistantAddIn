@@ -74,6 +74,7 @@ async function startDesktop(options) {
     const launcherUrl = workbenchUrl + '?surface=launcher';
     const portraitUrl = origin + '/portrait.html';
     let sync;
+    let attributeWindow;
     let draft = {};
     const imageInputs = new Map();
     let imageSequence = 0;
@@ -124,6 +125,7 @@ async function startDesktop(options) {
     }
     function broadcast(state) {
         desktop.setAgentLock(state.busy);
+        if (attributeWindow) attributeWindow.setEnabled(!state.busy);
         desktop.notify('state', withSpeech(state));
     }
     const controller = new DesktopController({ userData: app.getPath('userData'), runtime, dsh,
@@ -186,7 +188,15 @@ async function startDesktop(options) {
     });
     const pages = new Map([[window, workbenchUrl], [launcher, launcherUrl], [portrait, portraitUrl]]);
     for (const [surface, url] of pages) {
-        surface.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+        surface.webContents.setWindowOpenHandler(({ url: target, frameName }) => {
+            if (surface !== window || surface.webContents.getURL() !== workbenchUrl || target !== 'about:blank' ||
+                    !/^guizhi-attribute-table-[1-9][0-9]*$/.test(frameName) || attributeWindow || controller.state().busy) return { action: 'deny' };
+            return { action: 'allow', overrideBrowserWindowOptions: {
+                parent: window, modal: false, skipTaskbar: true, frame: true, titleBarStyle: 'default', titleBarOverlay: false,
+                show: true, autoHideMenuBar: true, minWidth: 560, minHeight: 300, icon: path.join(__dirname, 'mark.png'),
+                webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
+            } };
+        });
         surface.webContents.on('will-navigate', (event, target) => { if (target !== url) event.preventDefault(); });
         surface.webContents.on('render-process-gone', (_, details) => {
             if (!closing && !['clean-exit', 'killed'].includes(details.reason)) {
@@ -196,6 +206,19 @@ async function startDesktop(options) {
             }
         });
     }
+
+    window.webContents.on('did-create-window', (child, { frameName }) => {
+        attributeWindow = child;
+        child.setMenu(null);
+        child.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+        child.webContents.on('will-navigate', event => event.preventDefault());
+        child.on('closed', () => {
+            attributeWindow = null;
+            if (!window.isDestroyed()) window.webContents.send('guizhi:attributeWindowClosed', frameName);
+        });
+    });
+    window.on('hide', () => attributeWindow?.hide());
+    window.on('show', () => attributeWindow?.showInactive());
 
     function bind(method, handler, withSurface = false) {
         ipcMain.handle('guizhi:' + method, (event, ...args) => {
@@ -322,7 +345,7 @@ async function startDesktop(options) {
         }
         mapCatalogVersion += 1;
         mapLayers = new Map(items.map(item => [mapKey(item.ref), item]));
-        mapSelection = selection && mapLayers.has(selection.key) && Array.isArray(selection.ids) && selection.ids.length <= 500
+        mapSelection = selection && mapLayers.has(selection.key) && Array.isArray(selection.ids)
             && selection.ids.every(Number.isSafeInteger) ? selection : undefined;
         mapActive = mapLayers.has(active) ? active : null;
         mapHidden = new Set(Array.isArray(hidden) ? hidden.filter(id => mapLayers.has(id)) : []);
@@ -372,7 +395,7 @@ async function startDesktop(options) {
         if (command === 'reset') { resetConversation({}, true); return { reply: '好，我们开始新的对话。' }; }
         const prompt = command === 'send' ? draft.prompt : text;
         if (!prompt?.trim()) return { reply: '你可以直接告诉我想办理什么。' };
-        if (command !== 'send' && isBusinessRequest(prompt) && !namedLayers(prompt).length) {
+        if (command !== 'send' && isBusinessRequest(prompt)) {
             const current = draft;
             const workspace = controller.settings.workspace;
             const { exact, items } = matchBusiness(prompt, await controller.python('skills'));
@@ -823,15 +846,6 @@ async function startDesktop(options) {
         return { image: snapshot.image.split(',')[1], bounds: snapshot.bounds, crs: snapshot.crs,
             scale: snapshot.scale, limited: snapshot.limited };
     }
-    function namedLayers(prompt) {
-        const layers = [...mapLayers.values()];
-        const alias = item => item.name.replace(/^项目/u, '');
-        return layers.filter(item => prompt.includes(item.name) ||
-                alias(item) !== item.name && alias(item).length >= 4 && prompt.includes(alias(item)) &&
-                layers.filter(other => alias(other) === alias(item)).length === 1)
-            .filter((item, _, all) => !all.some(other => other.name.length > item.name.length && other.name.includes(item.name)))
-            .sort((a, b) => prompt.indexOf(a.name) - prompt.indexOf(b.name));
-    }
     async function submitTask(task) {
         if (updater.handoff) throw new Error('系统正在重启更新');
         if (controller.active || controller.delivery || controller.modelTesting) throw new Error('已有任务在运行');
@@ -868,23 +882,16 @@ async function startDesktop(options) {
                 const matches = [...mapLayers.values()].filter(item => item.name === name);
                 if (matches.length !== 1) throw new Error('请确认地图图层「' + name + '」存在且名称唯一');
                 return matches;
-            }) : namedLayers(task.prompt);
+            }) : [];
             if (new Set(picks.map(item => item.name)).size !== picks.length) {
                 throw new Error('地图中有同名图层，请先移除不使用的图层');
             }
-            const selected = mapSelection && mapLayers.get(mapSelection.key);
-            const asksSelection = /已选|选中|所选|选区|这[几两三四五一]块/u.test(task.prompt);
-            const useSelected = selected && mapSelection.ids.length && asksSelection && (!picks.length || picks.includes(selected));
-            if (useSelected && !picks.includes(selected)) picks.unshift(selected);
             if (picks.length) {
                 const workspace = controller.settings.workspace;
-                const selectedIds = mapSelection?.ids;
                 const version = mapCatalogVersion;
                 const inputs = await Promise.all(picks.map(item => {
-                    const bySelection = useSelected && selected === item;
-                    return controller.request('map', { action: bySelection ? 'selection' : 'material',
-                        ref: item.ref, name: item.name, ...(bySelection ? { revision: item.revision, fids: selectedIds } : {}) })
-                        .then(material => ({ ...material, ...(!bySelection && { ref: item.ref }) }));
+                    return controller.request('map', { action: 'material', ref: item.ref, name: item.name })
+                        .then(material => ({ ...material, ref: item.ref }));
                 }));
                 if (controller.settings.workspace !== workspace || mapCatalogVersion !== version) {
                     throw new Error('地图图层或选区已变更，请重新提交');
@@ -902,7 +909,7 @@ async function startDesktop(options) {
         const images = imageIds.map(item => imageInputs.get(item.id).reference);
         const layers = [...mapLayers.values()].map((item, index) => ({
             id: 'map-' + (index + 1), ref: item.ref, name: item.name, kind: item.kind || 'vector',
-            geometry: item.geometry, crs: item.crs, count: item.count, bounds: item.bounds, revision: item.revision,
+            geometry: item.geometry, crs: item.crs, crsName: item.crsName, units: item.units, count: item.count, bounds: item.bounds, revision: item.revision,
             style: item.style, visible: !mapHidden.has(mapKey(item.ref)), active: mapActive === mapKey(item.ref),
             fields: item.fields,
             fids: mapSelection?.key === mapKey(item.ref) ? mapSelection.ids : undefined,
@@ -933,9 +940,9 @@ async function startDesktop(options) {
         broadcast(state);
         return withSpeech(state);
     });
-    bind('finishMapDelivery', (surface, id) => {
+    bind('finishMapDelivery', (surface, id, error) => {
         if (surface !== window || typeof id !== 'string') throw new Error('地图成果请求无效');
-        controller.finishMapDelivery(id);
+        controller.finishMapDelivery(id, mapSelection, typeof error === 'string' ? error : undefined);
     }, true);
     bind('coordinates', () => controller.coordinateCatalog());
     bind('skills', () => controller.python('skills'));

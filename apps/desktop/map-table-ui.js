@@ -2,12 +2,12 @@ const h = window.React.createElement;
 const { useEffect, useState } = window.React;
 const { Button, Checkbox, Input, Modal, Select } = window.antd;
 
-export function AttributeSort({ columns, order, apply, close }) {
+export function AttributeSort({ getContainer, columns, order, apply, close }) {
     const [rows, setRows] = useState(order.length ? order : [{}]);
     function update(index, patch) {
         setRows(current => current.map((item, i) => i === index ? { ...item, ...patch } : item));
     }
-    return h(Modal, { open: true, centered: true, title: '高级排序', okText: '应用', cancelText: '取消',
+    return h(Modal, { getContainer, open: true, centered: true, title: '高级排序', okText: '应用', cancelText: '取消',
         className: 'gis-dialog', rootClassName: 'gis-modal-root', onCancel: close,
         onOk: () => { apply(rows.filter(item => item.field).map(item => ({ ...item, direction: item.direction || 'ascend' }))); close(); } },
         h('div', { className: 'map-field-editor' }, ...rows.map((item, index) => h('div', { className: 'gis-sort-row', key: index },
@@ -22,7 +22,7 @@ export function AttributeSort({ columns, order, apply, close }) {
         rows.length < Math.min(5, columns.length) && h(Button, { onClick: () => setRows(current => [...current, {}]) }, '添加排序条件')));
 }
 
-export function AttributeStatistics({ source, selected, columns, close }) {
+export function AttributeStatistics({ getContainer, source, selected, columns, close }) {
     const [field, setField] = useState(columns.find(item => /^(shape_?area|mj|dkmj|area(?:_m2)?)$/i.test(item.value))?.value ||
         columns[1]?.value || columns[0].value);
     const [only, setOnly] = useState(selected.length > 0);
@@ -36,7 +36,7 @@ export function AttributeStatistics({ source, selected, columns, close }) {
             .then(value => { if (alive) setData(value); }, issue => { if (alive) setError(window.GuizhiErrorText(issue)); });
         return () => { alive = false; };
     }, [field, only]);
-    return h(Modal, { open: true, centered: true, title: '字段统计', className: 'gis-dialog', rootClassName: 'gis-modal-root',
+    return h(Modal, { getContainer, open: true, centered: true, title: '字段统计', className: 'gis-dialog', rootClassName: 'gis-modal-root',
         onCancel: close, footer: h(Button, { onClick: close }, '关闭') },
         h('div', { className: 'map-field-editor' },
             h(Select, { 'aria-label': '统计字段', value: field, options: columns, onChange: setField }),

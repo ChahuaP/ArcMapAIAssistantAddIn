@@ -14,10 +14,6 @@ from guizhi.domain.imagery import Classification, ModelProfile
 from guizhi.infrastructure.operations.report import publish_report
 from guizhi.infrastructure.optional_components import require
 
-require("raster")
-
-import rasterio as rio
-from rasterio.features import shapes
 
 MAX_CELLS = 4_000_000
 MAX_POLYGONS = 50_000
@@ -94,6 +90,8 @@ def profile_for(src, dtype, nodata):
 
 
 def raster_receipt(ctx, path, expected, profile):
+    from guizhi.infrastructure.operations.raster_backend import rio
+
     ctx.check()
     with rio.open(path) as src:
         if (src.crs != profile["crs"] or src.transform != profile["transform"] or
@@ -105,6 +103,8 @@ def raster_receipt(ctx, path, expected, profile):
 
 
 def polygons(ctx, values, included, transform, crs, labels):
+    from guizhi.infrastructure.operations.raster_backend import shapes
+
     rows, geometries = [], []
     for geometry, code in shapes(values, mask=included, transform=transform, connectivity=4):
         ctx.check()
@@ -125,6 +125,8 @@ def polygons(ctx, values, included, transform, crs, labels):
 
 
 def classify(ctx, model: ModelProfile, observed_on: date, region: str, sensor: str):
+    from guizhi.infrastructure.operations.raster_backend import rio
+
     if len(ctx.rasters) != 1 or len(ctx.models) != 1:
         raise ValueError("Classification requires one GeoTIFF and one ONNX model")
     if region != model.region or sensor != model.sensor or not model.start <= observed_on <= model.end:
@@ -173,6 +175,8 @@ def classified(src):
 
 
 def change(ctx):
+    from guizhi.infrastructure.operations.raster_backend import rio
+
     require("imagery")
     first, second = ctx.rasters
     out = ctx.path("change.tif")

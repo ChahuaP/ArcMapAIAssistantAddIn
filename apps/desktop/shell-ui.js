@@ -78,6 +78,8 @@
         check: 'm5 12 4 4L19 6',
         chat: 'M4 5h16v12H9l-5 4zM8 9h8m-8 4h5',
         more: 'M5 12h.1m6.9 0h.1m6.9 0h.1',
+        floatTable: 'M14 3h7v7m0-7-9 9m-1-7H3v16h16v-8',
+        dockTable: 'M3 3h18v18H3zM3 15h18M12 5v7m-3-3 3 3 3-3',
         grip: 'M8 5h.1m7.9 0h.1M8 12h.1m7.9 0h.1M8 19h.1m7.9 0h.1',
         box: 'M4 4h5m6 0h5v5m0 6v5h-5m-6 0H4v-5m0-6V4',
         split: 'M4 4h16v16H4zM8 22 16 2',

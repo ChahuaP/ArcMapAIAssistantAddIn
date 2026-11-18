@@ -1,4 +1,5 @@
 """Versioned dataset and selection operations."""
+import re
 from typing import Literal
 
 from typing import Annotated, Any
@@ -6,7 +7,7 @@ from typing import Annotated, Any
 import numpy as np
 import pandas as pd
 from shapely import STRtree
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 
 from guizhi.infrastructure.operations.common import (
     Mode, Selection, Unit, compatible, concatenate, distance_in_crs,
@@ -15,6 +16,7 @@ from guizhi.infrastructure.operations.common import (
 
 
 def describe(ctx):
+    """读取要素数、几何类型、范围和源坐标系。返回统计与元数据。"""
     frame, info = ctx.frames[0], ctx.info[0]
     bounds = [float(n) for n in info["total_bounds"]] if info["total_bounds"] else None
     crs = ctx.datasets[0]["crs_wkt"]
@@ -34,6 +36,7 @@ def describe(ctx):
 
 
 def list_fields(ctx):
+    """读取字段名与类型，属性值需另行查询。"""
     info = ctx.info[0]
     return {"fields": [{"name": name, "type": kind} for name, kind in
                        zip(info["fields"].tolist(), info["dtypes"].tolist(), strict=True)]}
@@ -93,8 +96,21 @@ class AttributeFilter(BaseModel):
     condition: "AttributeFilter | None" = None
 
 
+def predicate_sql(expression):
+    # A query clause belongs to the enclosing SELECT produced by the executor.
+    if (not expression.strip() or len(expression) > 4000 or "\0" in expression or
+            re.match(r"(?:\s|\(|--[^\n]*(?:\n|$)|/\*.*?\*/)*(?:SELECT|WITH|WHERE|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|PRAGMA)\b",
+                     expression, re.IGNORECASE | re.DOTALL)):
+        raise ValueError("sql 只填写 WHERE 后的布尔条件，例如 DLMC = '草地'。字段、运算符和值也可用 where 结构化传入")
+    return expression
+
+
+PredicateSQL = Annotated[str, Field(min_length=1, max_length=4000), AfterValidator(predicate_sql)]
+
+
 def select_by_attribute(ctx, where: AttributeFilter | None = None, mode: Mode = "new_selection",
-                        previous: Selection | None = None, sql: str | None = None):
+                        previous: Selection | None = None, sql: PredicateSQL | None = None):
+    """输入待选择的图层。返回选区和匹配数。交付 selection 将标记原图层；只求数量可仅交付 answer。"""
     if (where is None) == (sql is None):
         raise ValueError("请提供一组属性查询条件")
     from guizhi.infrastructure.operations.sql_expression import attribute_predicate, evaluate
@@ -112,6 +128,7 @@ def select_by_location(
     distance: float | None = None, unit: Unit = "meters",
     mode: Mode = "new_selection", previous: Selection | None = None,
 ):
+    """输入顺序为目标图层、空间参照图层。返回目标图层中匹配的要素选区和数量。"""
     frame, query = ctx.frames
     crs = frame.crs
     if crs is None or query.crs is None:
@@ -148,6 +165,7 @@ def clear_selection(ctx):
 
 
 def export_selection(ctx, selection: Selection):
+    """输入原图层与同一版本的选择集，输出只含所选要素的新图层。"""
     from guizhi.infrastructure.operations.table import identifier, table_copy
 
     frame = ctx.frames[0]

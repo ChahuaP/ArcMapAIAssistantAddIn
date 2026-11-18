@@ -9,6 +9,7 @@ from guizhi.infrastructure.operations.common import field
 
 
 def export_table(ctx, fields: list[str] | None = None):
+    """输出 CSV 属性表和行数。"""
     frame = ctx.frames[0]
     if fields is not None:
         if not fields or len(set(fields)) != len(fields):
@@ -63,6 +64,7 @@ def map_layout(ctx, title: str | None = None, format: Literal["png", "jpg", "pdf
                frames: dict[Literal["frame", "frame2"], MapFrame] | None = None,
                note: Annotated[str, Field(max_length=160)] | None = None,
                monochrome: bool | None = None, update: bool = False, export: bool = False):
+    """生成地图版面设置。export=true 时在桌面应用版面后导出。"""
     if title is not None and not 1 <= len(title.strip()) <= 80:
         raise ValueError("图名应为 1 至 80 字")
     layout = {key: value for key, value in {"title": title.strip() if title else None, "format": format,

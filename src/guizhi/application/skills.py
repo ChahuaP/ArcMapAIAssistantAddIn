@@ -32,22 +32,10 @@ class TemplateLoader(yaml.SafeLoader):
         return super().construct_mapping(node, deep=deep)
 
 
-def validate_steps(steps, roles):
-    seen = set()
-    if not 1 <= len(steps) <= 12:
-        raise ValueError("A task requires 1–12 steps")
-    for step in steps:
-        spec = OPERATIONS.get(step.operation)
-        if spec is None or step.id in seen:
-            raise ValueError(f"Unknown operation or repeated step: {step.id}")
-        for reference in step.inputs:
-            group, separator, name = reference.partition(".")
-            if not separator or not ((group == "material" and name in roles) or (group == "step" and name in seen)):
-                raise ValueError(f"Step {step.id} references unavailable material: {reference}")
-        if not any(reference.startswith("material.") for reference in step.inputs):
-            if not spec.minimum <= len(step.inputs) <= spec.maximum:
-                raise ValueError(f"Step {step.id} has the wrong number of inputs")
-        seen.add(step.id)
+def validate_steps(steps, roles, *, materials=None, values=None):
+    from guizhi.application.operation_validation import validate_steps as check
+
+    check(steps, roles, OPERATIONS, materials=materials, values=values)
 
 
 def parse_skill(text):
@@ -170,7 +158,7 @@ def specification(workspace, materials, *, skill=None, steps=None, candidate=Non
         item, profile = resolve(workspace, [clean[role][0]["file"] for role in ("from", "to")], values)
         clean[managed[0]["id"]] = [item]
         values = {**values, "profile": profile}
-    validate_steps(fixed + extra, set(clean) | {role["id"] for role in required})
+    validate_steps(fixed + extra, set(clean) | {role["id"] for role in required}, materials=clean, values=values)
     return {"mode": "combined" if selected and extra else "fixed" if selected else "free",
             "materials": clean, "skill": selected, "steps": [step.model_dump(mode="json") for step in fixed + extra],
             "coordinate_plans": coordinate_plans or {}, "skill_parameters": values, "parameter_profile": parameter_profile,

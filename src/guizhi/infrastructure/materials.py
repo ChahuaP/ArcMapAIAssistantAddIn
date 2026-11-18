@@ -74,11 +74,11 @@ def bound_layer_metadata(materials):
                     dbf = next(part for part in parts if part.suffix.lower() == ".dbf")
                     info = pyogrio.read_info(dbf, force_feature_count=False)
                     geometry = next((geom for name, geom in pyogrio.list_layers(file) if name == item["layer"]), None)
-                    description.update(fields=info["fields"].tolist(), geometry=geometry,
+                    description.update(fields=[{"name": key, "type": str(dtype)} for key, dtype in zip(info["fields"], info["dtypes"], strict=True)], geometry=geometry,
                                        crs=crs.to_string() if crs else None)
                 else:
                     info = pyogrio.read_info(file, layer=item["layer"], force_feature_count=False)
-                    description.update(fields=info["fields"].tolist(), geometry=info["geometry_type"], crs=info["crs"])
+                    description.update(fields=[{"name": key, "type": str(dtype)} for key, dtype in zip(info["fields"], info["dtypes"], strict=True)], geometry=info["geometry_type"], crs=info["crs"])
             elif kind == "raster":
                 from guizhi.infrastructure.operations.raster import metadata
 

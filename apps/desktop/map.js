@@ -2,6 +2,7 @@ import 'ol/ol.css';
 import { MapProcessing, MapResultDialog, MapTool, TOOL_GROUPS, toolError, toolIcon,
     roleLayerPicker, layerMatches, mapLayerMaterial } from './map-processing.js';
 import { geometryProperties } from './map-attribute-tools.js';
+import { useTableWindow } from './map-table-window.js';
 import { AttributeSort, AttributeStatistics, AttributeCell } from './map-table-ui.js';
 import { MapLayout, amendLayout, drawMapLayers, layoutDefaults, mapCanvas, mapImage, sheetSize } from './map-layout.js';
 import { LayerProperties, MapProperties, MxdOpen, canSplitParts, categoryValue, classifyLayer, defaultMapBackground, layerSymbol, opacity, symbol } from './map-layer-dialog.js';
@@ -35,7 +36,7 @@ const format = new GeoJSON();
 const palette = ['#1785db', '#bf6f2b', '#17a489', '#8263ca', '#cc5785'];
 const commandIcons = {
     全图: 'extent', 定位图层: 'target', 放大: 'zoomIn', 缩小: 'zoomOut', 清除选择: 'clear',
-    按属性选择: toolIcon('data.select_by_attribute'), 按位置选择: toolIcon('data.select_by_location'), 添加图层: 'add', 最近成果: 'history',
+    按属性选择: toolIcon('data.select_by_attribute'), 按位置选择: toolIcon('data.select_by_location'), 添加图层: 'add',
     添加字段: toolIcon('table.add_field'), 删除字段: toolIcon('table.delete_field'), 新建图层: toolIcon('geometry.create_dataset'),
     复制图层: toolIcon('data.copy'), 合并图层: toolIcon('data.merge'), 地图属性: 'settings',
     编辑图层: 'pencil', 选择: 'select', 绘制: 'pencil', 编辑顶点: 'node', 移动: 'move',
@@ -68,6 +69,12 @@ const style = (color, settings) => {
 const layerFor = (items, color) => new VectorLayer({
     declutter: 'map-labels', source: new VectorSource({ features: items.map(feature) }), style: style(color),
 });
+function coverageLayer(geometries, color, settings = {}) {
+    const source = new VectorSource({ features: geometries.map(geometry => feature({ geometry })) });
+    return new VectorLayer({ ...settings, source, style: new Style({
+        stroke: new Stroke({ color, width: 1.4 }), fill: new Fill({ color: fillColor(color, 27) }),
+    }) });
+}
 const displayFields = item => [...new Set([item.style?.classification?.field, item.style?.labelField].filter(Boolean))];
 function withLabels(render, labelField, geometry) {
     if (!labelField) return render;
@@ -241,7 +248,6 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
     const [analysis, setAnalysis] = useState(null);
     const [tool, setTool] = useState(null);
     const [toolResult, setToolResult] = useState(null);
-    const [lastResult, setLastResult] = useState(null);
     const [count, setCount] = useState(0);
     const [fieldEdit, setFieldEdit] = useState(null);
     const [pasteTarget, setPasteTarget] = useState(null);
@@ -270,6 +276,9 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
     const selectionRef = useRef(selection);
     selectionRef.current = selection;
     const layer = layers.find(item => key(item) === active);
+    function closeTable() { setTable(null); setTableDialog(null); }
+    const tableVisible = Boolean(table && layer && layer.kind !== 'raster');
+    const tableWindow = useTableWindow(tableVisible, layer?.name, closeTable, fail);
     const geometryFamily = item => item?.geometry?.replace(/^Multi/, '');
     const pasteSource = clipboard && layers.find(item => key(item) === clipboard.key);
     const pasteTargets = pasteSource ? layers.filter(item => key(item) !== clipboard.key && item.crs &&
@@ -376,6 +385,12 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 const reply = await api.map({ action: 'features', ref: item.ref, bbox: bounds, target: target || null,
                     fields: displayFields(item),
                     plan: displayPlans[key(item)] || (plan && plan.id + '@' + plan.revision) });
+                if (reply.overview) {
+                    const summary = coverageLayer(reply.overview, appearance.color, options);
+                    summary.set('dataExtent', reply.bounds);
+                    summary.set('limited', true);
+                    return [summary];
+                }
                 const source = new VectorSource({ features: reply.features.map(feature) });
                 const fillLayer = previous?.get('fillLayer');
                 const layersForItem = fillLayer ? [new VectorLayer({ source, opacity: fillLayer.getOpacity(),
@@ -554,8 +569,8 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 }
             }
         }
-        void apply().catch(error => { if (!mapActions.signal.aborted) fail(error); })
-            .finally(() => { if (!mapActions.signal.aborted) onMapActions(mapActions.id); });
+        void apply().then(() => { if (!mapActions.signal.aborted) onMapActions(mapActions.id); },
+            error => { if (!mapActions.signal.aborted) onMapActions(mapActions.id, window.GuizhiErrorText(error)); });
     }, [mapActions, viewReady, busy, edit, layers]);
 
     async function load(job) {
@@ -605,7 +620,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         if (units === 'm' || units === 'degrees') ol.addControl(new ScaleLine({ units: 'metric' }));
         const selectable = () => !identifying.current && !selectionMode.current.busy &&
             (!selectionMode.current.edit || selectionMode.current.edit === 'select') &&
-            Boolean(graph.current?.byKey.get(activeRef.current) instanceof VectorLayer && graph.current.byKey.get(activeRef.current).getVisible());
+            Boolean(graph.current?.byKey.get(activeRef.current) instanceof VectorLayer && graph.current.byKey.get(activeRef.current).getVisible() && !graph.current.byKey.get(activeRef.current).get('coverage'));
         const subtract = event => event.originalEvent.ctrlKey && !event.originalEvent.shiftKey;
         const select = new Select({ condition: event => selectable() && !selectionMode.current.boxSelect &&
             (selectionMode.current.edit === 'select' || selectionMode.current.pointSelect) && singleClick(event),
@@ -613,6 +628,8 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
             addCondition: shiftKeyOnly, removeCondition: subtract, toggleCondition: never, hitTolerance: 5, style: null });
         ol.addInteraction(select);
         const highlight = showSelection(ol, select);
+        const summaryHighlight = new VectorLayer({ source: new VectorSource(), style: selectionStyle(), zIndex: 100002 });
+        ol.addLayer(summaryHighlight);
         select.on('select', event => {
             const layer = activeRef.current;
             const changed = event.selected.map(item => item.getId());
@@ -652,7 +669,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         ol.addOverlay(overlay);
         setIdentifyHost(host);
         setIdentified(null);
-        graph.current = { ol, view, select, highlight, identify: overlay, byKey: new globalThis.Map(), fitNeeded: true, initialExtent, updateScale };
+        graph.current = { ol, view, select, highlight, summaryHighlight, identify: overlay, byKey: new globalThis.Map(), fitNeeded: true, initialExtent, updateScale };
         ol.on('singleclick', async event => {
             if (!identifying.current) return;
             const hit = ol.forEachFeatureAtPixel(event.pixel, (feature, drawing) => {
@@ -705,6 +722,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
             if (layerKeys.includes(id)) continue;
             const fillLayer = existing.get('fillLayer');
             if (fillLayer) state.ol.removeLayer(fillLayer);
+            if (existing.get('coverage')) state.ol.removeLayer(existing.get('coverage'));
             state.ol.removeLayer(existing);
         }
         const bbox = !state.fitNeeded && state.ol.getSize()?.every(size => size > 0)
@@ -760,6 +778,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
             drawing.setOpacity(layerOpacity);
             drawing.setZIndex(order);
             drawing.setVisible(visible);
+            drawing.get('coverage')?.setVisible(visible);
             next.set(id, drawing);
             if (hidden.includes(id)) return null;
             if (item.kind === 'raster') {
@@ -779,16 +798,15 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 (entry.plan.source_wkt === item.crs || entry.source_reference === item.crs) &&
                 (entry.plan.target_wkt === target || entry.target_reference === display?.value));
             const planId = displayPlans[id] || (plan && plan.id + '@' + plan.revision);
+            drawing.set('displayPlan', planId);
             const stamp = JSON.stringify([target, displayFields(item), planId]);
             if (drawing.get('completeFeatures') === stamp) return Promise.resolve({ id, drawing, cached: true });
-            const overviewTolerance = item.bounds && Math.max(item.bounds[2] - item.bounds[0], item.bounds[3] - item.bounds[1]) / 2000;
-            return api.map({ action: 'features', ref: item.ref, bbox, tolerance: item.count > 8000
-                ? (bbox ? state.view.getResolution() * .5 : (!target || target === item.crs) ? overviewTolerance : undefined) : undefined,
+            return api.map({ action: 'features', ref: item.ref, bbox,
                 target: target || null, fields: displayFields(item), plan: planId })
                 .then(result => ({ id, drawing, result, full: !bbox && !result.limited ? stamp : null })).catch(error => ({ id, drawing, error }));
         }).filter(Boolean);
         state.byKey = next;
-        Promise.all(jobs).then(items => {
+        Promise.all(jobs).then(async items => {
             if (!alive) return;
             const errors = new globalThis.Map();
             for (const item of items.filter(item => item.error)) {
@@ -810,10 +828,24 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 }
                 if (item.cached) continue;
                 item.drawing.unset('completeFeatures');
+                if (item.drawing.get('coverage')) {
+                    state.ol.removeLayer(item.drawing.get('coverage'));
+                    item.drawing.unset('coverage');
+                }
                 item.drawing.getSource().clear();
                 if (item.result) {
                     if (item.full) item.drawing.set('completeFeatures', item.full);
+                    item.drawing.set('clipped', Boolean(item.result.clipped));
                     item.drawing.set('dataExtent', item.result.bounds);
+                    if (item.result.overview) {
+                        const index = layerKeys.indexOf(item.id);
+                        const color = symbol(layers[index].style, palette[index % palette.length]).color;
+                        const summary = coverageLayer(item.result.overview, color, {
+                            opacity: item.drawing.getOpacity(), zIndex: item.drawing.getZIndex(),
+                        });
+                        state.ol.addLayer(summary);
+                        item.drawing.set('coverage', summary);
+                    }
                     item.drawing.getSource().addFeatures(item.result.features.map(feature));
                 }
             }
@@ -823,12 +855,13 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 if (state.initialExtent && state.ol.getSize()?.every(size => size > 0)) {
                     state.view.fit(state.initialExtent, { size: state.ol.getSize(), padding: [12, 12, 12, 12] });
                     state.initialExtent = null;
-                } else if (drawn.some(item => item.getVisible() && (item instanceof ImageLayer ? Boolean(item.getSource()) : !isEmpty(item.getSource().getExtent())))) fit(state.view, drawn, state.ol.getSize());
+                } else if (drawn.some(item => item.getVisible() && (item instanceof ImageLayer ? Boolean(item.getSource()) : !!item.get('dataExtent')))) fit(state.view, drawn, state.ol.getSize());
                 else if (native?.bounds && native.crs === target) state.view.fit(native.bounds, { maxZoom: 20, padding: [28, 28, 28, 28] });
                 state.updateScale();
                 setViewReady(true);
             }
-            restoreSelection(state, selectionRef.current);
+            await restoreSelection(state, selectionRef.current);
+            if (!alive) return;
             const size = state.ol.getSize();
             if (!size?.every(value => value > 0) || !items.length) return;
             state.ol.renderSync();
@@ -845,11 +878,14 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 bounds: state.view.calculateExtent(size), crs: target, limited: items.some(item => item.result?.limited),
                 scale: node.current.querySelector('.ol-scale-line-inner')?.textContent,
                 image: canvas.toDataURL('image/jpeg', .78) }).catch(fail);
-        });
+        }).catch(error => { if (alive) fail(error); });
         return () => { alive = false; };
     }, [layers, hidden, target, units, initialExtent, viewRevision, entries, displayPlans, backgroundColor, Boolean(edit)]);
 
-    function restoreSelection(state, selected) {
+    async function restoreSelection(state, selected) {
+        const request = state.selectionRequest = (state.selectionRequest || 0) + 1;
+        const summarySource = state.summaryHighlight.getSource();
+        summarySource.clear();
         const drawing = selected && state.byKey.get(selected.key);
         const source = drawing instanceof VectorLayer && drawing.getVisible() && drawing.getSource();
         const collection = state.select.getFeatures();
@@ -859,11 +895,19 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
             const ids = new Set(selected.ids);
             const item = layerList.current.find(item => key(item) === selected.key);
             state.highlight.setStyle(selectionStyle(symbol(item?.style, palette[0]).size));
-            collection.extend(source.getFeatures().filter(feature => ids.has(feature.getId())));
+            if (drawing.get('coverage') && item) {
+                const result = await api.map({ action: 'features', ref: item.ref, selectionFids: selected.ids,
+                    bbox: state.view.calculateExtent(state.ol.getSize()), target, plan: drawing.get('displayPlan') });
+                if (graph.current !== state || state.selectionRequest !== request) return;
+                summarySource.addFeatures(result.overview ? result.overview.map(geometry => feature({ geometry }))
+                    : result.features.map(feature));
+            } else {
+                collection.extend(source.getFeatures().filter(feature => ids.has(feature.getId())));
+            }
         }
     }
     useEffect(() => {
-        if (graph.current) restoreSelection(graph.current, selection);
+        if (graph.current) void restoreSelection(graph.current, selection).catch(fail);
     }, [selection]);
     const picked = selection?.key === active ? selection.ids : [];
     const selectedRows = tableFilter === 'selected' && selection?.key === active ? selection.ids : undefined;
@@ -916,10 +960,10 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         } catch (error) { fail(error); }
         finally { setBusy(false); }
     }
-    const openTool = (operation, source = active) => {
+    const openTool = (operation, source = active, fromTable = false) => {
         const query = ['data.select_by_attribute', 'data.select_by_location'].includes(operation);
         if (busy || edit && !(query && edit === 'select' && !count && source === active)) return;
-        setTool({ operation, active: source, lockInput: Boolean(edit) });
+        setTool({ operation, active: source, lockInput: Boolean(edit), fromTable });
     };
     function addResultLayers(items) {
         const fresh = items.filter(item => !layers.some(existing => key(existing) === key(item)));
@@ -941,10 +985,10 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         const replaceLayer = input && result.layers.length === 1 && (attributes || operation === 'crs.assign')
             ? () => (attributes ? replaceAttributes : replace)(input, result.layers[0]) : undefined;
         setTool(null);
-        setToolResult({ result, replaceLayer });
+        setToolResult({ result, replaceLayer, fromTable: tool?.fromTable });
     }
     async function saveSelectedLayer() {
-        if (busy || !layer || !picked.length || picked.length > 500) return;
+        if (busy || !layer || !picked.length) return;
         setBusy(true);
         try {
             const result = await api.map({ action: 'tool', operation: 'data.export_selection',
@@ -989,9 +1033,9 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         }
         source.clear();
         source.addFeatures([...items.values()].map(feature));
-        restoreSelection(graph.current, selectionRef.current);
+        void restoreSelection(graph.current, selectionRef.current).catch(fail);
     }
-    function startEdit() {
+    async function startEdit() {
         if (display || target !== layer.crs) {
             setDisplay(null);
             setEditLayer(layer);
@@ -999,8 +1043,28 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
             setIssue('正在切换到图层坐标系…');
             return;
         }
-        const source = graph.current.byKey.get(active)?.getSource();
-        if (!source || graph.current.fitNeeded) return;
+        const state = graph.current;
+        const drawing = state.byKey.get(active);
+        const source = drawing?.getSource();
+        if (!source || state.fitNeeded || drawing.get('coverage')) return;
+        if (drawing.get('clipped')) {
+            setBusy(true);
+            try {
+                const ids = source.getFeatures().map(item => item.getId());
+                const complete = [];
+                for (let index = 0; index < ids.length; index += 500) {
+                    const result = await api.map({ action: 'features', ref: layer.ref, fids: ids.slice(index, index + 500) });
+                    complete.push(...result.features.map(feature));
+                }
+                if (graph.current !== state || activeRef.current !== active) return;
+                source.clear();
+                source.addFeatures(complete);
+                drawing.unset('clipped');
+            } catch (error) {
+                fail(error);
+                return;
+            } finally { setBusy(false); }
+        }
         original.current = new globalThis.Map(source.getFeatures().map(item => {
             const properties = item.getProperties();
             delete properties[item.getGeometryName()];
@@ -1467,8 +1531,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
             group('图层管理', command('添加图层', () => load(api.mapImport()), { disabled: busy }),
                 command('新建图层', () => openTool('geometry.create_dataset')),
                 command('复制图层', () => openTool('data.copy'), { disabled: !layer?.geometry }),
-                command('合并图层', () => openTool('data.merge'), { disabled: layers.filter(item => item.geometry).length < 2 })),
-            group('成果', command('最近成果', () => setAnalysis(lastResult), { disabled: !lastResult }))] : []),
+                command('合并图层', () => openTool('data.merge'), { disabled: layers.filter(item => item.geometry).length < 2 }))] : []),
             group('选择',
                 command('点选', () => { toggleIdentify(false); setPointSelect(!pointSelect); setBoxSelect(false); },
                     { icon: glyph('select'), 'aria-pressed': !identify && !boxSelect && (pointSelect || edit === 'select'),
@@ -1584,7 +1647,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                     busy ? '正在处理地图数据…' : notices.size > 0 ?
                         [...notices].map(([message, names]) => h('div', { key: message }, message,
                             names.length > 0 && h('span', { className: 'muted' }, '（' + names.join('、') + '）')))
-                        : '当前视野仅显示部分要素，放大后可查看更多。'))),
+                        : '当前显示图层覆盖范围，放大可查看和选择单个要素。'))),
         h('footer', { className: 'map-status' },
             h('span', null, layers.length ? layers.length + ' 个图层' : '暂无图层'),
             layer && h('span', null, layer.name),
@@ -1595,26 +1658,33 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 scale ? '1 : ' + scale.toLocaleString('zh-CN') : '1 : —'),
             h('span', { className: 'map-status-coordinates', 'aria-label': '鼠标坐标', title: '地图坐标 · X / Y' },
                 cursor && viewReady ? cursor.map(value => value.toFixed(units === 'degrees' ? 6 : 2)).join(' , ') + (units === 'degrees' ? ' °' : units === 'm' ? ' m' : '') : 'X —　Y —')),
-        table && layer && layer.kind !== 'raster' && h('section', { className: 'map-attribute-panel', 'aria-label': '属性表' },
-            h('header', { className: 'map-attribute-head' }, h('strong', null, glyph('table'), '属性表'),
-                h('span', null, layer.name),
-                command('添加字段', () => openTool('table.add_field'), { disabled: busy || Boolean(edit) }),
-                command('删除字段', () => openTool('table.delete_field'), { disabled: busy || Boolean(edit) || !layer.fields?.length }),
-                command('字段计算器', () => openTool('table.calculate_field'), { disabled: busy || Boolean(edit) || !layer.fields?.length }),
-                command('计算几何', () => openTool('table.calculate_geometry'), {
+        tableVisible && tableWindow.present(h('section', { className: 'map-attribute-panel', 'aria-label': '属性表' },
+            h('header', { className: 'map-attribute-head' }, h('strong', {
+                className: 'map-table-grip', title: tableWindow.detached ? undefined : '拖出属性表',
+                ...tableWindow.dragHandle }, glyph(tableWindow.detached ? 'table' : 'grip'), '属性表',
+                h('span', { className: 'map-table-name' }, layer.name)),
+                command('添加字段', () => openTool('table.add_field', active, true), { disabled: busy || Boolean(edit) }),
+                command('删除字段', () => openTool('table.delete_field', active, true), { disabled: busy || Boolean(edit) || !layer.fields?.length }),
+                command('字段计算器', () => openTool('table.calculate_field', active, true), { disabled: busy || Boolean(edit) || !layer.fields?.length }),
+                command('计算几何', () => openTool('table.calculate_geometry', active, true), {
                     disabled: busy || Boolean(edit) || !layer.crs || !Object.keys(geometryProperties(layer)).length }),
                 command('高级排序', () => setTableDialog({ kind: 'sort' }), { icon: glyph('sort'), disabled: busy }),
                 command('统计', () => setTableDialog({ kind: 'stats' }), { icon: glyph('statistics'), disabled: busy || !tableFields.length || Boolean(count) }),
                 command('切换选择', invertSelection, { icon: glyph('select'), disabled: busy || Boolean(count) }),
+                h(Button, { type: 'text', size: 'small', className: 'map-table-detach',
+                    icon: glyph(tableWindow.detached ? 'dockTable' : 'floatTable', 16),
+                    title: tableWindow.detached ? '停靠属性表' : '分离属性表',
+                    'aria-label': tableWindow.detached ? '停靠属性表' : '分离属性表',
+                    onClick: () => tableWindow.detached ? tableWindow.dock() : tableWindow.detach() }),
                 h(Button, { type: 'text', size: 'small', icon: glyph('close', 15),
-                    'aria-label': '关闭属性表', onClick: () => { setTable(null); setTableDialog(null); } })),
+                    'aria-label': '关闭属性表', onClick: closeTable })),
             h(Table, { className: 'map-attributes', size: 'small', columns, rowKey: 'id', dataSource: [...(page === 0 ? draftRows : []), ...persistedRows],
                 onChange: (_, filters, sorter, { action }) => {
                     if (action !== 'sort') return;
                     setPage(0);
                     setSort({ key: active, order: sorter.order ? [{ field: sorter.columnKey, direction: sorter.order }] : [] });
                 },
-                scroll: { x: 'max-content', y: 146 }, rowSelection: { selectedRowKeys: picked, preserveSelectedRowKeys: true,
+                scroll: tableWindow.detached ? undefined : { x: 'max-content', y: 146 }, rowSelection: { selectedRowKeys: picked, preserveSelectedRowKeys: true,
                     onChange: ids => { if (tableFilter === 'selected') setPage(0); setSelection({ key: active, ids }); } },
                 pagination: { current: page + 1, pageSize: 50,
                     total: tableFilter === 'selected' ? picked.length : countDraft,
@@ -1623,11 +1693,11 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 h('span', { role: 'status' }, '已选 ' + picked.length.toLocaleString('zh-CN') + ' / ' + countDraft.toLocaleString('zh-CN') + ' 个要素'),
                 h(antd.Segmented, { size: 'small', 'aria-label': '显示要素', value: tableFilter,
                     options: [{ label: '全部', value: 'all' }, { label: '已选', value: 'selected' }],
-                    onChange: value => { setTableFilter(value); setPage(0); } }))),
-        tableDialog?.kind === 'sort' && h(AttributeSort, { columns: tableFields, order: cellOrder,
-            close: () => setTableDialog(null), apply: order => { setPage(0); setSort({ key: active, order }); } }),
-        tableDialog?.kind === 'stats' && h(AttributeStatistics, { columns: tableFields, source: layer.ref,
-            selected: picked, close: () => setTableDialog(null) }),
+                    onChange: value => { setTableFilter(value); setPage(0); } })))),
+        tableDialog?.kind === 'sort' && tableWindow.present(h(AttributeSort, { getContainer: tableWindow.container, columns: tableFields, order: cellOrder,
+            close: () => setTableDialog(null), apply: order => { setPage(0); setSort({ key: active, order }); } })),
+        tableDialog?.kind === 'stats' && tableWindow.present(h(AttributeStatistics, { getContainer: tableWindow.container, columns: tableFields, source: layer.ref,
+            selected: picked, close: () => setTableDialog(null) })),
         pasteTarget !== null && h(Modal, { open: true, centered: true, title: '粘贴要素', className: 'gis-dialog',
             rootClassName: 'gis-modal-root', okText: '粘贴', cancelText: '取消', confirmLoading: busy,
             onOk: pasteFeatures, onCancel: () => { if (!busy) setPasteTarget(null); } },
@@ -1659,7 +1729,6 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                     setLayerErrors([]);
                     setExpandedLegends({});
                     setTable(null);
-                    setLastResult(null);
                     importFrame(result);
                     setDocument(null);
                 }
@@ -1674,15 +1743,14 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 onClick: () => setImportIssues([]), type: 'primary' }, '关闭') },
             h('ul', { className: 'map-field-editor' }, ...importIssues.map((item, index) =>
                 h('li', { key: index }, item.name + '：' + window.GuizhiErrorText(item.message))))),
-        tool && h(MapTool, { ...tool, layers, selection, components, openComponents: () => { setTool(null); openComponents(); },
-            glyph, busy, setBusy, close: () => setTool(null), onResult: showToolResult }),
-        toolResult && h(MapResultDialog, { result: toolResult.result,
+        tool && tableWindow.present(h(MapTool, { getContainer: tool.fromTable ? tableWindow.container : undefined, ...tool, layers, selection, components, openComponents: () => { setTool(null); openComponents(); },
+            glyph, busy, setBusy, close: () => setTool(null), onResult: showToolResult }), Boolean(tool.fromTable)),
+        toolResult && tableWindow.present(h(MapResultDialog, { getContainer: toolResult.fromTable ? tableWindow.container : undefined, result: toolResult.result,
             close: () => setToolResult(null),
             add: () => { if (edit) stopEdit(); addResultLayers(toolResult.result.layers); setToolResult(null); },
-            replace: toolResult.replaceLayer && (() => { toolResult.replaceLayer(); setToolResult(null); }) }),
+            replace: toolResult.replaceLayer && (() => { toolResult.replaceLayer(); setToolResult(null); }) }), Boolean(toolResult.fromTable)),
         analysis && h(MapProcessing, { ...analysis, layers, entries, components, openComponents, glyph, busy,
-            setBusy, close: () => setAnalysis(null), Preview, onAddLayers: addResultLayers,
-            onResult: result => setLastResult({ skill: analysis.skill, initialResult: result }) }),
+            setBusy, close: () => setAnalysis(null), Preview, onAddLayers: addResultLayers }),
         mergeTarget !== null && h(Modal, { open: true, centered: true, title: '合并要素', className: 'gis-dialog',
             rootClassName: 'gis-modal-root', okText: '合并', cancelText: '取消', confirmLoading: busy,
             onOk: () => void shapeEdit('merge', picked, mergeTarget), onCancel: () => { if (!busy) setMergeTarget(null); } },

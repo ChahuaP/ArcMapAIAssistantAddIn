@@ -201,14 +201,15 @@ def run_operation(root, payload, cancel_requested=None):
     spec = CAPABILITIES.get(request.operation)
     if spec is None:
         raise ValueError(f"Unknown operation: {request.operation}")
-    if not spec.minimum <= len(request.inputs) <= spec.maximum:
-        raise ValueError(f"{request.operation} requires {spec.minimum}–{spec.maximum} inputs")
+    from guizhi.application.operation_validation import validate_input_kinds
+
+    validate_input_kinds(request.operation, spec, [item.kind for item in request.inputs])
     if spec.edit and (not request.idempotency_key or (request.inputs and request.inputs[0].revision is None)):
         raise ValueError("An edit requires an idempotency key and the target snapshot revision")
     for item in request.inputs:
         path = Path(item.file).resolve(strict=True)
-        if not path.is_file() or item.kind not in spec.kinds:
-            raise ValueError(f"{request.operation} accepts material types: {', '.join(spec.kinds)}")
+        if not path.is_file():
+            raise ValueError(f"输入材料不是文件：{path}")
         item.file = str(path)
     payload = request.model_dump(mode="json")
     fingerprint = sha256(json.dumps(payload, sort_keys=True, allow_nan=False).encode()).hexdigest()

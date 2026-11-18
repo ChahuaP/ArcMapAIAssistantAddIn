@@ -12,6 +12,7 @@ from guizhi.infrastructure.operations.data import AttributeFilter
 
 def area(ctx, where: AttributeFilter | None = None, method: Literal["union", "sum"] = "union",
          area_field: str | None = None):
+    """计算面图层面积并返回统计量。union 为合并后覆盖面积，sum 为各要素面积之和。"""
     frame = ctx.frames[0]
     filters = where.model_dump(mode="json", exclude_none=True) if where is not None else None
     if filters is not None:
@@ -46,6 +47,7 @@ def area(ctx, where: AttributeFilter | None = None, method: Literal["union", "su
 
 def buffer(ctx, distance: float, unit: Unit, cap: Literal["round", "flat", "square"] = "round",
            join: Literal["round", "mitre", "bevel"] = "round", dissolve: bool = False):
+    """按输入距离及单位生成缓冲区面图层。"""
     frame = ctx.frames[0]
     valid(frame)
     width = distance_in_crs(frame.crs, distance, unit)
@@ -57,6 +59,7 @@ def buffer(ctx, distance: float, unit: Unit, cap: Literal["round", "flat", "squa
 
 
 def clip(ctx):
+    """输入被裁切图层、范围面图层，输出范围内的新图层。"""
     left, mask = ctx.frames
     compatible(ctx.frames)
     valid(left)
@@ -95,6 +98,7 @@ def overlay(ctx, how, polygons=False):
 
 
 def intersect(ctx):
+    """对输入图层求空间交集，输出具有相交属性的图层。"""
     overlay(ctx, "intersection")
 
 

@@ -7,6 +7,7 @@ from guizhi.infrastructure.crs_options import describe_crs, projection, resolve_
 
 
 def assign(ctx, definition: str):
+    """更新坐标系定义并保留原坐标值，输出带新定义的图层。"""
     target = resolve_definition(ctx.workspace, definition)
     entry = get(ctx.workspace, "definition", definition) if "@" in definition else {
         "definition": {"wkt": target.to_wkt()}, "authority": ":".join(target.to_authority() or ()) or None,
@@ -40,6 +41,7 @@ def transform(ctx, plan: str):
 
 
 def reproject(ctx, definition: str | None = None, plan: str | None = None):
+    """在源坐标系和目标坐标系间变换几何坐标，输出新图层及前后坐标系。"""
     import shapely
 
     if bool(definition) == bool(plan):

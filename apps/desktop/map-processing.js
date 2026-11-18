@@ -388,7 +388,7 @@ function ResultSummary({ result }) {
             : !metrics.length && result.value !== undefined && h('output', null, String(result.value)));
 }
 
-export function MapTool({ operation, active, lockInput, layers, selection, components, openComponents, glyph, busy, setBusy, close, onResult }) {
+export function MapTool({ getContainer, operation, active, lockInput, layers, selection, components, openComponents, glyph, busy, setBusy, close, onResult }) {
     const api = window.guizhi;
     const definition = definitions[operation];
     const initial = operation === 'geometry.create_dataset' ? { geometry_type: 'polygon' }
@@ -439,7 +439,7 @@ export function MapTool({ operation, active, lockInput, layers, selection, compo
         } catch (issue) { setError(window.GuizhiErrorText(issue)); }
         finally { setBusy(false); }
     }
-    return h(Modal, { open: true, centered: true, width: 480, className: 'gis-dialog', rootClassName: 'gis-modal-root',
+    return h(Modal, { open: true, centered: true, getContainer, width: 480, className: 'gis-dialog', rootClassName: 'gis-modal-root',
         title: h('span', { className: 'gis-dialog-title' }, glyph(definition.icon), definition.title),
         closable: !busy, keyboard: !busy, maskClosable: false, onCancel: () => { if (!busy) close(); }, onOk: result ? close : run,
         okText: result ? '关闭' : definition.action, cancelText: '取消', confirmLoading: busy,
@@ -463,10 +463,10 @@ function ResultLayers({ layers }) {
     return h('ul', { className: 'gis-result-layers', 'aria-label': '成果图层' }, rows);
 }
 
-export function MapResultDialog({ result, close, add, replace }) {
+export function MapResultDialog({ getContainer, result, close, add, replace }) {
     const [preview, setPreview] = useState(false);
     const layer = result.layers.length === 1 ? result.layers[0] : null;
-    return h(Modal, { open: true, centered: true, width: 540, className: 'gis-dialog', rootClassName: 'gis-modal-root',
+    return h(Modal, { open: true, centered: true, getContainer, width: 540, className: 'gis-dialog', rootClassName: 'gis-modal-root',
         title: '将成果加入地图？', onCancel: close, maskClosable: false,
         footer: [h(Button, { key: 'decline', onClick: close }, '不加入'), replace && h(Button, { key: 'replace', onClick: replace }, '替换原图层'),
             h(Button, { key: 'add', type: 'primary', onClick: add }, '加入地图')] },
@@ -566,11 +566,11 @@ function skillValues(skill, values) {
 }
 
 export function MapProcessing({ skill, layers, entries, components, openComponents, glyph, busy, setBusy,
-    close, Preview, onResult, onAddLayers, initialResult }) {
+    close, Preview, onAddLayers }) {
     const api = window.guizhi;
     const [values, setValues] = useState({});
     const [materials, setMaterials] = useState({});
-    const [result, setResult] = useState(initialResult || null);
+    const [result, setResult] = useState(null);
     const [error, setError] = useState('');
     const [pendingMaterial, setPendingMaterial] = useState('');
     const fail = issue => setError(window.GuizhiErrorText(issue));
@@ -589,7 +589,6 @@ export function MapProcessing({ skill, layers, entries, components, openComponen
             const output = await api.mapSkill({ skill: window.GuizhiTaskCommands.reference(skill), materials, parameters,
                 coordinatePlans: Object.fromEntries(['project', 'control'].filter(role => materials[role]?.[0]?.plan)
                     .map(role => [role + '_plan', materials[role][0].plan])) });
-            onResult(output);
             setResult(output);
         } catch (issue) { fail(issue); }
         finally { setBusy(false); }

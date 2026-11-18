@@ -823,3 +823,16 @@ dialog label { display: grid; gap: 5px; }
 .gis-preview-table th, .gis-preview-table td { padding: 5px 8px; border-bottom: 1px solid var(--line); text-align: left; }
 .gis-preview-table th { position: sticky; top: 0; background: var(--sub); }
 .gis-preview-table tr:last-child td { border-bottom: 0; }
+
+.map-table-grip { cursor: grab; user-select: none; touch-action: none; min-width: 0; }
+.map-table-grip:active { cursor: grabbing; }
+.map-table-name { margin-inline-start: 3px; font-weight: 400; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.map-attribute-head > button.map-table-detach { margin-inline-start: auto; }
+.map-attribute-head > button.map-table-detach + button { margin-inline-start: 0; }
+.attribute-window { margin: 0; background: var(--panel); height: 100vh; }
+.attribute-window-root { height: 100%; }
+.attribute-window .map-attribute-panel { display: flex; flex-direction: column; height: 100%; border: 0; border-radius: 0; }
+.attribute-window .map-attributes { flex: 1; min-height: 0; max-height: none; }
+.attribute-window .ant-table-content { width: max-content; min-width: 100%; }
+.attribute-window .ant-table-thead > tr > th { position: sticky; top: 0; z-index: 1; }
+.attribute-window .map-table-grip { cursor: default; }

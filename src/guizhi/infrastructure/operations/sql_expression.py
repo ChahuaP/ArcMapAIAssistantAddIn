@@ -79,6 +79,8 @@ def attribute_predicate(where, fields):
         return identifier(name)
 
     def parameter(field, value):
+        if str(fields[field]) in {"object", "string", "str"} and not isinstance(value, str):
+            raise ValueError(f"「{field}」是文本字段。请核实原始文本值，并保留编码的前导零")
         arguments.append(attribute_value(field, fields[field], value))
         return "?"
 

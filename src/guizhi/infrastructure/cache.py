@@ -13,7 +13,8 @@ MAX_BYTES = 32 << 20
 MAX_ENTRY = 1 << 20
 
 READ_OPERATIONS = {
-    "data.describe", "vector_inventory", "control_check", "semantics.read_documents",
+    "data.describe", "data.export_selection", "data.select_by_attribute", "data.selection_count",
+    "table.lookup", "vector.area", "vector_inventory", "control_check", "semantics.read_documents",
     "semantics.approval_case", "knowledge.extract_facts", "knowledge.map_terms", "knowledge.match_objects",
     "knowledge.find_rules", "knowledge.model_scope", "governance.explain_findings",
     "presentation.export_table",

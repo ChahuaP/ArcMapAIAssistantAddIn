@@ -7,7 +7,7 @@
     const labels = { running: '正在办理', cancelling: '正在停止', succeeded: '已完成',
         failed: '未完成', cancelled: '已停止', timed_out: '已超时', interrupted: '已中断',
         missing_materials: '待补材料', invalid_materials: '材料有误', no_result: '待补信息', answered: '已答复',
-        budget_exhausted: '已保存进度' };
+        budget_exhausted: '达到限额' };
     const active = task => task && ['running', 'cancelling'].includes(task.status);
     const emptyDraft = () => ({ prompt: '', project: null, control: null, skill: null, materials: {}, parameterText: {},
         unassigned: [], images: [], mentions: {}, freeMode: false });
@@ -182,6 +182,7 @@
         const [hiddenLayers, hideLayers] = useState([]);
         const [activeLayer, setActiveLayer] = useState(null);
         const [mapSelection, setMapSelection] = useState(null);
+        const [selectionReceipt, setSelectionReceipt] = useState(null);
         const [references, setReferences] = useState([]);
         const [imageReferences, setImageReferences] = useState([]);
         const [mention, setMention] = useState(null);
@@ -194,8 +195,16 @@
             setMention(match ? { from: value.length - match[1].length - 1, to: value.length, query: match[1] } : null);
         }
         useEffect(() => {
-            if (!launcher) void api.mapCatalog(layers, mapSelection, activeLayer, hiddenLayers).catch(fail);
-        }, [layers, mapSelection, activeLayer, hiddenLayers]);
+            if (launcher) return;
+            let current = true;
+            api.mapCatalog(layers, mapSelection, activeLayer, hiddenLayers).then(async () => {
+                if (current && selectionReceipt) {
+                    await api.finishMapDelivery(selectionReceipt);
+                    if (current) setSelectionReceipt(null);
+                }
+            }).catch(fail);
+            return () => { current = false; };
+        }, [layers, mapSelection, activeLayer, hiddenLayers, selectionReceipt]);
         const mapKey = window.GuizhiMap.key;
         function addLayers(items) {
             if (!items.length) return;
@@ -294,13 +303,14 @@
         const ownership = locked ? { cancelling, label: cancelling ? '正在停止小六' :
             delivering || pendingDelivery || state?.delivery ? '正在应用地图成果' : activity?.label || '小六正在处理' } : null;
 
-        function settleDelivery(id) {
+        function settleDelivery(id, error) {
             if (delivery.current?.id !== id) return;
             delivery.current = null;
             setDelivering(null);
             setLayoutReady(null);
             setMapActions(null);
-            void api.finishMapDelivery(id).catch(fail);
+            if (task?.mapSelection && !error) setSelectionReceipt(id);
+            else void api.finishMapDelivery(id, error).catch(fail);
         }
         async function takeOver() {
             if (cancelling || !task) return;
@@ -329,14 +339,16 @@
             setDelivering(task.id);
             void openMap(task, stop.signal).then(opened => {
                 if (stop.signal.aborted) return;
-                if (!opened) { settleDelivery(task.id); return; }
+                if (!opened) { settleDelivery(task.id, '地图未能应用本轮成果'); return; }
                 const layout = task.layout && !task.layoutImage && !task.layoutError;
                 if (layout) setLayoutReady({ id: task.id, signal: stop.signal });
-                if (task.mapActions) setMapActions({ id: task.id, signal: stop.signal, actions: task.mapActions.map(action => ({
-                    ...action, ...(task.mapTargets?.[action.layer] && { layerRef: task.mapTargets[action.layer] }),
-                })) });
+                if (task.mapActions) setMapActions({ id: task.id, signal: stop.signal, actions: task.mapActions.map(action => {
+                    const layerRef = task.mapTargets?.[action.layer] ?? task.mapLayers?.find(
+                        layer => layer.stepReferences?.includes(action.layer))?.ref;
+                    return layerRef ? { ...action, layerRef } : action;
+                }) });
                 else if (!layout) settleDelivery(task.id);
-            }).catch(error => { if (!stop.signal.aborted) { fail(error); settleDelivery(task.id); } });
+            }).catch(error => { if (!stop.signal.aborted) { fail(error); settleDelivery(task.id, window.GuizhiErrorText(error)); } });
         }, [task?.id, task?.status, pendingDelivery]);
         const resultTask = turns.find(item => item.id === viewed) ||
             turns.findLast(item => item.map || item.hasReport || item.mapLayers?.length) || task;
@@ -734,10 +746,9 @@
             }
             if (item?.mapSelection) {
                 const target = mapKey(item.mapSelection);
-                if (layers.some(layer => mapKey(layer) === target)) {
-                    setActiveLayer(target);
-                    setMapSelection({ key: target, ids: item.mapSelection.fids });
-                }
+                if (!layers.some(layer => mapKey(layer) === target)) throw new Error('目标图层已移除，无法应用选区');
+                setActiveLayer(target);
+                setMapSelection({ key: target, ids: item.mapSelection.fids });
             }
             if (item?.layout && !item.mapLayers?.length && !layers.length) {
                 await api.mapLayoutError(item.id, '地图中没有可绘制的图层，请先添加图层。');
@@ -792,9 +803,9 @@
             requestedLayout: layoutReady && task?.id === layoutReady.id && !task.layoutImage && !task.layoutError && task.layout
                 ? { taskId: task.id, layout: task.layout, signal: layoutReady.signal } : null,
             openLayout: layoutOpen, onLayout: api.mapLayoutError, onLayoutSettled: settleDelivery, mapActions,
-            onMapActions: id => {
+            onMapActions: (id, error) => {
                 setMapActions(current => current?.id === id ? null : current);
-                if (layoutReady?.id !== id) settleDelivery(id);
+                if (error || layoutReady?.id !== id) settleDelivery(id, error);
             },
             selection: mapSelection, setSelection: setMapSelection,
             replace: replaceLayer, replaceLayers, editing: setMapEditing });
