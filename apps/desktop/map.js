@@ -9,6 +9,9 @@ import { AttributeSort, AttributeStatistics, AttributeCell } from './map-table-u
 import { MapLayout, amendLayout, drawMapLayers, mapCanvas, mapImage, sheetSize } from './map-layout.js';
 import { LayerProperties, MapProperties, MxdOpen, categoryValue, classifyLayer, defaultMapBackground, layerSymbol, opacity, symbol } from './map-layer-dialog.js';
 import Map from 'ol/Map.js';
+import { defaults as defaultInteractions } from 'ol/interaction/defaults.js';
+import MouseWheelZoom from 'ol/interaction/MouseWheelZoom.js';
+import { unByKey } from 'ol/Observable.js';
 import Overlay from 'ol/Overlay.js';
 import View from 'ol/View.js';
 import Projection from 'ol/proj/Projection.js';
@@ -17,6 +20,8 @@ import Static from 'ol/source/ImageStatic.js';
 import VectorLayer from 'ol/layer/Vector.js';
 import VectorSource from 'ol/source/Vector.js';
 import GeoJSON from 'ol/format/GeoJSON.js';
+import WKB from 'ol/format/WKB.js';
+import Feature from 'ol/Feature.js';
 import Select from 'ol/interaction/Select.js';
 import Draw from 'ol/interaction/Draw.js';
 import DragBox from 'ol/interaction/DragBox.js';
@@ -35,6 +40,7 @@ const { Button, Input, Select: Choice, Table, Modal } = window.antd;
 const { icon: glyph, businessIcon } = window.GuizhiShell;
 const api = window.guizhi;
 const format = new GeoJSON();
+const viewportGeometry = new WKB();
 const palette = ['#1785db', '#bf6f2b', '#17a489', '#8263ca', '#cc5785'];
 const commandIcons = {
     全图: 'extent', 定位图层: 'target', 放大: 'zoomIn', 缩小: 'zoomOut', 清除选择: 'clear',
@@ -56,6 +62,17 @@ const projection = (code, units) => new Projection({ code: code || 'local', unit
 const fillColor = (color, percent) => color + Math.round(percent * 255 / 100).toString(16).padStart(2, '0');
 const classFill = (settings, color, fill) => settings.fill === null || fill === null ? null : fill || color;
 const feature = item => format.readFeature({ type: 'Feature', ...item });
+function viewportFeature(item) {
+    const bytes = atob(item.wkb);
+    const buffer = new Uint8Array(bytes.length);
+    for (let i = 0; i < bytes.length; i++) buffer[i] = bytes.charCodeAt(i);
+    const geometry = viewportGeometry.readGeometry(buffer);
+    const rendered = new Feature();
+    rendered.setProperties(item.properties);
+    rendered.setGeometry(geometry);
+    rendered.setId(item.id);
+    return rendered;
+}
 const style = (color, settings) => {
     const appearance = symbol(settings, color);
     const lineDash = appearance.pattern === 'dash' ? [9, 5] : appearance.pattern === 'dot' ? [2, 4] : undefined;
@@ -73,9 +90,11 @@ const layerFor = (items, color) => new VectorLayer({
 });
 function coverageLayer(geometries, color, settings = {}) {
     const source = new VectorSource({ features: geometries.map(geometry => feature({ geometry })) });
-    return new VectorLayer({ ...settings, source, style: new Style({
-        stroke: new Stroke({ color, width: 1.4 }), fill: new Fill({ color: fillColor(color, 27) }),
-    }) });
+    return new VectorLayer({ ...settings, source, style: coverageStyle(color) });
+}
+
+function coverageStyle(color) {
+    return new Style({ stroke: new Stroke({ color, width: 1.4 }), fill: new Fill({ color: fillColor(color, 27) }) });
 }
 const displayFields = item => [...new Set([item.style?.classification?.field, item.style?.labelField].filter(Boolean))];
 function withLabels(render, labelField, geometry) {
@@ -112,7 +131,9 @@ function classSwatch(item, entry) {
 }
 
 function attach(node, view, layers) {
-    return new Map({ target: node, view, layers, controls: [], pixelRatio: Math.min(devicePixelRatio, 2) });
+    const interactions = defaultInteractions({ mouseWheelZoom: false });
+    interactions.push(new MouseWheelZoom({ timeout: 35, duration: 120 }));
+    return new Map({ target: node, view, layers, controls: [], interactions, pixelRatio: Math.min(devicePixelRatio, 2) });
 }
 
 function fit(view, layers, size) {
@@ -217,8 +238,8 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
     const [layout, setLayout] = useState(null);
     const [layoutDraft, setLayoutDraft] = useState(null);
     const [document, setDocument] = useState(null);
-    const [cursor, setCursor] = useState(null);
-    const [scale, setScale] = useState(null);
+    const cursorLabel = useRef(null);
+    const scaleLabel = useRef(null);
     const [viewReady, setViewReady] = useState(false);
     const [ioStatus, setIoStatus] = useState('');
     const [importIssues, setImportIssues] = useState([]);
@@ -285,6 +306,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
     const [tableDialog, setTableDialog] = useState(null);
     const [limited, setLimited] = useState([]);
     const [viewRevision, setViewRevision] = useState(0);
+    const [viewLoading, setViewLoading] = useState(false);
     const selectionRef = useRef(selection);
     selectionRef.current = selection;
     const layer = layers.find(item => key(item) === active);
@@ -634,19 +656,27 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         const view = new View({ projection: projection(target, units), center: [0, 0], zoom: 0 });
         const ol = attach(node.current, view, []);
         setViewReady(false);
-        setScale(null);
         const updateScale = () => {
-            if (!target) { setScale(null); return; }
+            if (!scaleLabel.current) return;
             const resolution = view.getResolution();
-            const metres = units === 'degrees' ? getPointResolution(view.getProjection(), resolution, view.getCenter(), 'm')
+            const metres = !target ? NaN : units === 'degrees'
+                ? getPointResolution(view.getProjection(), resolution, view.getCenter(), 'm')
                 : resolution * (metresPerUnit || (units === 'm' ? 1 : NaN));
-            setScale(Number.isFinite(metres) && metres > 0 ? Math.max(1, Math.round(metres / .0002645833333)) : null);
+            const ratio = Number.isFinite(metres) && metres > 0 ? Math.max(1, Math.round(metres / .0002645833333)) : null;
+            scaleLabel.current.textContent = ratio ? '1 : ' + ratio.toLocaleString('zh-CN') : '1 : —';
         };
-        const track = event => { if (!event.dragging) setCursor(event.coordinate); };
-        const clearCursor = () => setCursor(null);
-        ol.on('pointermove', track);
+        const scaleChange = view.on('change:resolution', updateScale);
+        const clearCursor = () => {
+            if (cursorLabel.current) cursorLabel.current.textContent = 'X —　Y —';
+        };
+        ol.on('pointermove', event => {
+            if (event.dragging || !cursorLabel.current || graph.current?.fitNeeded) return;
+            const suffix = units === 'degrees' ? ' °' : units === 'm' ? ' m' : '';
+            cursorLabel.current.textContent = event.coordinate.map(value => value.toFixed(units === 'degrees' ? 6 : 2)).join(' , ') + suffix;
+        });
         node.current.addEventListener('pointerleave', clearCursor);
-        setCursor(null);
+        clearCursor();
+        if (scaleLabel.current) scaleLabel.current.textContent = '1 : —';
         if (units === 'm' || units === 'degrees') ol.addControl(new ScaleLine({ units: 'metric' }));
         const selectable = () => !identifying.current && !selectionMode.current.measure && !selectionMode.current.busy &&
             (!selectionMode.current.edit || selectionMode.current.edit === 'select') &&
@@ -736,6 +766,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         return () => {
             identification.current += 1;
             viewport.removeEventListener('pointerleave', clearCursor);
+            unByKey(scaleChange);
             observer.disconnect();
             ol.dispose();
             graph.current = null;
@@ -752,6 +783,8 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         const state = graph.current;
         if (!state || edit) return;
         let alive = true;
+        let snapshotTimer;
+        let snapshotListener;
         const previous = state.byKey;
         const next = new globalThis.Map();
         const layerKeys = layers.map(key);
@@ -764,6 +797,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         }
         const bbox = !state.fitNeeded && state.ol.getSize()?.every(size => size > 0)
             ? state.view.calculateExtent(state.ol.getSize()) : null;
+        let hasNewView = false;
         const jobs = layers.map((item, index) => {
             const id = key(item);
             const drawing = previous.get(id) || (item.kind === 'raster'
@@ -775,9 +809,17 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
             const order = 2 * (layers.length - index);
             const layerOpacity = opacity(item.style?.opacity ?? item.opacity) / 100;
             const visible = !hidden.includes(id);
-            if (item.kind !== 'raster') {
+            const displayStyle = JSON.stringify([index, order, item.style, layerOpacity, visible]);
+            if (item.kind !== 'raster' && drawing.get('displayStyle') !== displayStyle) {
+                drawing.set('displayStyle', displayStyle);
                 const color = palette[index % palette.length];
                 const appearance = symbol(item.style, color);
+                const coverage = drawing.get('coverage');
+                if (coverage) {
+                    coverage.setStyle(coverageStyle(appearance.color));
+                    coverage.setOpacity(layerOpacity);
+                    coverage.setZIndex(order);
+                }
                 const classification = item.style?.classification;
                 const field = classification?.field;
                 const render = settings => {
@@ -828,7 +870,6 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                         projection: state.view.getProjection() }) })).catch(error => ({ id, drawing, raster: true, error }));
             }
             if (!item.crs && target) {
-                drawing.getSource().clear();
                 return Promise.resolve({ id, drawing, error: new Error('请先定义图层坐标系') });
             }
             const plan = entries.find(entry => entry.kind === 'plan' &&
@@ -837,13 +878,69 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
             const planId = displayPlans[id] || (plan && plan.id + '@' + plan.revision);
             drawing.set('displayPlan', planId);
             const stamp = JSON.stringify([target, displayFields(item), planId]);
-            if (drawing.get('completeFeatures') === stamp) return Promise.resolve({ id, drawing, cached: true });
-            return api.map({ action: 'features', ref: item.ref, bbox,
-                target: target || null, fields: displayFields(item), plan: planId })
-                .then(result => ({ id, drawing, result, full: !bbox && !result.limited ? stamp : null })).catch(error => ({ id, drawing, error }));
+            const viewportStamp = JSON.stringify([stamp, bbox]);
+            if (drawing.get('completeFeatures') === stamp || drawing.get('viewportStamp') === viewportStamp)
+                return Promise.resolve({ id, drawing });
+            hasNewView = true;
+            // Only one query per layer can be in flight. Queued views superseded by a new gesture do no work.
+            const pending = (drawing.get('viewportRequest') || Promise.resolve()).then(async () => {
+                if (!alive) return { id, drawing };
+                try {
+                    const result = await api.map({ action: 'features', ref: item.ref, bbox, interactive: true,
+                        knownOverview: drawing.get('overviewKey'), target: target || null, fields: displayFields(item), plan: planId });
+                    return { id, drawing, result, viewportStamp, full: !bbox && !result.limited ? stamp : null };
+                } catch (error) {
+                    return { id, drawing, error };
+                }
+            });
+            drawing.set('viewportRequest', pending, true);
+            return pending.finally(() => {
+                if (drawing.get('viewportRequest') === pending) drawing.unset('viewportRequest', true);
+            });
         }).filter(Boolean);
         state.byKey = next;
-        Promise.all(jobs).then(async items => {
+        setViewLoading(hasNewView);
+        const updated = new Set();
+        function apply(item) {
+            if (!alive || item.error) return item;
+            const { drawing, result } = item;
+            if (item.image) {
+                drawing.setExtent(item.bounds);
+                drawing.set('dataExtent', item.bounds);
+                drawing.setSource(item.image);
+            }
+            if (!result || state.view.getAnimating() || state.view.getInteracting()) return item;
+            if (bbox) {
+                const latest = state.view.calculateExtent(state.ol.getSize());
+                if (!bbox.every((coordinate, i) => coordinate === latest[i])) return item;
+            }
+            if (item.full) drawing.set('completeFeatures', item.full);
+            else drawing.unset('completeFeatures');
+            drawing.set('viewportStamp', item.viewportStamp);
+            drawing.set('clipped', Boolean(result.clipped));
+            drawing.set('dataExtent', result.bounds);
+            if (result.overviewKey && result.overviewKey === drawing.get('overviewKey')) return item;
+            updated.add(item.id);
+            // Prepare the new geometries before replacing anything visible.
+            const details = result.features.map(viewportFeature);
+            const old = drawing.get('coverage');
+            let coverage;
+            if (result.overview) {
+                const index = layerKeys.indexOf(item.id);
+                const color = symbol(layers[index].style, palette[index % palette.length]).color;
+                coverage = coverageLayer(result.overview, color, {
+                    opacity: drawing.getOpacity(), zIndex: drawing.getZIndex(),
+                });
+                state.ol.addLayer(coverage);
+            }
+            drawing.getSource().clear(true);
+            drawing.getSource().addFeatures(details);
+            if (old) state.ol.removeLayer(old);
+            drawing.set('coverage', coverage);
+            drawing.set('overviewKey', result.overviewKey);
+            return item;
+        }
+        Promise.all(jobs.map(job => job.then(apply))).then(async items => {
             if (!alive) return;
             const errors = new globalThis.Map();
             for (const item of items.filter(item => item.error)) {
@@ -853,39 +950,10 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 errors.set(message, affected);
             }
             setLayerErrors([...errors].map(([message, affected]) => ({ message, names: [...affected] })));
-            setLimited(items.filter(item => item.result?.limited).map(item => item.id));
-            for (const item of items) {
-                if (item.raster) {
-                    if (item.image) {
-                        item.drawing.setExtent(item.bounds);
-                        item.drawing.set('dataExtent', item.bounds);
-                        item.drawing.setSource(item.image);
-                    }
-                    continue;
-                }
-                if (item.cached) continue;
-                item.drawing.unset('completeFeatures');
-                if (item.drawing.get('coverage')) {
-                    state.ol.removeLayer(item.drawing.get('coverage'));
-                    item.drawing.unset('coverage');
-                }
-                item.drawing.getSource().clear();
-                if (item.result) {
-                    if (item.full) item.drawing.set('completeFeatures', item.full);
-                    item.drawing.set('clipped', Boolean(item.result.clipped));
-                    item.drawing.set('dataExtent', item.result.bounds);
-                    if (item.result.overview) {
-                        const index = layerKeys.indexOf(item.id);
-                        const color = symbol(layers[index].style, palette[index % palette.length]).color;
-                        const summary = coverageLayer(item.result.overview, color, {
-                            opacity: item.drawing.getOpacity(), zIndex: item.drawing.getZIndex(),
-                        });
-                        state.ol.addLayer(summary);
-                        item.drawing.set('coverage', summary);
-                    }
-                    item.drawing.getSource().addFeatures(item.result.features.map(feature));
-                }
-            }
+            const overviewKeys = items.filter(item => item.drawing.get('coverage')).map(item => item.id);
+            setLimited(previous => previous.length === overviewKeys.length &&
+                previous.every((id, index) => id === overviewKeys[index]) ? previous : overviewKeys);
+            setViewLoading(false);
             if (state.fitNeeded && items.length) {
                 state.fitNeeded = false;
                 const drawn = [...next.values()];
@@ -897,26 +965,39 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 state.updateScale();
                 setViewReady(true);
             }
-            await restoreSelection(state, selectionRef.current);
-            if (!alive) return;
-            const size = state.ol.getSize();
-            if (!size?.every(value => value > 0) || !items.length) return;
-            state.ol.renderSync();
-            const factor = Math.min(1, 880 / Math.max(...size));
-            const canvas = globalThis.document.createElement('canvas');
-            canvas.width = Math.round(size[0] * factor);
-            canvas.height = Math.round(size[1] * factor);
-            const context = canvas.getContext('2d');
-            context.fillStyle = backgroundColor;
-            context.fillRect(0, 0, canvas.width, canvas.height);
-            context.scale(factor, factor);
-            drawMapLayers(context, node.current);
-            void api.mapSnapshot({ keys: layerKeys.filter(id => !hidden.includes(id)),
-                bounds: state.view.calculateExtent(size), crs: target, limited: items.some(item => item.result?.limited),
-                scale: node.current.querySelector('.ol-scale-line-inner')?.textContent,
-                image: canvas.toDataURL('image/jpeg', .78) }).catch(fail);
-        }).catch(error => { if (alive) fail(error); });
-        return () => { alive = false; };
+            const selected = selectionRef.current;
+            if (selected && (updated.has(selected.key) || next.get(selected.key)?.get('coverage') ||
+                    !next.get(selected.key)?.getVisible())) await restoreSelection(state, selected);
+            if (!alive || !items.length) return;
+            // Use the next rendered frame, away from wheel/drag input, for the agent's map snapshot.
+            snapshotTimer = setTimeout(() => {
+                if (!alive || state.view.getAnimating() || state.view.getInteracting()) return;
+                snapshotListener = state.ol.once('postrender', capture);
+                state.ol.render();
+            }, 180);
+            function capture() {
+                const size = state.ol.getSize();
+                if (!alive || !size?.every(value => value > 0) || state.view.getAnimating() || state.view.getInteracting()) return;
+                const factor = Math.min(1, 880 / Math.max(...size));
+                const canvas = globalThis.document.createElement('canvas');
+                canvas.width = Math.round(size[0] * factor);
+                canvas.height = Math.round(size[1] * factor);
+                const context = canvas.getContext('2d');
+                context.fillStyle = backgroundColor;
+                context.fillRect(0, 0, canvas.width, canvas.height);
+                context.scale(factor, factor);
+                drawMapLayers(context, node.current);
+                void api.mapSnapshot({ keys: layerKeys.filter(id => !hidden.includes(id)),
+                    bounds: state.view.calculateExtent(size), crs: target, limited: overviewKeys.length > 0,
+                    scale: node.current.querySelector('.ol-scale-line-inner')?.textContent,
+                    image: canvas.toDataURL('image/jpeg', .78) }).catch(fail);
+            }
+        }).catch(error => { if (alive) { setViewLoading(false); fail(error); } });
+        return () => {
+            alive = false;
+            clearTimeout(snapshotTimer);
+            if (snapshotListener) unByKey(snapshotListener);
+        };
     }, [layers, hidden, target, units, initialExtent, viewRevision, entries, displayPlans, backgroundColor, Boolean(edit)]);
 
     async function restoreSelection(state, selected) {
@@ -1438,7 +1519,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         group('提交', command('撤销', undoEdit, { disabled: busy || !(count || drawingPoints), title: 'Ctrl+Z', 'aria-keyshortcuts': 'Control+Z' }),
         command('保存', saveEdit, { disabled: busy || !count, loading: busy, type: 'primary', title: 'Ctrl+S', 'aria-keyshortcuts': 'Control+S' }),
         command('退出', () => count ? setConfirmExit(true) : leaveEdit(), { disabled: busy })),
-    ] : [group('图层编辑', command('编辑图层', startEdit, { disabled: !editable || busy || !viewReady || Boolean(pendingEdit) || limited.includes(active) }))];
+    ] : [group('图层编辑', command('编辑图层', startEdit, { disabled: !editable || busy || viewLoading || !viewReady || Boolean(pendingEdit) || limited.includes(active) }))];
     const partsReady = !busy && !count && edit === 'select';
     function openPartsTool(operation) {
         if (!partsReady) return;
@@ -1736,21 +1817,18 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                         'aria-label': '图层导入进度' }) : h('progress', { 'aria-label': '图层导入进度' })),
                 !layers.length && h(Button, { className: 'map-empty', type: 'default', icon: glyph('add', 30),
                     title: '添加或拖入空间数据', 'aria-label': '添加或拖入空间数据', disabled: busy, onClick: () => load(api.mapImport()) }),
-                (notices.size > 0 || limited.length > 0 || busy) && h('div', { className: 'map-notice', role: 'status' },
-                    busy ? '正在处理地图数据…' : notices.size > 0 ?
+                (notices.size > 0 || busy) && h('div', { className: 'map-notice', role: 'status' },
+                    busy ? '正在处理地图数据…' :
                         [...notices].map(([message, names]) => h('div', { key: message }, message,
-                            names.length > 0 && h('span', { className: 'muted' }, '（' + names.join('、') + '）')))
-                        : '当前显示图层覆盖范围，放大可查看和选择单个要素。'))),
+                            names.length > 0 && h('span', { className: 'muted' }, '（' + names.join('、') + '）')))))),
         h('footer', { className: 'map-status' },
             h('span', null, layers.length ? layers.length + ' 个图层' : '暂无图层'),
             layer && h('span', null, layer.name),
             picked.length > 0 && h('span', null, '已选 ' + picked.length + ' 个要素'),
             h('span', { className: 'map-status-crs', title: display?.label || native?.crsName }, glyph('globe', 14),
                 h('span', null, display?.label || native?.crsName || '未设置坐标系')),
-            h('span', { className: 'map-status-measure', 'aria-label': '当前比例尺', title: '屏幕比例尺' },
-                scale ? '1 : ' + scale.toLocaleString('zh-CN') : '1 : —'),
-            h('span', { className: 'map-status-coordinates', 'aria-label': '鼠标坐标', title: '地图坐标 · X / Y' },
-                cursor && viewReady ? cursor.map(value => value.toFixed(units === 'degrees' ? 6 : 2)).join(' , ') + (units === 'degrees' ? ' °' : units === 'm' ? ' m' : '') : 'X —　Y —')),
+            h('span', { ref: scaleLabel, className: 'map-status-measure', 'aria-label': '当前比例尺', title: '屏幕比例尺' }, '1 : —'),
+            h('span', { ref: cursorLabel, className: 'map-status-coordinates', 'aria-label': '鼠标坐标', title: '地图坐标 · X / Y' }, 'X —　Y —')),
         tableVisible && tableWindow.present(h('section', { ref: tablePanel, className: 'map-attribute-panel', 'aria-label': '属性表' },
             h('header', { className: 'map-attribute-head' }, h('strong', {
                 className: 'map-table-grip', title: tableWindow.detached ? undefined : '拖出属性表',

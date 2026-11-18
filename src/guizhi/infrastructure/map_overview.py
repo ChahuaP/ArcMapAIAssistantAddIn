@@ -4,7 +4,7 @@ GDAL burns every geometry touched into a byte mask. Polygonizing the occupied
 pixels retains disjoint areas and holes, without sending individual feature IDs.
 """
 from contextlib import ExitStack
-from ctypes import POINTER, byref, c_char_p, c_int, c_uint, c_void_p
+from ctypes import POINTER, byref, c_char_p, c_double, c_int, c_uint, c_void_p
 from functools import lru_cache
 from hashlib import sha256
 import json
@@ -26,6 +26,8 @@ def overview_gdal():
     return gdal_library({
         "GDALOpenEx": (c_void_p, c_char_p, c_uint, c_void_p, c_void_p, c_void_p),
         "GDALClose": (c_int, c_void_p),
+        "GDALDatasetGetLayerByName": (c_void_p, c_void_p, c_char_p),
+        "OGR_L_SetSpatialFilterRect": (None, c_void_p, c_double, c_double, c_double, c_double),
         "GDALRasterizeOptionsNew": (c_void_p, POINTER(c_char_p), c_void_p),
         "GDALRasterizeOptionsFree": (None, c_void_p),
         "GDALRasterize": (c_void_p, c_char_p, c_void_p, c_void_p, c_void_p, POINTER(c_int)),
@@ -60,6 +62,8 @@ def footprint(file, layer, extent, where=None):
         with ExitStack() as resources:
             src = check(gd.GDALOpenEx(str(file).encode("utf8"), 4, None, None, None))
             resources.callback(gd.GDALClose, src)
+            source_layer = check(gd.GDALDatasetGetLayerByName(src, layer.encode("utf8")))
+            gd.OGR_L_SetSpatialFilterRect(source_layer, *bounds)
             opts = check(gd.GDALRasterizeOptionsNew(argv, None))
             resources.callback(gd.GDALRasterizeOptionsFree, opts)
             mask = check(gd.GDALRasterize(b"", None, src, opts, byref(c_int())))

@@ -7,6 +7,7 @@ import re
 import sqlite3
 from contextlib import closing
 from functools import lru_cache
+from hashlib import sha256
 from shutil import copyfile
 from uuid import uuid4
 
@@ -27,6 +28,7 @@ from guizhi.infrastructure.export import package_layer
 from guizhi.infrastructure.operations.evidence import artifact_path, read_artifact
 from guizhi.infrastructure.operations.runner import data_revision
 from guizhi.infrastructure.vector import digest, layer_geometry
+from guizhi.infrastructure.workspace import Workspace
 
 MAX_VISIBLE = 8000
 MAX_MAP_POINTS = 180_000
@@ -321,9 +323,34 @@ def category_value(value):
     return str(value)
 
 
+@lru_cache(maxsize=64)
+def feature_metadata(root, run, artifact, file, name, revision):
+    return describe(Workspace(root), {"run": run, "artifact": artifact}, file, name)
+
+
+@lru_cache(maxsize=32)
+def display_transform(current, target, extent):
+    return projection(current, target, extent)
+
+
+def overview_window(extent):
+    """Group neighboring viewports into reusable, padded overview windows."""
+    west, south, east, north = extent
+    span = max(east - west, north - south)
+    if span <= 0:
+        return extent
+    grid = math.ldexp(1.0, math.frexp(span)[1] - 3)
+    return (math.floor(west / grid) * grid, math.floor(south / grid) * grid,
+            math.ceil(east / grid) * grid, math.ceil(north / grid) * grid)
+
+
 def features(workspace, payload):
     file, name = source(workspace, payload["ref"])
-    info = describe(workspace, payload["ref"], file, name)
+    ref = payload["ref"]
+    stat = file.stat()
+    revision = interactive_revision(file, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)[1]
+    info = feature_metadata(workspace.root, ref["run"], ref["artifact"], file, name, revision)
+    interactive = payload.get("interactive") is True
     extent = bounds(payload["bbox"]) if payload.get("bbox") is not None else None
     target = CRS(payload["target"]) if payload.get("target") else None
     current = CRS(info["crs"]) if info["crs"] else None
@@ -340,7 +367,7 @@ def features(workspace, payload):
                                   any(type(fid) is not int for fid in highlight)):
         raise ValueError("请选择有效的地图要素")
     fids = highlight if highlight is not None and len(highlight) <= 500 else payload.get("fids")
-    tx = projection(current, target, info["bounds"]) if convert else None
+    tx = display_transform(current, target, tuple(info["bounds"]) if info["bounds"] else None) if convert else None
     display_bounds = info["bounds"]
     if tx and display_bounds:
         display_bounds = numbers(tx.transform_bounds(*display_bounds, errcheck=True))
@@ -369,17 +396,24 @@ def features(workspace, payload):
             # Reuse the whole-layer footprint at regional scales. Refine in a dense local view.
             if (xmax - xmin) * (ymax - ymin) < (full[2]-full[0]) * (full[3]-full[1]) / 16:
                 window = (xmin, ymin, xmax, ymax)
+                if interactive:
+                    window = overview_window(window)
         where = None
         if highlight:
             from guizhi.infrastructure.operations.table import identifier
             where = identifier(info["fidField"]) + " IN (" + ",".join(map(str, highlight)) + ")"
         revision = file.stem if plan else info["revision"]
+        response = {"features": [], "limited": True, "bounds": display_bounds}
+        if interactive:
+            overview_key = sha256(json.dumps([name, revision, full, window, payload.get("target"), where]).encode()).hexdigest()
+            response["overviewKey"] = overview_key
+            if payload.get("knownOverview") == overview_key:
+                return response
         shapes = coverage(file, name, revision, full, window, workspace.root / "cache", where)
         if tx and shapes:
             shapes = shapely.transform(np.asarray(shapes, dtype=object), lambda x, y: tx.transform(x, y, errcheck=True),
                                        interleaved=False)
-        return {"features": [], "overview": [shapely.geometry.mapping(shape) for shape in shapes],
-                "limited": True, "bounds": display_bounds}
+        return {**response, "overview": [shapely.geometry.mapping(shape) for shape in shapes]}
 
     if fids is not None:
         if not isinstance(fids, list) or not fids or len(fids) > 500 or any(type(fid) is not int for fid in fids):
@@ -419,10 +453,18 @@ def features(workspace, payload):
         for row in attributes:
             for key, value in row.items():
                 row[key] = category_value(value)
-    items = [{"id": int(fid), "geometry": shapely.geometry.mapping(shape), "properties": attrs}
-             for (fid, shape), attrs in zip(frame.geometry.items(), attributes, strict=True)
-             if shape is not None and not shape.is_empty]
-    return {"features": items, "limited": False, "bounds": display_bounds, "clipped": clipped}
+    result = {"limited": False, "bounds": display_bounds, "clipped": clipped}
+    if interactive and fids is None:
+        # Use GEOS' native writer and a compact payload for the interactive renderer.
+        geometries = shapely.to_wkb(frame.geometry.array, flavor="iso")
+        items = [{"id": int(fid), "wkb": b64encode(data).decode("ascii"), "properties": attrs}
+                 for fid, data, attrs, empty in zip(frame.index, geometries, attributes, frame.geometry.is_empty, strict=True)
+                 if data is not None and not empty]
+    else:
+        items = [{"id": int(fid), "geometry": shapely.geometry.mapping(shape), "properties": attrs}
+                 for (fid, shape), attrs in zip(frame.geometry.items(), attributes, strict=True)
+                 if shape is not None and not shape.is_empty]
+    return {**result, "features": items}
 
 
 def request(workspace, payload):
