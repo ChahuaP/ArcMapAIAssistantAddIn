@@ -92,14 +92,8 @@ def import_frame(workspace, payload):
                         name = name.split(".")[-1]
                     if name not in names:
                         raise ValueError("找不到指定要素类")
-                    with TemporaryDirectory(prefix="mxd-layer-", dir=workspace.root) as temp:
-                        copy = Path(temp) / "layer.gpkg"
-                        pyogrio.write_dataframe(pyogrio.read_dataframe(file, layer=name), copy, layer=name, driver="GPKG")
-                        record = successful(run_operation(workspace.root, {"operation": "data.describe", "inputs": [
-                            {"file": str(copy), "layer": name}]}))
-                else:
-                    record = successful(run_operation(workspace.root, {"operation": "data.describe", "inputs": [
-                        {"file": str(file), "layer": name}]}))
+                record = successful(run_operation(workspace.root, {"operation": "data.describe", "inputs": [
+                    {"file": str(file), "layer": name}]}))
                 layer = describe(workspace, {"run": record["id"], "artifact": "import"})
             result.append({**layer, "name": item["name"], "style": item.get("style"), "group": item["group"],
                            "visible": item["visible"], "opacity": item.get("opacity", 100), "sourceName": str(file)})

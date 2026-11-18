@@ -11,7 +11,7 @@ from zipfile import ZipFile
 import pyogrio
 from pyproj import CRS
 
-from guizhi.domain.capabilities import MATERIAL_FORMATS, material_kind
+from guizhi.domain.capabilities import MATERIAL_FORMATS, material_kind, material_path_exists
 from guizhi.infrastructure.vector import layer_geometry, shapefile_projection, source_files
 
 MAX_FILES = 1000
@@ -25,13 +25,13 @@ def redirected(path):
 
 def describe(file):
     file = Path(file).resolve(strict=True)
-    if not file.is_file():
+    if not material_path_exists(file):
         raise ValueError("请选择材料文件")
     kind = material_kind(file)
     layers = []
     metadata = {}
     if kind == "vector":
-        parts = source_files(file)
+        parts = source_files(file) if file.suffix.lower() == ".shp" else []
         for name, geometry in pyogrio.list_layers(file):
             if not geometry:
                 continue
@@ -58,8 +58,22 @@ def describe(file):
             "layerInfo": layers, "metadata": metadata}
 
 
-def bound_layer_metadata(materials):
-    """Describe selected layers by role, without opening feature rows or returning paths."""
+def field_value_evidence(file, layer, fields):
+    """Read a bounded attribute-only window; examples are observations, never field aliases or totals."""
+    names = [entry["name"] for entry in fields if str(entry["type"]).lower() in {"object", "string", "str"}][:120]
+    if not names:
+        return {"sample_rows": 0, "examples": {}}
+    frame = pyogrio.read_dataframe(file, layer=layer, columns=names, max_features=32, read_geometry=False)
+    examples = {}
+    for name in names:
+        values = [value for value in frame[name].dropna().unique() if isinstance(value, str) and 0 < len(value) <= 64]
+        if values:
+            examples[name] = values[:3]
+    return {"sample_rows": len(frame), "examples": examples}
+
+
+def bound_layer_metadata(materials, *, with_examples=False):
+    """Describe material schemas; only explicit field inspection reads example values."""
     result = {}
     for role, group in materials.items():
         for item in group:
@@ -79,6 +93,8 @@ def bound_layer_metadata(materials):
                 else:
                     info = pyogrio.read_info(file, layer=item["layer"], force_feature_count=False)
                     description.update(fields=[{"name": key, "type": str(dtype)} for key, dtype in zip(info["fields"], info["dtypes"], strict=True)], geometry=layer_geometry(info, file), crs=info["crs"])
+                if with_examples:
+                    description["field_value_sample"] = field_value_evidence(file, item["layer"], description["fields"])
             elif kind == "raster":
                 from guizhi.infrastructure.operations.raster import metadata
 
@@ -93,6 +109,10 @@ def directory_files(folder):
     for root, folders, files in os.walk(folder, followlinks=False):
         folders[:] = sorted(name for name in folders if not name.startswith(".") and
                             not redirected(Path(root) / name))
+        for name in folders[:]:
+            if name.lower().endswith(".gdb"):
+                folders.remove(name)
+                yield Path(root) / name
         for name in sorted(files):
             file = Path(root) / name
             if file.is_symlink():
@@ -145,7 +165,7 @@ def intake(workspace, paths, kind="any"):
                 extracted = parent / uuid4().hex
                 extracted.mkdir()
                 unpack(path, extracted)
-            grouped = extracted is not None or path.is_dir()
+            grouped = extracted is not None or path.is_dir() and path.suffix.lower() != ".gdb"
             files = list(directory_files(extracted or path)) if grouped else [path]
             prior_issues = len(issues)
             for file in files:

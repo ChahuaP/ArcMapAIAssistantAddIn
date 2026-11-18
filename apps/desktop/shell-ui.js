@@ -57,6 +57,7 @@
         calculator: 'M5 3h14v18H5zM8 7h8m-7 5h.1m5.9 0h.1m-6.1 4h.1m5.9 0h.1',
         add: 'M3 5h7l2 2h9v13H3zM12 10v7m-3.5-3.5h7',
         download: 'M12 3v12m-4-4 4 4 4-4M4 16v5h16v-5',
+        measure: 'M3 16 16 3l5 5L8 21zM8 12l2 2m2-6 2 2m2-6 2 2',
         area: 'M3 3h18v18H3zM7 17l10-10m-5 0h5v5m-5 5H7v-5',
         buffer: 'M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0Zm5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z',
         intersect: 'M4 4h12v12H4zM8 8h12v12H8z',
@@ -136,7 +137,7 @@
                 right && iconButton('right', '折叠或展开材料与成果', { onClick: right, onKeyDown: resize(1) })));
     }
 
-    function Workbench({ appearance, saveAppearance, sidebar, conversation, inspector, map, composer,
+    function Workbench({ appearance, saveAppearance, sidebar, conversation, inspector, map, composer, dockReply,
         mode, setMode, activity, ownership, onCancel, arcgis, connected, fail, page }) {
         const [width, setWidth] = useState(innerWidth);
         const [panels, setPanels] = useState(appearance.panels);
@@ -222,7 +223,7 @@
                             min: chatVisible && mapVisible ? 270 : 0, resizable: chatVisible && mapVisible }, chatVisible && conversation),
                         h(Splitter.Panel, { size: mapVisible ? chatVisible ? (100 - split) + '%' : '100%' : 0,
                             min: mapVisible && chatVisible ? 420 : 0, resizable: chatVisible && mapVisible }, map)),
-                    !chatVisible && h('div', { className: 'workbench-chat-dock' }, composer))),
+                    !chatVisible && h('div', { className: 'workbench-chat-dock' }, dockReply, composer))),
                 h(Splitter.Panel, { size: right, min: right ? 250 : 0, max: 520, resizable: Boolean(right) }, right > 0 && inspector)),
             inspector && compact && mode === 'chat' && h(Drawer, { title: '材料与成果', width: 360, getContainer: false,
                 rootStyle: { position: 'absolute' }, open: drawer, onClose: () => showDrawer(false) }, inspector)),

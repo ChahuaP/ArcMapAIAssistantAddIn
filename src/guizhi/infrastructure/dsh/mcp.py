@@ -8,7 +8,9 @@ import re
 import sys
 from threading import Lock
 from time import monotonic, sleep
-from typing import Literal
+from typing import Annotated, Literal
+
+from pydantic import Field
 from uuid import UUID
 
 from fastmcp import FastMCP
@@ -21,11 +23,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from guizhi.application import skills
 from guizhi.application.dispatch import format_operation, remember_plan
 from guizhi.application.tasks import run_operation
+from guizhi.domain.area_units import AreaUnit
 from guizhi.domain.semantics import Fact
 from guizhi.domain.skills import Step
 from guizhi.infrastructure.cache import reuse_job, verified_run
 from guizhi.infrastructure.crs_options import coordinate_options, describe_crs
-from guizhi.infrastructure.materials import bound_layer_metadata
+from guizhi.infrastructure.dsh.statistics import compose_statistics
+from guizhi.infrastructure.materials import bound_layer_metadata, field_value_evidence
 from guizhi.infrastructure.map_workspace import map_material, selection_material
 from guizhi.infrastructure.operations.data import AttributeFilter
 from guizhi.infrastructure.operations.evidence import read_artifact
@@ -84,7 +88,7 @@ def register(server, job=None):
         summary = {key: result[key] for key in ("operation", "status", "run_id", "mode", "statistics", "error", "failure", "outputs", "artifacts", "stage", "next")
                    if key in result}
         if "steps" in result:
-            summary["steps"] = [{key: item[key] for key in ("id", "operation", "statistics", "reused", "inputs", "observations") if key in item}
+            summary["steps"] = [{key: item[key] for key in ("id", "operation", "statistics", "reused", "inputs", "observations", "table_reference") if key in item}
                                 for item in result["steps"]]
         return redact(summary)
 
@@ -125,6 +129,8 @@ def register(server, job=None):
                         step["observations"] = {name: bounded(value) for name, value in child.items()
                                                 if name not in internal}
                         step["artifacts"] = [ref["step"] for ref in child["evidence"]]
+                        if step["operation"] in {"vector.area", "table.summarize"}:
+                            step["table_reference"] = "{{统计:" + step["id"] + "}}"
                     artifacts = [ref for ref in record["result"]["evidence"] if ref["step"] in PUBLISHED_OUTPUTS]
                     result["artifacts"] = [{"output": ref["step"], "file": Path(ref["path"]).name,
                                             "on_delivery": PUBLISHED_OUTPUTS[ref["step"]]}
@@ -175,8 +181,8 @@ def register(server, job=None):
                      "steps": [step["operation"] for step in row.get("steps", [])]} for row in previews.values()]
 
     @server.tool
-    def request_clarification(question: str) -> dict:
-        """暂停本轮办理并把这个问题呈现给用户。仅当缺少的信息会影响实际办理结果时使用。"""
+    def request_clarification(question: Annotated[str, Field(min_length=1, max_length=180)]) -> dict:
+        """需要用户补充信息时，只提交一个简短的澄清问题。已有统计结果应通过 deliver_result 交付，并沿用用户要求的统计范围。"""
         with mutex:
             if cancelled.exists():
                 return {"status": "cancelled"}
@@ -188,17 +194,21 @@ def register(server, job=None):
             return {"status": "awaiting_user"}
 
     @server.tool
-    def deliver_result(run_id: str, outputs: list[str], answer: str) -> dict:
-        """结束自由任务。引用本轮已成功作业及其实际 outputs。只回答选 answer；要在地图选中须含 selection；处理、制图、导出须选对应产物。answer 用核实的结果回答用户。"""
+    def deliver_result(run_id: str, outputs: list[str], answer: str = "", area_unit: AreaUnit = "square_meters") -> dict:
+        """交付本轮成功回执。只回答问题选 answer；需要地图选区或成果时选对应产物。统计结果优先在 answer 中插入回执的 table_reference，系统填入各组数量、数值和合计；area_unit 指定表中面积单位。单步纯统计可省略 answer。多步任务保留相关说明和所需统计表引用。"""
         with mutex:
             if cancelled.exists():
                 return {"status": "cancelled"}
             if receipt.exists():
                 return {"status": "already_delivered"}
             item = next((row for row in previews.values() if row.get("run_id") == run_id and row["status"] == "succeeded"), None)
-            if not item or not outputs or not set(outputs) <= set(item["outputs"]) or not answer.strip():
+            if not item or not outputs or not set(outputs) <= set(item["outputs"]):
                 return {"status": "missing_evidence", "next": "请引用本轮成功回执中列出的实际产物；缺少成果时继续办理。"}
-            delivery = {"outputs": outputs, "answer": answer.strip()}
+            answer = compose_statistics(item["steps"], answer.strip(), area_unit)
+            if not answer or "{{统计:" in answer:
+                return {"status": "invalid_answer", "table_references": [step["table_reference"] for step in item["steps"]
+                            if "table_reference" in step], "next": "请填写答复；统计表请使用当前回执提供的引用。"}
+            delivery = {"outputs": outputs, "answer": answer}
             if "selection" in outputs:
                 step = next((row for row in reversed(item["steps"]) if "selection" in row["artifacts"]), None)
                 if not step or not step["inputs"] or not step["inputs"][0].startswith("material."):
@@ -261,6 +271,7 @@ def register(server, job=None):
                 sleep(.06)
 
     resolved_map_inputs = {}
+    sampled_layers = {}
 
     def map_inputs(roles):
         data = {**materials}
@@ -280,8 +291,8 @@ def register(server, job=None):
         return data
 
     @server.tool
-    def inspect_current_map() -> dict:
-        """读取当前地图图层、可见状态、符号、坐标系、当前视野和选区。要查询或编辑该图层，使用返回的 id 作为材料角色。"""
+    def inspect_current_map(role: str | None = None) -> dict:
+        """读取地图、图层与选区，用 id 引用图层。活动图层或指定 role 附带文本字段的实际取值样本（最多 32 行、每字段 3 个）。样本可定位业务值所在字段，不能推断编码含义或全层数量。"""
         context = current_map()
         scene = {key: value for key, value in (current_scene() or {}).items() if key != "image"}
         visible = []
@@ -289,6 +300,16 @@ def register(server, job=None):
             public = {key: value for key, value in layer.items() if key not in {"ref", "revision", "fids"}}
             if public.get("crsName"):
                 public["crs"] = public.pop("crsName")
+            if layer.get("fields") and (layer["id"] == role if role else
+                                         layer.get("active") or len(context["layers"]) == 1):
+                identity = layer["id"]
+                if identity not in sampled_layers:
+                    try:
+                        item = map_inputs({identity})[identity][0]
+                        sampled_layers[identity] = field_value_evidence(item["file"], item["layer"], layer["fields"])
+                    except (ValueError, OSError, RuntimeError) as error:
+                        sampled_layers[identity] = {"status": "unavailable", "message": redact(str(error))}
+                public["field_value_sample"] = sampled_layers[identity]
             if layer.get("fids"):
                 public.update(selected_count=len(layer["fids"]), selection_role="selection-" + layer["id"],
                               selection_reference="$map_selection." + layer["id"])
@@ -373,9 +394,9 @@ def register(server, job=None):
 
     @server.tool
     def describe_bound_layers() -> dict:
-        """查看已绑定材料类型、矢量字段或栅格的坐标系、波段与分辨率。"""
+        """查看已绑定材料的字段与实际文本取值样本，以及栅格坐标系、波段与分辨率。取值样本不代表全部类别和数量。"""
         try:
-            result = bound_layer_metadata(materials)
+            result = bound_layer_metadata(materials, with_examples=True)
         except (ValueError, OSError) as exc:
             return input_issue("invalid_materials", str(exc))
         return result
@@ -497,8 +518,21 @@ def register(server, job=None):
                                         "parameters": params}])
 
     @server.tool
+    def summarize_layer(role: str, measure: Literal["count", "sum", "area"] = "count",
+                        group_by: list[str] | None = None, where: AttributeFilter | None = None,
+                        field: str | None = None, offset: int = 0) -> dict:
+        """按任意复合条件统计整个图层或选定范围。group_by 按真实属性字段分组，可同时给出各类别和总计。count 计数，sum 对指定数值字段求和，area 计算逐要素面积之和（平方米），可指定已核实单位的面积字段。每组及合计的 area 提供 square_meters、mu、hectares、square_kilometers 数值。超过 50 组可用 next_offset 翻页。"""
+        if job["skill"]:
+            return input_issue("invalid_materials", "请使用本轮所选业务")
+        params = {"measure": measure, "group_by": group_by, "field": field, "offset": offset}
+        if where is not None:
+            params["where"] = where.model_dump(exclude_none=True)
+        return run_plan("free", None, [{"id": "summary", "operation": "table.summarize",
+                                        "inputs": ["material." + role.removeprefix("material.")], "parameters": params}])
+
+    @server.tool
     def sum_layer_area(role: str, where: AttributeFilter | None = None, area_field: str | None = None) -> dict:
-        """计算匹配要素的面积之和。可指定经过核实、单位为平方米的属性字段；否则按投影图层几何计算。返回匹配数量、有效值数、面积和单位。"""
+        """计算匹配要素的面积之和。可指定经过核实、单位为平方米的属性字段；否则按投影图层几何计算。返回匹配数量和面积；statistics.area 给出平方米、亩、公顷和平方千米值，可直接引用。"""
         if job["skill"]:
             return input_issue("invalid_materials", "请使用本轮所选业务")
         params = {"method": "sum", "area_field": area_field}

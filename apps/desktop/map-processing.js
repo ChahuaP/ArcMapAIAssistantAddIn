@@ -22,14 +22,12 @@ const numeric = (label, value, change, min) => field(label, h(Input, {
 const number = value => value === '' || value == null ? NaN : Number(value);
 const tool = (id, title, icon, action, ...inputs) => ({ id, title, icon, action, inputs });
 const area = tool('vector.area', '面积汇总', 'area', '计算', ['统计图层', polygon]);
-const count = tool('data.describe', '要素计数', 'count', '统计', ['统计图层', vector]);
+const areaUnits = { square_meters: '平方米', mu: '亩', hectares: '公顷', square_kilometers: '平方千米' };
 const selectAttr = tool('data.select_by_attribute', '按属性选择', 'filter', '选择要素', ['待选择图层', vector]);
 const selectLocation = tool('data.select_by_location', '按位置选择', 'spatialSelect', '选择要素',
     ['待选择图层', vector], ['参照图层', vector]);
 const tools = [
-    { title: '统计', icon: 'statistics', tools: [area, count,
-        tool('flow.unique_values', '唯一值', 'filter', '查询', ['查询图层', vector]),
-        tool('flow.calculate', '数值计算', 'calculator', '计算')] },
+    { title: '统计', icon: 'statistics', tools: [area] },
     { title: '矢量处理', icon: 'layers', tools: [
         tool('vector.buffer', '缓冲分析', 'buffer', '生成缓冲区', ['输入图层', vector]),
         tool('geometry.repair', '修复几何', 'pencil', '修复', ['待修复图层', vector]),
@@ -84,8 +82,6 @@ function toolInputIssue(operation, inputs, parameters) {
     if ((['vector.area', 'vector.buffer'].includes(operation) || operation === 'data.select_by_location' &&
             parameters.predicate === 'within_a_distance') && inputs[0]?.units === 'degrees')
         return '请先将输入图层转换为投影坐标系';
-    if (operation === 'flow.calculate' && parameters.operator === 'divide' && parameters.right === 0)
-        return '除数不能为 0';
     return '';
 }
 const layerOptions = layers => layers.map(item => ({ value: key(item), label: item.name }));
@@ -140,7 +136,7 @@ const stats = {
 };
 
 
-function CoordinateChoice({ value, onPick, placeholder, standardOnly }) {
+export function CoordinateChoice({ value, onPick, placeholder, standardOnly }) {
     const [query, setQuery] = useState('');
     const [items, setItems] = useState([]);
     const [custom, setCustom] = useState([]);
@@ -242,6 +238,17 @@ function toolForm(definition, inputs, values, update, selection) {
         'table.calculate_geometry': geometryCalculation };
     if (attributeTools[id]) {
         const form = attributeTools[id](input, values, update, { field });
+        if (id === 'data.select_by_attribute') {
+            const selected = Boolean(input && selection?.key === key(input) && selection.ids.length);
+            const mode = selected ? (values.mode || 'select_subset') : 'new_selection';
+            const modes = { new_selection: '新建选区', select_subset: '在当前选区内筛选',
+                add_to_selection: '添加到当前选区', remove_from_selection: '从当前选区移除' };
+            controls.push(field('选择方式', dropdown(mode, options(modes).map(item => ({
+                ...item, disabled: !selected && item.value !== 'new_selection',
+            })), value => update('mode', value))));
+            form.parameters.mode = mode;
+            if (mode !== 'new_selection') form.parameters.previous = { revision: input.revision, fids: selection.ids };
+        }
         return { controls: [...controls, ...form.parts], valid: valid && form.valid, parameters: form.parameters };
     }
     if (id === 'geometry.create_dataset') {
@@ -270,6 +277,10 @@ function toolForm(definition, inputs, values, update, selection) {
         controls.push(field('结果图层名称', h(Input, { maxLength: 120, value: name,
             onChange: event => update('name', event.target.value) })));
         valid = Boolean(name.trim());
+    } else if (id === 'vector.area') {
+        controls.push(select('method', '重叠处理', { union: '重叠区域只计一次', sum: '逐个要素累加' }, 'union'),
+            select('areaUnit', '面积单位', areaUnits, 'square_meters'));
+        parameters = { method: values.method || 'union' };
     } else if (id === 'vector.buffer') {
         const choice = (name, label, defaultValue, labels) => h(TokenPicker, { label,
             selected: values[name] || defaultValue, items: options(labels), onPick: value => update(name, value) });
@@ -343,22 +354,11 @@ function toolForm(definition, inputs, values, update, selection) {
             }
             valid = Boolean(input?.crs && projection);
         }
-    } else if (id === 'flow.unique_values') {
-        controls.push(columns('field', '字段'), text('query', '匹配文字（选填）'));
-        parameters = { field: values.field, query: values.query?.trim() || '' };
-        valid &&= names.includes(values.field);
-    } else if (id === 'flow.calculate') {
-        controls.push(field('运算', h(Segmented, { block: true, value: values.operator || 'add',
-            options: options({ add: '+', subtract: '−', multiply: '×', divide: '÷' }), onChange: value => update('operator', value) })),
-        numeric('第一个数', values.left, value => update('left', value)), numeric('第二个数', values.right, value => update('right', value)));
-        parameters = { operator: values.operator || 'add', left: number(values.left), right: number(values.right) };
-        valid &&= Number.isFinite(parameters.left) && Number.isFinite(parameters.right);
     }
     return { controls, valid, parameters };
 }
 
 const toolDescription = {
-    'vector.area': '计算图层中各面合并后的总面积，重叠部分只计一次。',
     'vector.intersect': '提取两个图层相交的部分。',
     'vector.erase': '保留待擦除图层中位于擦除范围之外的部分。',
     'vector.clip': '保留待裁剪图层中位于裁剪范围内的部分。',
@@ -377,13 +377,19 @@ export function toolError(result) {
     return window.GuizhiErrorText(result.message) + (result.diagnosticId ? '　故障编号 ' + result.diagnosticId : '');
 }
 
-function ResultSummary({ result }) {
-    const metrics = Object.entries(result.statistics || {}).filter(([name, value]) => stats[name] &&
+function ResultSummary({ result, areaUnit }) {
+    const metrics = Object.entries(result.statistics || {}).filter(([name, value]) => stats[name] && !(areaUnit && name === 'area_m2') &&
         (typeof value === 'number' || typeof value === 'boolean'));
     const format = value => typeof value === 'number' ? value.toLocaleString('zh-CN', { maximumFractionDigits: 3 }) : value ? '是' : '否';
+    const labels = { ...stats };
+    if (areaUnit && typeof result.statistics?.area?.[areaUnit] === 'number') {
+        metrics.push(['area', result.statistics.area[areaUnit]]);
+        labels.area = '总面积（' + areaUnits[areaUnit] + '）';
+    }
     return h(window.React.Fragment, null,
         metrics.length > 0 && h('dl', { className: 'gis-result-metrics', role: 'status' },
-            metrics.map(([name, value]) => h('div', { key: name }, h('dt', null, stats[name]), h('dd', null, format(value))))),
+            metrics.map(([name, value]) => h('div', { key: name }, h('dt', null, labels[name]),
+                h('dd', null, name === 'area' ? value.toLocaleString('zh-CN', { maximumSignificantDigits: 9 }) : format(value))))),
         result.statistics?.band_statistics?.map(band => h('p', { key: band.band }, '波段 ' + band.band + ' · 有效像元 ' + band.valid_count +
             ' · 无数据像元 ' + band.nodata_count + ' · 最小 ' + (band.min ?? '—') + ' · 最大 ' + (band.max ?? '—') + ' · 平均 ' + (band.mean ?? '—'))),
         Array.isArray(result.value) ? result.value.length ? h('ul', { className: 'gis-tool-values', 'aria-label': '唯一值' },
@@ -445,12 +451,15 @@ export function MapTool({ getContainer, operation, active, lockInput, layers, se
         } catch (issue) { setError(window.GuizhiErrorText(issue)); }
         finally { setBusy(false); }
     }
+    const refine = result && operation === 'data.select_by_attribute' && result.selection?.fids.length > 0;
+    const confirm = !result ? run : refine ? () => { setValues({ mode: 'select_subset' }); setResult(null); } : close;
     return h(Modal, { open: true, centered: true, getContainer, width: 480, className: 'gis-dialog', rootClassName: 'gis-modal-root',
         title: h('span', { className: 'gis-dialog-title' }, glyph(definition.icon), definition.title),
-        closable: !busy, keyboard: !busy, maskClosable: false, onCancel: () => { if (!busy) close(); }, onOk: result ? close : run,
-        okText: result ? '关闭' : definition.action, cancelText: '取消', confirmLoading: busy,
-        okButtonProps: { disabled: !result && !valid }, cancelButtonProps: { disabled: busy, className: result ? 'gis-result-cancel' : undefined } },
-        result ? h('div', { className: 'gis-result-body' }, h(ResultSummary, { result }))
+        closable: !busy, keyboard: !busy, maskClosable: false, onCancel: () => { if (!busy) close(); }, onOk: confirm,
+        okText: refine ? '继续筛选' : result ? '关闭' : definition.action, cancelText: result ? '关闭' : '取消', confirmLoading: busy,
+        okButtonProps: { disabled: !result && !valid }, cancelButtonProps: { disabled: busy, className: result && !refine ? 'gis-result-cancel' : undefined } },
+        result ? h('div', { className: 'gis-result-body' }, h(ResultSummary, { result,
+            areaUnit: operation === 'vector.area' ? (values.areaUnit || 'square_meters') : undefined }))
             : h('fieldset', { className: 'gis-tool-fields', disabled: busy, 'aria-busy': busy },
             toolDescription[operation] && h('p', { className: 'gis-tool-description' }, toolDescription[operation]),
             definition.multiple && h('p', { className: 'gis-tool-description' }, '选择两个或更多图层。'),

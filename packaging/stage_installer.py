@@ -92,7 +92,7 @@ def build(stage, runtime, desktop, dsh, speech, arcmap, addin, tree, commit):
     payload = stage / "payload"
     core = payload / "core"
     for name in ("src/guizhi", "apps/desktop", "resources/skills"):
-        copy_tree(SOURCE / name, core / name)
+        copy_tree(SOURCE / name, core / name, lambda path: "__pycache__" not in path.split("/") and not path.endswith((".pyc", ".pyo")))
     for name in ("VERSION", "LICENSE", "requirements.lock", "packaging/runtime.lock.json",
                  "packaging/dsh-runtime/package.json", "packaging/local-speech/models.lock.json",
                  "packaging/component_archive.py", "packaging/update-trust.json"):

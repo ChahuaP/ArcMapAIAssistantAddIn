@@ -40,13 +40,28 @@ def table_page(file, name, payload):
         if payload.get("selection") is not None:
             chosen(db, payload["selection"])
             filters = f" WHERE {index} IN (SELECT id FROM selected)"
+        focus = payload.get("focusFid")
+        if focus is not None:
+            if type(focus) is not int:
+                raise ValueError("要素编号无效")
+            if order:
+                position = db.execute(
+                    f"SELECT ordinal FROM (SELECT {index} AS feature_id, row_number() OVER "
+                    f"(ORDER BY {sorting}) - 1 AS ordinal FROM {table}{filters}) WHERE feature_id=?", (focus,)
+                ).fetchone()
+            else:
+                conjunction = " AND " if filters else " WHERE "
+                position = db.execute(f"SELECT count(*) FROM {table}{filters}{conjunction}{index} < ?", (focus,)).fetchone()
+            if position is not None:
+                page = position[0] // 50
         rows = db.execute(f"SELECT {columns} FROM {table}{filters} ORDER BY {sorting} LIMIT 50 OFFSET ?",
                           (page * 50,)).fetchall()
-    return {"rows": [{"id": row[0], "values": {field: value.hex() if isinstance(value, bytes) else value
+    return {"page": page, "rows": [{"id": row[0], "values": {field: value.hex() if isinstance(value, bytes) else value
                        for field, value in zip(fields, row[1:], strict=True)}} for row in rows]}
 
 
-def filter_ids(file, name, where):
+def filter_ids(file, name, where, *, mode="new_selection", previous=None):
+    from guizhi.infrastructure.operations.common import combine_selection
     from guizhi.infrastructure.operations.data import AttributeFilter
     from guizhi.infrastructure.operations.sql_expression import attribute_predicate, evaluate
 
@@ -55,7 +70,15 @@ def filter_ids(file, name, where):
     fields = dict(zip(info["fields"], info["dtypes"], strict=True))
     predicate, arguments = attribute_predicate(AttributeFilter.model_validate(where), fields)
     rows = evaluate(file, name, fid, fields, predicate, predicate=True, arguments=arguments)
-    return sorted(row[0] for row in rows)
+    old = None
+    if previous is not None:
+        with attribute_table(file, name) as (db, table, fid, _):
+            chosen(db, previous)
+            old = {row[0] for row in db.execute(f"SELECT {identifier(fid)} FROM {table} "
+                                                f"WHERE {identifier(fid)} IN (SELECT id FROM selected)")}
+            if len(old) != len(previous):
+                raise ValueError("选区包含失效或重复的要素编号，请重新选择")
+    return sorted(combine_selection({row[0] for row in rows}, mode, old))
 
 
 def complement(file, name, payload):

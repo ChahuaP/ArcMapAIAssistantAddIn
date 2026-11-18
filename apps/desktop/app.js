@@ -288,6 +288,16 @@
         const plans = coordinates.filter(entry => entry.kind === 'plan');
         const turns = (state?.tasks || []).slice().reverse();
         const task = turns.at(-1);
+        const [mapReply, setMapReply] = useState(null);
+        const observedTurn = useRef(null);
+        useEffect(() => {
+            if (!state) return;
+            const previous = observedTurn.current;
+            const workspace = state.settings.workspace;
+            if (previous?.workspace !== workspace) setMapReply(null);
+            else if (task?.id && task.id !== previous.id && mapMode === 'map') setMapReply(task.id);
+            observedTurn.current = { workspace, id: task?.id };
+        }, [state?.settings.workspace, task?.id, mapMode]);
         const taskRunning = ['running', 'cancelling'].includes(task?.status);
         const activity = taskRunning && task.visual && state?.settings.showOperation !== false ? task.visual : null;
         const shownMapRuns = useRef(new Set());
@@ -680,6 +690,21 @@
                 'aria-current': showLog ? 'page' : undefined, onClick: () => setShowLog(true) }),
             nav('settings', '设置', { disabled: mapEditing, onClick: () => showSettings(true) }));
         };
+        function reply(item) {
+            return h(React.Fragment, { key: item.id + '-reply' },
+                h(Result, { task: item, retry, fail, voiceReply, openComponents,
+                    parcel: resultTask?.id === item.id ? parcel : null, selectParcel: id => { viewResult(item.id); selectParcel(id); },
+                    editSkill: text => { setInitialMarkdown(text); showSettings('skills'); } }),
+                item.layout && h('div', { key: item.id + '-layout', className: 'map-layout-result' },
+                    item.layoutImage ? button('map', '打开图件', { onClick: () => api.openMapLayout(item.id).catch(fail) })
+                        : item.layoutReady ? button('layout', '编辑版面', { onClick: () => { setLayoutOpen({ id: item.id }); } })
+                            : h('span', { role: 'status' }, item.layoutError || '正在生成版面…')));
+        }
+        const dockReply = task && h('section', { className: 'map-reply' },
+            h('button', { type: 'button', className: 'map-reply-toggle', 'aria-controls': 'map-reply-content',
+                'aria-expanded': mapReply === task.id, onClick: () => setMapReply(mapReply === task.id ? null : task.id) },
+                icon('chat'), h('span', null, task.prompt), icon('chevron')),
+            mapReply === task.id && h('div', { id: 'map-reply-content', className: 'map-reply-content' }, reply(task)));
         const conversation = h('section', { className: 'conversation' + (task ? '' : ' conversation-empty'), 'aria-label': '办理对话' },
             task && h('div', { className: 'task-head' }, h('h1', null, turns[0].title),
                 h('div', { className: 'task-head-actions' },
@@ -689,13 +714,7 @@
             h('div', { className: 'messages', ref: messages }, task ? turns.flatMap(item => [
                 h('article', { key: item.id + '-question', className: 'bubble user' },
                     item.images?.length > 0 && h(ImageAttachments, { images: item.images }), item.prompt),
-                h(Result, { key: item.id + '-answer', task: item, retry, fail, voiceReply, openComponents,
-                    parcel: resultTask?.id === item.id ? parcel : null, selectParcel: id => { viewResult(item.id); selectParcel(id); },
-                    editSkill: text => { setInitialMarkdown(text); showSettings('skills'); } }),
-                item.layout && h('div', { key: item.id + '-layout', className: 'map-layout-result' },
-                    item.layoutImage ? button('map', '打开图件', { onClick: () => api.openMapLayout(item.id).catch(fail) })
-                        : item.layoutReady ? button('layout', '编辑版面', { onClick: () => { setLayoutOpen({ id: item.id }); } })
-                            : h('span', { role: 'status' }, item.layoutError || '正在生成版面…')),
+                reply(item),
             ]) : h('div', { className: 'welcome' }, h('img', { src: '/mark.svg', alt: '', width: 50 }),
                 h('h2', null, '今天要办理什么？'), h('p', null, '输入办理要求，或选择已有业务。'), tiles)),
             h('div', { className: 'compose-wrap' }, composer));
@@ -820,7 +839,7 @@
             initial: settings, catalog, refresh, plans, initialMarkdown,
             close: () => { setInitialMarkdown(''); showSettings(false); },
             save: configure,
-        }) : h(Workbench, { appearance, saveAppearance, sidebar, conversation, inspector: showLog ? null : inspector, map: mapWorkspace, composer,
+        }) : h(Workbench, { appearance, saveAppearance, sidebar, conversation, inspector: showLog ? null : inspector, map: mapWorkspace, composer, dockReply,
             page: showLog ? h(BusinessLog, { revision: state }) : null,
             mode: mapMode, setMode: mode => { if (mode !== 'chat') setMapMounted(true); setMapMode(mode); },
             activity, ownership, onCancel: takeOver, fail,

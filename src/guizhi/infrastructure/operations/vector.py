@@ -4,6 +4,7 @@ from typing import Literal
 import geopandas
 import shapely
 
+from guizhi.domain.area_units import area_values
 from guizhi.infrastructure.operations.common import (
     Unit, compatible, concatenate, condition, distance_in_crs, field, separate_fields, valid,
 )
@@ -36,7 +37,7 @@ def area(ctx, where: AttributeFilter | None = None, method: Literal["union", "su
         area_m2 = float((shapely.area(frame.geometry).sum() if method == "sum" else
                          shapely.area(shapely.union_all(frame.geometry))) * scale)
         valid_count = len(frame)
-    stats = {"feature_count": len(frame)}
+    stats = {"feature_count": len(frame), "area": area_values(area_m2)}
     if where is not None or method == "sum" or area_field is not None:
         stats["area_summary"] = {"area_m2": area_m2, "layer": ctx.request.inputs[0].layer,
                                  "where": filters, "count": len(frame), "valid": valid_count, "field": area_field}

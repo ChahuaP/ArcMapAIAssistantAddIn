@@ -47,6 +47,18 @@ function verifiedResponse(receipt, dialogue) {
     if (stats.changed_parcels) parts.push(`更新涉及 ${stats.changed_parcels} 宗地。`);
     for (const item of receipt.steps ?? [{ statistics: stats }]) {
         const fact = item.statistics;
+        if (fact.summary) {
+            const result = fact.summary;
+            const label = result.measure === 'area' ? '面积' : result.field;
+            const describe = row => row.count + ' 个要素' + (result.measure === 'count' ? '' :
+                '，' + label + '合计' + (row.value == null ? '无有效值' : area(row.value) + (result.unit || '')) +
+                (row.valid < row.count ? '（' + row.valid + ' 个有效值）' : ''));
+            const groups = result.groups.map(row => result.group_by.map(name => row.keys[name] ?? '空值').join(' · ') + '：' + describe(row));
+            const source = [result.layer, filterLabel(result.filter), result.field].filter(Boolean).join(' · ');
+            parts.push([...groups, '合计：' + describe(result.total),
+                result.next_offset != null && '共 ' + result.group_count + ' 组，可继续查看。',
+                '来源：' + source].filter(Boolean).join('\n\n') + '。');
+        }
         if (fact.area_summary) {
             const result = fact.area_summary;
             const summary = result.count === 0 ? '没有找到符合条件的要素。' :
@@ -54,7 +66,7 @@ function verifiedResponse(receipt, dialogue) {
                     `匹配 ${result.count} 个要素，面积合计 ${area(result.area_m2)} m²。` +
                     (result.count === result.valid ? '' : `其中 ${result.count - result.valid} 个要素没有面积值。`);
             const basis = result.field ? '面积字段 ' + result.field : '按几何计算';
-            return summary + '\n\n来源：' + [result.layer, filterLabel(result.where), basis].filter(Boolean).join(' · ') + '。';
+            parts.push(summary + '\n\n来源：' + [result.layer, filterLabel(result.where), basis].filter(Boolean).join(' · ') + '。');
         }
         if (fact.lookup) {
             const { fields, rows, count, layer, filter } = fact.lookup;
@@ -92,7 +104,7 @@ function verifiedResponse(receipt, dialogue) {
     } else if (steps.some(step => step.operation.startsWith('geometry.create_'))) {
         parts.push('已绘制要素并生成图层。');
     }
-    if (stats.feature_count !== undefined) parts.push(`共 ${stats.feature_count} 个要素。`);
+    if (stats.feature_count !== undefined && !steps.some(step => step.statistics.area_summary)) parts.push(`共 ${stats.feature_count} 个要素。`);
     if (stats.geometry_types && !dialogue) parts.push(Object.entries(stats.geometry_types)
         .map(([name, count]) => `${name} ${count} 个`).join('，') + '。');
     if (stats.selected_count !== undefined) parts.push(receipt.delivery?.outputs.includes('selection')
@@ -308,9 +320,10 @@ export async function dispatch(options, { signal, onEvent = () => {}, getService
             ran = true;
             const needsSelectedWorkflow = Boolean(options.skill && roles.length);
             const workAttempted = () => existsSync(join(directory, 'work-attempted'));
-            if ((needsSelectedWorkflow || workAttempted()) && response.finishReason === 'completed' &&
+            const truncated = response.finishReason === 'max-tokens';
+            if ((truncated || ((needsSelectedWorkflow || workAttempted()) && response.finishReason === 'completed')) &&
                     !stop.aborted && !existsSync(operationPath) && !existsSync(join(directory, 'operation.claim'))) {
-                event({ kind: 'workflow_retry', reason: 'missing_delivery' });
+                event({ kind: 'workflow_retry', reason: truncated ? 'truncated_output' : 'missing_delivery' });
                 response = await run('本轮尚未交付。核对刚才的回执与用户原意；需要时继续查证或更正，确认后交付。缺信息请询问用户。');
             }
             if (stop.aborted) {
@@ -327,12 +340,14 @@ export async function dispatch(options, { signal, onEvent = () => {}, getService
                 const status = receipt?.status ?? (stopped ? 'budget_exhausted' : response.finishReason !== 'completed' ? 'failed' :
                     issue?.status ?? (answer && !workAttempted() && !needsSelectedWorkflow ? 'answered' : 'no_result'));
                 const terminal = response.events.findLast(fact => fact.type === 'turn/end');
-                const failure = terminal?.data.reason.error;
+                const failure = terminal?.data.reason.error ?? (response.finishReason === 'max-tokens'
+                    ? { code: 'MODEL_OUTPUT_LIMIT', message: '模型回复达到服务的单次输出上限，本轮答复未完成。' } : null);
                 const candidatePath = join(directory, 'candidate.json');
                 result = { status, finish_reason: response.finishReason,
                     response: status === 'succeeded'
                         ? receipt.delivery?.answer || verifiedResponse(receipt, options.dialogue)
                         : receipt?.question ?? receipt?.error ?? issue?.error ?? (stopped ? '本次调用达到指定限额，办理已停止。'
+                            : failure?.code === 'MODEL_OUTPUT_LIMIT' ? failure.message
                             : status === 'no_result' ? '本轮没有生成可核验的成果。可以继续让我重新办理。' : answer),
                     operation: receipt, ...(issue && !receipt ? { input_issue: issue } : {}),
                     ...(status === 'answered' && existsSync(candidatePath) ? { candidate: readJson(candidatePath) } : {}),

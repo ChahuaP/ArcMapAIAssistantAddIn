@@ -61,11 +61,19 @@ RUN_INPUTS = {
 }
 
 OVERRIDES = {
+    ("xy.points", "x_field"): "源表的横坐标字段，地理坐标系对应经度。",
+    ("xy.points", "y_field"): "源表的纵坐标字段，地理坐标系对应纬度。",
+    ("xy.points", "source_crs"): "坐标值本身使用的二维地理或投影坐标系，例如 EPSG:4490；单位与该坐标系一致。",
+    ("xy.points", "sheet"): "XLSX 工作表名称，多工作表时必填；CSV 省略。",
     ("geometry.create_rectangle", "left"): "左边界横坐标，单位与目标坐标系一致。",
     ("geometry.create_rectangle", "right"): "右边界横坐标，单位与目标坐标系一致。",
     ("table.add_field", "field"): "新字段的名称、数据类型和约束。",
     ("table.calculate_field", "field"): "接收计算结果的目标字段。",
     ("table.calculate_geometry", "field"): "写入几何量的目标字段。",
+    ("table.summarize", "group_by"): "用于分类的真实字段名列表。省略时仅统计合计。",
+    ("table.summarize", "measure"): "count 统计数量，sum 汇总数值字段，area 汇总各要素面积（平方米）。",
+    ("table.summarize", "field"): "sum 必须指定数值字段；area 可传已核实单位为平方米的面积字段，否则按几何计算。",
+    ("table.summarize", "offset"): "分组结果的起始序号，默认 0。后续分页使用返回的 next_offset。",
     ("table.lookup", "field"): "需要返回实际值的字段，匹配条件在 where 中指定。",
     ("cad.convert", "layer"): "DXF 图纸内的原始图层名称。",
     ("vector.dissolve", "fields"): "用于融合分组的字段。空列表表示整体融合。",

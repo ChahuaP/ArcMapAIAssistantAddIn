@@ -1,10 +1,10 @@
 const path = require('node:path');
 
 const formats = {
-    vector: { name: '矢量数据', extensions: ['shp', 'gpkg', 'geojson'] },
+    vector: { name: '矢量数据', extensions: ['shp', 'gpkg', 'geojson', 'gdb'] },
     raster: { name: '影像和栅格', extensions: ['tif', 'tiff', 'img'] },
     cad: { name: 'CAD 图纸', extensions: ['dxf', 'dwg'] },
-    document: { name: '审批文档', extensions: ['pdf', 'docx', 'xlsx', 'txt', 'doc', 'xls'] },
+    document: { name: '审批文档', extensions: ['pdf', 'docx', 'xlsx', 'csv', 'txt', 'doc', 'xls'] },
 };
 const kinds = new Map(Object.entries(formats).flatMap(([kind, group]) =>
     group.extensions.map(extension => ['.' + extension, kind])));

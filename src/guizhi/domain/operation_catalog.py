@@ -14,6 +14,8 @@ def op(purpose, roles, products):
 
 
 CONTRACTS = {
+    "xy.inspect": op("列出 CSV 或 XLSX 坐标表的工作表、字段名称和表头问题。", "坐标表", "fields"),
+    "xy.points": op("从 CSV 或 XLSX 的横、纵坐标字段生成点图层。每条数据行生成一个点，保留其属性。", "坐标表", "vector"),
     "data.copy": op("完整复制一个已有矢量图层。", "源图层", "vector"),
     "data.merge": op("将多个图层的要素纵向合并到新图层。", "待合并图层", "vector"),
     "data.append": op("以第一层为目标，将其余图层的数据追加入目标副本。", "目标图层 追加来源", "vector"),
@@ -38,6 +40,7 @@ CONTRACTS = {
     "table.add_coordinates": op("将点的横纵坐标写入属性字段，使用图层坐标单位。", "点图层", "vector"),
     "table.add_field": op("按名称和数据类型增加属性字段。", "目标图层", "vector"),
     "table.delete_field": op("删除指定属性字段。", "目标图层", "vector"),
+    "table.summarize": op("按完整匹配范围统计数量、字段之和或面积，可按多个属性分类。返回每组和总计，包含范围、字段、单位和有效值数。", "待统计图层", "statistics"),
     "table.lookup": op("返回满足条件的完整记录总数（statistics.lookup.count）及字段值样本（statistics.lookup.rows，最多 25 条）。查询不改变选区。", "待查询图层", "lookup statistics"),
     "table.calculate_field": op("根据字段、表达式或常量计算并更新指定字段。", "目标图层", "vector"),
     "table.calculate_geometry": op("按几何类型和单位将面积、长度或坐标写入字段。", "目标图层", "vector"),
@@ -140,22 +143,26 @@ RESPONSE_FIELDS = {
 }
 
 DETAILS = {
+    "xy.inspect": "fields 列出每个工作表的 sheet 和 fields；CSV 的 sheet 为 null，表头无效时返回 issue。",
     "data.describe": "value 是完整图层要素数，statistics.coordinate_system 为实际空间参考。",
     "data.selection_count": "statistics.selected_count 是给定选区的完整要素数。",
+    "table.summarize": "statistics.summary.groups 是各组，total 是完整匹配范围的合计。scope=all_input 表示整份输入，filtered 表示仅筛选范围。match_status=no_matches 表示条件未命中。分页不改变合计。measure=area 时每组和总计的 area 给出平方米、亩、公顷和平方千米实值。",
     "table.lookup": "statistics.lookup.count 是全部匹配数；rows 只预览前 25 条，值可能重复。",
-    "vector.area": "value 是平方米；statistics.area_summary 给出数量和统计口径（按条件或逐要素统计时）。",
+    "vector.area": "value 是平方米；statistics.area 为四种标准面积单位的实值；statistics.area_summary 给出数量和统计口径（按条件或逐要素统计时）。",
     "raster.statistics": "value 是波段数，statistics 和 raster 包含波段、范围和分辨率。",
     "flow.unique_values": "value 是全部匹配的唯一值列表；超过 500 项时要求缩小范围。",
     "presentation.map_layout": "export=true 时由桌面端应用版面后导出，仅完成本步骤时产物为版面定义。",
 }
 
 REQUIREMENTS = {
+    "xy.points": "输入 CSV 或 XLSX；先查看表头，横、纵字段须不同，每行须有有效坐标。坐标系取自源表。",
     "data.select_by_location": "within_a_distance 时填写 distance；组合选区时填写 previous，须属第一图层同一版本。",
     "data.select_by_attribute": "组合选区时填写 previous，须属原图层同一版本。",
     "data.export_selection": "selection 必须来自第一图层的同一版本。",
     "data.selection_count": "selection 必须来自第一图层的同一版本。",
     "vector.area": "几何面积需面图层和投影坐标系。已有平方米数值字段可作为 area_field。",
     "vector.buffer": "distance 必须是有限非负值；实际距离单位须能转换到图层坐标单位。",
+    "table.summarize": "按属性计数与求和可使用任意矢量图层；无面积字段时，几何面积须使用投影面图层。统计仅用于回答，保留地图图层和选区。",
     "table.calculate_geometry": "几何量须与图层几何类型匹配；面积、长度、周长和坐标使用对应单位。",
     "imagery.change": "两期分类影像需具有相同的范围、格网和空间参考。",
     "raster.mosaic": "输入栅格须有一致的坐标系、像元尺寸、对齐格网、波段和类型。",

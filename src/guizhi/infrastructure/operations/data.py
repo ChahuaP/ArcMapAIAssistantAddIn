@@ -182,4 +182,4 @@ def export_selection(ctx, selection: Selection):
                    (*bounds, ctx.request.inputs[0].layer))
         return {"deleted": len(frame) - len(remaining)}
 
-    return table_copy(ctx, keep)
+    return table_copy(ctx, keep, edit_source=False)

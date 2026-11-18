@@ -119,6 +119,13 @@ def digest(path: Path) -> str:
 
 
 def source_files(path):
+    if path.suffix.lower() == ".gdb":
+        from guizhi.infrastructure.arcmap import file_stamps
+
+        parts = [path / name for name, _, _ in file_stamps(path)]
+        if not path.is_dir() or not parts or any(file.resolve() != file for file in parts):
+            raise ValueError("请选择有效的本机文件地理数据库（.gdb 文件夹）")
+        return parts
     if path.suffix.lower() != ".shp":
         return [path]
     allowed = {".shp", ".shx", ".dbf", ".prj", ".cpg"}
@@ -199,7 +206,7 @@ def snapshot_external(source, snapshot, layer, ensure_supervised, allow_undefine
 
 def convert_external(copied, snapshot, layer, allow_undefined, check, metadata_only):
     info = pyogrio.read_info(copied, layer=layer)
-    if metadata_only and copied.suffix.lower() == ".shp":
+    if metadata_only and copied.suffix.lower() in {".shp", ".gdb"}:
         from guizhi.infrastructure.gdal_translate import vector_translate
 
         names = {name.casefold() for name in info["fields"]}
@@ -208,7 +215,9 @@ def convert_external(copied, snapshot, layer, allow_undefined, check, metadata_o
             fid += "_"
         while geometry in names:
             geometry += "_"
-        crs = CRS(info["crs"]) if info["crs"] else shapefile_projection(source_files(copied))
+        crs = CRS(info["crs"]) if info["crs"] else None
+        if not crs and copied.suffix.lower() == ".shp":
+            crs = shapefile_projection(source_files(copied))
         projection = ("-a_srs", crs.to_wkt()) if crs else ()
         # SHP line and polygon records can contain either one or several parts.
         family = info["geometry_type"] if info["geometry_type"] in {"LineString", "Polygon"} else None
@@ -259,7 +268,16 @@ def import_layer(source_path, layer, directory, filename, job_id, ensure_supervi
     source = Path(source_path)
     snapshot = directory / "artifacts" / filename
     originals = []
-    if source.suffix.lower() == ".gpkg":
+    if source.suffix.lower() == ".gdb":
+        from guizhi.infrastructure.arcmap import file_stamps
+
+        before = file_stamps(source)
+        if expected_source_revision and source_revision(source_files(source)) != expected_source_revision:
+            raise Fault("association", "input_revision_mismatch", "文件地理数据库已变化，请重新选择")
+        defined = convert_external(source, snapshot, layer, allow_undefined, ensure_supervised, metadata_only)
+        if file_stamps(source) != before:
+            raise ValueError("读取期间数据库发生变化，请保存编辑后重试")
+    elif source.suffix.lower() == ".gpkg":
         defined = snapshot_gpkg(source, snapshot, layer, ensure_supervised, allow_undefined=allow_undefined)
     else:
         defined, originals = snapshot_external(source, snapshot, layer, ensure_supervised, allow_undefined,

@@ -13,6 +13,7 @@ import pyogrio
 import shapely
 from pydantic import BaseModel, ConfigDict, Field
 
+from guizhi.domain.area_units import M2_PER_UNIT, area_values
 from guizhi.infrastructure.operations.common import condition
 from guizhi.infrastructure.operations.data import AttributeFilter, AttributeValue
 
@@ -35,6 +36,75 @@ def lookup(ctx, field: str, where: AttributeFilter | None = None):
               "filter": where.model_dump(mode="json", exclude_none=True) if where else None}
     ctx.json("lookup.json", result, "lookup")
     return {"statistics": {"lookup": result}}
+
+
+def summarize(ctx, measure: Literal["count", "sum", "area"] = "count", group_by: list[str] | None = None,
+              where: AttributeFilter | None = None, field: str | None = None, offset: int = 0):
+    """对完整筛选范围分组并计算各组、总计。分页仅影响返回的分组。"""
+    from math import fsum
+    import pandas as pd
+    from pandas.api.types import is_numeric_dtype, is_bool_dtype
+    from guizhi.infrastructure.map_attributes import filter_ids
+    from guizhi.infrastructure.operations.common import valid
+
+    frame = ctx.frames[0]
+    groups = group_by or []
+    attrs = set(frame.columns) - {frame.geometry.name}
+    if len(groups) != len(set(groups)) or not set(groups) <= attrs:
+        raise ValueError("分组字段必须是图层中互不重复的属性字段")
+    if offset < 0 or (not groups and offset):
+        raise ValueError("分组分页位置无效")
+    if (measure == "count" and field is not None) or (measure == "sum" and field is None):
+        raise ValueError("计数无需指定统计字段，字段求和须指定数值字段")
+    if field is not None and (field not in attrs or not is_numeric_dtype(frame[field]) or is_bool_dtype(frame[field])):
+        raise ValueError("请选择图层中实际存在的数值字段")
+    layer = ctx.request.inputs[0].layer
+    filters = where.model_dump(mode="json", exclude_none=True) if where else None
+    input_count = len(frame)
+    if filters:
+        fids = filter_ids(ctx.directory / ctx.evidence[0]["path"], layer, filters)
+        frame = frame.loc[fids]
+    values = frame[field] if field is not None else None
+    if measure == "area" and field is None:
+        crs = frame.crs
+        if not crs or not crs.is_projected or len(crs.axis_info) != 2:
+            raise ValueError("几何面积统计需要投影坐标系，或已核实单位为平方米的面积字段")
+        if not frame.empty:
+            valid(frame, polygon=True)
+        scale = crs.axis_info[0].unit_conversion_factor * crs.axis_info[1].unit_conversion_factor
+        values = frame.geometry.area * scale
+    if values is not None:
+        clean = values.dropna()
+        if not all(isfinite(v) for v in clean) or (measure == "area" and (clean < 0).any()):
+            raise ValueError("统计字段含无效数值")
+
+    def totals(records):
+        count = len(records)
+        if values is None:
+            return {"count": count}
+        series = values.loc[records.index].dropna()
+        amount = (sum(map(int, series)) if pd.api.types.is_integer_dtype(series) else fsum(series)) if len(series) else None
+        value = amount if count else 0
+        result = {"count": count, "valid": len(series), "value": value}
+        if measure == "area":
+            result["area"] = area_values(value)
+        return result
+
+    grouped = frame.groupby(groups, sort=True, observed=True, dropna=False) if groups else None
+    group_count = grouped.ngroups if grouped is not None else 0
+    rows = []
+    if grouped is not None:
+        from itertools import islice
+        for _, records in islice(grouped, offset, offset + 50):
+            keys = json.loads(records[groups].iloc[:1].to_json(orient="records", date_format="iso", double_precision=15))[0]
+            rows.append({"keys": keys, **totals(records)})
+    result = {"layer": layer, "filter": filters, "group_by": groups, "measure": measure, "field": field,
+              "scope": "filtered" if filters else "all_input", "input_count": input_count,
+              "match_status": "matched" if len(frame) else ("no_matches" if input_count else "empty_input"),
+              "unit": "m²" if measure == "area" else None, "groups": rows, "total": totals(frame),
+              "group_count": group_count, "next_offset": offset + len(rows) if offset + len(rows) < group_count else None}
+    ctx.json("summary.json", result, "statistics")
+    return {"statistics": {"summary": result}}
 
 
 class FieldSpec(BaseModel):
@@ -118,7 +188,7 @@ def install_spatial_functions(db):
         db.create_function(name, 1, lambda value, axis=index: bound(value, axis), deterministic=True)
 
 
-def table_copy(ctx, action):
+def table_copy(ctx, action, *, edit_source=True):
     from guizhi.infrastructure.operations.runner import data_revision
 
     source = ctx.directory / ctx.evidence[0]["path"]
@@ -140,8 +210,10 @@ def table_copy(ctx, action):
     if len(frame) != count:
         raise ValueError("Attribute edit changed unexpected rows")
     ctx.record("export", output)
-    return {"export_layer": layer, "data_revision": data_revision(output), "statistics": {"feature_count": count},
-            "changeset": {"target_revision": ctx.selection_hashes[0], **change}}
+    result = {"export_layer": layer, "data_revision": data_revision(output), "statistics": {"feature_count": count}}
+    if edit_source:
+        result["changeset"] = {"target_revision": ctx.selection_hashes[0], **change}
+    return result
 
 
 def add_field(ctx, field: FieldSpec):
@@ -313,7 +385,7 @@ def calculate_geometry(ctx, field: str = "AREA_M2",
     crs = CRS(frame.crs)
     if not (crs.is_projected or crs.is_geographic):
         raise ValueError("请选择使用地理或投影坐标系的图层")
-    units = ({"square_meters": 1, "mu": 10_000 / 15, "hectares": 10_000, "square_kilometers": 1_000_000} if property == "area" else
+    units = (M2_PER_UNIT if property == "area" else
              {"meters": 1, "kilometers": 1_000} if property in {"length", "perimeter"} else {"layer": 1})
     if unit is not None and unit not in units:
         raise ValueError("所选单位与几何属性不匹配")

@@ -684,30 +684,76 @@ async function startDesktop(options) {
         shell.showItemInFolder(output);
         return result;
     }, true);
-    bind('mapImport', async (surface, paths) => {
-        if (surface !== window) throw new Error('请从工作台添加图层');
-        const files = paths || (await dialog.showOpenDialog(window, { properties: ['openFile', 'multiSelections'],
-            filters: [{ name: '空间数据', extensions: [...formats.vector.extensions, ...formats.raster.extensions, 'zip'] }] })).filePaths;
-        if (!files.length) return { layers: [], issues: [] };
-        window.webContents.send('guizhi:mapImportProgress', { label: '正在读取文件信息' });
-        const intake = await controller.intake(files, 'any');
-        const items = intake.items.filter(item => item.kind === 'vector')
-            .flatMap(item => item.layers.map(layer => ({ file: item.file, layer, revision: null })));
-        const images = intake.items.filter(item => item.kind === 'raster');
-        const jobs = [...items.map(item => ['import', item]), ...images.map(item => ['raster-import', item])];
+    let pendingSource;
+    function offerSource(kind, items, details) {
+        const id = randomUUID();
+        pendingSource = { id, kind, items, workspace: controller.settings.workspace };
+        return { id, kind, ...details };
+    }
+    async function importMapJobs(jobs, issues = []) {
         const layers = [];
         for (const [completed, [action, item]] of jobs.entries()) {
-            const name = item.name || path.basename(item.file);
+            const name = item.name || item.layer || path.basename(item.file);
             window.webContents.send('guizhi:mapImportProgress', { label: '正在加载 ' + name, total: jobs.length > 1 ? jobs.length : 0, completed });
             try { layers.push(...await controller.gis.map(controller.settings.workspace, { action, items: [item] })); }
-            catch (error) { intake.issues.push({ name, message: error.message }); }
+            catch (error) { issues.push({ name, message: error.message }); }
         }
         if (jobs.length) window.webContents.send('guizhi:mapImportProgress', { label: '正在绘制图层',
             total: jobs.length, completed: jobs.length });
-        for (const item of intake.items) if (!['vector', 'raster'].includes(item.kind)) {
-            intake.issues.push({ name: item.name, message: '地图支持矢量和影像图层' });
+        return { layers, issues };
+    }
+    bind('mapImport', async (surface, paths, mode) => {
+        if (surface !== window) throw new Error('请从工作台添加图层');
+        pendingSource = null;
+        const empty = { layers: [], issues: [] };
+        if (mode === 'xy') {
+            const pick = await dialog.showOpenDialog(window, { title: '选择坐标表', properties: ['openFile'],
+                filters: [{ name: '坐标表', extensions: ['csv', 'xlsx'] }] });
+            if (pick.canceled) return empty;
+            const file = externalPath(pick.filePaths[0]);
+            const tables = await controller.reader.map(controller.settings.workspace, { action: 'xy-fields', file });
+            return { ...empty, source: offerSource('xy', [file], { name: path.basename(file), tables }) };
         }
-        return { layers, issues: intake.issues };
+        const db = mode === 'gdb';
+        const files = paths || (await dialog.showOpenDialog(window, db ?
+            { title: '选择 .gdb 地理数据库目录', properties: ['openDirectory'] } :
+            { properties: ['openFile', 'multiSelections'], filters: [{ name: '空间数据',
+                extensions: [...formats.vector.extensions.filter(ext => ext !== 'gdb'), ...formats.raster.extensions, 'zip'] }] })).filePaths;
+        if (!files.length) return empty;
+        if (db && !files.every(file => path.extname(file).toLowerCase() === '.gdb')) throw new Error('请选择扩展名为 .gdb 的地理数据库目录');
+        window.webContents.send('guizhi:mapImportProgress', { label: '正在读取文件信息' });
+        const intake = await controller.intake(files, 'any');
+        const databases = intake.items.filter(item => item.kind === 'vector' && path.extname(item.file).toLowerCase() === '.gdb');
+        const jobs = [];
+        for (const item of intake.items) {
+            if (databases.includes(item)) continue;
+            if (item.kind === 'vector') for (const layer of item.layers) jobs.push(['import', { file: item.file, layer, revision: null }]);
+            else if (item.kind === 'raster') jobs.push(['raster-import', item]);
+            else intake.issues.push({ name: item.name, message: '地图支持矢量和影像图层' });
+        }
+        const result = await importMapJobs(jobs, intake.issues);
+        if (databases.length) result.source = offerSource('gdb', databases, {
+            databases: databases.map(item => ({ name: item.name, layers: item.layers })),
+        });
+        return result;
+    }, true);
+    bind('mapSourceApply', async (surface, id, params) => {
+        const source = pendingSource;
+        if (surface !== window || !source || source.id !== id || source.workspace !== controller.settings.workspace) {
+            throw new Error('请重新选择数据源');
+        }
+        let result;
+        if (source.kind === 'xy') {
+            const layers = await controller.gis.map(source.workspace, { action: 'xy-import', file: source.items[0], parameters: params });
+            result = { layers, issues: [] };
+        } else {
+            const jobs = source.items.flatMap((item, index) => item.layers.filter(layer => params[index]?.includes(layer))
+                .map(layer => ['import', { file: item.file, layer, revision: null }]));
+            if (!jobs.length) throw new Error('请选择需要添加的图层');
+            result = await importMapJobs(jobs);
+        }
+        if (pendingSource === source) pendingSource = null;
+        return result;
     }, true);
     bind('mapTaskInputs', async (surface, id) => {
         if (surface !== window) throw new Error('请从工作台查看材料');

@@ -361,6 +361,11 @@ dialog label { display: grid; gap: 5px; }
 .map-swatch[data-color="4"] { background: #cc5785; }
 .map-viewport { display: flex; flex-direction: column; min-height: 0; position: relative; overflow: hidden; }
 .map-viewport .geo-map { position: relative; }
+.workspace-map[data-map-mode="pan"] .geo-map { cursor: grab; }
+.workspace-map[data-map-mode="pan"] .geo-map:active { cursor: grabbing; }
+.workspace-map[data-map-mode="tool"] .geo-map { cursor: crosshair; }
+.map-measure-readout { position: absolute; inset-block-start: 10px; inset-inline-start: 10px; z-index: 4; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 6px 10px; background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; }
+.map-measure-readout output { font-variant-numeric: tabular-nums; }
 .workspace-map[data-identify="true"] .geo-map { cursor: crosshair; }
 .workspace-map[data-box-select="true"] .geo-map { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Cpath d='M16 3v26M3 16h26' fill='none' stroke='%23fff' stroke-width='5'/%3E%3Cpath d='M16 3v26M3 16h26' fill='none' stroke='%231d2835' stroke-width='2'/%3E%3C/svg%3E") 16 16, crosshair; }
 .map-selection-box { border: 2px solid #fff000; background: #fff00018; box-shadow: 0 0 0 1px #312a05; }
@@ -719,6 +724,13 @@ dialog label { display: grid; gap: 5px; }
 .workbench-modes .ant-btn { width: 30px; height: 28px; }
 .workbench-mode-active.ant-btn { background: var(--soft); }
 .workbench-chat-dock { flex: none; padding: var(--space-2); background: var(--panel); border-top: 1px solid var(--line); }
+.map-reply { margin: 0 0 var(--space-2); }
+.map-reply-toggle { display: flex; align-items: center; gap: 8px; width: 100%; padding: 5px 8px; border: 0; color: var(--ink); background: transparent; text-align: start; cursor: pointer; }
+.map-reply-toggle span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.map-reply-toggle svg { flex: none; }
+.map-reply-toggle[aria-expanded="true"] svg:last-child { transform: rotate(180deg); }
+.map-reply-content { max-height: min(30vh, 260px); overflow: auto; overscroll-behavior: contain; }
+.map-reply-content .bubble { margin: 0; max-width: 100%; }
 .workbench-chat-dock .composer textarea { min-height: 36px; max-height: 110px; }
 .workbench-content .welcome .skill-tiles { grid-template-columns: 1fr; }
 .workbench-interaction { display: contents; }

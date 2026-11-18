@@ -1,10 +1,12 @@
 import 'ol/ol.css';
+import { MapSourceDialog } from './map-source-dialog.js';
+import { attachMeasurement } from './map-measure.js';
 import { MapProcessing, MapResultDialog, MapTool, TOOL_GROUPS, toolError, toolIcon,
     roleLayerPicker, layerMatches, mapLayerMaterial } from './map-processing.js';
 import { geometryProperties } from './map-attribute-tools.js';
 import { useTableWindow } from './map-table-window.js';
 import { AttributeSort, AttributeStatistics, AttributeCell } from './map-table-ui.js';
-import { MapLayout, amendLayout, drawMapLayers, layoutDefaults, mapCanvas, mapImage, sheetSize } from './map-layout.js';
+import { MapLayout, amendLayout, drawMapLayers, mapCanvas, mapImage, sheetSize } from './map-layout.js';
 import { LayerProperties, MapProperties, MxdOpen, categoryValue, classifyLayer, defaultMapBackground, layerSymbol, opacity, symbol } from './map-layer-dialog.js';
 import Map from 'ol/Map.js';
 import Overlay from 'ol/Overlay.js';
@@ -226,6 +228,8 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
     const [edit, setEdit] = useState('');
     const [boxSelect, setBoxSelect] = useState(false);
     const [pointSelect, setPointSelect] = useState(false);
+    const [measure, setMeasure] = useState(null);
+    const [measurement, setMeasurement] = useState('');
     const selectionMode = useRef(null);
     const [mergeTarget, setMergeTarget] = useState(null);
     const [clipboard, setClipboard] = useState(null);
@@ -256,10 +260,11 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
     const [drawingPoints, setDrawingPoints] = useState(0);
     const original = useRef(new globalThis.Map());
     const [busy, setBusy] = useState(false);
-    selectionMode.current = { boxSelect, pointSelect, edit, busy };
+    selectionMode.current = { boxSelect, pointSelect, edit, busy, measure };
     const exportedLayout = useRef(null);
     const appliedActions = useRef(null);
     const [importing, setImporting] = useState(null);
+    const [sourceDialog, setSourceDialog] = useState(null);
     useEffect(() => api.onMapImportProgress(setImporting), []);
     useEffect(() => { editing(Boolean(edit) || busy); return () => editing(false); }, [Boolean(edit), busy]);
     const [issue, setIssue] = useState('');
@@ -267,7 +272,14 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
     const [locateMxd, setLocateMxd] = useState(null);
     const [table, setTable] = useState(null);
     const [tableLayer, setTableLayer] = useState(null);
-    const [page, setPage] = useState(0);
+    const [tableRequest, requestTable] = useState({ page: 0 });
+    const [resolvedPage, setResolvedPage] = useState(0);
+    const tablePanel = useRef(null);
+    const zoomRequest = useRef(0);
+    const focusFid = tableRequest.layer === active ? tableRequest.fid : undefined;
+    const page = focusFid == null ? tableRequest.page : resolvedPage;
+    function setPage(page) { requestTable({ page }); }
+    function focusRow(layer, fid) { if (fid != null) requestTable({ page: 0, layer, fid }); }
     const [sort, setSort] = useState({});
     const [tableFilter, setTableFilter] = useState('all');
     const [tableDialog, setTableDialog] = useState(null);
@@ -301,12 +313,22 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
     const metresPerUnit = display ? display.metresPerUnit : native?.metresPerUnit;
     const initialExtent = display?.bounds;
     const backgroundColor = background || defaultMapBackground;
+    const canMeasure = Boolean(target) && (units === 'degrees' || metresPerUnit > 0 || units === 'm');
+    function startMeasure(type) {
+        toggleIdentify(false);
+        setPointSelect(false);
+        setBoxSelect(false);
+        setMeasurement('');
+        setMeasure(measure === type ? null : type);
+        node.current?.focus();
+    }
     function closeIdentification() {
         identification.current += 1;
         graph.current?.identify.setPosition(undefined);
         setIdentified(null);
     }
     function toggleIdentify(enabled) {
+        setMeasure(null);
         identifying.current = enabled;
         setIdentify(enabled);
         if (!enabled) closeIdentification();
@@ -330,8 +352,15 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
     }
 
     useEffect(() => {
-        if (openLayout && layoutDraft) setLayout({ key: openLayout, config: layoutDraft });
+        if (openLayout) openManualLayout(openLayout);
     }, [openLayout]);
+
+    function openManualLayout(id) {
+        const size = graph.current?.ol.getSize();
+        const config = amendLayout(null, layoutDraft || { title: layer?.name || '地图' });
+        config.viewBounds = viewReady && size?.every(value => value > 0) ? graph.current.view.calculateExtent(size) : undefined;
+        setLayout({ key: id, config });
+    }
 
     function prepareLayout(config) {
         const size = graph.current.ol.getSize();
@@ -355,7 +384,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
     }
 
     async function renderFrame(items, bounds, size, zoom) {
-        if (!items.length) throw new Error('请为地图框选择图层');
+        if (!items.length) throw new Error('请先在地图工作区添加并显示图层，再预览或导出图件');
         const view = new View({ projection: projection(target, units), center: [0, 0], zoom: 0 });
         const offscreen = globalThis.document.createElement('div');
         Object.assign(offscreen.style, { position: 'fixed', left: '-20000px', top: '0',
@@ -579,7 +608,8 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         setIoStatus('');
         setImportIssues([]);
         try {
-            const { layers: items, issues } = await job;
+            const { layers: items, issues, source } = await job;
+            if (source) setSourceDialog(source);
             if (items.length) graph.current.fitNeeded = true;
             add(items);
             setImportIssues(issues);
@@ -618,7 +648,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         node.current.addEventListener('pointerleave', clearCursor);
         setCursor(null);
         if (units === 'm' || units === 'degrees') ol.addControl(new ScaleLine({ units: 'metric' }));
-        const selectable = () => !identifying.current && !selectionMode.current.busy &&
+        const selectable = () => !identifying.current && !selectionMode.current.measure && !selectionMode.current.busy &&
             (!selectionMode.current.edit || selectionMode.current.edit === 'select') &&
             Boolean(graph.current?.byKey.get(activeRef.current) instanceof VectorLayer && graph.current.byKey.get(activeRef.current).getVisible() && !graph.current.byKey.get(activeRef.current).get('coverage'));
         const subtract = event => event.originalEvent.ctrlKey && !event.originalEvent.shiftKey;
@@ -639,6 +669,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
             const ids = removed ? previous.filter(id => !event.deselected.some(item => item.getId() === id))
                 : added ? [...new Set([...previous, ...changed])] : select.getFeatures().getArray().map(item => item.getId());
             setSelection({ key: layer, ids });
+            if (!removed) focusRow(layer, changed.at(-1));
         });
         const box = new DragBox({ className: 'ol-box map-selection-box', condition: event => selectable() && primaryAction(event) &&
             (shiftKeyOnly(event) || selectionMode.current.boxSelect && (noModifierKeys(event) || subtract(event))) });
@@ -662,6 +693,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
             const ids = subtract(event.mapBrowserEvent) ? previous.filter(id => !hits.has(id)) :
                 shiftKeyOnly(event.mapBrowserEvent) ? [...new Set([...previous, ...hits])] : [...hits];
             setSelection({ key: layer, ids });
+            if (!subtract(event.mapBrowserEvent)) focusRow(layer, hits.values().next().value);
         });
         ol.addInteraction(box);
         const host = globalThis.document.createElement('div');
@@ -710,6 +742,11 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
             void api.mapSnapshot(null).catch(fail);
         };
     }, [target, units, metresPerUnit, initialExtent]);
+    useEffect(() => {
+        setMeasurement('');
+        if (!measure || !canMeasure || !graph.current || busy || edit) return;
+        return attachMeasurement(graph.current.ol, measure, units === 'degrees', metresPerUnit || 1, setMeasurement);
+    }, [target, units, metresPerUnit, initialExtent, measure, canMeasure, busy, edit]);
 
     useEffect(() => {
         const state = graph.current;
@@ -917,11 +954,41 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         if (!layer || layer.kind === 'raster' || !table) return;
         let alive = true;
         const order = sort.key === key(layer) ? sort.order : [];
-        api.map({ action: 'table', ref: layer.ref, page, order, selection: emptyFilter ? [] : selectedRows?.filter(Number.isSafeInteger) }).then(result => {
-            if (alive) { setTable(result.rows); setTableLayer(key(layer)); }
+        api.map({ action: 'table', ref: layer.ref, page: tableRequest.page, order,
+            focusFid: Number.isSafeInteger(focusFid) ? focusFid : undefined,
+            selection: emptyFilter ? [] : selectedRows?.filter(Number.isSafeInteger) }).then(result => {
+            if (alive) { setTable(result.rows); setTableLayer(key(layer)); setResolvedPage(result.page); }
         }).catch(error => { if (alive) fail(error); });
         return () => { alive = false; };
-    }, [layer, page, sort, selectedRows, emptyFilter, Boolean(table)]);
+    }, [layer, tableRequest, sort, selectedRows, emptyFilter, Boolean(table)]);
+    useEffect(() => {
+        if (focusFid == null || !tablePanel.current) return;
+        const row = [...tablePanel.current.querySelectorAll('tr[data-row-key]')].find(
+            element => element.dataset.rowKey === String(focusFid));
+        row?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    }, [table, focusFid, tableWindow.detached]);
+    async function zoomToRow(row) {
+        const g = graph.current;
+        if (!g || !layer || busy) return;
+        const request = ++zoomRequest.current;
+        try {
+            const drawing = g.byKey.get(active);
+            // A rendered feature can be clipped to the viewport. Use the complete stored geometry outside edit mode.
+            let geometry = edit && drawing?.getSource().getFeatureById(row.id)?.getGeometry();
+            if (!geometry && Number.isSafeInteger(row.id)) {
+                const slice = await api.map({ action: 'features', ref: layer.ref, fids: [row.id], target, plan: drawing?.get('displayPlan') });
+                const match = slice.features.find(item => item.id === row.id);
+                geometry = match?.geometry && format.readGeometry(match.geometry);
+            }
+            if (g !== graph.current || active !== activeRef.current || request !== zoomRequest.current) return;
+            if (!geometry) throw new Error('该要素没有可定位的几何');
+            if (hidden.includes(active)) toggle(active);
+            setSelection({ key: active, ids: [row.id] });
+            const size = g.ol.getSize();
+            const margin = Math.min(32, Math.floor(Math.min(...size) / 5));
+            g.view.fit(geometry, { size, padding: [margin, margin, margin, margin], maxZoom: 18 });
+        } catch (error) { if (request === zoomRequest.current) fail(error); }
+    }
     async function invertSelection() {
         setBusy(true);
         try {
@@ -1129,6 +1196,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
     }
     function mapKeys(event) {
         if (event.key === 'Escape' && !busy && !event.target.closest('input, textarea, [role="dialog"]')) {
+            if (measure) { setMeasure(null); return; }
             if (identify) { toggleIdentify(false); return; }
             if (edit && edit !== 'select') { setEdit('select'); setIssue(''); return; }
             if (clipboard) { cancelClipboard(); return; }
@@ -1204,7 +1272,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
             translate.on('translateend', makeChanges);
             interactions.push(translate);
         }
-        if (edit !== 'select') {
+        if (edit !== 'select' && edit !== 'pan') {
             for (const candidate of g.byKey.values()) {
                 if (candidate instanceof VectorLayer && candidate.getVisible()) interactions.push(new Snap({ source: candidate.getSource() }));
             }
@@ -1466,7 +1534,8 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
             if (action === 'selection') { void saveSelectedLayer(); return; }
             if (action === 'table') {
                 if (id !== active) selectLayer(id);
-                setPage(0);
+                if (selection?.key === id && selection.ids.length) focusRow(id, selection.ids[0]);
+                else setPage(0);
                 setTableFilter('all');
                 setTable(current => current || []);
                 return;
@@ -1525,11 +1594,14 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
     }
     const commands = {
         地图: [group('导航',
-            command('平移', () => { toggleIdentify(false); setPointSelect(false); setBoxSelect(false); },
-                { icon: glyph('hand'), 'aria-pressed': !pointSelect && !boxSelect && !identify }),
+            command('平移', () => { toggleIdentify(false); setPointSelect(false); setBoxSelect(false); if (edit) setEdit('pan'); node.current?.focus(); },
+                { icon: glyph('hand'), title: '按住鼠标左键拖动地图', 'aria-pressed': !pointSelect && !boxSelect && !identify && !measure && (!edit || edit === 'pan') }),
             command('全图', () => position(false), { disabled: !layers.length }),
             command('定位图层', () => position(true), { disabled: !layer }),
             command('放大', () => graph.current.view.adjustZoom(1)), command('缩小', () => graph.current.view.adjustZoom(-1))),
+            group('量测', ...[['测距', 'LineString', 'measure'], ['测面', 'Polygon', 'area']].map(([label, type, icon]) =>
+                command(label, () => startMeasure(type), { icon: glyph(icon), disabled: busy || Boolean(edit) || !canMeasure,
+                    'aria-pressed': measure === type }))),
             group('查询', command('识别要素', () => toggleIdentify(!identify), { disabled: busy || !layers.some(item => item.geometry),
                 type: identify ? 'primary' : 'default', 'aria-pressed': identify })),
             group('显示', command('地图属性', () => setMapProperties({ display, plan: displayPlans[active] }), { disabled: busy }))],
@@ -1542,6 +1614,8 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
             result => setIoStatus('已保存 MXD 和配套数据 · ' + result.layers + ' 个图层')),
             { disabled: busy || !layers.length || !viewReady, 'aria-label': '保存地图工程' })),
             group('图层管理', command('添加图层', () => load(api.mapImport()), { disabled: busy }),
+                command('地理数据库', () => load(api.mapImport(null, 'gdb')), { icon: glyph('folderOpen'), disabled: busy }),
+                command('添加 XY 数据', () => load(api.mapImport(null, 'xy')), { icon: glyph('target'), disabled: busy }),
                 command('新建图层', () => openTool('geometry.create_dataset')),
                 command('复制图层', () => openTool('data.copy'), { disabled: !layer?.geometry }),
                 command('合并图层', () => openTool('data.merge'), { disabled: layers.filter(item => item.geometry).length < 2 }))] : []),
@@ -1570,9 +1644,8 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 command('拆分多部件', () => openPartsTool('geometry.explode'),
                     { disabled: !partsReady || !picked.length || !picked.every(Number.isSafeInteger) })),
         ] : []), ...editCommands],
-        制图: [group('图件', command('版面布局', () => setLayout({ key: 'manual', config: prepareLayout(
-            layoutDraft || { ...layoutDefaults, title: layer?.name || '地图' }) }),
-        { icon: glyph('layout'), disabled: busy || !viewReady || !layers.length }))],
+        制图: [group('图件', command('版面布局', () => openManualLayout('manual'),
+        { icon: glyph('layout'), disabled: busy }))],
         分析: TOOL_GROUPS.map(({ title, icon, tools }) => {
             const prominent = { '统计': 2, '矢量处理': 2, '叠加分析': 3 }[title] || 0;
             return prominent ? group(title, ...tools.slice(0, prominent).map(item => command(item.title, () => openTool(item.id),
@@ -1589,6 +1662,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
     return h('section', { className: 'workspace-map', 'aria-label': '地图工作区', onKeyDown: mapKeys,
         'data-identify': identify ? 'true' : undefined, 'data-box-select': boxSelect && (!edit || edit === 'select') ? 'true' : undefined,
         'data-edit-mode': edit || undefined,
+        'data-map-mode': measure || identify || pointSelect || boxSelect || (edit && edit !== 'pan') ? 'tool' : 'pan',
         onDragOver: event => { if (event.dataTransfer.types.includes('Files')) event.preventDefault(); },
         onDrop: event => {
             if (!event.dataTransfer.files.length) return;
@@ -1639,6 +1713,9 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                             entry.label || (entry.value ?? '空值')))))))),
             h('div', { className: 'map-viewport' },
                 h('div', { className: 'geo-map', ref: node, tabIndex: 0, 'aria-label': '交互地图', style: { backgroundColor } }),
+                measure && h('div', { className: 'map-measure-readout', role: 'status' },
+                    h('strong', null, measure === 'Polygon' ? '面积' : '距离'), measurement && h('output', null, measurement),
+                    h('span', null, '单击添加顶点，双击完成'), h(Button, { size: 'small', onClick: () => setMeasure(null) }, '结束量测')),
                 identifyHost && identified && window.ReactDOM.createPortal(h('section', { className: 'map-identify-popup',
                     'aria-label': '要素属性', 'data-above': identified.above, 'data-align': identified.align,
                     style: { width: identified.width, maxHeight: Math.min(252, identified.height) } },
@@ -1674,7 +1751,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 scale ? '1 : ' + scale.toLocaleString('zh-CN') : '1 : —'),
             h('span', { className: 'map-status-coordinates', 'aria-label': '鼠标坐标', title: '地图坐标 · X / Y' },
                 cursor && viewReady ? cursor.map(value => value.toFixed(units === 'degrees' ? 6 : 2)).join(' , ') + (units === 'degrees' ? ' °' : units === 'm' ? ' m' : '') : 'X —　Y —')),
-        tableVisible && tableWindow.present(h('section', { className: 'map-attribute-panel', 'aria-label': '属性表' },
+        tableVisible && tableWindow.present(h('section', { ref: tablePanel, className: 'map-attribute-panel', 'aria-label': '属性表' },
             h('header', { className: 'map-attribute-head' }, h('strong', {
                 className: 'map-table-grip', title: tableWindow.detached ? undefined : '拖出属性表',
                 ...tableWindow.dragHandle }, glyph(tableWindow.detached ? 'table' : 'grip'), '属性表',
@@ -1695,6 +1772,9 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 h(Button, { type: 'text', size: 'small', icon: glyph('close', 15),
                     'aria-label': '关闭属性表', onClick: closeTable })),
             h(Table, { className: 'map-attributes', size: 'small', columns, rowKey: 'id', dataSource: [...(page === 0 ? draftRows : []), ...persistedRows],
+                onRow: row => ({ onDoubleClick: event => {
+                    if (!event.target.closest('input, button, label, textarea')) void zoomToRow(row);
+                } }),
                 onChange: (_, filters, sorter, { action }) => {
                     if (action !== 'sort') return;
                     setPage(0);
@@ -1721,12 +1801,14 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 h('label', null, '目标图层', h(Choice, { value: pasteTarget, 'aria-label': '目标图层', disabled: busy,
                     options: pasteTargets.map(item => ({ value: key(item), label: item.name })), onChange: setPasteTarget })),
                 issue && h('p', { className: 'error', role: 'alert' }, issue))),
+        sourceDialog && h(MapSourceDialog, { key: sourceDialog.id, source: sourceDialog, close: () => setSourceDialog(null),
+            add: result => load(Promise.resolve(result)) }),
         properties && h(LayerProperties, { ...properties, close: () => setProperties(null), glyph,
             save: value => styleLayer(key(properties.item), value) }),
         mapProperties && h(MapProperties, { background: backgroundColor, save: applyMapProperties, coordinates: coordinateTools(),
             close: () => setMapProperties(null), glyph }),
         layout && !layout.signal?.aborted && h(MapLayout, { key: layout.key, initial: layout.config,
-            change: saveLayout, draw: drawLayout, layerChoices: layers.map(item => ({ value: key(item), label: item.name })),
+            change: saveLayout, draw: drawLayout, sourceRevision: layoutSource, layerChoices: layers.map(item => ({ value: key(item), label: item.name })),
             onRendered: layout.taskId ? issue => {
                 if (layout.signal?.aborted) return;
                 const jobId = layout.taskId;

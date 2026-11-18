@@ -11,6 +11,7 @@ import sys
 from time import monotonic
 from uuid import uuid4
 
+from guizhi.domain.capabilities import MATERIAL_FORMATS, material_path_exists
 from guizhi.domain.contracts import Job, Run, TaskSpec
 from guizhi.domain.diagnostics import Fault
 from guizhi.domain.operations import OPERATIONS
@@ -168,8 +169,8 @@ def run_vector(root: Path, source: Path, layer: str, object_id: str | None,
                project_plan: str | None = None, control_plan: str | None = None, output_layer: bool = False, progress=None) -> dict:
     definition = OPERATIONS[operation]
     source = source.resolve(strict=True)
-    if not source.is_file() or source.suffix.lower() not in {".gpkg", ".shp", ".geojson"}:
-        raise ValueError("请选择 SHP、GeoJSON 或 GeoPackage 矢量材料")
+    if not material_path_exists(source) or MATERIAL_FORMATS.get(source.suffix.lower()) != "vector":
+        raise ValueError("请选择 SHP、GeoJSON、GeoPackage 或文件地理数据库中的矢量图层")
     if not layer.strip() or (object_id is not None and not object_id.strip()):
         raise ValueError("Layer and any supplied object ID must be non-empty")
     control_source = control_layer = None
@@ -177,8 +178,8 @@ def run_vector(root: Path, source: Path, layer: str, object_id: str | None,
         if control is None or not control[1].strip():
             raise ValueError("请选择管控范围的矢量材料和图层")
         target = control[0].resolve(strict=True)
-        if not target.is_file() or target.suffix.lower() not in {".gpkg", ".shp", ".geojson"}:
-            raise ValueError("请选择 SHP、GeoJSON 或 GeoPackage 管控范围")
+        if not material_path_exists(target) or MATERIAL_FORMATS.get(target.suffix.lower()) != "vector":
+            raise ValueError("请选择矢量数据中的管控范围图层")
         control_source, control_layer = str(target), control[1]
     workspace = Workspace(root, create=True)
     if project_plan or control_plan:
@@ -208,7 +209,7 @@ def run_operation(root, payload, cancel_requested=None):
         raise ValueError("An edit requires an idempotency key and the target snapshot revision")
     for item in request.inputs:
         path = Path(item.file).resolve(strict=True)
-        if not path.is_file():
+        if not material_path_exists(path):
             raise ValueError(f"输入材料不是文件：{path}")
         item.file = str(path)
     payload = request.model_dump(mode="json")

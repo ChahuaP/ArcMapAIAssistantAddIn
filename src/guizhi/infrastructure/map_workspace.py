@@ -183,8 +183,13 @@ def manual_tool(workspace, payload):
         if len(refs) != 1:
             raise ValueError("请选择一个查询图层")
         file, name = source(workspace, refs[0])
-        fids = filter_ids(file, name, parameters["where"])
-        return {"layers": [], "selection": {"layer": name, "revision": material(file, name)["revision"],
+        revision = material(file, name)["revision"]
+        previous = parameters.get("previous")
+        if previous is not None and (not isinstance(previous, dict) or previous.get("revision") != revision):
+            raise ValueError("图层版本已变化，请重新选择要素")
+        fids = filter_ids(file, name, parameters["where"], mode=parameters.get("mode", "new_selection"),
+                          previous=previous["fids"] if previous is not None else None)
+        return {"layers": [], "selection": {"layer": name, "revision": revision,
                                              "fids": fids}, "statistics": {"selected_count": len(fids)}}
     items = [map_material(workspace, ref) for ref in refs]
     if operation in {"data.export_selection", "geometry.multipart", "geometry.explode"}:
@@ -427,6 +432,16 @@ def request(workspace, payload):
 
         return {"mxd-read": map_document.read_document, "mxd-import": map_document.import_frame,
                 "mxd-write": map_document.write_document}[action](workspace, payload)
+    if action == "xy-fields":
+        from guizhi.infrastructure.operations.xy import table_headers
+
+        return table_headers(payload["file"])
+    if action == "xy-import":
+        file = Path(payload["file"])
+        record = successful(run_operation(workspace.root, {"operation": "xy.points",
+            "inputs": [{"file": str(file), "layer": None, "revision": None}],
+            "parameters": payload["parameters"]}))
+        return output_layers(workspace, record, file.stem)
     if action == "tool":
         return manual_tool(workspace, payload)
     if action == "skill":

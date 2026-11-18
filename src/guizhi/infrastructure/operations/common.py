@@ -123,20 +123,21 @@ def selection_fids(ctx, selection):
     return fids
 
 
-def select(ctx, chosen, mode, previous):
-    if mode == "new_selection":
-        if previous is not None:
-            raise ValueError("A new selection has no previous selection")
-    else:
-        if previous is None:
-            raise ValueError("Selection mode requires a previous selection")
-        old = selection_fids(ctx, previous)
+def combine_selection(chosen, mode, previous):
+    if mode == "new_selection" and previous is None:
+        return chosen
+    if previous is not None:
         if mode == "add_to_selection":
-            chosen = old | chosen
-        elif mode == "remove_from_selection":
-            chosen = old - chosen
-        else:
-            chosen = old & chosen
+            return previous | chosen
+        if mode == "remove_from_selection":
+            return previous - chosen
+        if mode == "select_subset":
+            return previous & chosen
+    raise ValueError("选择方式与已有选区不匹配")
+
+
+def select(ctx, chosen, mode, previous):
+    chosen = combine_selection(chosen, mode, selection_fids(ctx, previous) if previous is not None else None)
     result = Selection(layer=ctx.request.inputs[0].layer, revision=ctx.selection_hashes[0],
                        fids=sorted(chosen)).model_dump()
     ctx.json("selection.json", result, "selection")

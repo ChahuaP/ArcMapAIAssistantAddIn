@@ -8,10 +8,14 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 Hash = Annotated[str, StringConstraints(pattern=r"^[a-f0-9]{64}$")]
 
 MATERIAL_FORMATS = {
-    ".gpkg": "vector", ".shp": "vector", ".geojson": "vector", ".tif": "raster", ".tiff": "raster",
+    ".gdb": "vector", ".gpkg": "vector", ".shp": "vector", ".geojson": "vector", ".tif": "raster", ".tiff": "raster",
     ".img": "raster", ".dxf": "cad", ".pdf": "document", ".docx": "document", ".xlsx": "document",
-    ".txt": "document", ".onnx": "model",
+    ".csv": "document", ".txt": "document", ".onnx": "model",
 }
+
+
+def material_path_exists(path):
+    return path.is_dir() if path.suffix.lower() == ".gdb" else path.is_file()
 
 
 def material_kind(file):
@@ -36,6 +40,8 @@ class Capability:
 
 
 CAPABILITIES = {
+    "xy.inspect": Capability("查看坐标表字段", kinds=("document",)),
+    "xy.points": Capability("添加 XY 数据", kinds=("document",)),
     "data.copy": Capability("复制要素"),
     "data.merge": Capability("合并数据", 2, 32),
     "data.append": Capability("追加要素", 2, 32, True),
@@ -46,7 +52,7 @@ CAPABILITIES = {
     "data.select_by_location": Capability("按位置选择", 2, 2, version="1.1.0"),
     "data.clear_selection": Capability("清除选择"),
     "data.export_selection": Capability("导出选择", version="1.1.0"),
-    "vector.area": Capability("汇总面积", version="1.1.0"),
+    "vector.area": Capability("汇总面积", version="1.2.0"),
     "vector.buffer": Capability("缓冲分析", version="1.1.0"),
     "vector.clip": Capability("裁切", 2, 2),
     "vector.intersect": Capability("相交", 2, 32),
@@ -60,6 +66,7 @@ CAPABILITIES = {
     "table.add_coordinates": Capability("写入点坐标"),
     "table.add_field": Capability("添加字段", edit=True),
     "table.delete_field": Capability("删除字段", edit=True),
+    "table.summarize": Capability("分组汇总", version="1.1.0"),
     "table.lookup": Capability("查询匹配要素的字段值", version="1.1.0"),
     "table.calculate_field": Capability("计算字段", edit=True, version="1.3.0"),
     "table.calculate_geometry": Capability("计算几何", edit=True, version="1.3.0"),

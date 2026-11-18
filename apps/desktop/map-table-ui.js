@@ -63,7 +63,7 @@ export function AttributeCell({ field, value, fid, disabled, commit, fail }) {
         const next = event.target.value;
         if (next !== (value == null ? '' : String(value))) commit(fid, field, next === '' ? null : next);
     }
-    return editing ? h(Input, { className: 'gis-cell-edit', size: 'small', autoFocus: true, value: draft,
+    if (editing) return h(Input, { className: 'gis-cell-edit', size: 'small', autoFocus: true, value: draft,
         'aria-label': '编辑 ' + field, onChange: event => setDraft(event.target.value),
         onFocus: event => event.target.select(), onBlur: save, onKeyDown: event => {
             if (event.key !== 'Escape' && event.key !== 'Enter') return;
@@ -71,8 +71,9 @@ export function AttributeCell({ field, value, fid, disabled, commit, fail }) {
             event.preventDefault();
             if (event.key === 'Escape') event.currentTarget.dataset.cancel = 'true';
             event.currentTarget.blur();
-        } }) : h('span', { className: 'gis-cell', tabIndex: 0,
-        title: disabled ? 'Ctrl+C 复制' : '双击编辑 · Ctrl+C 复制', onDoubleClick: open,
+        } });
+    const content = h('span', { className: 'gis-cell', tabIndex: 0,
+        title: disabled ? '双击定位要素 · Ctrl+C 复制' : '双击定位要素 · 右键或 F2 编辑 · Ctrl+C 复制',
         onClick: event => event.currentTarget.focus(),
         onKeyDown: event => {
             if (event.ctrlKey && event.key.toLowerCase() === 'c') {
@@ -84,4 +85,6 @@ export function AttributeCell({ field, value, fid, disabled, commit, fail }) {
                 open();
             }
         } }, String(value ?? '—'));
+    return disabled ? content : h(window.antd.Dropdown, { trigger: ['contextMenu'],
+        getPopupContainer: node => node.ownerDocument.body, menu: { items: [{ key: 'edit', label: '编辑属性值' }], onClick: open } }, content);
 }

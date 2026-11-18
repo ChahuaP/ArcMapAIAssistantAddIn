@@ -43,7 +43,7 @@ function adjust(box, dx, dy, resize) {
         : { ...box, x: clamp(box.x + dx, 0, 1 - box.width), y: clamp(box.y + dy, 0, 1 - box.height) };
 }
 
-export function MapLayout({ initial, busy, close, exportImage, draw, change, layerChoices, onRendered }) {
+export function MapLayout({ initial, busy, close, exportImage, draw, change, sourceRevision, layerChoices, onRendered }) {
     const [value, setValue] = useState(initial);
     const [active, setActive] = useState('frame');
     const paper = useRef(null);
@@ -79,7 +79,7 @@ export function MapLayout({ initial, busy, close, exportImage, draw, change, lay
             } finally { if (current) setRendering(false); }
         }, 85);
         return () => { current = false; clearTimeout(id); };
-    }, [value]);
+    }, [value, sourceRevision]);
     function start(event, name, resize) {
         if (event.button !== 0 || busy) return;
         event.stopPropagation();
