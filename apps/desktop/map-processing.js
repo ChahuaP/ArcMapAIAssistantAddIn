@@ -1,6 +1,6 @@
 import { attributeFilter, fieldCalculation, geometryCalculation, geometryProperties } from './map-attribute-tools.js';
 import { AttributePreview, TokenPicker } from './map-pickers.js';
-import { canSplitParts, geometryName } from './map-layer-dialog.js';
+import { geometryName } from './map-layer-dialog.js';
 
 const h = window.React.createElement;
 const { useEffect, useState } = window.React;
@@ -61,7 +61,7 @@ const definitions = Object.fromEntries([...tools.flatMap(group => group.tools), 
     { ...tool('data.merge', '合并图层', 'merge', '合并', ['待合并图层', vector]), multiple: true },
     tool('geometry.create_dataset', '新建图层', 'newLayer', '创建'),
     tool('geometry.multipart', '合并为多部件', 'union', '合并', ['源图层', item => Boolean(geometryName(item?.geometry))]),
-    tool('geometry.explode', '拆分多部件', 'split', '拆分', ['待拆分图层', canSplitParts]),
+    tool('geometry.explode', '拆分多部件', 'split', '拆分', ['待拆分图层', item => Boolean(geometryName(item?.geometry))]),
     tool('table.add_field', '添加字段', 'columnAdd', '确定', ['图层', vector]),
     tool('table.delete_field', '删除字段', 'columnRemove', '删除', ['图层', vector]),
     tool('table.calculate_field', '字段计算器', 'calculator', '计算', ['计算图层', vector]),
@@ -246,19 +246,25 @@ function toolForm(definition, inputs, values, update, selection) {
     }
     if (id === 'geometry.create_dataset') {
         controls.push(field('图层名称', h(Input, { maxLength: 120, value: values.name ?? '', onChange: event => update('name', event.target.value) })),
-            select('geometry_type', '要素类型', { point: '点', polyline: '线', polygon: '面',
-                multi_point: '多点', multi_polyline: '多线', multi_polygon: '多面' }),
+            select('geometry_type', '图层类型', { point: '点', polyline: '线', polygon: '面' }),
             coordinates('图层坐标系'));
         parameters = { geometry_type: values.geometry_type,
             epsg: number(values.coordinate?.value.slice(5)) };
         valid = Boolean(values.name?.trim() && values.geometry_type && Number.isInteger(parameters.epsg) && parameters.epsg > 0);
-    } else if (id === 'geometry.multipart') {
+    } else if (id === 'geometry.multipart' || id === 'geometry.explode') {
         const fids = selection?.key === key(input) ? selection.ids : [];
-        const attribute_fid = values.attribute_fid ?? fids[0];
-        controls.push(field('属性来源', dropdown(attribute_fid, fids.map(fid => ({ value: fid, label: '要素 ' + fid })),
-            value => update('attribute_fid', value))));
-        parameters = { fids, attribute_fid };
-        valid = fids.length >= 2 && fids.length <= 500 && fids.every(Number.isSafeInteger) && fids.includes(attribute_fid);
+        const destination = values.destination ?? 'current';
+        controls.push(field('输出到', h(Segmented, { value: destination, options: options({ current: '当前图层', new: '新图层' }),
+            onChange: value => update('destination', value) })));
+        parameters = { fids, destination };
+        valid = fids.length > 0 && fids.every(Number.isSafeInteger);
+        if (id === 'geometry.multipart') {
+            const source = values.attribute_fid ?? fids[0];
+            controls.push(field('属性来源', dropdown(source, fids.map(fid => ({ value: fid, label: '要素 ' + fid })),
+                value => update('attribute_fid', value))));
+            parameters.attribute_fid = source;
+            valid &&= fids.length >= 2 && fids.length <= 500 && fids.includes(source);
+        }
     } else if (id === 'data.merge') {
         const name = values.name ?? '合并图层';
         controls.push(field('结果图层名称', h(Input, { maxLength: 120, value: name,
@@ -362,8 +368,6 @@ const toolDescription = {
     'vector.symmetric_difference': '保留两个面图层各自未重叠的部分。',
     'vector.spatial_join': '按相交关系把属性连接到目标图层。目标图层的形状保持原样。',
     'data.merge': '把多个图层的要素汇集到一个新图层。',
-    'geometry.multipart': '把所选要素组成一条多部件要素，生成新图层。',
-    'geometry.explode': '逐个拆开图层中要素的部件，生成单部件图层。每个部件继承原要素的属性。',
     'crs.assign': '设置或覆盖坐标系定义，保留原坐标值和像元。',
     'crs.reproject': '根据源图层匹配可用的内置转换和已保存的自定义方案。',
 };
@@ -408,7 +412,9 @@ export function MapTool({ getContainer, operation, active, lockInput, layers, se
         ...(definition.multiple && { mode: 'multiple', maxCount: 32, maxTagCount: 'responsive' }) }));
     const selectors = definition.inputs.map(([name, accepts], index) => {
         if (!index && lockInput) return h('div', { className: 'gis-tool-field' },
-            h('span', null, '编辑图层'), h('strong', null, inputs[0]?.name));
+            h('span', null, '编辑图层'), h('strong', null, inputs[0]?.name),
+            ['geometry.multipart', 'geometry.explode'].includes(operation) &&
+                h('span', null, '已选 ' + (selection?.key === active ? selection.ids.length : 0) + ' 个要素'));
         return pickLayer(name, index, layers.filter(item => accepts(item) &&
             (definition.multiple || !ids.some((id, slot) => slot !== index && key(item) === id))));
     });
@@ -434,7 +440,7 @@ export function MapTool({ getContainer, operation, active, lockInput, layers, se
                 ...(operation === 'data.merge' && { name: (values.name ?? '合并图层').trim() }) });
             const failure = toolError(output);
             if (failure) { setError(failure); return; }
-            if (output.layers.length || output.selection) onResult(output, inputs[0]);
+            if (output.layers.length || output.selection) onResult(output, inputs[0], form.parameters.destination);
             if (!output.layers.length) setResult(output);
         } catch (issue) { setError(window.GuizhiErrorText(issue)); }
         finally { setBusy(false); }

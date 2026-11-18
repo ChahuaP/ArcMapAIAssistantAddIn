@@ -305,7 +305,9 @@ def calculate_geometry(ctx, field: str = "AREA_M2",
     kind = ctx.info[0]["geometry_type"].split()[0].removeprefix("Multi")
     available = {"Polygon": {"area", "perimeter", "center_x", "center_y"},
                  "LineString": {"length", "center_x", "center_y"},
-                 "Point": {"point_x", "point_y"} if not ctx.info[0]["geometry_type"].startswith("Multi") else {"center_x", "center_y"}}
+                 "Point": {"center_x", "center_y"}}
+    if kind == "Point" and not frame.geom_type.eq("MultiPoint").any():
+        available["Point"].update(("point_x", "point_y"))
     if property not in available.get(kind, set()):
         raise ValueError("图层不支持所选几何属性")
     crs = CRS(frame.crs)

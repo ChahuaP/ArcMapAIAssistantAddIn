@@ -15,8 +15,8 @@ export function geometryProperties(layer) {
     const shape = layer?.geometry?.split(' ')[0];
     if (/^(Multi)?Polygon$/.test(shape)) return { area: '面积', perimeter: '周长', ...axes };
     if (/^(Multi)?LineString$/.test(shape)) return { length: '长度', ...axes };
-    if (shape === 'Point') return { point_x: 'X 坐标', point_y: 'Y 坐标' };
-    return shape === 'MultiPoint' ? axes : {};
+    if (shape === 'Point' && layer.singlePoint !== false) return { point_x: 'X 坐标', point_y: 'Y 坐标' };
+    return /^(Multi)?Point$/.test(shape) ? axes : {};
 }
 
 const fieldsOf = layer => (layer?.fields || []).map(field => ({ value: field.name, label: field.name }));

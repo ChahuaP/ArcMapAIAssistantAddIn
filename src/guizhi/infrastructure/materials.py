@@ -12,7 +12,7 @@ import pyogrio
 from pyproj import CRS
 
 from guizhi.domain.capabilities import MATERIAL_FORMATS, material_kind
-from guizhi.infrastructure.vector import shapefile_projection, source_files
+from guizhi.infrastructure.vector import layer_geometry, shapefile_projection, source_files
 
 MAX_FILES = 1000
 MAX_BYTES = 2 << 30
@@ -78,7 +78,7 @@ def bound_layer_metadata(materials):
                                        crs=crs.to_string() if crs else None)
                 else:
                     info = pyogrio.read_info(file, layer=item["layer"], force_feature_count=False)
-                    description.update(fields=[{"name": key, "type": str(dtype)} for key, dtype in zip(info["fields"], info["dtypes"], strict=True)], geometry=info["geometry_type"], crs=info["crs"])
+                    description.update(fields=[{"name": key, "type": str(dtype)} for key, dtype in zip(info["fields"], info["dtypes"], strict=True)], geometry=layer_geometry(info, file), crs=info["crs"])
             elif kind == "raster":
                 from guizhi.infrastructure.operations.raster import metadata
 

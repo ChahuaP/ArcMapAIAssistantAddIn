@@ -4,11 +4,8 @@ const h = window.React.createElement;
 const { useState } = window.React;
 const { Button, Checkbox, ColorPicker, InputNumber, Modal, Segmented, Select } = window.antd;
 const hex = /^#[0-9a-f]{6}$/i;
-const geometryNames = { Point: '点', LineString: '线', Polygon: '面',
-    MultiPoint: '多点', MultiLineString: '多线', MultiPolygon: '多面' };
-export const geometryName = type => geometryNames[type?.split(' ')[0]];
-export const canSplitParts = layer => /^(MultiPoint|MultiLineString|MultiPolygon)$/.test(layer?.geometry) ||
-    (/\.shp$/i.test(layer?.sourceName) && /^(LineString|Polygon)$/.test(layer.geometry));
+const geometryNames = { Point: '点', LineString: '线', Polygon: '面' };
+export const geometryName = type => geometryNames[type?.split(' ')[0].replace(/^Multi/, '')];
 export const opacity = (value, defaultValue = 100) => Number.isFinite(value)
     ? Math.round(Math.min(100, Math.max(0, value))) : defaultValue;
 export function symbol(value, color) {

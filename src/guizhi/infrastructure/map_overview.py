@@ -117,13 +117,14 @@ def display_copy(workspace, file, layer, info, entry, target):
     """Index custom coordinate-plan output once, retaining original feature IDs."""
     from guizhi.infrastructure.coordinates import apply_plan
     token = sha256(json.dumps([info["revision"], layer, entry], sort_keys=True).encode()).hexdigest()
-    directory = workspace.root / "cache" / "display-plans-v1"
+    directory = workspace.root / "cache" / "display-plans-v2"
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / (token + ".gpkg")
     if path.is_file():
         return path
     with TemporaryDirectory(dir=directory) as temp:
         staged = Path(temp) / "display.gpkg"
+        storage_type = pyogrio.read_info(file, layer=layer)["geometry_type"]
         batch = 8000
         for offset in range(0, max(1, info["count"]), batch):
             frame = pyogrio.read_dataframe(file, layer=layer, skip_features=offset, max_features=batch, fid_as_index=True)
@@ -132,6 +133,6 @@ def display_copy(workspace, file, layer, info, entry, target):
                 raise ValueError("转换方案的目标坐标系与地图不一致")
             frame.index.name = info["fidField"]
             pyogrio.write_dataframe(frame.reset_index(), staged, layer=layer, append=offset > 0,
-                                    geometry_type=info["geometry"], layer_options={"FID": info["fidField"]})
+                                    geometry_type=storage_type, promote_to_multi=False, layer_options={"FID": info["fidField"]})
         staged.replace(path)
     return path

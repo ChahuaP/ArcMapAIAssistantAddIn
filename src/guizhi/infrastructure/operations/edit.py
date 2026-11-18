@@ -6,7 +6,7 @@ import geopandas
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, StrictInt
 import shapely
-from shapely.geometry import MultiLineString, MultiPoint, MultiPolygon, mapping, shape
+from shapely.geometry import mapping, shape
 
 from guizhi.infrastructure.operations.common import Selection, selection_fids, valid
 
@@ -32,12 +32,8 @@ def editable(frame, info):
 
 def publish_edit(ctx, frame, kind, **options):
     valid(frame)
-    family = kind.removeprefix("Multi")
-    if kind.startswith("Multi") or frame.geom_type.str.startswith("Multi").any():
-        composite = {"Point": MultiPoint, "LineString": MultiLineString, "Polygon": MultiPolygon}[family]
-        frame = frame.set_geometry(frame.geometry.map(lambda geom: composite([geom]) if geom.geom_type == family else geom))
-        kind = "Multi" + family
-    ctx.publish(frame, geometry_type=kind, **options)
+    kinds = frame.geom_type.dropna().unique()
+    ctx.publish(frame, geometry_type=kinds[0] if len(kinds) == 1 else kind, **options)
 
 
 def changes(ctx, changes: Annotated[list[Change], Field(min_length=1, max_length=500)]):

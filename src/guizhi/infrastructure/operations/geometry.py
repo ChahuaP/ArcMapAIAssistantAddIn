@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, PositiveInt, Str
 import shapely
 from shapely.geometry import LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon, box
 
-from guizhi.infrastructure.operations.common import Unit, distance_in_crs
+from guizhi.infrastructure.operations.common import Selection, Unit, distance_in_crs, selection_fids
 from guizhi.infrastructure.operations.runner import data_revision
 
 XY = tuple[FiniteFloat, FiniteFloat]
@@ -21,9 +21,8 @@ Line = Annotated[list[XY], Field(min_length=2, max_length=100000)]
 Ring = Annotated[list[XY], Field(min_length=3, max_length=100000)]
 Sides = Annotated[int, Field(ge=3, le=360)]
 Radius = Annotated[FiniteFloat, Field(gt=0)]
-GeometryType = Literal["point", "polyline", "polygon", "multi_point", "multi_polyline", "multi_polygon"]
-GEOMETRY_TYPES = {"point": "Point", "polyline": "LineString", "polygon": "Polygon",
-                  "multi_point": "MultiPoint", "multi_polyline": "MultiLineString", "multi_polygon": "MultiPolygon"}
+GeometryType = Literal["point", "polyline", "polygon"]
+GEOMETRY_TYPES = {"point": "Point", "polyline": "LineString", "polygon": "Polygon"}
 MULTIPART = {"Point": MultiPoint, "LineString": MultiLineString, "Polygon": MultiPolygon}
 
 
@@ -157,12 +156,17 @@ def append(ctx, features, builder, family):
         if new["name"].notna().any():
             raise ValueError("Target has no name field")
         new = new.drop(columns="name")
-    if target_type.startswith("Multi"):
-        wrap = MULTIPART[family]
-        new.geometry = new.geometry.map(lambda shape: wrap([shape]))
     out = ctx.path("result.gpkg")
-    shutil.copyfile(ctx.directory / ctx.evidence[0]["path"], out)
+    snapshot = ctx.directory / ctx.evidence[0]["path"]
     layer = ctx.request.inputs[0].layer
+    if target_type.startswith("Multi"):
+        from guizhi.infrastructure.gdal_translate import vector_translate
+
+        vector_translate(snapshot, out, "-f", "GPKG", "-preserve_fid", "-nlt", "GEOMETRY",
+                         "-lco", "FID=" + info["fid_column"], "-lco", "GEOMETRY_NAME=" + info["geometry_name"],
+                         layer, geometry_family=family)
+    else:
+        shutil.copyfile(snapshot, out)
     pyogrio.write_dataframe(new, out, layer=layer, driver="GPKG", append=True)
     final = pyogrio.read_dataframe(out, layer=layer, fid_as_index=True)
     if len(final) != len(base) + len(new) or final.crs != base.crs:
@@ -216,41 +220,57 @@ def part_family(frame, info):
     return family
 
 
-def multipart(ctx, fids: Annotated[list[StrictInt], Field(min_length=2, max_length=500)] | None = None,
+PartsDestination = Literal["current", "new"]
+
+
+def publish_parts(ctx, result, selected, destination, family):
+    source = ctx.frames[0]
+    if destination == "current":
+        result = pd.concat([source.drop(index=selected.index), result])
+    kinds = result.geom_type.dropna().unique()
+    ctx.publish(result, preserve_fids=True, geometry_type=kinds[0] if len(kinds) == 1 else family)
+    receipt = {"statistics": {"feature_count": len(result), "source_feature_count": len(selected)}}
+    if destination == "current":
+        receipt["changeset"] = {"target_revision": ctx.selection_hashes[0]}
+    return receipt
+
+
+def multipart(ctx, selection: Selection, destination: PartsDestination = "current",
               attribute_fid: StrictInt | None = None):
-    frame = ctx.frames[0]
-    if fids is not None:
-        if len(set(fids)) != len(fids) or not set(fids).issubset(frame.index):
-            raise ValueError("选中的要素已变化，请重新选择")
-        frame = frame.loc[fids]
-    if not 2 <= len(frame) <= 500:
+    ids = selection_fids(ctx, selection)
+    if not 2 <= len(ids) <= 500:
         raise ValueError("请选择 2 至 500 个待合并要素")
-    family = part_family(frame, ctx.info[0])
+    selected = ctx.frames[0].loc[selection.fids]
+    family = part_family(selected, ctx.info[0])
     if attribute_fid is None:
-        attribute_fid = frame.index[0]
-    if attribute_fid not in frame.index:
+        attribute_fid = selection.fids[0]
+    if attribute_fid not in ids:
         raise ValueError("请选择一个参与合并的要素作为属性来源")
-    shape = MULTIPART[family](list(shapely.get_parts(frame.geometry.array)))
+    shape = MULTIPART[family](list(shapely.get_parts(selected.geometry.array)))
     if not shape.is_valid:
         raise ValueError("所选图形无法保留为独立部件。重叠或共边的面可先使用「合并要素」。")
-    result = frame.loc[[attribute_fid]].set_geometry([shape])
-    ctx.publish(result, geometry_type="Multi" + family)
-    return {"statistics": {"feature_count": 1, "source_feature_count": len(frame), "part_count": len(shape.geoms)}}
+    result = selected.loc[[attribute_fid]].set_geometry([shape])
+    receipt = publish_parts(ctx, result, selected, destination, family)
+    receipt["statistics"]["part_count"] = len(shape.geoms)
+    return receipt
 
 
-def explode(ctx):
-    frame = ctx.frames[0]
-    family = part_family(frame, ctx.info[0])
-    if ctx.info[0]["geometry_type"] == family and not frame.geom_type.eq("Multi" + family).any():
-        raise ValueError("此图层没有多部件要素")
-    source_id = "source_fid"
-    fields = {name.casefold() for name in frame.columns}
-    while source_id.casefold() in fields:
-        source_id += "_"
-    result = frame.assign(**{source_id: frame.index}).explode(index_parts=False)
-    ctx.publish(result, geometry_type=family)
-    return {"statistics": {"feature_count": len(result), "source_feature_count": len(frame)},
-            "source_id_field": source_id}
+def explode(ctx, selection: Selection, destination: PartsDestination = "current"):
+    if not selection_fids(ctx, selection):
+        raise ValueError("请先选择要拆分的要素")
+    source = ctx.frames[0]
+    selected = source.loc[selection.fids]
+    family = part_family(selected, ctx.info[0])
+    if not selected.geom_type.eq("Multi" + family).any():
+        raise ValueError("所选要素均为单部件，无需拆分")
+    result = selected.explode(index_parts=False)
+    # Keep the first part's FID and allocate new IDs above all existing features.
+    additional = result.index.duplicated()
+    ids = result.index.to_numpy(copy=True)
+    start = int(source.index.max()) + 1
+    ids[additional] = range(start, start + int(additional.sum()))
+    result.index = ids
+    return publish_parts(ctx, result, selected, destination, family)
 
 
 def repair(ctx, delete_null: bool = False):

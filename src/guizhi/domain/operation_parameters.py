@@ -3,6 +3,7 @@ PARAMETERS = {
     "action": "地图操作种类。", "all_touched": "是否保留与裁切边界接触的所有像元。",
     "approval_source": "审批手续信息来源。", "approved_status": "认定为已批准的状态值。",
     "area_field": "可选的已有面积字段，以平方米计。", "as_of": "用于判定有效性的基准日期。",
+    "destination": "current 在地图上更新原图层并保留未选要素；new 将所选要素的处理结果输出到新图层。",
     "assignments": "待更新的字段名与新值。", "attribute_fid": "合并后沿用其属性的要素编号。",
     "basis": "面积与质量核算的业务依据。", "border": "是否绘制图框。",
     "bottom": "下边界的纵坐标，单位与目标坐标系一致。", "cap": "缓冲区端部样式。",
@@ -14,10 +15,10 @@ PARAMETERS = {
     "epsg": "新图层的 EPSG 坐标系编号。", "export": "是否请求桌面端导出排版成果。",
     "expression": "用于字段计算的受支持表达式。", "facts": "含材料来源和原文位置的结构化事实。",
     "features": "要生成的要素定义，坐标使用目标图层的空间参考。", "fid": "目标图层中的要素编号。",
-    "fids": "待合并的要素编号。", "field": "要读取、分组或修改的字段。", "fields": "参与操作的字段名称列表。",
+    "fids": "所选要素的编号。", "field": "要读取、分组或修改的字段。", "fields": "参与操作的字段名称列表。",
     "fill": "面符号的填充颜色。", "fill_opacity": "面填充的不透明度，0 为透明、100 为不透明。",
     "force_2d": "是否将 CAD 要素降为二维。", "format": "导出文件格式。",
-    "frames": "版面各地图框的设置。", "from_year": "前一期数据的年份。", "geometry_type": "新建图层的几何类型。",
+    "frames": "版面各地图框的设置。", "from_year": "前一期数据的年份。", "geometry_type": "新建点、线或面图层。同族单部件和多部件要素可以共存。",
     "intended_use": "拟办理事项的用地用途。", "join": "线转角处的缓冲连接样式。",
     "layer": "操作目标的图层标识。", "left": "左操作数。", "legend": "是否显示图例。",
     "limit": "最多返回的历史记录数。", "matter": "查询规则所针对的业务事项。",
@@ -81,4 +82,5 @@ def parameter_help(operation, field):
     info = {"description": OVERRIDES.get((operation, field)) or PARAMETERS[field]}
     if field in ("selection", "previous"):
         info["accepts_reference"] = "$selection.<step_id>"
+        info["map_selection_reference"] = "使用当前地图图层的 selection_reference，图层输入仍引用该原图层。"
     return info

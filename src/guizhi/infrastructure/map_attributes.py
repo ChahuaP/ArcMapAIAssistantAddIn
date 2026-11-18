@@ -112,5 +112,7 @@ def feature_attributes(file, name, payload):
         row = db.execute(f"SELECT {columns} FROM {table} WHERE {index}=?", (feature,)).fetchone()
     if row is None:
         raise ValueError("要素已不存在")
-    return {name: value.hex() if isinstance(value, bytes) else str(value) if type(value) is int and abs(value) > 2**53 - 1 else value
+    attributes = {name: value.hex() if isinstance(value, bytes) else str(value) if type(value) is int and abs(value) > 2**53 - 1 else value
             for name, value in zip(fields, row[1:], strict=True)}
+    shape = pyogrio.read_dataframe(file, layer=name, fids=[feature], columns=[]).geometry.iloc[0]
+    return {"attributes": attributes, "geometryType": shape.geom_type if shape is not None else None}

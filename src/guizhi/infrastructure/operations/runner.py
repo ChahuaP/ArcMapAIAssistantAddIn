@@ -19,7 +19,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError, create_model, model
 from guizhi.domain.capabilities import CAPABILITIES, OperationRequest
 from guizhi.domain.contracts import EvidenceRef
 from guizhi.domain.diagnostics import Fault
-from guizhi.infrastructure.vector import digest, import_layer, source_revision
+from guizhi.infrastructure.vector import digest, import_layer, source_revision, storage_geometry
 
 
 def handler(operation):
@@ -220,8 +220,10 @@ class Execution:
         with warnings.catch_warnings():
             warnings.simplefilter("error", RuntimeWarning)
             fid, geometry = available("fid"), available("geom")
+            if preserve_fids:
+                frame = frame.sort_index().rename_axis(fid)
             data = frame.assign(**{fid: frame.index.astype("int64")}) if preserve_fids else frame
-            pyogrio.write_dataframe(data, out, layer="result", driver="GPKG", geometry_type=geometry_type,
+            pyogrio.write_dataframe(data, out, layer="result", driver="GPKG", **storage_geometry(frame, geometry_type),
                                     promote_to_multi=False,
                                     layer_options={"FID": fid, "GEOMETRY_NAME": geometry})
             check = pyogrio.read_dataframe(out, layer="result", fid_as_index=preserve_fids)

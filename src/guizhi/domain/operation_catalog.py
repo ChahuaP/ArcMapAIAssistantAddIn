@@ -53,8 +53,8 @@ CONTRACTS = {
     "edit.transfer_plan": op("从源选区准备要粘贴到目标层的几何和属性。", "选区所属图层 目标图层", "features"),
     "geometry.create_dataset": op("按几何类型建立空图层。可提供一个空间参考图层。", "空间参考图层", "vector"),
     "geometry.create_rectangle": op("根据边界坐标新建包含矩形的面图层。", "空间参考图层", "vector"),
-    "geometry.multipart": op("将指定要素组合成一个多部件要素，可指定属性来源。", "目标图层", "vector"),
-    "geometry.explode": op("将多部件按几何部件拆分为独立要素，并继承属性。", "待拆分图层", "vector"),
+    "geometry.multipart": op("将同一图层中选中的 2 至 500 个要素组合为一个多部件要素，沿用属性来源要素的编号和属性。", "目标图层", "vector"),
+    "geometry.explode": op("仅拆分选区中的多部件，各部件继承属性，选中的单部件保持原样。", "待拆分图层", "vector"),
     "geometry.repair": op("检查并修复不合法几何，可按参数剔除空几何。", "待修复图层", "vector"),
     "map_raster.preview": op("生成可显示的栅格预览图。", "影像", "raster_preview"),
     "raster.statistics": op("读取空间参考、波段、像元统计和无数据像元情况。", "待统计栅格", "statistics count"),
@@ -194,6 +194,9 @@ def describe_contract(operation, spec):
     if operation.startswith("geometry.create_"):
         requirements.append("一个空间参考图层与 epsg 编号二选一，须为二维地理或投影坐标系。")
     detail = {"response": DETAILS[operation]} if operation in DETAILS else {}
+    effects = [MAP_EFFECTS[key] for key in contract.products if key in MAP_EFFECTS]
+    if operation in {"geometry.multipart", "geometry.explode"}:
+        effects = ["交付 export 时，destination=current 更新当前图层，保留未选要素；new 只添加选区处理结果图层。"]
     return {"usage": contract.purpose, "preconditions": requirements, **detail, "inputs": inputs, "outputs": outputs,
-            "map_effects": [MAP_EFFECTS[key] for key in contract.products if key in MAP_EFFECTS],
+            "map_effects": effects,
             "writes_input_file": False}

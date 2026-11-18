@@ -290,7 +290,8 @@ def register(server, job=None):
             if public.get("crsName"):
                 public["crs"] = public.pop("crsName")
             if layer.get("fids"):
-                public.update(selected_count=len(layer["fids"]), selection_role="selection-" + layer["id"])
+                public.update(selected_count=len(layer["fids"]), selection_role="selection-" + layer["id"],
+                              selection_reference="$map_selection." + layer["id"])
             visible.append(public)
         layout = context.get("layout")
         if layout:
@@ -440,6 +441,20 @@ def register(server, job=None):
             if mode == "free":
                 inputs = {role: items for role, items in inputs.items() if role in roles}
             for step in extra:
+                for param in ("selection", "previous"):
+                    reference = step["parameters"].get(param)
+                    if isinstance(reference, str) and reference.startswith("$map_selection."):
+                        layer_id = reference.removeprefix("$map_selection.")
+                        layer = next((item for item in current_map().get("layers", []) if item["id"] == layer_id), None)
+                        if not layer or not layer.get("fids"):
+                            raise ValueError(f"步骤 {step['id']}：目标图层没有已选要素")
+                        if not step["inputs"] or step["inputs"][0] != "material." + layer_id:
+                            raise ValueError(f"步骤 {step['id']}：地图选区与输入图层必须属于同一图层")
+                        item = inputs[layer_id][0]
+                        if item["revision"] != layer["revision"]:
+                            raise ValueError(f"步骤 {step['id']}：图层已变化，请重新选择要素")
+                        step["parameters"][param] = {"layer": item["layer"], "revision": layer["revision"],
+                                                     "fids": layer["fids"]}
                 where = step["parameters"].get("where")
                 first = next(iter(step["inputs"]), "")
                 if not isinstance(where, dict) or "$" in json.dumps(where) or not first.startswith("material."):

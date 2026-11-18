@@ -262,6 +262,7 @@ export async function dispatch(options, { signal, onEvent = () => {}, getService
                 crs: layer.crs?.length <= 120 ? layer.crs : undefined, crsName: layer.crsName, units: layer.units,
                 active: layer.active, visible: layer.visible, selected: layer.fids?.length || undefined,
                 selection_role: layer.fids?.length ? 'selection-' + layer.id : undefined,
+                selection_reference: layer.fids?.length ? '$map_selection.' + layer.id : undefined,
                 field_count: layer.fields?.length, fields: layer.fields?.slice(0, 45),
             }));
             service.bind({ id, workspace, cancelled,

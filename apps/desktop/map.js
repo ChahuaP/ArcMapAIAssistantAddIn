@@ -5,7 +5,7 @@ import { geometryProperties } from './map-attribute-tools.js';
 import { useTableWindow } from './map-table-window.js';
 import { AttributeSort, AttributeStatistics, AttributeCell } from './map-table-ui.js';
 import { MapLayout, amendLayout, drawMapLayers, layoutDefaults, mapCanvas, mapImage, sheetSize } from './map-layout.js';
-import { LayerProperties, MapProperties, MxdOpen, canSplitParts, categoryValue, classifyLayer, defaultMapBackground, layerSymbol, opacity, symbol } from './map-layer-dialog.js';
+import { LayerProperties, MapProperties, MxdOpen, categoryValue, classifyLayer, defaultMapBackground, layerSymbol, opacity, symbol } from './map-layer-dialog.js';
 import Map from 'ol/Map.js';
 import Overlay from 'ol/Overlay.js';
 import View from 'ol/View.js';
@@ -692,8 +692,8 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 height: Math.max(82, (above ? event.pixel[1] : height - event.pixel[1]) - 18) };
             setIdentified(record);
             try {
-                const values = await api.map({ action: 'table-feature', ref: hit.item.ref, fid: hit.fid });
-                if (request === identification.current) setIdentified({ ...record, values });
+                const { attributes, geometryType } = await api.map({ action: 'table-feature', ref: hit.item.ref, fid: hit.fid });
+                if (request === identification.current) setIdentified({ ...record, values: attributes, geometryType });
             } catch (error) { if (request === identification.current) setIdentified({ ...record, error: window.GuizhiErrorText(error) }); }
         });
         const observer = new ResizeObserver(() => ol.updateSize());
@@ -971,7 +971,20 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         graph.current.fitNeeded = true;
         add(fresh);
     }
-    function showToolResult(result, input) {
+    function showToolResult(result, input, destination) {
+        if (destination && ['geometry.multipart', 'geometry.explode'].includes(tool?.operation)) {
+            const [output] = result.layers;
+            if (!output || result.layers.length !== 1) throw new Error('没有取得完整的编辑结果');
+            stopEdit();
+            if (destination === 'current') {
+                if (mapBasis.current === key(input)) mapBasis.current = key(output);
+                replace(input, output);
+            } else {
+                addResultLayers(result.layers);
+            }
+            setTool(null);
+            return;
+        }
         if (result.selection) {
             setPointSelect(false);
             setBoxSelect(false);
@@ -1555,7 +1568,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 command('合并为多部件', () => openPartsTool('geometry.multipart'),
                     { disabled: !partsReady || !canCopy || picked.length < 2, title: '选择两个或更多同图层要素' }),
                 command('拆分多部件', () => openPartsTool('geometry.explode'),
-                    { disabled: !partsReady || !canSplitParts(layer) })),
+                    { disabled: !partsReady || !picked.length || !picked.every(Number.isSafeInteger) })),
         ] : []), ...editCommands],
         制图: [group('图件', command('版面布局', () => setLayout({ key: 'manual', config: prepareLayout(
             layoutDraft || { ...layoutDefaults, title: layer?.name || '地图' }) }),
@@ -1631,8 +1644,11 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                     style: { width: identified.width, maxHeight: Math.min(252, identified.height) } },
                     h('header', null, h('strong', { title: identified.name }, identified.name),
                         h(Button, { type: 'text', size: 'small', icon: glyph('close', 13), 'aria-label': '关闭要素属性', onClick: closeIdentification })),
-                    identified.values ? h('dl', null, ...Object.entries({ FID: identified.fid, ...identified.values }).map(([name, value]) =>
-                        h('div', { key: name }, h('dt', { title: name }, name), h('dd', null, value === null ? '空值' : String(value))))) :
+                    identified.values ? h('dl', null, ...[['FID', identified.fid], ['要素类型', ({
+                        Point: '点', MultiPoint: '多点', LineString: '线', MultiLineString: '多线',
+                        Polygon: '面', MultiPolygon: '多面',
+                    })[identified.geometryType] || identified.geometryType || '空几何'], ...Object.entries(identified.values)].map(([name, value], i) =>
+                        h('div', { key: i }, h('dt', { title: name }, name), h('dd', null, value === null ? '空值' : String(value))))) :
                         h('p', { role: identified.error ? 'alert' : 'status' }, identified.error || '正在读取属性…')), identifyHost),
                 activity && h('div', { className: 'map-ai-note', 'data-kind': activity.kind },
                     glyph(({ read: 'layers', transform: 'globe', calculate: 'analysis', publish: 'save', draw: 'pencil' })[activity.kind] || 'target'),

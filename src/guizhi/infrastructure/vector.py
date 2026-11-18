@@ -1,6 +1,7 @@
 """GeoPackage snapshot, inventory and verified export."""
 from contextlib import closing
 from dataclasses import asdict
+from functools import lru_cache
 from hashlib import file_digest, sha256
 from math import isclose
 from pathlib import Path
@@ -21,6 +22,49 @@ from guizhi.domain.contracts import ClaimRevision, DatasetRevision, EvidenceRef,
 from guizhi.domain.diagnostics import Fault
 
 SOURCE_LOCK_WAIT = 5
+
+
+@lru_cache(maxsize=128)
+def mixed_layer_family(file, layer, column, stamp):
+    def quoted(name):
+        return '"' + name.replace('"', '""') + '"'
+    geom = quoted(column)
+    rows = pyogrio.read_dataframe(file, sql=f"SELECT DISTINCT ST_GeometryType({geom}) AS kind "
+        f"FROM {quoted(layer)} WHERE {geom} IS NOT NULL LIMIT 3", sql_dialect="SQLITE", read_geometry=False)
+    kinds = {str(value).upper().removeprefix("ST_").removeprefix("MULTI") for value in rows["kind"]}
+    for family in ("Point", "LineString", "Polygon"):
+        if kinds == {family.upper()}:
+            return family
+    return "Unknown"
+
+
+def layer_geometry(info, file):
+    declared = info["geometry_type"]
+    if declared == "Unknown":
+        family = (info.get("layer_metadata") or {}).get("GEOMETRY_FAMILY")
+        if family in {"Point", "LineString", "Polygon"}:
+            return family
+        if Path(file).suffix.lower() == ".gpkg" and info.get("geometry_name"):
+            stat = Path(file).stat()
+            try:
+                wal = Path(str(file) + "-wal").stat()
+                wal_stamp = (wal.st_size, wal.st_mtime_ns, wal.st_ctime_ns)
+            except FileNotFoundError:
+                wal_stamp = ()
+            return mixed_layer_family(str(file), info["layer_name"], info["geometry_name"],
+                                      (stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns, wal_stamp))
+    return declared
+
+
+def storage_geometry(frame, declared=None):
+    """GeoPackage GEOMETRY permits single and multipart values in the same feature table."""
+    types = set(frame.geom_type.dropna().unique())
+    for family in ("Point", "LineString", "Polygon"):
+        if types == {family, "Multi" + family}:
+            return {"geometry_type": "Unknown", "layer_metadata": {"GEOMETRY_FAMILY": family}}
+    if declared in {"Point", "Polygon", "LineString"} and types == {"Multi" + declared}:
+        return {"geometry_type": "Multi" + declared}
+    return {"geometry_type": declared}
 
 
 def snapshot_gpkg(source: Path, target: Path, layer: str, ensure_supervised, *, allow_undefined=False):
@@ -166,9 +210,12 @@ def convert_external(copied, snapshot, layer, allow_undefined, check, metadata_o
             geometry += "_"
         crs = CRS(info["crs"]) if info["crs"] else shapefile_projection(source_files(copied))
         projection = ("-a_srs", crs.to_wkt()) if crs else ()
-        vector_translate(copied, snapshot, "-f", "GPKG", "-preserve_fid", *projection,
+        # SHP line and polygon records can contain either one or several parts.
+        family = info["geometry_type"] if info["geometry_type"] in {"LineString", "Polygon"} else None
+        storage = ("-nlt", "GEOMETRY") if family else ()
+        vector_translate(copied, snapshot, "-f", "GPKG", "-preserve_fid", *projection, *storage,
                          "-lco", "FID=" + fid, "-lco", "GEOMETRY_NAME=" + geometry,
-                         "-lco", "SPATIAL_INDEX=YES", layer)
+                         "-lco", "SPATIAL_INDEX=YES", layer, geometry_family=family)
         saved = pyogrio.read_info(snapshot, layer=layer)
         before, after = info["total_bounds"], saved["total_bounds"]
         same_bounds = not info["features"] or before is None and after is None or before is not None and after is not None and all(
@@ -194,7 +241,7 @@ def convert_external(copied, snapshot, layer, allow_undefined, check, metadata_o
         # GDAL uses the FID-valued column when creating the SQLite feature table.
         data = frame.assign(**{fid: frame.index.astype("int64")})
         pyogrio.write_dataframe(data.reset_index(drop=True), snapshot, layer=layer, driver="GPKG",
-                                geometry_type=info["geometry_type"], promote_to_multi=False,
+                                **storage_geometry(frame, info["geometry_type"]), promote_to_multi=False,
                                 layer_options={"FID": fid, "GEOMETRY_NAME": geometry})
     defined = frame.crs is not None
     reopened = pyogrio.read_dataframe(snapshot, layer=layer, fid_as_index=True)
@@ -218,6 +265,7 @@ def import_layer(source_path, layer, directory, filename, job_id, ensure_supervi
         defined, originals = snapshot_external(source, snapshot, layer, ensure_supervised, allow_undefined,
                                                expected_source_revision, metadata_only)
     info = pyogrio.read_info(snapshot, layer=layer)
+    info["geometry_type"] = layer_geometry(info, snapshot)
     crs = CRS(info["crs"]) if defined else None
     frame = None
     if not metadata_only or info["geometry_type"] in {"Unknown", "GeometryCollection"}:
@@ -263,7 +311,8 @@ def inventory(task: dict, job: dict, directory: Path, progress, ensure_supervise
     with warnings.catch_warnings():
         warnings.simplefilter("error", RuntimeWarning)
         pyogrio.write_dataframe(
-            frame, export, layer="inventory", driver="GPKG",
+            frame, export, layer="inventory", driver="GPKG", promote_to_multi=False,
+            **storage_geometry(frame, info["geometry_type"]),
             layer_options={"FID": info["fid_column"], "GEOMETRY_NAME": info["geometry_name"]},
         )
         reopened = pyogrio.read_dataframe(export, layer="inventory")

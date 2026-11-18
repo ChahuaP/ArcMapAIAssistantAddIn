@@ -26,7 +26,7 @@ from guizhi.infrastructure.map_overview import coverage, display_copy, many_in_v
 from guizhi.infrastructure.export import package_layer
 from guizhi.infrastructure.operations.evidence import artifact_path, read_artifact
 from guizhi.infrastructure.operations.runner import data_revision
-from guizhi.infrastructure.vector import digest
+from guizhi.infrastructure.vector import digest, layer_geometry
 
 MAX_VISIBLE = 8000
 MAX_MAP_POINTS = 180_000
@@ -113,7 +113,7 @@ def workflow_layers(workspace, record):
         for layer in outputs:
             artifact = layer["ref"]["artifact"]
             key = "step." + step["id"] + ("" if artifact == "export" else "." + artifact)
-            edited = artifact == "export" and "target_revision" in change and operation != "geometry.explode"
+            edited = artifact == "export" and "target_revision" in change
             moved_source = artifact == "transfer-source" and operation == "edit.transfer"
             if edited or moved_source:
                 target = step["inputs"][int(operation == "edit.transfer" and not moved_source)]
@@ -187,11 +187,11 @@ def manual_tool(workspace, payload):
         return {"layers": [], "selection": {"layer": name, "revision": material(file, name)["revision"],
                                              "fids": fids}, "statistics": {"selected_count": len(fids)}}
     items = [map_material(workspace, ref) for ref in refs]
-    if operation == "data.export_selection":
-        fids = parameters.get("fids")
+    if operation in {"data.export_selection", "geometry.multipart", "geometry.explode"}:
+        fids = parameters.pop("fids", None)
         if len(items) != 1 or not isinstance(fids, list) or not fids or any(type(fid) is not int for fid in fids):
             raise ValueError("请选择有效的地图要素")
-        parameters = {"selection": {"layer": items[0]["layer"], "revision": items[0]["revision"], "fids": fids}}
+        parameters["selection"] = {"layer": items[0]["layer"], "revision": items[0]["revision"], "fids": fids}
     title = {"data.export_selection": "所选要素"}.get(operation) or step_title(operation)
     if operation == "geometry.create_dataset" or payload.get("name") is not None:
         name = payload.get("name")
@@ -287,7 +287,8 @@ def describe(workspace, ref, file=None, name=None):
         source_parts = [item["sha256"] for item in details["evidence"] if "-source-" in item["step"]]
     stat = file.stat()
     _, revision = interactive_revision(file, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
-    return {"ref": ref, "name": name, "sourceName": original, "revision": revision, "sourceRevision": ":".join(source_parts) or revision, "geometry": info["geometry_type"],
+    return {"ref": ref, "name": name, "sourceName": original, "revision": revision, "sourceRevision": ":".join(source_parts) or revision, "geometry": layer_geometry(info, file),
+            "singlePoint": info["geometry_type"].split(" ")[0] == "Point",
             "count": info["features"], "fidField": info["fid_column"], "bounds": numbers(info["total_bounds"]),
             "crs": crs.to_string() if crs else None,
             "crsName": (source_crs_name or crs.name) if crs else "未定义坐标系",
