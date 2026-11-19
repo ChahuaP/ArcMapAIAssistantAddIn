@@ -40,16 +40,24 @@ def overview_gdal():
     })
 
 
-def footprint(file, layer, extent, where=None):
+def footprint(file, layer, extent, where=None, outlines=False):
     gd = overview_gdal()
     xmin, ymin, xmax, ymax = extent
-    cell = max(xmax - xmin, ymax - ymin) / 480 or 1.0
+    cell = max(xmax - xmin, ymax - ymin) / (960 if outlines else 480) or 1.0
     # A half-cell apron includes features lying exactly on the outer grid edge.
     bounds = (xmin - cell/2, ymin - cell/2, xmax + cell/2, ymax + cell/2)
     args = ["-of", "MEM", "-ot", "Byte", "-at", "-burn", "1", "-te", *map(str, bounds),
             "-tr", str(cell), str(cell), "-l", layer]
     if where:
         args.extend(["-where", where])
+    if outlines and not where:
+        from guizhi.infrastructure.operations.table import identifier
+
+        info = pyogrio.read_info(file, layer=layer)
+        if info["geometry_type"] in {"Polygon", "MultiPolygon", "Unknown"}:
+            geometry = identifier(info["geometry_name"] or "geometry")
+            args[-2:] = ["-dialect", "SQLITE", "-sql",
+                         f"SELECT ST_Boundary({geometry}) AS outline FROM {identifier(layer)}"]
     argv = (c_char_p * (len(args) + 1))(*(value.encode("utf8") for value in args))
 
     def check(handle):
@@ -80,17 +88,18 @@ def footprint(file, layer, extent, where=None):
 
 
 @lru_cache(maxsize=24)
-def coverage(file, name, revision, full_bounds, view, cache, where=None):
+def coverage(file, name, revision, full_bounds, view, cache, where=None, outlines=False):
     """Persist whole-layer footprints and retain recent viewport footprints in memory."""
     if view is not None or where:
-        return footprint(file, name, view or full_bounds, where)
-    token = sha256(json.dumps([name, revision, full_bounds]).encode()).hexdigest()
+        return footprint(file, name, view or full_bounds, where, outlines)
+    token = sha256(json.dumps([name, revision, full_bounds, "outlines"] if outlines
+                              else [name, revision, full_bounds]).encode()).hexdigest()
     directory = cache / "coverage-v1"
     directory.mkdir(exist_ok=True, parents=True)
     path = directory / (token + ".wkb")
     if path.is_file():
         return tuple(shapely.from_wkb(path.read_bytes()).geoms)
-    shapes = footprint(file, name, full_bounds)
+    shapes = footprint(file, name, full_bounds, outlines=outlines)
     staging = directory / (uuid4().hex + ".pending")
     try:
         staging.write_bytes(shapely.to_wkb(shapely.GeometryCollection(shapes)))
@@ -105,6 +114,8 @@ def many_in_view(file, layer, count, extent, limit):
         return False
     if extent is None:
         return True
+    if file.suffix.lower() != ".gpkg":
+        return False
     from guizhi.infrastructure.operations.table import identifier
     with closing(sqlite3.connect(file.as_uri() + "?mode=ro", uri=True)) as db:
         geom = db.execute("SELECT column_name FROM gpkg_geometry_columns WHERE table_name=?", (layer,)).fetchone()[0]

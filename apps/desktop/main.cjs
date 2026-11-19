@@ -340,7 +340,7 @@ async function startDesktop(options) {
         if (surface !== window || !Array.isArray(items) || items.length > 256 ||
             items.some(item => !item || typeof item.name !== 'string' || !item.name.trim() || item.name.length > 255 ||
                 !/^[a-f0-9]{32}$/.test(item.ref?.run) ||
-                !['import', 'export', 'boundaries', 'transfer-source', 'raster_preview'].includes(item.ref.artifact))) {
+                !['import', 'export', 'boundaries', 'transfer-source', 'raster_preview', 'raster_source', 'shape_source'].includes(item.ref.artifact))) {
             throw new Error('地图图层引用无效');
         }
         mapCatalogVersion += 1;

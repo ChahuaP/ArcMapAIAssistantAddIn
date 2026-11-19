@@ -29,7 +29,9 @@ export function categoryValue(value) {
 export function layerSymbol(value, color) {
     const base = symbol(value, color);
     return { ...base, ...(value?.classification && { classification: value.classification }),
-        ...(value?.labelField && { labelField: value.labelField }) };
+        ...(value?.labelField && { labelField: value.labelField }),
+        ...(value?.outlines && { outlines: true }),
+        ...(value?.rasterBands && { rasterBands: value.rasterBands }) };
 }
 const commonColors = [
     ['白色', '#ffffff'], ['浅灰', '#d9d9d9'], ['灰色', '#808080'], ['深灰', '#434343'], ['黑色', '#000000'],
@@ -153,6 +155,12 @@ export function LayerProperties({ item, color, close, save, glyph, start = 'info
             h('br'), 'Y ' + format(bounds[1]) + ' 至 ' + format(bounds[3])) : '无有效范围'],
     ];
     const formatTab = tab === 'style';
+    const rasterBands = style.rasterBands || item.displayBands || (item.bands >= 3 ? [1, 2, 3] : [1]);
+    const bandChoices = Array.from({ length: image ? item.bands : 0 }, (_, index) => {
+        const number = index + 1;
+        const name = item.bandNames?.[index];
+        return { value: number, label: '波段 ' + number + (name ? ' · ' + name : '') };
+    });
     return h(Modal, { open: true, centered: true, width: 520, className: 'gis-dialog', rootClassName: 'gis-modal-root',
         title: h('span', { className: 'gis-dialog-title' }, glyph('layers'), item.name),
         onCancel: close, footer: tab !== 'info' ? [h(Button, { key: 'cancel', onClick: close }, '取消'),
@@ -165,6 +173,15 @@ export function LayerProperties({ item, color, close, save, glyph, start = 'info
                 ...(!image ? [{ value: 'labels', label: '标注' }] : [])] }),
         formatTab ? h('div', { className: 'gis-symbol-editor' },
             measure('opacity', '图层不透明度（%）', 0, 100, 1),
+            image && h('fieldset', { className: 'gis-symbol-group' },
+                h('legend', null, '波段设置'),
+                field('显示方式', h(Select, { 'aria-label': '显示方式', value: rasterBands.length,
+                    options: [{ value: 1, label: '单波段灰度' }, ...(item.bands > 1 ? [{ value: 3, label: 'RGB 合成' }] : [])],
+                    onChange: count => update('rasterBands', count === 1 ? [rasterBands[0]]
+                        : (item.displayBands?.length === 3 ? item.displayBands : [1, 2, Math.min(item.bands, 3)])) })),
+                ...(rasterBands.length === 3 ? ['红色通道', '绿色通道', '蓝色通道'] : ['灰度波段']).map((label, index) =>
+                    field(label, h(Select, { 'aria-label': label, options: bandChoices, value: rasterBands[index],
+                        onChange: band => update('rasterBands', rasterBands.map((current, i) => i === index ? band : current)) })))),
             !image && item.fields?.length > 0 && h(Segmented, { value: classified ? 'unique' : 'single',
                 'aria-label': '符号类型', disabled: classificationBusy, options: [{ value: 'single', label: '单一符号' },
                     { value: 'unique', label: '唯一值分类' }],

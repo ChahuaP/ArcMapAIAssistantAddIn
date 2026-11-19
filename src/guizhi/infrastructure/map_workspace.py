@@ -17,7 +17,7 @@ import shapely
 from pyproj import CRS
 from pyproj.enums import TransformDirection
 
-from guizhi.application.diagnostics import failure_summary
+from guizhi.application.diagnostics import contained, failure_summary, save
 from guizhi.application.skills import execute as execute_skill
 from guizhi.application.tasks import run_operation
 from guizhi.infrastructure.cache import reuse_job
@@ -25,9 +25,9 @@ from guizhi.infrastructure.crs_catalog import get_plan
 from guizhi.infrastructure.crs_options import projection
 from guizhi.infrastructure.map_overview import coverage, display_copy, many_in_view
 from guizhi.infrastructure.export import package_layer
-from guizhi.infrastructure.operations.evidence import artifact_path, read_artifact
+from guizhi.infrastructure.operations.evidence import artifact_path, artifact_reference, read_artifact
 from guizhi.infrastructure.operations.runner import data_revision
-from guizhi.infrastructure.vector import digest, layer_geometry
+from guizhi.infrastructure.vector import digest, layer_geometry, shapefile_projection, source_files as vector_files
 from guizhi.infrastructure.workspace import Workspace
 
 MAX_VISIBLE = 8000
@@ -44,9 +44,118 @@ MANUAL_OPERATIONS = {
     "raster.statistics", "raster.clip", "raster.reproject", "raster.assign", "raster.mosaic",
     "table.calculate_field", "table.calculate_geometry", "table.edit_cell",
 }
+RASTER_ARTIFACTS = {"raster_source", "raster_preview"}
+
+
+def raster_signature(file):
+    from guizhi.infrastructure.operations.raster import source_files
+
+    return local_signature(source_files(file))
+
+
+def local_signature(parts):
+    result = []
+    for part in parts:
+        stat = part.stat()
+        result.append([str(part), stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns])
+    return result
+
+
+def link_shape(workspace, item):
+    file = Path(item["file"]).resolve(strict=True)
+    name = item["layer"]
+    signature = local_signature(vector_files(file))
+    token = sha256(json.dumps([signature, name]).encode()).hexdigest()[:32]
+    manifest = contained(workspace.root, "map-shapes", token + ".json")
+    if not manifest.is_file():
+        save(manifest, {"path": str(file), "layer": name, "signature": signature})
+    return describe(workspace, {"run": token, "artifact": "shape_source"}, file, name)
+
+
+def shape_record(workspace, ref):
+    if not isinstance(ref.get("run"), str) or not re.fullmatch(r"[0-9a-f]{32}", ref["run"]):
+        raise ValueError("地图图层引用无效")
+    manifest = contained(workspace.root, "map-shapes", ref["run"] + ".json")
+    entry = json.loads(manifest.read_bytes())
+    file = Path(entry["path"])
+    if not file.is_file() or local_signature(vector_files(file)) != entry["signature"]:
+        raise ValueError("原始 SHP 或配套文件已移动或修改，请重新添加图层")
+    return entry, file
+
+
+def shape_snapshot(workspace, ref):
+    entry, file = shape_record(workspace, ref)
+    saved = contained(workspace.root, "map-shapes", ref["run"] + ".snapshot.json")
+    if saved.is_file():
+        return source(workspace, json.loads(saved.read_bytes()))
+    record = successful(run_operation(workspace.root, {"operation": "data.describe",
+        "inputs": [{"file": str(file), "layer": entry["layer"]}],
+        "idempotency_key": "map-shape-" + ref["run"]}))
+    snapshot = {"run": record["id"], "artifact": "import"}
+    save(saved, snapshot)
+    return source(workspace, snapshot)
+
+
+def shape_display_file(workspace, ref, file, name):
+    from xml.sax.saxutils import escape, quoteattr
+
+    prj = next((part for part in vector_files(file) if part.suffix.lower() == ".prj"), None)
+    if not prj or prj.read_bytes().isascii():
+        return file
+    # Read coordinates through GDAL without decoding the GBK WKT in Pyogrio.
+    # The map reads the actual CRS separately from the original PRJ.
+    view = contained(workspace.root, "map-shapes", ref["run"] + ".vrt")
+    if not view.is_file():
+        view.write_text(f'<OGRVRTDataSource><OGRVRTLayer name={quoteattr(name)}>'
+                        f'<SrcDataSource relativeToVRT="0">{escape(str(file))}</SrcDataSource>'
+                        f'<SrcLayer>{escape(name)}</SrcLayer><LayerSRS>NULL</LayerSRS>'
+                        '</OGRVRTLayer></OGRVRTDataSource>', encoding="utf-8")
+    return view
+
+
+def map_revision(ref, material):
+    return ref["run"] if ref["artifact"] == "shape_source" else material["revision"]
+
+
+def link_raster(workspace, file, name):
+    file = Path(file).resolve(strict=True)
+    signature = raster_signature(file)
+    identifier = sha256(json.dumps(signature).encode()).hexdigest()[:32]
+    entry = contained(workspace.root, "map-rasters", identifier + ".json")
+    if not entry.is_file():
+        save(entry, signature)
+    return raster_layer(workspace, {"run": identifier, "artifact": "raster_source"}, name)
+
+
+def raster_file(workspace, ref):
+    if ref["artifact"] == "raster_preview":
+        file, checksum = artifact_reference(workspace, ref["run"], "raster-1")
+        stat = file.stat()
+        if raster_digest(file, stat.st_size, stat.st_mtime_ns) != checksum:
+            raise ValueError("影像成果已移动或修改")
+        return file
+    if ref["artifact"] != "raster_source" or not re.fullmatch(r"[0-9a-f]{32}", ref["run"]):
+        raise ValueError("影像引用无效")
+    entry = contained(workspace.root, "map-rasters", ref["run"] + ".json")
+    signature = json.loads(entry.read_bytes())
+    file = Path(signature[0][0])
+    if not file.is_file() or raster_signature(file) != signature:
+        raise ValueError("原始影像或配套文件已移动或修改，请重新添加图层")
+    return file
+
+
+@lru_cache(maxsize=64)
+def raster_digest(file, size, modified):
+    return digest(file)
 
 
 def raster_layer(workspace, ref, name):
+    if ref["artifact"] == "raster_source":
+        from guizhi.infrastructure.operations.map_raster import image_preview
+
+        file = raster_file(workspace, ref)
+        _, info = image_preview(file, metadata_only=True)
+        return {**info, "kind": "raster", "ref": ref, "name": name, "sourceName": str(file)}
     info = workspace.read(ref["run"])["result"]["raster_preview"]
     source_path = workspace.read(ref["run"])["task"]["request"]["inputs"][0]["file"]
     return {**info, "kind": "raster", "ref": ref, "name": name, "sourceName": source_path}
@@ -55,7 +164,15 @@ def raster_layer(workspace, ref, name):
 def map_material(workspace, ref):
     if not isinstance(ref, dict) or set(ref) != {"run", "artifact"}:
         raise ValueError("请选择已保存的地图图层")
-    if ref["artifact"] == "raster_preview":
+    if ref["artifact"] in RASTER_ARTIFACTS:
+        if ref["artifact"] == "raster_source":
+            from guizhi.infrastructure.vector import source_revision
+
+            file = raster_file(workspace, ref)
+            parts = [Path(part[0]) for part in raster_signature(file)]
+            stat = file.stat()
+            revision = source_revision(parts) if len(parts) > 1 else raster_digest(file, stat.st_size, stat.st_mtime_ns)
+            return {"file": str(file), "layer": None, "revision": revision}
         file = read_artifact(workspace, ref["run"], "raster-1")
         return {"file": str(file), "layer": None, "revision": digest(file)}
     return material(*source(workspace, ref))
@@ -74,20 +191,18 @@ def output_layers(workspace, record, title):
             layer = describe(workspace, ref, file, data.get("export_layer") if kind == "export" else None)
             result.append({**layer, "name": title + (" · 边界" if kind == "boundaries" else "")})
         elif file.suffix.lower() in {".tif", ".tiff", ".img"}:
-            preview = successful(run_operation(workspace.root, {"operation": "map_raster.preview", "inputs": [
-                {"file": str(file), "layer": None, "revision": entry["sha256"]}]}))
-            result.append(raster_layer(workspace, {"run": preview["id"], "artifact": "raster_preview"}, title + " · 影像"))
+            result.append(link_raster(workspace, file, title + " · 影像"))
     return result
 
 
 def selection_material(workspace, ref, revision, fids):
     file, name = source(workspace, ref)
     item = material(file, name)
-    if item["revision"] != revision:
+    if map_revision(ref, item) != revision:
         raise ValueError("图层版本已变化，请重新选择要素")
     if not isinstance(fids, list) or not fids or any(type(fid) is not int for fid in fids):
         raise ValueError("请选择有效的地图要素")
-    selection = {"layer": name, "revision": revision, "fids": sorted(set(fids))}
+    selection = {"layer": name, "revision": item["revision"], "fids": sorted(set(fids))}
     parameters = {"selection": selection}
     record, _ = reuse_job(workspace, "data.export_selection", [item], parameters, lambda: run_operation(
         workspace.root, {"operation": "data.export_selection", "inputs": [item], "parameters": parameters}))
@@ -235,6 +350,8 @@ def source(workspace, ref):
     if not isinstance(ref, dict) or set(ref) != {"run", "artifact"}:
         raise ValueError("请选择已保存的地图图层")
     run, kind = ref["run"], ref["artifact"]
+    if kind == "shape_source":
+        return shape_snapshot(workspace, ref)
     if not isinstance(run, str) or not re.fullmatch(r"[a-f0-9]{32}", run) or kind not in VECTOR_ARTIFACTS:
         raise ValueError("地图图层引用无效")
     record = workspace.read(run)
@@ -276,9 +393,16 @@ def numbers(values):
 
 
 def describe(workspace, ref, file=None, name=None):
+    linked = ref["artifact"] == "shape_source"
     if file is None:
-        file, name = source(workspace, ref)
-    info = pyogrio.read_info(file, layer=name, force_total_bounds=True)
+        if linked:
+            entry, file = shape_record(workspace, ref)
+            name = entry["layer"]
+        else:
+            file, name = source(workspace, ref)
+    projection = shapefile_projection(vector_files(file)) if linked else None
+    display_file = shape_display_file(workspace, ref, file, name) if linked else file
+    info = pyogrio.read_info(display_file, layer=name, force_total_bounds=True)
     name = info["layer_name"]
     crs = CRS(info["crs"]) if info["crs"] else None
     if crs and crs.to_epsg() in {0, 404000}:
@@ -286,6 +410,8 @@ def describe(workspace, ref, file=None, name=None):
     original = str(file)
     source_crs_name = None
     source_parts = []
+    if linked:
+        crs = projection
     if ref["artifact"] == "import":
         details = workspace.read(ref["run"])["result"]
         original = (details.get("datasets") or [{}])[0].get("source") or original
@@ -293,10 +419,16 @@ def describe(workspace, ref, file=None, name=None):
         source_crs_name = details.get("crs_name")
         source_parts = [item["sha256"] for item in details["evidence"] if "-source-" in item["step"]]
     stat = file.stat()
-    _, revision = interactive_revision(file, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+    revision = ref["run"] if linked else interactive_revision(file, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)[1]
+    fid_field = info["fid_column"]
+    if linked:
+        fid_field = "fid"
+        names = {field.casefold() for field in info["fields"]}
+        while fid_field in names:
+            fid_field += "_"
     return {"ref": ref, "name": name, "sourceName": original, "revision": revision, "sourceRevision": ":".join(source_parts) or revision, "geometry": layer_geometry(info, file),
             "singlePoint": info["geometry_type"].split(" ")[0] == "Point",
-            "count": info["features"], "fidField": info["fid_column"], "bounds": numbers(info["total_bounds"]),
+            "count": info["features"], "fidField": fid_field, "bounds": numbers(info["total_bounds"]),
             "crs": crs.to_string() if crs else None,
             "crsName": (source_crs_name or crs.name) if crs else "未定义坐标系",
             "metresPerUnit": crs.axis_info[0].unit_conversion_factor if crs and crs.is_projected else None,
@@ -345,12 +477,23 @@ def overview_window(extent):
 
 
 def features(workspace, payload):
-    file, name = source(workspace, payload["ref"])
     ref = payload["ref"]
-    stat = file.stat()
-    revision = interactive_revision(file, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)[1]
+    linked = ref["artifact"] == "shape_source"
+    if linked and not payload.get("plan"):
+        entry, file = shape_record(workspace, ref)
+        name, revision = entry["layer"], ref["run"]
+    else:
+        file, name = source(workspace, ref)
+        stat = file.stat()
+        revision = interactive_revision(file, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)[1]
+        if linked:
+            ref = {"run": json.loads(contained(workspace.root, "map-shapes", ref["run"] + ".snapshot.json").read_bytes())["run"],
+                   "artifact": "import"}
     info = feature_metadata(workspace.root, ref["run"], ref["artifact"], file, name, revision)
+    if linked and ref["artifact"] == "shape_source":
+        file = shape_display_file(workspace, ref, file, name)
     interactive = payload.get("interactive") is True
+    outlines = payload.get("outlines") is True
     extent = bounds(payload["bbox"]) if payload.get("bbox") is not None else None
     target = CRS(payload["target"]) if payload.get("target") else None
     current = CRS(info["crs"]) if info["crs"] else None
@@ -401,15 +544,15 @@ def features(workspace, payload):
         where = None
         if highlight:
             from guizhi.infrastructure.operations.table import identifier
-            where = identifier(info["fidField"]) + " IN (" + ",".join(map(str, highlight)) + ")"
+            where = ("FID" if linked and not plan else identifier(info["fidField"])) + " IN (" + ",".join(map(str, highlight)) + ")"
         revision = file.stem if plan else info["revision"]
         response = {"features": [], "limited": True, "bounds": display_bounds}
         if interactive:
-            overview_key = sha256(json.dumps([name, revision, full, window, payload.get("target"), where]).encode()).hexdigest()
+            overview_key = sha256(json.dumps([name, revision, full, window, payload.get("target"), where, outlines]).encode()).hexdigest()
             response["overviewKey"] = overview_key
             if payload.get("knownOverview") == overview_key:
                 return response
-        shapes = coverage(file, name, revision, full, window, workspace.root / "cache", where)
+        shapes = coverage(file, name, revision, full, window, workspace.root / "cache", where, outlines)
         if tx and shapes:
             shapes = shapely.transform(np.asarray(shapes, dtype=object), lambda x, y: tx.transform(x, y, errcheck=True),
                                        interleaved=False)
@@ -497,7 +640,8 @@ def request(workspace, payload):
             raise ValueError("请选择另一个图层")
         origin = material(*source(workspace, payload["ref"]))
         destination = material(*source(workspace, payload["destination"]))
-        if origin["revision"] != payload["revision"] or destination["revision"] != payload["destinationRevision"]:
+        if map_revision(payload["ref"], origin) != payload["revision"] or \
+                map_revision(payload["destination"], destination) != payload["destinationRevision"]:
             raise ValueError("图层已修改，请重新复制或剪切要素")
         selection = {"layer": origin["layer"], "revision": origin["revision"], "fids": payload["fids"]}
         record = successful(run_operation(workspace.root, {"operation": "edit.transfer", "inputs": [origin, destination],
@@ -511,6 +655,9 @@ def request(workspace, payload):
             raise ValueError("一次请选择 1 至 32 个图层")
         result = []
         for item in items:
+            if Path(item["file"]).suffix.lower() == ".shp":
+                result.append(link_shape(workspace, item))
+                continue
             record = successful(run_operation(workspace.root, {"operation": "data.describe", "inputs": [item]}))
             result.append(describe(workspace, {"run": record["id"], "artifact": "import"}))
         return result
@@ -538,16 +685,13 @@ def request(workspace, payload):
             raise ValueError("一次请选择 1 至 32 个影像")
         result = []
         for item in payload["items"]:
-            record = successful(run_operation(workspace.root, {"operation": "map_raster.preview", "inputs": [
-                {name: item[name] for name in ("file", "layer")}]}))
-            ref = {"run": record["id"], "artifact": "raster_preview"}
-            result.append(raster_layer(workspace, ref, item["name"]))
+            result.append(link_raster(workspace, item["file"], item["name"]))
         return result
     if action == "raster-display":
         from guizhi.infrastructure.operations.map_raster import image_preview
 
-        file = Path(map_material(workspace, payload["ref"])["file"])
-        image, info = image_preview(file, payload.get("target"))
+        file = raster_file(workspace, payload["ref"])
+        image, info = image_preview(file, payload.get("target"), payload.get("bands"), payload.get("bbox"))
         return {"image": b64encode(image).decode("ascii"), "bounds": info["bounds"]}
     if action == "raster-preview":
         ref = payload["ref"]
@@ -585,7 +729,7 @@ def request(workspace, payload):
         if action == "crs-search":
             return coordinate_options(query)
         ref = payload["ref"]
-        layer = raster_layer(workspace, ref, None) if ref.get("artifact") == "raster_preview" else describe(workspace, ref)
+        layer = raster_layer(workspace, ref, None) if ref.get("artifact") in RASTER_ARTIFACTS else describe(workspace, ref)
         return projection_options(workspace, layer, query)
     if action == "material":
         item = map_material(workspace, payload["ref"])
@@ -596,7 +740,7 @@ def request(workspace, payload):
         return export_layer(workspace, payload)
     file, name = source(workspace, payload["ref"])
     if action == "edit":
-        if material(file, name)["revision"] != payload.get("revision"):
+        if map_revision(payload["ref"], material(file, name)) != payload.get("revision"):
             raise ValueError("图层版本已变化，请重新打开图层")
         return produce(workspace, "edit.changes", file, name, {"changes": payload["changes"]})
     if action == "selection":
@@ -617,10 +761,10 @@ def export_layer(workspace, payload):
     if output.suffix.lower() != "." + extension or output.exists():
         raise ValueError("请选择尚未使用的导出文件名")
     ref = payload["ref"]
-    if ref["artifact"] == "raster_preview":
+    if ref["artifact"] in RASTER_ARTIFACTS:
         from guizhi.infrastructure.operations import raster_backend as raster
 
-        file = map_material(workspace, ref)["file"]
+        file = raster_file(workspace, ref)
         if extension == "tif":
             copyfile(file, output)
         elif extension == "jpg":

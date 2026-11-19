@@ -58,6 +58,14 @@ const tabIcons = { 地图: 'map', 数据: 'layers', 编辑: 'pencil', 分析: 'a
 
 const roles = { project: '项目范围', coverage: '重叠范围' };
 const key = item => item.ref.run + ':' + item.ref.artifact;
+function rasterDetailBounds(item, view) {
+    if (!view || !item.bounds || Math.max(item.width, item.height) <= 960) return null;
+    const [x1, y1, x2, y2] = item.bounds;
+    const bounds = [Math.max(x1, view[0]), Math.max(y1, view[1]), Math.min(x2, view[2]), Math.min(y2, view[3])];
+    if (bounds[0] >= bounds[2] || bounds[1] >= bounds[3]) return null;
+    const fraction = Math.max((bounds[2] - bounds[0]) / (x2 - x1), (bounds[3] - bounds[1]) / (y2 - y1));
+    return fraction <= .5 ? bounds : null;
+}
 const projection = (code, units) => new Projection({ code: code || 'local', units: units || 'm' });
 const fillColor = (color, percent) => color + Math.round(percent * 255 / 100).toString(16).padStart(2, '0');
 const classFill = (settings, color, fill) => settings.fill === null || fill === null ? null : fill || color;
@@ -420,11 +428,16 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 const appearance = symbol(item.style, palette[layers.indexOf(item) % palette.length]);
                 const options = { opacity: opacity(item.style?.opacity ?? item.opacity) / 100 };
                 if (item.kind === 'raster') {
-                    const oldSource = previous?.getSource();
-                    if (oldSource) return [new ImageLayer({ ...options, source: oldSource })];
-                    const image = !target || target === item.crs
-                        ? { image: await api.map({ action: 'raster-preview', ref: item.ref }), bounds: item.bounds }
-                        : await api.map({ action: 'raster-display', ref: item.ref, target });
+                    const stamp = JSON.stringify([target, item.style?.rasterBands]);
+                    const windowed = options.opacity === 1 && item.byteImagery && (!target || target === item.crs) && rasterDetailBounds(item, bounds);
+                    const oldSource = previous?.get('rasterStamp') === stamp && previous.getSource();
+                    if (oldSource && !windowed) return [new ImageLayer({ ...options, source: oldSource })];
+                    if (oldSource && windowed) options.extent = item.bounds;
+                    const image = await api.map({ action: 'raster-display', ref: item.ref, target, bands: item.style?.rasterBands,
+                        bbox: windowed || undefined });
+                    if (oldSource && windowed) return [new ImageLayer({ ...options, source: oldSource }),
+                        new ImageLayer({ ...options, source: new Static({ url: 'data:image/png;base64,' + image.image,
+                            imageExtent: image.bounds, projection: view.getProjection() }) })];
                     return [new ImageLayer({ ...options, source: new Static({
                         url: 'data:image/png;base64,' + image.image, imageExtent: image.bounds, projection: view.getProjection(),
                     }) })];
@@ -434,6 +447,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                     (entry.plan.source_wkt === item.crs || entry.source_reference === item.crs) &&
                     (entry.plan.target_wkt === target || entry.target_reference === display?.value));
                 const reply = await api.map({ action: 'features', ref: item.ref, bbox: bounds, target: target || null,
+                    outlines: item.style?.outlines === true,
                     fields: displayFields(item),
                     plan: displayPlans[key(item)] || (plan && plan.id + '@' + plan.revision) });
                 if (reply.overview) {
@@ -792,6 +806,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
             if (layerKeys.includes(id)) continue;
             const fillLayer = existing.get('fillLayer');
             if (fillLayer) state.ol.removeLayer(fillLayer);
+            if (existing.get('rasterDetail')) state.ol.removeLayer(existing.get('rasterDetail'));
             if (existing.get('coverage')) state.ol.removeLayer(existing.get('coverage'));
             state.ol.removeLayer(existing);
         }
@@ -805,6 +820,21 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
             if (!previous.has(id)) {
                 drawing.set('key', id);
                 state.ol.addLayer(drawing);
+                if (item.ref.artifact === 'shape_source' && item.count > 8000 && item.bounds &&
+                        (!target || target === item.crs)) {
+                    const [west, south, east, north] = item.bounds;
+                    if (west < east && south < north) {
+                        const geometry = { type: 'Polygon', coordinates: [[
+                            [west, south], [east, south], [east, north], [west, north], [west, south],
+                        ]] };
+                        const extentLayer = coverageLayer([geometry], palette[index % palette.length]);
+                        drawing.set('coverage', extentLayer);
+                        drawing.set('dataExtent', item.bounds);
+                        state.ol.addLayer(extentLayer);
+                        if (state.fitNeeded && !state.initialExtent && !hidden.includes(id))
+                            fit(state.view, [drawing], state.ol.getSize());
+                    }
+                }
             }
             const order = 2 * (layers.length - index);
             const layerOpacity = opacity(item.style?.opacity ?? item.opacity) / 100;
@@ -858,14 +888,37 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
             drawing.setZIndex(order);
             drawing.setVisible(visible);
             drawing.get('coverage')?.setVisible(visible);
+            drawing.get('rasterDetail')?.setVisible(visible);
             next.set(id, drawing);
             if (hidden.includes(id)) return null;
             if (item.kind === 'raster') {
-                if (drawing.getSource()) return Promise.resolve({ id, drawing, raster: true });
-                const nativeRaster = !target || target === item.crs;
-                const request = nativeRaster ? api.map({ action: 'raster-preview', ref: item.ref }).then(image => ({ image, bounds: item.bounds }))
-                    : api.map({ action: 'raster-display', ref: item.ref, target });
-                return request.then(({ image, bounds }) => ({ id, drawing, raster: true, bounds,
+                const bands = item.style?.rasterBands;
+                const rasterStamp = JSON.stringify([target, bands]);
+                let detail = drawing.get('rasterDetail');
+                if (drawing.get('rasterStamp') === rasterStamp) {
+                    const extent = layerOpacity === 1 && item.byteImagery && (!target || target === item.crs)
+                        && rasterDetailBounds(item, bbox);
+                    if (!extent) {
+                        detail?.setVisible(false);
+                        return Promise.resolve({ id, drawing, raster: true });
+                    }
+                    if (!detail) {
+                        detail = new ImageLayer();
+                        drawing.set('rasterDetail', detail);
+                        state.ol.addLayer(detail);
+                    }
+                    detail.setZIndex(order + 1);
+                    const detailStamp = JSON.stringify([rasterStamp, extent]);
+                    if (detail.get('stamp') === detailStamp) return Promise.resolve({ id, drawing, raster: true });
+                    return api.map({ action: 'raster-display', ref: item.ref, target, bands, bbox: extent })
+                        .then(({ image, bounds }) => ({ id, drawing, raster: true, detail, detailStamp,
+                            detailImage: new Static({ url: 'data:image/png;base64,' + image, imageExtent: bounds,
+                                projection: state.view.getProjection() }) }))
+                        .catch(error => ({ id, drawing, raster: true, error }));
+                }
+                detail?.setVisible(false);
+                return api.map({ action: 'raster-display', ref: item.ref, target, bands })
+                    .then(({ image, bounds }) => ({ id, drawing, raster: true, bounds, rasterStamp,
                     image: new Static({ url: 'data:image/png;base64,' + image, imageExtent: bounds,
                         projection: state.view.getProjection() }) })).catch(error => ({ id, drawing, raster: true, error }));
             }
@@ -877,7 +930,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 (entry.plan.target_wkt === target || entry.target_reference === display?.value));
             const planId = displayPlans[id] || (plan && plan.id + '@' + plan.revision);
             drawing.set('displayPlan', planId);
-            const stamp = JSON.stringify([target, displayFields(item), planId]);
+            const stamp = JSON.stringify([target, displayFields(item), planId, item.style?.outlines === true]);
             const viewportStamp = JSON.stringify([stamp, bbox]);
             if (drawing.get('completeFeatures') === stamp || drawing.get('viewportStamp') === viewportStamp)
                 return Promise.resolve({ id, drawing });
@@ -887,7 +940,8 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 if (!alive) return { id, drawing };
                 try {
                     const result = await api.map({ action: 'features', ref: item.ref, bbox, interactive: true,
-                        knownOverview: drawing.get('overviewKey'), target: target || null, fields: displayFields(item), plan: planId });
+                        knownOverview: drawing.get('overviewKey'), target: target || null, fields: displayFields(item), plan: planId,
+                        outlines: item.style?.outlines === true });
                     return { id, drawing, result, viewportStamp, full: !bbox && !result.limited ? stamp : null };
                 } catch (error) {
                     return { id, drawing, error };
@@ -904,7 +958,13 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         function apply(item) {
             if (!alive || item.error) return item;
             const { drawing, result } = item;
+            if (item.detailImage) {
+                item.detail.setSource(item.detailImage);
+                item.detail.set('stamp', item.detailStamp);
+                item.detail.setVisible(true);
+            }
             if (item.image) {
+                drawing.set('rasterStamp', item.rasterStamp);
                 drawing.setExtent(item.bounds);
                 drawing.set('dataExtent', item.bounds);
                 drawing.setSource(item.image);
@@ -1170,6 +1230,13 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
             onClick: ({ key: id }) => onClick(id) },
     }, h(Button, { size: 'small', icon: glyph(icon), disabled: busy,
         'aria-label': accessibleName, title: accessibleName }, title, glyph('chevron', 13))));
+    const addLayer = trigger => h(antd.Dropdown, { trigger: ['click'], disabled: busy,
+        menu: { items: [
+            { key: 'file', label: '本地文件', icon: glyph('folderOpen') },
+            { key: 'gdb', label: '文件地理数据库', icon: glyph('layers') },
+            { key: 'xy', label: '坐标表（XY）', icon: glyph('target') },
+        ], onClick: ({ key: mode }) => load(mode === 'file' ? api.mapImport() : api.mapImport(null, mode)) },
+    }, trigger);
 
     const editable = Boolean(layer?.crs && !hidden.includes(active) &&
         /^(Multi)?(Point|LineString|Polygon)$/.test(layer.geometry));
@@ -1585,6 +1652,8 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
             { key: 'table', label: '打开属性表', icon: glyph('table'), disabled: raster },
             { key: 'rename', label: '重命名', icon: glyph('pencil') },
             { key: 'style', label: raster ? '影像显示' : '符号化', icon: glyph(raster ? 'image' : 'swatches') },
+            ...(!raster && item.geometry && item.count > 8000 ? [{ key: 'outlines', icon: glyph('layers'),
+                label: item.style?.outlines ? '切换为自动概览' : '全图显示要素轮廓' }] : []),
             ...(!raster ? [{ key: 'labels', label: '标注', icon: glyph('label') }] : []),
             { key: 'export', label: '导出', icon: glyph('download'), children: [
                 { key: 'export-data', label: '导出为…' },
@@ -1599,6 +1668,10 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         ], onClick: ({ key: action }) => {
             if (action === 'remove') { remove(id); return; }
             if (action === 'rename') { setRenamingLayer(id); return; }
+            if (action === 'outlines') {
+                styleLayer(id, { ...item.style, outlines: !item.style?.outlines });
+                return;
+            }
             if (action === 'export-table') { openTool('presentation.export_table', id); return; }
             if (action === 'export-data') {
                 const appearance = !raster && layerSymbol({ ...item.style, opacity: item.style?.opacity ?? item.opacity },
@@ -1694,9 +1767,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                     style: item.kind === 'raster' ? null : layerSymbol(item.style, palette[(layers.length - index - 1) % palette.length]) })) }),
             result => setIoStatus('已保存 MXD 和配套数据 · ' + result.layers + ' 个图层')),
             { disabled: busy || !layers.length || !viewReady, 'aria-label': '保存地图工程' })),
-            group('图层管理', command('添加图层', () => load(api.mapImport()), { disabled: busy }),
-                command('地理数据库', () => load(api.mapImport(null, 'gdb')), { icon: glyph('folderOpen'), disabled: busy }),
-                command('添加 XY 数据', () => load(api.mapImport(null, 'xy')), { icon: glyph('target'), disabled: busy }),
+            group('图层管理', addLayer(command('添加图层', undefined, { disabled: busy, 'aria-haspopup': 'menu' })),
                 command('新建图层', () => openTool('geometry.create_dataset')),
                 command('复制图层', () => openTool('data.copy'), { disabled: !layer?.geometry }),
                 command('合并图层', () => openTool('data.merge'), { disabled: layers.filter(item => item.geometry).length < 2 }))] : []),
@@ -1815,8 +1886,8 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                     h('span', null, importing.label),
                     importing.total ? h('progress', { max: importing.total, value: importing.completed,
                         'aria-label': '图层导入进度' }) : h('progress', { 'aria-label': '图层导入进度' })),
-                !layers.length && h(Button, { className: 'map-empty', type: 'default', icon: glyph('add', 30),
-                    title: '添加或拖入空间数据', 'aria-label': '添加或拖入空间数据', disabled: busy, onClick: () => load(api.mapImport()) }),
+                !layers.length && addLayer(h(Button, { className: 'map-empty', type: 'default', icon: glyph('add', 30),
+                    title: '添加或拖入空间数据', 'aria-label': '添加或拖入空间数据', disabled: busy })),
                 (notices.size > 0 || busy) && h('div', { className: 'map-notice', role: 'status' },
                     busy ? '正在处理地图数据…' :
                         [...notices].map(([message, names]) => h('div', { key: message }, message,

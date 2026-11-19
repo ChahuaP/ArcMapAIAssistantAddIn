@@ -9,7 +9,7 @@ from pyproj import CRS
 
 from guizhi.application.tasks import run_operation
 from guizhi.infrastructure.arcmap import bridge, export_frame
-from guizhi.infrastructure.map_workspace import bounds, describe, map_material, raster_layer, source, successful
+from guizhi.infrastructure.map_workspace import RASTER_ARTIFACTS, bounds, describe, link_raster, raster_file, source, successful
 
 
 def frame_layers(layers, parent=(), visible=True):
@@ -81,9 +81,7 @@ def import_frame(workspace, payload):
         try:
             file, name = layer_file(item, document, search)
             if item["kind"] == "raster":
-                record = successful(run_operation(workspace.root, {"operation": "map_raster.preview", "inputs": [
-                    {"file": str(file), "layer": None}]}))
-                layer = raster_layer(workspace, {"run": record["id"], "artifact": "raster_preview"}, item["name"])
+                layer = link_raster(workspace, file, item["name"])
             else:
                 if file.suffix.lower() == ".gdb":
                     # ArcGIS stores qualified dataset names in some documents.
@@ -165,10 +163,10 @@ def write_document(workspace, payload):
             ref = item["ref"]
             dataset = f"layer_{index}"
             geometry = None
-            if ref["artifact"] == "raster_preview":
+            if ref["artifact"] in RASTER_ARTIFACTS:
                 from guizhi.infrastructure.operations.raster import normalize
 
-                file = Path(map_material(workspace, ref)["file"])
+                file = raster_file(workspace, ref)
                 target = data / (dataset + ".tif")
                 normalize(file, target, lambda: None)
                 layer = {"kind": "raster", "source": str(target)}
