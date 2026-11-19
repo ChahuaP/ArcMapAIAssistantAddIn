@@ -17,6 +17,7 @@ const { prepareConversation, uploadConversation } = require('./conversation-feed
 const { conversationRetentionDays } = require('./conversation-schema.cjs');
 const { Updater } = require('./updater.cjs');
 const { Components } = require('./components.cjs');
+const { basemaps } = require('./map-basemap.cjs');
 const { action, parameterValues, parametersReady, isBusinessRequest, matchBusiness, reference } = require('./task-commands.js');
 
 const origin = 'guizhi://app';
@@ -54,9 +55,11 @@ async function startDesktop(options) {
         if (!fs.existsSync(file)) throw new Error('桌面运行依赖不完整');
     }
     const nonce = randomBytes(18).toString('base64');
+    const basemap = basemaps(net);
     protocol.handle('guizhi', async request => {
         const url = new URL(request.url);
         if (url.hostname !== 'app') return new Response('', { status: 404 });
+        if (url.pathname.startsWith('/basemap/')) return basemap.tile(request, url);
         const file = files.get(url.pathname);
         if (!file) return new Response('', { status: 404 });
         if (url.pathname === '/index.html') {
@@ -688,10 +691,38 @@ async function startDesktop(options) {
         shell.showItemInFolder(output);
         return result;
     }, true);
-    let pendingSource;
+    const pendingSources = new Map();
+    const coordinateFiles = new Set(['.csv', '.xlsx']);
+    const localExtensions = new Set([...formats.vector.extensions, ...formats.raster.extensions, 'zip', 'csv', 'xlsx']
+        .map(extension => '.' + extension));
+    let driveList;
+    bind('mapBasemap', (surface, config) => {
+        if (surface !== window) throw new Error('请从工作台添加底图');
+        return basemap.configure(config);
+    }, true);
+    bind('mapBrowse', async (surface, folder) => {
+        if (surface !== window) throw new Error('请从工作台添加数据');
+        const directory = path.resolve(folder || app.getPath('documents'));
+        if ((folder && !path.isAbsolute(folder)) || path.extname(directory).toLowerCase() === '.gdb') {
+            throw new Error('请选择有效的文件夹');
+        }
+        const entries = await fs.promises.readdir(directory, { withFileTypes: true });
+        const rows = entries.flatMap(entry => {
+            const extension = path.extname(entry.name).toLowerCase();
+            const isFolder = entry.isDirectory() && extension !== '.gdb';
+            if (!isFolder && !(localExtensions.has(extension) && (entry.isFile() ||
+                    (entry.isDirectory() && extension === '.gdb')))) return [];
+            return [{ name: entry.name, file: path.join(directory, entry.name), folder: isFolder }];
+        }).sort((a, b) => Number(b.folder) - Number(a.folder) || a.name.localeCompare(b.name, 'zh-CN'));
+        driveList ??= Promise.all('ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map(async letter => {
+            const root = letter + ':\\';
+            try { await fs.promises.access(root); return root; } catch { return null; }
+        })).then(drives => drives.filter(Boolean));
+        return { directory, up: path.dirname(directory), drives: await driveList, rows };
+    }, true);
     function offerSource(kind, items, details) {
         const id = randomUUID();
-        pendingSource = { id, kind, items, workspace: controller.settings.workspace };
+        pendingSources.set(id, { kind, items, workspace: controller.settings.workspace });
         return { id, kind, ...details };
     }
     async function importMapJobs(jobs, issues = []) {
@@ -709,29 +740,20 @@ async function startDesktop(options) {
             total: jobs.length, completed: jobs.length });
         return { layers, issues };
     }
-    bind('mapImport', async (surface, paths, mode) => {
+    bind('mapImport', async (surface, paths) => {
         if (surface !== window) throw new Error('请从工作台添加图层');
-        pendingSource = null;
-        const empty = { layers: [], issues: [] };
-        if (mode === 'xy') {
-            const pick = await dialog.showOpenDialog(window, { title: '选择坐标表', properties: ['openFile'],
-                filters: [{ name: '坐标表', extensions: ['csv', 'xlsx'] }] });
-            if (pick.canceled) return empty;
-            const file = externalPath(pick.filePaths[0]);
-            const tables = await controller.reader.map(controller.settings.workspace, { action: 'xy-fields', file });
-            return { ...empty, source: offerSource('xy', [file], { name: path.basename(file), tables }) };
+        pendingSources.clear();
+        if (!Array.isArray(paths) || !paths.length || paths.length > 32 ||
+                paths.some(file => typeof file !== 'string' || !path.isAbsolute(file))) {
+            throw new Error('请选择 1 至 32 份本地数据');
         }
-        const db = mode === 'gdb';
-        const files = paths || (await dialog.showOpenDialog(window, db ?
-            { title: '选择 .gdb 地理数据库目录', properties: ['openDirectory'] } :
-            { properties: ['openFile', 'multiSelections'], filters: [{ name: '空间数据',
-                extensions: [...formats.vector.extensions.filter(ext => ext !== 'gdb'), ...formats.raster.extensions, 'zip'] }] })).filePaths;
-        if (!files.length) return empty;
-        if (db && !files.every(file => path.extname(file).toLowerCase() === '.gdb')) throw new Error('请选择扩展名为 .gdb 的地理数据库目录');
+        const files = paths.filter(file => !coordinateFiles.has(path.extname(file).toLowerCase()));
         window.webContents.send('guizhi:mapImportProgress', { label: '正在读取文件信息' });
-        const intake = await controller.intake(files, 'any');
+        const intake = files.length ? await controller.intake(files, 'any') : { items: [], issues: [] };
         const databases = intake.items.filter(item => item.kind === 'vector' && path.extname(item.file).toLowerCase() === '.gdb');
         const jobs = [];
+        const sources = [];
+        const tables = paths.filter(file => coordinateFiles.has(path.extname(file).toLowerCase()));
         for (const item of intake.items) {
             if (databases.includes(item)) continue;
             if (item.kind === 'vector') for (const layer of item.layers) {
@@ -744,14 +766,21 @@ async function startDesktop(options) {
             else intake.issues.push({ name: item.name, message: '地图支持矢量和影像图层' });
         }
         const result = await importMapJobs(jobs, intake.issues);
-        if (databases.length) result.source = offerSource('gdb', databases, {
+        if (databases.length) sources.push(offerSource('gdb', databases, {
             databases: databases.map(item => ({ name: item.name, layers: item.layers })),
-        });
-        return result;
+        }));
+        for (const input of tables) {
+            try {
+                const file = externalPath(input);
+                const sheets = await controller.reader.map(controller.settings.workspace, { action: 'xy-fields', file });
+                sources.push(offerSource('xy', [file], { name: path.basename(file), tables: sheets }));
+            } catch (error) { result.issues.push({ name: path.basename(input), message: error.message }); }
+        }
+        return { ...result, sources };
     }, true);
     bind('mapSourceApply', async (surface, id, params) => {
-        const source = pendingSource;
-        if (surface !== window || !source || source.id !== id || source.workspace !== controller.settings.workspace) {
+        const source = pendingSources.get(id);
+        if (surface !== window || !source || source.workspace !== controller.settings.workspace) {
             throw new Error('请重新选择数据源');
         }
         let result;
@@ -764,7 +793,7 @@ async function startDesktop(options) {
             if (!jobs.length) throw new Error('请选择需要添加的图层');
             result = await importMapJobs(jobs);
         }
-        if (pendingSource === source) pendingSource = null;
+        if (pendingSources.get(id) === source) pendingSources.delete(id);
         return result;
     }, true);
     bind('mapTaskInputs', async (surface, id) => {

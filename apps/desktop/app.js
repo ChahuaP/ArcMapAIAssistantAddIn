@@ -683,7 +683,7 @@
                             : h('span', { role: 'status' }, item.layoutError || '正在生成版面…')));
         }
         const conversation = h('section', { className: 'conversation' + (task ? '' : ' conversation-empty'), 'aria-label': '办理对话' },
-            task && h('div', { className: 'task-head' }, h('h1', null, turns[0].title),
+            task && h('div', { className: 'task-head' },
                 h('div', { className: 'task-head-actions' },
                     h('span', { className: 'status-tag' }, labels[task.status] || '未完成'),
                     button('upload', '上传会话', { type: 'text', size: 'small', disabled: state.busy || sending,

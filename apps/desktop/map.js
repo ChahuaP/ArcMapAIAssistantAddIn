@@ -1,5 +1,5 @@
 import 'ol/ol.css';
-import { MapSourceDialog } from './map-source-dialog.js';
+import { BasemapDialog, LocalDataPicker, MapSourceDialog } from './map-source-dialog.js';
 import { attachMeasurement } from './map-measure.js';
 import { MapProcessing, MapResultDialog, MapTool, TOOL_GROUPS, toolError, toolIcon,
     roleLayerPicker, layerMatches, mapLayerMaterial } from './map-processing.js';
@@ -17,6 +17,9 @@ import View from 'ol/View.js';
 import Projection from 'ol/proj/Projection.js';
 import ImageLayer from 'ol/layer/Image.js';
 import Static from 'ol/source/ImageStatic.js';
+import TileLayer from 'ol/layer/Tile.js';
+import XYZ from 'ol/source/XYZ.js';
+import TileWMS from 'ol/source/TileWMS.js';
 import VectorLayer from 'ol/layer/Vector.js';
 import VectorSource from 'ol/source/Vector.js';
 import GeoJSON from 'ol/format/GeoJSON.js';
@@ -32,7 +35,7 @@ import { never, primaryAction, singleClick, shiftKeyOnly, noModifierKeys } from 
 import ScaleLine from 'ol/control/ScaleLine.js';
 import { Fill, Stroke, Style, Circle, RegularShape, Text } from 'ol/style.js';
 import { createEmpty, extend, isEmpty } from 'ol/extent.js';
-import { getPointResolution } from 'ol/proj.js';
+import { get as getProjection, getPointResolution } from 'ol/proj.js';
 
 const h = window.React.createElement;
 const { useEffect, useRef, useState } = window.React;
@@ -66,7 +69,7 @@ function rasterDetailBounds(item, view) {
     const fraction = Math.max((bounds[2] - bounds[0]) / (x2 - x1), (bounds[3] - bounds[1]) / (y2 - y1));
     return fraction <= .5 ? bounds : null;
 }
-const projection = (code, units) => new Projection({ code: code || 'local', units: units || 'm' });
+const projection = (code, units) => getProjection(code || 'local') || new Projection({ code: code || 'local', units: units || 'm' });
 const fillColor = (color, percent) => color + Math.round(percent * 255 / 100).toString(16).padStart(2, '0');
 const classFill = (settings, color, fill) => settings.fill === null || fill === null ? null : fill || color;
 const feature = item => format.readFeature({ type: 'Feature', ...item });
@@ -294,7 +297,14 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
     const exportedLayout = useRef(null);
     const appliedActions = useRef(null);
     const [importing, setImporting] = useState(null);
-    const [sourceDialog, setSourceDialog] = useState(null);
+    const [sources, setSources] = useState([]);
+    const sourceDialog = sources[0];
+    const [localPicker, setLocalPicker] = useState(false);
+    const localFolder = useRef();
+    const [basemapDialog, setBasemapDialog] = useState(false);
+    const [basemap, setBasemap] = useState(null);
+    const [basemapVisible, showBasemap] = useState(true);
+    const [basemapError, setBasemapError] = useState('');
     useEffect(() => api.onMapImportProgress(setImporting), []);
     useEffect(() => { editing(Boolean(edit) || busy); return () => editing(false); }, [Boolean(edit), busy]);
     const [issue, setIssue] = useState('');
@@ -339,8 +349,8 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         [item.name, item.sourceName?.split(/[\\/]/).at(-1)].includes(name));
     const native = editLayer || layers.find(item => key(item) === mapBasis.current && item.crs) ||
         layers.find(item => item.crs && item.kind !== 'raster') || layers.find(item => item.crs) || layers[0];
-    const target = display?.wkt || display?.value || native?.crs;
-    const units = display ? display.units : native?.units;
+    const target = display?.wkt || display?.value || native?.crs || (!layers.length && basemap ? 'EPSG:3857' : undefined);
+    const units = display ? display.units : native?.units || (target === 'EPSG:3857' ? 'm' : undefined);
     const metresPerUnit = display ? display.metresPerUnit : native?.metresPerUnit;
     const initialExtent = display?.bounds;
     const backgroundColor = background || defaultMapBackground;
@@ -645,8 +655,8 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         setIoStatus('');
         setImportIssues([]);
         try {
-            const { layers: items, issues, source } = await job;
-            if (source) setSourceDialog(source);
+            const { layers: items, issues, sources: offered } = await job;
+            if (offered) setSources(offered);
             if (items.length) graph.current.fitNeeded = true;
             add(items);
             setImportIssues(issues);
@@ -788,6 +798,30 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
             void api.mapSnapshot(null).catch(fail);
         };
     }, [target, units, metresPerUnit, initialExtent]);
+    useEffect(() => {
+        const state = graph.current;
+        if (!basemap || !basemapVisible || !state) { setBasemapError(''); return; }
+        if (!['EPSG:3857', 'EPSG:4326'].includes(target)) {
+            setBasemapError('请在地图属性中将地图坐标系设为 EPSG:3857 或 EPSG:4326。');
+            return;
+        }
+        setBasemapError('');
+        const url = 'guizhi://app/basemap/' + basemap.id;
+        const source = basemap.kind === 'wms'
+            ? new TileWMS({ url, hidpi: false, params: { LAYERS: basemap.layers, FORMAT: 'image/png' } })
+            : new XYZ({ url: url + '/{z},{x},{y}', maxZoom: 24 });
+        const events = [source.on('tileloaderror', () => setBasemapError('有底图瓦片未能加载，请检查地址、图层名及网络。')),
+            source.on('tileloadend', () => setBasemapError(''))];
+        const layer = new TileLayer({ source, zIndex: -100 });
+        state.ol.addLayer(layer);
+        if (state.fitNeeded && !layerList.current.length) {
+            state.fitNeeded = false;
+            state.view.setZoom(2);
+            state.updateScale();
+            setViewReady(true);
+        }
+        return () => { unByKey(events); state.ol.removeLayer(layer); };
+    }, [basemap, basemapVisible, target, units, metresPerUnit, initialExtent]);
     useEffect(() => {
         setMeasurement('');
         if (!measure || !canMeasure || !graph.current || busy || edit) return;
@@ -1230,13 +1264,6 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
             onClick: ({ key: id }) => onClick(id) },
     }, h(Button, { size: 'small', icon: glyph(icon), disabled: busy,
         'aria-label': accessibleName, title: accessibleName }, title, glyph('chevron', 13))));
-    const addLayer = trigger => h(antd.Dropdown, { trigger: ['click'], disabled: busy,
-        menu: { items: [
-            { key: 'file', label: '本地文件', icon: glyph('folderOpen') },
-            { key: 'gdb', label: '文件地理数据库', icon: glyph('layers') },
-            { key: 'xy', label: '坐标表（XY）', icon: glyph('target') },
-        ], onClick: ({ key: mode }) => load(mode === 'file' ? api.mapImport() : api.mapImport(null, mode)) },
-    }, trigger);
 
     const editable = Boolean(layer?.crs && !hidden.includes(active) &&
         /^(Multi)?(Point|LineString|Polygon)$/.test(layer.geometry));
@@ -1746,6 +1773,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 } }, item.name));
     }
     const notices = new globalThis.Map(layerErrors.map(({ message, names }) => [message, names]));
+    if (basemapError) notices.set(basemapError, []);
     for (const message of [document ? '' : ioStatus, issue]) {
         if (message && !notices.has(message)) notices.set(message, []);
     }
@@ -1782,7 +1810,8 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                     style: item.kind === 'raster' ? null : layerSymbol(item.style, palette[(layers.length - index - 1) % palette.length]) })) }),
             result => setIoStatus('已保存 MXD 和配套数据 · ' + result.layers + ' 个图层')),
             { disabled: busy || !layers.length || !viewReady, 'aria-label': '保存地图工程' })),
-            group('图层管理', addLayer(command('添加数据', undefined, { icon: glyph('add'), disabled: busy, 'aria-haspopup': 'menu' })),
+            group('图层管理', command('添加数据', () => setLocalPicker(true), { icon: glyph('add'), disabled: busy }),
+                command('添加底图', () => setBasemapDialog(true), { icon: glyph('globe'), disabled: busy }),
                 command('新建图层', () => openTool('geometry.create_dataset')),
                 command('复制图层', () => openTool('data.copy'), { disabled: !layer?.geometry }),
                 command('合并图层', () => openTool('data.merge'), { disabled: layers.filter(item => item.geometry).length < 2 }))] : []),
@@ -1849,6 +1878,10 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         h('div', { className: 'map-workspace-body' },
             h('aside', { className: 'map-layers', 'aria-label': '图层和图例' },
                 h('div', { className: 'map-layer-head' }, h('strong', null, glyph('layers'), '图层')),
+                basemap && h('div', { className: 'gis-basemap-row' },
+                    h(antd.Checkbox, { checked: basemapVisible, onChange: event => showBasemap(event.target.checked) }, basemap.name),
+                    h(Button, { size: 'small', type: 'text', 'aria-label': '移除底图', icon: glyph('close'),
+                        onClick: () => { void api.mapBasemap(null).then(() => setBasemap(null)).catch(fail); } })),
                 layers.length > 5 && h(Input, { size: 'small', placeholder: '查找图层', 'aria-label': '查找图层',
                     allowClear: true, value: layerSearch, onChange: event => setLayerSearch(event.target.value) }),
                 ...layers.map((item, index) => showLayer(item) &&
@@ -1901,8 +1934,8 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                     h('span', null, importing.label),
                     importing.total ? h('progress', { max: importing.total, value: importing.completed,
                         'aria-label': '图层导入进度' }) : h('progress', { 'aria-label': '图层导入进度' })),
-                !layers.length && addLayer(h(Button, { className: 'map-empty', type: 'default', icon: glyph('add', 30),
-                    title: '添加或拖入空间数据', 'aria-label': '添加或拖入空间数据', disabled: busy })),
+                !layers.length && !basemap && h(Button, { className: 'map-empty', type: 'default', icon: glyph('add', 30),
+                    title: '添加或拖入空间数据', 'aria-label': '添加或拖入空间数据', disabled: busy, onClick: () => setLocalPicker(true) }),
                 (notices.size > 0 || busy) && h('div', { className: 'map-notice', role: 'status' },
                     busy ? '正在处理地图数据…' :
                         [...notices].map(([message, names]) => h('div', { key: message }, message,
@@ -1965,7 +1998,17 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 h('label', null, '目标图层', h(Choice, { value: pasteTarget, 'aria-label': '目标图层', disabled: busy,
                     options: pasteTargets.map(item => ({ value: key(item), label: item.name })), onChange: setPasteTarget })),
                 issue && h('p', { className: 'error', role: 'alert' }, issue))),
-        sourceDialog && h(MapSourceDialog, { key: sourceDialog.id, source: sourceDialog, close: () => setSourceDialog(null),
+        localPicker && h(LocalDataPicker, { initialFolder: localFolder.current, close: () => setLocalPicker(false),
+            select(files, folder) { localFolder.current = folder; setLocalPicker(false); void load(api.mapImport(files)); } }),
+        basemapDialog && h(BasemapDialog, { close: () => setBasemapDialog(false),
+            apply(value) {
+                if (target && !['EPSG:3857', 'EPSG:4326'].includes(target)) {
+                    setDisplay({ value: 'EPSG:3857', label: 'WGS 84 / Web 墨卡托', units: 'm', metresPerUnit: 1 });
+                }
+                setBasemap(value);
+                showBasemap(true);
+            } }),
+        sourceDialog && h(MapSourceDialog, { key: sourceDialog.id, source: sourceDialog, close: () => setSources(old => old.slice(1)),
             add: result => load(Promise.resolve(result)) }),
         properties && h(LayerProperties, { ...properties, close: () => setProperties(null), glyph,
             save: value => styleLayer(key(properties.item), value) }),
