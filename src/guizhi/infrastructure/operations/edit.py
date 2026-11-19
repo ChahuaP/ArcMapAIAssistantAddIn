@@ -3,6 +3,7 @@ import json
 from typing import Annotated, Literal
 
 import geopandas
+import numpy as np
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, StrictInt
 import shapely
@@ -41,7 +42,11 @@ def changes(ctx, changes: Annotated[list[Change], Field(min_length=1, max_length
     frame = original.copy()
     geometry = frame.geometry.name
     fields = frame.columns.drop(geometry)
-    geom_type = editable(frame, ctx.info[0])
+    if frame.crs is None:
+        raise ValueError("请先为图层定义坐标系")
+    geom_type = ctx.info[0]["geometry_type"]
+    expect_z = frame.geometry.has_z.any()
+    has_measure = frame.geometry.has_m.any()
     expected = geom_type.removeprefix("Multi")
     seen = set()
     additions = []
@@ -60,7 +65,10 @@ def changes(ctx, changes: Annotated[list[Change], Field(min_length=1, max_length
             raise ValueError("修改包含图层中不存在的字段")
         updates = {name: field_value(original[name], value) for name, value in change.fields.items()}
         candidate = shape(change.geometry) if change.geometry else None
-        if candidate is not None and (candidate.is_empty or not candidate.is_valid or candidate.has_z or candidate.has_m or
+        if candidate is not None and (has_measure or candidate.has_z != expect_z or
+                (expect_z and not np.isfinite(shapely.get_coordinates(candidate, include_z=True)[:, 2]).all())):
+            raise ValueError("几何编辑必须保留有效的高程或量测值。缺少坐标时可使用「修复几何」。")
+        if candidate is not None and (candidate.is_empty or not candidate.is_valid or candidate.has_m or
                 candidate.geom_type.removeprefix("Multi") != expected):
             raise ValueError("几何无效或与图层类型不一致")
         if change.action == "add":
@@ -89,8 +97,11 @@ def changes(ctx, changes: Annotated[list[Change], Field(min_length=1, max_length
                 dtype = "boolean"
                 frame[name] = frame[name].astype(dtype)
             incoming[name] = incoming[name].astype(dtype)
-        frame = geopandas.GeoDataFrame(pd.concat([frame, incoming], ignore_index=True), geometry=geometry, crs=frame.crs)
-    publish_edit(ctx, frame, geom_type)
+        start = int(original.index.max()) + 1 if len(original) else 1
+        incoming.index = range(start, start + len(incoming))
+        frame = geopandas.GeoDataFrame(pd.concat([frame, incoming]), geometry=geometry, crs=frame.crs)
+    coordinates = frame.geom_type.dropna().unique()
+    ctx.publish(frame, geometry_type=geom_type if not len(coordinates) else None, preserve_fids=True)
     ctx.json("edits.json", {"revision": ctx.selection_hashes[0],
         "changes": [change.model_dump(mode="json") for change in changes]}, "edits")
     return {"changeset": {"target_revision": ctx.selection_hashes[0], "count": len(changes)}}

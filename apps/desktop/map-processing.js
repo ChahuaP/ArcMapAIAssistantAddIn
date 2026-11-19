@@ -274,6 +274,25 @@ function toolForm(definition, inputs, values, update, selection) {
             parameters.attribute_fid = source;
             valid &&= fids.length >= 2 && fids.length <= 500 && fids.includes(source);
         }
+    } else if (id === 'geometry.repair') {
+        const repairInvalid = values.repairInvalid ?? true;
+        const deleteNull = values.deleteNull ?? false;
+        const ids = selection?.key === key(input) ? selection.ids : [];
+        const canCut = polygon(input) && ids.length === 2 && ids.every(Number.isSafeInteger);
+        const cut = canCut && values.cutOverlap;
+        controls.push(h(Checkbox, { checked: repairInvalid && !cut, disabled: cut,
+                onChange: event => update('repairInvalid', event.target.checked) }, '修复无效几何'),
+            h(Checkbox, { checked: deleteNull && !cut, disabled: cut,
+                onChange: event => update('deleteNull', event.target.checked) }, '删除空要素'),
+            h(Checkbox, { checked: Boolean(cut), disabled: !canCut,
+                title: '先定位一对重叠面，或在当前图层选择两个面',
+                onChange: event => update('cutOverlap', event.target.checked) }, '裁除选中两面的重叠'));
+        const keep = values.keepOverlap ?? ids[0];
+        if (cut) controls.push(field('保留边界的要素', dropdown(keep,
+            ids.map(value => ({ value, label: '要素 ' + value })), value => update('keepOverlap', value))));
+        parameters = cut ? { fids: ids.filter(id => id !== keep), preserve_overlap_fid: keep } :
+            { repair_invalid: repairInvalid, delete_null: deleteNull };
+        valid = cut ? ids.includes(keep) : repairInvalid || deleteNull;
     } else if (id === 'data.merge') {
         const name = values.name ?? '合并图层';
         controls.push(field('结果图层名称', h(Input, { maxLength: 120, value: name,
@@ -428,7 +447,7 @@ function geometryReason(reason) {
         'Too few points in geometry component': '几何顶点过少', 'IllegalArgumentException: Points of LinearRing do not form a closed linestring': '环未闭合' })[type] || '几何结构无效';
 }
 
-export function TopologyPanel({ report, close, locate, repair, busy }) {
+export function TopologyPanel({ report, close, locate, busy }) {
     const [kind, setKind] = useState('all');
     const [page, setPage] = useState(0);
     const [data, setData] = useState(null);
@@ -458,9 +477,7 @@ export function TopologyPanel({ report, close, locate, repair, busy }) {
                 h('strong', null, topologyKinds[row.kind] + ' · ' + row.fid + (row.peer !== null ? '、' + row.peer : '')),
                 row.reason && h('span', { className: 'muted', title: row.reason }, geometryReason(row.reason)),
                 h('div', null,
-                    h(Button, { size: 'small', disabled: busy || row.kind === 'empty', onClick: () => locate(row) }, '定位'),
-                    h(Button, { size: 'small', disabled: busy, onClick: () => repair(row) },
-                        row.kind === 'empty' ? '删除空要素' : row.kind === 'overlap' ? '处理重叠' : '修复几何')))))),
+                    h(Button, { size: 'small', disabled: busy || row.kind === 'empty', onClick: () => locate(row) }, '定位')))))),
         data?.total > 25 && h('footer', null,
             h(Button, { size: 'small', disabled: !page, onClick: () => setPage(page - 1) }, '上一页'),
             h('span', null, (page + 1) + ' / ' + Math.ceil(data.total / 25)),
@@ -522,7 +539,7 @@ export function MapTool({ getContainer, operation, active, lockInput, layers, se
                 ...(operation === 'data.merge' && { name: (values.name ?? '合并图层').trim() }) });
             const failure = toolError(output);
             if (failure) { setError(failure); return; }
-            if (output.layers.length || output.selection || output.topology) onResult(output, inputs[0], form.parameters.destination);
+            if (output.layers.length || output.selection || output.topology) await onResult(output, inputs[0], form.parameters.destination);
             if (!output.layers.length) setResult(output);
         } catch (issue) { setError(window.GuizhiErrorText(issue)); }
         finally { setBusy(false); }

@@ -580,7 +580,7 @@ def features(workspace, payload):
         if convert and extent and read_extent is None and len(frame):
             frame = frame.cx[extent[0]:extent[2], extent[1]:extent[3]]
         if int(shapely.get_num_coordinates(frame.geometry.array).sum()) > MAX_MAP_POINTS:
-            if not extent or extent[2] <= extent[0] or extent[3] <= extent[1]:
+            if payload.get("editing") is True or not extent or extent[2] <= extent[0] or extent[3] <= extent[1]:
                 return overview()
             # Keep magnified portions of very long or complex features addressable by original FID.
             # Editing reloads full geometries by FID before any change can be made.
@@ -705,7 +705,8 @@ def request(workspace, payload):
         from guizhi.infrastructure.operations.map_raster import image_preview
 
         file = raster_file(workspace, payload["ref"])
-        image, info = image_preview(file, payload.get("target"), payload.get("bands"), payload.get("bbox"))
+        image, info = image_preview(file, payload.get("target"), payload.get("bands"), payload.get("bbox"),
+                                    appearance=payload.get("appearance"))
         return {"image": b64encode(image).decode("ascii"), "bounds": info["bounds"]}
     if action == "raster-preview":
         ref = payload["ref"]

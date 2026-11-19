@@ -58,7 +58,7 @@ CONTRACTS = {
     "geometry.create_rectangle": op("根据边界坐标新建包含矩形的面图层。", "空间参考图层", "vector"),
     "geometry.multipart": op("将同一图层中选中的 2 至 500 个要素组合为一个多部件要素，沿用属性来源要素的编号和属性。", "目标图层", "vector"),
     "geometry.explode": op("仅拆分选区中的多部件，各部件继承属性，选中的单部件保持原样。", "待拆分图层", "vector"),
-    "geometry.repair": op("修复指定要素编号的无效几何，未指定编号时检查整个图层。可明确指定删除空几何。也可指定一个需要保留的面要素，从另一个指定面中裁除重叠。生成矢量副本，需应用成果才更换地图图层。", "待修复图层", "vector"),
+    "geometry.repair": op("修复无效几何并校验原有坐标维度；可指定要素编号，未指定时检查整个图层。可明确指定删除空几何，也可将一个面保留并从另一个面裁除重叠。生成矢量副本，需应用成果才更换地图图层。", "待修复图层", "vector"),
     "geometry.check_topology": op("只读检查空几何、无效几何和面重叠，返回数量及可分页查阅的要素编号与问题类型。", "待检查图层", "statistics"),
     "map_raster.preview": op("生成可显示的栅格预览图。", "影像", "raster_preview"),
     "raster.statistics": op("读取空间参考、波段、像元统计和无数据像元情况。", "待统计栅格", "statistics count"),

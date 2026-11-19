@@ -5,6 +5,7 @@ import shutil
 from typing import Annotated, Literal
 
 import geopandas
+import numpy as np
 import pandas as pd
 from pandas.testing import assert_frame_equal
 import pyogrio
@@ -311,7 +312,16 @@ def check_topology(ctx):
             "topology": {"issue_count": int(empty.sum() + invalid.sum()) + overlap_pairs}}
 
 
-def repair(ctx, delete_null: bool = False, fids: list[StrictInt] | None = None, preserve_overlap_fid: StrictInt | None = None):
+def verify_repair_geometry(fid, original, fixed):
+    if fixed.is_empty or not fixed.is_valid or fixed.geom_type.removeprefix("Multi") != original.geom_type.removeprefix("Multi"):
+        raise ValueError(f"要素 {fid} 修复后不能保持原有几何类型，请手动编辑")
+    if fixed.has_z != original.has_z or (original.has_z and
+            not np.isfinite(shapely.get_coordinates(fixed, include_z=True)[:, 2]).all()):
+        raise ValueError(f"要素 {fid} 修复后不能保留有效的高程，请手动编辑")
+
+
+def repair(ctx, delete_null: bool = False, fids: list[StrictInt] | None = None,
+           preserve_overlap_fid: StrictInt | None = None, repair_invalid: bool = True):
     frame = ctx.frames[0]
     selected = set(fids) if fids is not None else set(frame.index)
     if fids is not None and (not 1 <= len(fids) <= 500 or not selected.issubset(frame.index)):
@@ -321,12 +331,15 @@ def repair(ctx, delete_null: bool = False, fids: list[StrictInt] | None = None, 
             raise ValueError("请选择一个修复要素和一个保留要素")
         fid, = selected
         shape, peer = frame.geometry.loc[fid], frame.geometry.loc[preserve_overlap_fid]
-        if any(item is None or not item.is_valid or item.geom_type not in {"Polygon", "MultiPolygon"} or item.has_z
+        if any(item is None or not item.is_valid or item.geom_type not in {"Polygon", "MultiPolygon"}
                for item in (shape, peer)):
-            raise ValueError("仅支持裁除两个有效二维面要素之间的重叠")
+            raise ValueError("请选择两个有效的面要素")
+        if shape.has_z != peer.has_z:
+            raise ValueError("两个面要素的坐标维度不同，请手动处理重叠")
         fixed = shape.difference(peer)
         if fixed.is_empty or not fixed.is_valid or fixed.geom_type not in {"Polygon", "MultiPolygon"} or fixed.area >= shape.area:
             raise ValueError("裁除后要素将消失或没有可裁除的重叠，请手动编辑")
+        verify_repair_geometry(fid, shape, fixed)
         result = frame.copy()
         result.at[fid, frame.geometry.name] = fixed
         ctx.publish(result, preserve_fids=True)
@@ -340,9 +353,7 @@ def repair(ctx, delete_null: bool = False, fids: list[StrictInt] | None = None, 
         if fid in selected and (shape is None or shape.is_empty) and delete_null:
             changes.append({"fid": int(fid), "reason": "null", "removed": True})
             continue
-        if fid in selected and shape is not None and not shape.is_valid:
-            if shape.has_z:
-                raise ValueError("Invalid 3D geometry requires a dedicated repair method")
+        if repair_invalid and fid in selected and shape is not None and not shape.is_valid:
             fixed = shapely.make_valid(shape)
             family = shape.geom_type.removeprefix("Multi")
             if fixed.geom_type == "GeometryCollection" and family in MULTIPART:
@@ -350,8 +361,7 @@ def repair(ctx, delete_null: bool = False, fids: list[StrictInt] | None = None, 
                          if part.geom_type == family]
                 if parts:
                     fixed = parts[0] if len(parts) == 1 else MULTIPART[family](parts)
-            if fixed.is_empty or fixed.geom_type.replace("Multi", "", 1) != shape.geom_type.replace("Multi", "", 1):
-                raise ValueError("Repair would change geometry family or remove geometry")
+            verify_repair_geometry(fid, shape, fixed)
             changes.append({"fid": int(fid), "reason": shapely.is_valid_reason(shape),
                             "before_sha256": sha256(shape.wkb).hexdigest(),
                             "after_sha256": sha256(fixed.wkb).hexdigest(),
@@ -361,9 +371,9 @@ def repair(ctx, delete_null: bool = False, fids: list[StrictInt] | None = None, 
         repaired.append(shape)
     result = frame.loc[kept].copy()
     result.geometry = repaired
-    if not result.loc[result.index.isin(selected)].geometry.dropna().is_valid.all():
+    if repair_invalid and not result.loc[result.index.isin(selected)].geometry.dropna().is_valid.all():
         raise ValueError("Repair output remains invalid")
     ctx.publish(result, geometry_type=ctx.info[0]["geometry_type"] if result.empty else None, preserve_fids=True)
     change = {"target_revision": ctx.selection_hashes[0], "features": changes}
     ctx.json("changeset.json", change, "changeset")
-    return {"changeset": change}
+    return {"changeset": change, "statistics": {"feature_count": len(result), "updated": len(changes)}}

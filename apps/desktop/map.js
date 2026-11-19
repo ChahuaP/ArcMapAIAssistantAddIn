@@ -285,7 +285,6 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
     const [tool, setTool] = useState(null);
     const [toolResult, setToolResult] = useState(null);
     const [topology, setTopology] = useState(null);
-    const [overlapRepair, setOverlapRepair] = useState(null);
     const [count, setCount] = useState(0);
     const partsDraft = useRef(null);
     const [fieldEdit, setFieldEdit] = useState(null);
@@ -441,12 +440,13 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 const appearance = symbol(item.style, palette[layers.indexOf(item) % palette.length]);
                 const options = { opacity: opacity(item.style?.opacity ?? item.opacity) / 100 };
                 if (item.kind === 'raster') {
-                    const stamp = JSON.stringify([target, item.style?.rasterBands]);
-                    const windowed = options.opacity === 1 && item.byteImagery && (!target || target === item.crs) && rasterDetailBounds(item, bounds);
+                    const appearance = item.style?.rasterAppearance;
+                    const stamp = JSON.stringify([target, item.style?.rasterBands, appearance]);
+                    const windowed = options.opacity === 1 && rasterDetailBounds({ ...item, bounds: previous?.get('dataExtent') || item.bounds }, bounds);
                     const oldSource = previous?.get('rasterStamp') === stamp && previous.getSource();
                     if (oldSource && !windowed) return [new ImageLayer({ ...options, source: oldSource })];
                     if (oldSource && windowed) options.extent = item.bounds;
-                    const image = await api.map({ action: 'raster-display', ref: item.ref, target, bands: item.style?.rasterBands,
+                    const image = await api.map({ action: 'raster-display', ref: item.ref, target, bands: item.style?.rasterBands, appearance,
                         bbox: windowed || undefined });
                     if (oldSource && windowed) return [new ImageLayer({ ...options, source: oldSource }),
                         new ImageLayer({ ...options, source: new Static({ url: 'data:image/png;base64,' + image.image,
@@ -832,7 +832,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
 
     useEffect(() => {
         const state = graph.current;
-        if (!state || edit) return;
+        if (!state || (edit && (edits.current.length || partsDraft.current))) return;
         let alive = true;
         let snapshotTimer;
         let snapshotListener;
@@ -934,11 +934,11 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                         error: new Error('此影像没有地理参考。可单独按像素浏览，或补齐地理参考后叠加。') });
                 }
                 const bands = item.style?.rasterBands;
-                const rasterStamp = JSON.stringify([target, bands]);
+                const appearance = item.style?.rasterAppearance;
+                const rasterStamp = JSON.stringify([target, bands, appearance]);
                 let detail = drawing.get('rasterDetail');
                 if (drawing.get('rasterStamp') === rasterStamp) {
-                    const extent = layerOpacity === 1 && item.byteImagery && (!target || target === item.crs)
-                        && rasterDetailBounds(item, bbox);
+                    const extent = rasterDetailBounds({ ...item, bounds: drawing.get('dataExtent') || item.bounds }, bbox);
                     if (!extent) {
                         detail?.setVisible(false);
                         return Promise.resolve({ id, drawing, raster: true });
@@ -949,16 +949,20 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                         state.ol.addLayer(detail);
                     }
                     detail.setZIndex(order + 1);
+                    detail.setOpacity(layerOpacity);
                     const detailStamp = JSON.stringify([rasterStamp, extent]);
-                    if (detail.get('stamp') === detailStamp) return Promise.resolve({ id, drawing, raster: true });
-                    return api.map({ action: 'raster-display', ref: item.ref, target, bands, bbox: extent })
+                    if (detail.get('stamp') === detailStamp) {
+                        drawing.setVisible(layerOpacity === 1);
+                        return Promise.resolve({ id, drawing, raster: true });
+                    }
+                    return api.map({ action: 'raster-display', ref: item.ref, target, bands, appearance, bbox: extent })
                         .then(({ image, bounds }) => ({ id, drawing, raster: true, detail, detailStamp,
                             detailImage: new Static({ url: 'data:image/png;base64,' + image, imageExtent: bounds,
                                 projection: state.view.getProjection() }) }))
                         .catch(error => ({ id, drawing, raster: true, error }));
                 }
                 detail?.setVisible(false);
-                return api.map({ action: 'raster-display', ref: item.ref, target, bands })
+                return api.map({ action: 'raster-display', ref: item.ref, target, bands, appearance })
                     .then(({ image, bounds }) => ({ id, drawing, raster: true, bounds, rasterStamp,
                     image: new Static({ url: 'data:image/png;base64,' + image, imageExtent: bounds,
                         projection: state.view.getProjection() }) })).catch(error => ({ id, drawing, raster: true, error }));
@@ -982,7 +986,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 try {
                     const result = await api.map({ action: 'features', ref: item.ref, bbox, interactive: true,
                         knownOverview: drawing.get('overviewKey'), target: target || null, fields: displayFields(item), plan: planId,
-                        outlines: item.style?.outlines === true });
+                        outlines: item.style?.outlines === true, editing: Boolean(edit) && id === active });
                     return { id, drawing, result, viewportStamp, full: !bbox && !result.limited ? stamp : null };
                 } catch (error) {
                     return { id, drawing, error };
@@ -1003,6 +1007,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 item.detail.setSource(item.detailImage);
                 item.detail.set('stamp', item.detailStamp);
                 item.detail.setVisible(true);
+                drawing.setVisible(drawing.getOpacity() === 1);
             }
             if (item.image) {
                 drawing.set('rasterStamp', item.rasterStamp);
@@ -1011,6 +1016,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 drawing.setSource(item.image);
             }
             if (!result || state.view.getAnimating() || state.view.getInteracting()) return item;
+            if (edit && item.id === active && (edits.current.length || partsDraft.current)) return item;
             if (bbox) {
                 const latest = state.view.calculateExtent(state.ol.getSize());
                 if (!bbox.every((coordinate, i) => coordinate === latest[i])) return item;
@@ -1035,6 +1041,11 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 state.ol.addLayer(coverage);
             }
             drawing.getSource().clear(true);
+            if (edit && item.id === active && !edits.current.length && !partsDraft.current) {
+                original.current = new globalThis.Map(details.map((feature, index) => [feature.getId(), {
+                    id: feature.getId(), geometry: format.writeGeometryObject(feature.getGeometry()), properties: result.features[index].properties,
+                }]));
+            }
             drawing.getSource().addFeatures(details);
             if (old) state.ol.removeLayer(old);
             drawing.set('coverage', coverage);
@@ -1161,6 +1172,11 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 const slice = await api.map({ action: 'features', ref: layer.ref, fids: [row.id], target, plan: drawing?.get('displayPlan') });
                 const match = slice.features.find(item => item.id === row.id);
                 geometry = match?.geometry && format.readGeometry(match.geometry);
+                if (geometry && edit && drawing) {
+                    original.current.set(row.id, { id: row.id, geometry: match.geometry, properties: match.properties });
+                    drawing.get('coverage')?.setVisible(false);
+                    if (!drawing.getSource().getFeatureById(row.id)) drawing.getSource().addFeature(feature(match));
+                }
             }
             if (g !== graph.current || active !== activeRef.current || request !== zoomRequest.current) return;
             if (!geometry) throw new Error('该要素没有可定位的几何');
@@ -1220,7 +1236,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         graph.current.fitNeeded = true;
         add(fresh);
     }
-    function showToolResult(result, input, destination) {
+    async function showToolResult(result, input, destination) {
         if (result.topology) {
             setTopology({ result, input });
             setTool(null);
@@ -1229,7 +1245,16 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         if (destination && ['geometry.multipart', 'geometry.explode'].includes(tool?.operation)) {
             const [output] = result.layers;
             if (!output || result.layers.length !== 1) throw new Error('没有取得完整的编辑结果');
-            partsDraft.current = { input, output, destination };
+            const g = graph.current;
+            const drawing = g.byKey.get(key(input));
+            const preview = await api.map({ action: 'features', ref: output.ref, target,
+                bbox: g.view.calculateExtent(g.ol.getSize()) });
+            const draftLayer = preview.overview ? coverageLayer(preview.overview, palette[0])
+                : layerFor(preview.features, palette[0]);
+            draftLayer.setZIndex(drawing.getZIndex() + 1);
+            if (destination === 'current') { drawing.setVisible(false); drawing.get('coverage')?.setVisible(false); }
+            g.ol.addLayer(draftLayer);
+            partsDraft.current = { input, output, destination, draftLayer, drawing };
             setCount(1);
             setTool(null);
             return;
@@ -1244,8 +1269,8 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         if (!result.layers.length) return;
         const operation = tool?.operation;
         const attributes = ['table.add_field', 'table.delete_field', 'table.calculate_field', 'table.calculate_geometry'].includes(operation);
-        const replaceLayer = input && result.layers.length === 1 && (attributes || operation === 'crs.assign')
-            ? () => (attributes ? replaceAttributes : replace)(input, result.layers[0]) : undefined;
+        const replaceLayer = input && result.layers.length === 1 && (attributes || ['crs.assign', 'geometry.repair'].includes(operation))
+            ? () => { (attributes ? replaceAttributes : replace)(input, result.layers[0]); if (operation === 'geometry.repair') setTopology(null); } : undefined;
         setTool(null);
         setToolResult({ result, replaceLayer, fromTable: tool?.fromTable });
     }
@@ -1265,21 +1290,6 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
             setSelection({ key: id, ids });
             g.view.fit(extent, { size: g.ol.getSize(), padding: [34, 34, 34, 34], maxZoom: 18 });
         } catch (error) { fail(error); }
-    }
-    async function repairTopology(input, row, keep) {
-        setBusy(true);
-        try {
-            const result = await api.map({ action: 'tool', operation: 'geometry.repair', refs: [input.ref],
-                parameters: { fids: [keep === row.fid ? row.peer : row.fid], delete_null: row.kind === 'empty',
-                    ...(keep !== undefined && { preserve_overlap_fid: keep }) } });
-            const error = toolError(result);
-            if (error) throw new Error(error);
-            const [output] = result.layers;
-            if (!output) throw new Error('没有生成修复图层');
-            setOverlapRepair(null);
-            setToolResult({ result, replaceLayer: () => { replace(input, output); setTopology(null); } });
-        } catch (error) { fail(error); }
-        finally { setBusy(false); }
     }
     async function saveSelectedLayer() {
         if (busy || !layer || !picked.length) return;
@@ -1340,7 +1350,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         const state = graph.current;
         const drawing = state.byKey.get(active);
         const source = drawing?.getSource();
-        if (!source || state.fitNeeded || drawing.get('coverage')) return;
+        if (!source || state.fitNeeded) return;
         if (drawing.get('clipped')) {
             setBusy(true);
             try {
@@ -1379,7 +1389,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
             setIssue('');
         } else if (!busy && !tool && !toolResult && viewReady && !graph.current?.fitNeeded && target === layer?.crs) {
             setPendingEdit(null);
-            if (limited.includes(active) || layerErrors.some(error => error.names.includes(layer.name))) {
+            if (layerErrors.some(error => error.names.includes(layer.name))) {
                 setIssue('完整图层尚未加载，无法开始编辑。');
                 return;
             }
@@ -1387,6 +1397,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         }
     }, [pendingEdit, active, layer, target, busy, tool, toolResult, viewReady, limited, layerErrors]);
     function stopEdit() {
+        clearPartsPreview();
         partsDraft.current = null;
         edits.current = [];
         setCount(0);
@@ -1396,6 +1407,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
     }
     function undoEdit() {
         if (partsDraft.current) {
+            clearPartsPreview();
             partsDraft.current = null;
             setCount(0);
             return;
@@ -1407,6 +1419,13 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         setCount(edits.current.length);
         applyDraft();
         setSelection(reverted.selected);
+    }
+    function clearPartsPreview() {
+        const draft = partsDraft.current;
+        if (!draft) return;
+        graph.current?.ol.removeLayer(draft.draftLayer);
+        draft.drawing.setVisible(true);
+        draft.drawing.get('coverage')?.setVisible(true);
     }
     function leaveEdit() {
         edits.current = [];
@@ -1650,7 +1669,10 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
     }
     const clear = () => setSelection({ key: active, ids: [] });
     const editCommands = edit ? [
-        group('要素编辑', ...[['select', '选择'], ['draw', '绘制'], ['modify', '编辑顶点'], ['move', '移动']].map(([mode, title]) =>
+        group('要素编辑',
+            command('点选', () => { setEdit('select'); setBoxSelect(false); }, { type: edit === 'select' && !boxSelect ? 'primary' : 'default', disabled: busy }),
+            command('框选', () => { setEdit('select'); setBoxSelect(true); node.current.focus(); }, { type: edit === 'select' && boxSelect ? 'primary' : 'default', disabled: busy }),
+            ...[['draw', '绘制'], ['modify', '编辑顶点'], ['move', '移动']].map(([mode, title]) =>
             command(title, () => { setEdit(mode); if (mode === 'select') setBoxSelect(false); }, { key: mode, disabled: busy || (['modify', 'move'].includes(mode) && !picked.length),
                 type: edit === mode ? 'primary' : 'default' })),
             command('合并要素', () => { setEditDialogError(''); setMergeTarget(picked[0]); }, { disabled: !canReshape || picked.length < 2 }),
@@ -1667,7 +1689,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         group('提交', command('撤销', undoEdit, { disabled: busy || !(count || drawingPoints), title: 'Ctrl+Z', 'aria-keyshortcuts': 'Control+Z' }),
         command('保存', saveEdit, { disabled: busy || !count, loading: busy, type: 'primary', title: 'Ctrl+S', 'aria-keyshortcuts': 'Control+S' }),
         command('退出', () => count ? setConfirmExit(true) : leaveEdit(), { disabled: busy })),
-    ] : [group('图层编辑', command('编辑图层', startEdit, { disabled: !editable || busy || viewLoading || !viewReady || Boolean(pendingEdit) || limited.includes(active) }))];
+    ] : [group('图层编辑', command('编辑图层', startEdit, { disabled: !editable || busy || !viewReady || Boolean(pendingEdit) }))];
     const partsReady = !busy && !count && edit === 'select';
     function openPartsTool(operation) {
         if (!partsReady) return;
@@ -1953,7 +1975,6 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
             topology && layers.some(item => key(item) === key(topology.input)) && h(TopologyPanel, {
                 key: topology.result.run, report: topology.result, busy: busy || Boolean(edit),
                 close: () => setTopology(null), locate: row => locateTopology(topology.input, row),
-                repair: row => row.kind === 'overlap' ? setOverlapRepair({ row, keep: row.peer }) : repairTopology(topology.input, row),
             }),
             h('div', { className: 'map-viewport' },
                 h('div', { className: 'geo-map', ref: node, tabIndex: 0, 'aria-label': '交互地图', style: { backgroundColor } }),
@@ -2098,15 +2119,6 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
             close: () => setToolResult(null),
             add: () => { if (edit) stopEdit(); addResultLayers(toolResult.result.layers); setToolResult(null); },
             replace: toolResult.replaceLayer && (() => { toolResult.replaceLayer(); setToolResult(null); }) }), Boolean(toolResult.fromTable)),
-        overlapRepair && topology && h(Modal, { open: true, centered: true, title: '处理重叠',
-            className: 'gis-dialog', rootClassName: 'gis-modal-root', okText: '生成修复结果', cancelText: '取消',
-            confirmLoading: busy, closable: !busy, onCancel: () => { if (!busy) setOverlapRepair(null); },
-            onOk: () => repairTopology(topology.input, overlapRepair.row, overlapRepair.keep) },
-            h('div', { className: 'map-field-editor' },
-                h('label', null, '保留边界的要素', h(Choice, { 'aria-label': '保留边界的要素', value: overlapRepair.keep,
-                    onChange: keep => setOverlapRepair(old => ({ ...old, keep })), disabled: busy,
-                    options: [overlapRepair.row.fid, overlapRepair.row.peer].map(value => ({ value, label: '要素 ' + value })) })),
-                h('p', null, '从另一要素裁除重叠部分，生成结果供确认。'), h(ToolProgress, { busy }))),
         analysis && h(MapProcessing, { ...analysis, layers, entries, components, openComponents, glyph, busy,
             setBusy, close: () => setAnalysis(null), Preview, onAddLayers: addResultLayers }),
         mergeTarget !== null && h(Modal, { open: true, centered: true, title: '合并要素', className: 'gis-dialog',
