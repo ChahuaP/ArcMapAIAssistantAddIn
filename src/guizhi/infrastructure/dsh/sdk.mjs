@@ -146,6 +146,15 @@ export function runtimeEnv(options, mcpArgs = []) {
     const key = models.modelKey(options.modelConfig, options.apiKey);
     // pi-ai requires a credential value even when a loopback service permits anonymous requests.
     env.GUIZHI_MODEL_KEY = key || 'local';
+    const search = Boolean(process.env.GUIZHI_WEB_SEARCH_KEY);
+    const fetch = Boolean(process.env.GUIZHI_WEB_FETCH_KEY);
+    if (search) env.GUIZHI_WEB_SEARCH_KEY = process.env.GUIZHI_WEB_SEARCH_KEY;
+    if (fetch) env.GUIZHI_WEB_FETCH_KEY = process.env.GUIZHI_WEB_FETCH_KEY;
+    env.GUIZHI_WEB_PROVIDER = JSON.stringify({
+        ...(search && { searchApiKeyEnv: 'GUIZHI_WEB_SEARCH_KEY' }),
+        ...(fetch && { fetchApiKeyEnv: 'GUIZHI_WEB_FETCH_KEY' }),
+    });
+    env.GUIZHI_WEB_TOOLS = JSON.stringify({ search, fetch, searchTimeoutMs: 30000, fetchTimeoutMs: 30000 });
     return { ...env, GUIZHI_MODEL_PROVIDERS: JSON.stringify(models.route(options.modelConfig).providers),
         GUIZHI_PYTHON: options.python, GUIZHI_MCP_ARGS: JSON.stringify(mcpArgs) };
 }
@@ -178,7 +187,7 @@ export async function dispatch(options, { signal, onEvent = () => {}, getService
     }
     const started = performance.now();
     const safeError = value => redact(value, apiKey);
-    const { timeoutMs, maxModelCalls: calls, maxModelTokens: tokens } = options;
+    const { timeoutMs = 300000, maxModelCalls: calls, maxModelTokens: tokens } = options;
     if (timeoutMs != null && (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 900000)) {
         throw new Error('Timeout must be between 1 and 900000 ms');
     }
@@ -223,7 +232,7 @@ export async function dispatch(options, { signal, onEvent = () => {}, getService
     const operationPath = join(directory, 'operation.json');
     const budgetPath = join(directory, 'budget.json');
     writeFileSync(requestFile, JSON.stringify({ materials, provenance,
-        skill: options.skill ?? null, previous_run: options.previousRun ?? null, project_plan: options.projectPlan ?? null,
+        skill: options.skill ?? null, material_turn: options.materialTurn ?? null, previous_run: options.previousRun ?? null, project_plan: options.projectPlan ?? null,
         control_plan: options.controlPlan ?? null, skill_parameters: options.skillParameters ?? null,
         image_inputs: imageRecords,
         dsh: versions['@deepseek-ai/dsh'] }));
@@ -269,16 +278,16 @@ export async function dispatch(options, { signal, onEvent = () => {}, getService
             const layers = Object.fromEntries(Object.entries(prepared.layers || {}).map(([role, items]) => [
                 role, items.map(item => ({ ...item, ...options.layerLabels?.[role] })),
             ]));
-            const maps = [...(options.mapContext?.layers || [])].sort((a, b) => Number(b.active) - Number(a.active)).slice(0, 24).map(layer => ({
+            const maps = [...(options.mapContext?.layers || [])].sort((a, b) => Number(b.active) - Number(a.active)).map((layer, index) => ({
                 id: layer.id, input: 'material.' + layer.id, name: layer.name, kind: layer.kind, geometry: layer.geometry, count: layer.count,
                 crs: layer.crs?.length <= 120 ? layer.crs : undefined, crsName: layer.crsName, units: layer.units,
                 active: layer.active, visible: layer.visible, selected: layer.fids?.length || undefined,
                 selection_role: layer.fids?.length ? 'selection-' + layer.id : undefined,
                 selection_reference: layer.fids?.length ? '$map_selection.' + layer.id : undefined,
-                field_count: layer.fields?.length, fields: layer.fields?.slice(0, 45),
+                field_count: layer.fields?.length, fields: index < 24 ? layer.fields?.slice(0, 45) : undefined,
             }));
             service.bind({ id, workspace, cancelled,
-                modelContext: { skill: prepared.selected ?? null, materials: layers, parametersBound: options.skillParameters !== undefined,
+                modelContext: { skill: prepared.selected ?? null, materials: layers, materialSource: options.materialTurn ? '会话中上一次提交的材料' : '本轮提交的材料', parametersBound: options.skillParameters !== undefined,
                     previousResultAvailable: Boolean(options.previousRun), mapLayerCount: options.mapContext?.layers?.length || 0,
                     mapLayers: maps, priorTurnCount: history.length, recentTurns: history.slice(-4).map(([user, assistant]) =>
                         ({ user: user.slice(0, 600), assistant: assistant.slice(0, 600) })),
@@ -304,13 +313,14 @@ export async function dispatch(options, { signal, onEvent = () => {}, getService
                     }
                     if (note.method !== 'session.event') return;
                     const fact = note.params.event;
-                    const item = { kind: 'session_event', type: fact.type, seq: fact.seq, time: fact.time };
+                    const sessionId = note.params.sessionId;
+                    const item = { kind: 'session_event', type: fact.type, seq: fact.seq, time: fact.time, sessionId };
                     if (fact.type === 'tool/call') {
                         item.tool = fact.data.name;
                     }
                     if (fact.type === 'assistant/message' && fact.data.usage) {
                         item.usage = fact.data.usage;
-                        usage.set(fact.seq, fact.data.usage);
+                        usage.set(sessionId + ':' + fact.seq, fact.data.usage);
                     }
                     event(item);
                 },

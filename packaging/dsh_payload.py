@@ -9,19 +9,25 @@ CLI = {"@deepseek-ai/" + name for name in (
     "dsh-app-boot", "dsh-atomic-write", "dsh-cmdline", "dsh-home-paths",
     "dsh-http-proxy", "dsh-launch-environment", "dsh-official-bundles",
     "dsh-plugin-manager", "dsh-sdk-minimal", "dsh-llm-pi-ai", "dsh-mcp-client",
+
 )}
 CLI.update({"commander", "js-yaml", "node-addon-require-builtin"})
+PROFILE_PLUGINS = {"@deepseek-ai/" + name for name in (
+    "dsh-subagent", "dsh-agent-team", "dsh-tool-agent-team", "dsh-subagent-spawn-in-process",
+    "dsh-tool-subagent", "dsh-tool-subagent-control", "dsh-web", "dsh-web-deepseek-api",
+    "dsh-tool-web", "dsh-tool-call-timeout-policy",
+)}
 SDK_APP = "@deepseek-ai/dsh-sdk-app"
-OFFICE_SKILL = "@deepseek-ai/dsh-skill-office"
+OFFICE_PLUGINS = {"@deepseek-ai/" + name for name in ("dsh-skill-office", "dsh-office-kit", "dsh-tool-office")}
 
 
 def retained(lock):
     packages = lock["packages"]
     selected = set()
-    todo = [("", name, False) for name in (
+    todo = [("", name, False) for name in PROFILE_PLUGINS.union((
         "@deepseek-ai/dsh", "@deepseek-ai/dsh-sdk-client", "@deepseek-ai/dsh-llm-pi-ai",
         "@deepseek-ai/dsh-mcp-client", "@earendil-works/pi-ai", "ws",
-    )]
+    ))]
     while todo:
         owner, name, optional = todo.pop()
         parent = PurePosixPath(owner)
@@ -46,8 +52,8 @@ def retained(lock):
         if location == "node_modules/@deepseek-ai/dsh":
             regular &= CLI
         elif location == f"node_modules/{SDK_APP}":
-            # sdk-minimal uses the startup plugin, not the standard SDK's Office skill.
-            regular.discard(OFFICE_SKILL)
+            # sdk-minimal uses SDK startup only. Office processing belongs to the desktop's material service.
+            regular -= OFFICE_PLUGINS
         peers = entry.get("peerDependencies", {})
         meta = entry.get("peerDependenciesMeta", {})
         todo.extend((location, dep, False) for dep in regular)
@@ -72,7 +78,7 @@ def runtime_file(name, selected):
 def package_manifest(manifest):
     dependencies = manifest["dependencies"]
     if manifest["name"] == "@deepseek-ai/dsh":
-        manifest["dependencies"] = {name: dependencies.get(name, manifest["version"]) for name in sorted(CLI)}
+        manifest["dependencies"] = {name: dependencies.get(name, manifest["version"]) for name in sorted(CLI | PROFILE_PLUGINS)}
     elif manifest["name"] == SDK_APP:
-        del dependencies[OFFICE_SKILL]
+        manifest["dependencies"] = {name: version for name, version in dependencies.items() if name not in OFFICE_PLUGINS}
     return manifest

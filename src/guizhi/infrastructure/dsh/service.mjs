@@ -54,22 +54,27 @@ export class DispatchService {
     async archive(id, directory) {
         const { flushRequest, flushReceipt } = this.active;
         writeFileSync(flushRequest, '');
-        const deadline = performance.now() + 3000;
+        const deadline = performance.now() + 8000;
         while (!existsSync(flushReceipt) && performance.now() < deadline) await delay(25);
-        if (!existsSync(flushReceipt) || readFileSync(flushReceipt, 'utf8') !== 'ok') throw new Error('本轮会话留痕未写入');
+        if (!existsSync(flushReceipt)) throw new Error('本轮会话留痕未写入');
+        const children = JSON.parse(readFileSync(flushReceipt, 'utf8'));
+        if (!Array.isArray(children)) throw new Error('本轮会话留痕失败：' + children.error);
+        const pending = new Set([id, ...children]);
         const sessions = join(this.root, 'dsh-home', 'sessions');
         for (const project of readdirSync(sessions, { withFileTypes: true })) {
             if (!project.isDirectory()) continue;
-            const log = join(sessions, project.name, id, 'session.v4.jsonl');
-            if (!existsSync(log)) continue;
-            const target = join(directory, 'dsh-home', 'sessions', project.name, id);
-            mkdirSync(target, { recursive: true });
-            copyFileSync(log, join(target, 'session.v4.jsonl'));
-            rmSync(flushRequest);
-            rmSync(flushReceipt);
-            return;
+            for (const session of pending) {
+                const log = join(sessions, project.name, session, 'session.v4.jsonl');
+                if (!existsSync(log)) continue;
+                const target = join(directory, 'dsh-home', 'sessions', project.name, session);
+                mkdirSync(target, { recursive: true });
+                copyFileSync(log, join(target, 'session.v4.jsonl'));
+                pending.delete(session);
+            }
         }
-        throw new Error('本轮会话留痕文件缺失');
+        if (pending.size) throw new Error('本轮会话留痕文件缺失');
+        rmSync(flushRequest);
+        rmSync(flushReceipt);
     }
 
     close() {

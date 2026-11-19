@@ -229,21 +229,30 @@ class DesktopController {
     }
 
 
-    submit({ prompt, project, control, skill, materials = {}, skillParameters, parameterText, mentions, images = [], imageBlocks = [], dialogue = false, mapContext }) {
+    submit({ prompt, project, control, skill, materials = {}, skillParameters, parameterText, mentions, mapPicks = [], images = [], imageBlocks = [], dialogue = false, mapContext }) {
         if (!this.settings.workspace) throw new Error('请先选择成果保存位置');
         if (this.active || this.delivery || this.modelTesting) throw new Error('已有任务在运行');
         if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 4000) throw new Error('请输入办理事项');
-        let bindings = materialBindings({ ...materials, ...(project ? { project: [project] } : {}),
-            ...(control ? { control: [control] } : {}) });
-        const suppliedMaterials = Object.keys(bindings).length > 0;
+        const groups = ({ project, control, materials }) => ({ ...materials,
+            ...(project ? { project: [project] } : {}), ...(control ? { control: [control] } : {}) });
+        const current = { project, control, materials };
+        const suppliedMaterials = Object.values(groups(current)).some(items => items?.length);
+        const prior = suppliedMaterials || skill ? null : this.tasks.find(item =>
+            Object.values(groups(item)).some(items => items?.length));
+        const source = prior || current;
+        const bound = groups(source);
+        const inputs = [...new Map([...(bound.inputs || []), ...mapPicks]
+            .map(item => [JSON.stringify([item.file, item.layer]), item])).values()];
+        let bindings = materialBindings({ ...bound, inputs });
         let layerLabels;
         if (!skill && bindings.inputs) {
-            const { inputs, ...named } = bindings;
-            layerLabels = Object.fromEntries((materials.inputs || []).map((item, index) => ['layer-' + (index + 1), {
+            const { inputs: validated, ...named } = bindings;
+            layerLabels = Object.fromEntries(inputs.map((item, index) => ['layer-' + (index + 1), {
                 name: item.name || item.layer, layer: item.layer, mapId: mapContext?.layers.find(row =>
-                    item.ref && row.ref.run === item.ref.run && row.ref.artifact === item.ref.artifact)?.id, ...(item.mapSelection ? { selected: item.mapSelection.fids.length } : {}),
+                    item.ref && row.ref.run === item.ref.run && row.ref.artifact === item.ref.artifact)?.id,
+                ...(item.mapSelection ? { selected: item.mapSelection.fids.length } : {}),
             }]));
-            bindings = { ...named, ...Object.fromEntries(inputs.map((item, index) => ['layer-' + (index + 1), [item]])) };
+            bindings = { ...named, ...Object.fromEntries(validated.map((item, index) => ['layer-' + (index + 1), [item]])) };
         }
         const previousRun = this.tasks.find(prior => prior.status === 'succeeded' && prior.runId)?.runId;
         const history = this.tasks.filter(prior => prior.prompt && prior.response)
@@ -253,6 +262,7 @@ class DesktopController {
         const { config, key } = this.selectModel({ modelConfig: this.settings.modelConfig });
         const task = { id: randomUUID(), title: [...prompt.trim()].slice(0, 32).join(''), prompt: prompt.trim(),
             project, control, skill, materials, parameterText, mentions, images, dialogue, operator: operator(this.settings), status: 'running', createdAt: new Date().toISOString() };
+        if (prior) task.materialTurn = prior.id;
         if (mapContext?.layers.length) task.mapTargets = Object.fromEntries(mapContext.layers.map(layer => [layer.id, layer.ref]));
         const next = [task, ...this.tasks];
         this.persist(next);
@@ -262,7 +272,7 @@ class DesktopController {
             files: Object.values(bindings).flat().map(item => item.file) };
         this.active = active;
         const options = { workspace: this.settings.workspace, modelConfig: config, apiKey: key,
-            prompt: task.prompt, skill, skillParameters, materials: bindings, layerLabels, previousRun, history, dialogue, images: imageBlocks, mapContext,
+            prompt: task.prompt, skill, skillParameters, materials: bindings, layerLabels, materialTurn: prior?.id, previousRun, history, dialogue, images: imageBlocks, mapContext,
             projectPlan: project?.plan || materials.project?.[0]?.plan,
             controlPlan: control?.plan || materials.control?.[0]?.plan };
         active.done = this.dispatch(options, { signal: stop.signal, onEvent: event => {
@@ -429,6 +439,9 @@ class DesktopController {
                     config: active.config, skill: task.skill, files: active.files, secret: active.secret });
             }
             task.status = status;
+            task.dispatch = { id: receipt.id || active.dispatchId,
+                elapsedMs: Math.round(performance.now() - active.started),
+                calls: receipt.budget?.calls, finishReason: receipt.finish_reason };
             delete task.visual;
             const current = this.tasks.includes(task);
             if (current && !['succeeded', 'answered'].includes(status) && task.skill) {

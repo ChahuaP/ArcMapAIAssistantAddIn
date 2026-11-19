@@ -1,16 +1,15 @@
 (() => {
     const h = React.createElement;
-    const { useEffect, useRef, useState } = React;
+    const { useState } = React;
     const api = window.guizhi;
-    const { button, iconButton, icon, businessIcon } = window.GuizhiShell;
+    const { button, icon, businessIcon } = window.GuizhiShell;
     const { SkillEditor, deliverables } = window.GuizhiSkillEditor;
     const { reference, normalizeBusiness } = window.GuizhiTaskCommands;
     const domainTitles = { data: '数据', vector: '空间分析', geometry: '几何', table: '属性表',
         crs: '坐标', presentation: '地图与版面', evidence: '留痕', system: '运行状态', semantics: '审批材料',
         knowledge: '业务知识', governance: '依据与解释', raster: '栅格', cad: 'CAD',
         annual: '年度地类', imagery: '影像识别', delivery: '共享交付', business: '业务' };
-    function Business({ catalog, refresh, choose, close, manage, initialMarkdown, plans }) {
-        const dialog = useRef(null);
+    function Business({ catalog, refresh, choose, manage, initialMarkdown, plans }) {
         const [editor, setEditor] = useState(initialMarkdown ? { markdown: initialMarkdown } : null);
         const [section, setSection] = useState(manage ? 'manage' : 'browse');
         const [query, setQuery] = useState('');
@@ -25,7 +24,6 @@
         }
         const keyword = normalizeBusiness(query);
         const matches = catalog.filter(item => normalizeBusiness([item.title, item.summary, ...item.aliases].join(' ')).includes(keyword));
-        useEffect(() => { dialog.current?.showModal(); }, []);
         const content = h(React.Fragment, null,
             editor ? h(React.Fragment, null,
                 button('back', '返回业务', { type: 'text', onClick: () => setEditor(null) }),
@@ -58,11 +56,7 @@
                                 h('summary', null, title), h('ul', null, ...tools.map(([name, spec]) => h('li', { key: name }, spec.title))));
                         }))),
             error && h('p', { className: 'error', role: 'alert' }, error));
-        if (manage) return h('div', { className: 'business-page' }, content);
-        return h('dialog', { className: 'business-dialog', ref: dialog,
-            onCancel: event => { event.preventDefault(); close(); } },
-            h('div', { className: 'dialog-head' }, h('h2', null, '业务中心'),
-                iconButton('close', '关闭业务中心', { onClick: close })), content);
+        return h('div', { className: 'business-page' }, content);
     }
     window.GuizhiBusiness = { Business };
 })();

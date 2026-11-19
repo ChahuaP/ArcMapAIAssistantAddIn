@@ -128,7 +128,7 @@
     function Titlebar({ settings, onboarding, back, left, right, arcgis, connected, resize }) {
         return h('header', { className: 'titlebar' },
             h('div', { className: 'title-group' },
-                !onboarding && (settings ? iconButton('back', '返回工作台', { onClick: back })
+                !onboarding && (settings ? iconButton('back', '返回智慧治理', { onClick: back })
                     : iconButton('left', '折叠或展开导航栏', { onClick: left, onKeyDown: resize(0) })),
                 brand(), settings && h('span', { className: 'title-path' }, '设置')),
             !settings && !onboarding && h('div', { className: 'title-group' },
@@ -137,7 +137,7 @@
                 right && iconButton('right', '折叠或展开材料与成果', { onClick: right, onKeyDown: resize(1) })));
     }
 
-    function Workbench({ appearance, saveAppearance, sidebar, conversation, inspector, map, composer, dockReply,
+    function Workbench({ appearance, saveAppearance, sidebar, conversation, inspector, map,
         mode, setMode, activity, ownership, onCancel, arcgis, connected, fail, page }) {
         const [width, setWidth] = useState(innerWidth);
         const [panels, setPanels] = useState(appearance.panels);
@@ -215,15 +215,14 @@
             h(Splitter, { className: 'workbench-panels', lazy: true,
                 onResizeEnd: sizes => persist(sideSizes(sizes)) },
                 h(Splitter.Panel, { size: left, min: left, max: left, resizable: false }, sidebar(left > 56)),
-                h(Splitter.Panel, { min: 0 }, page || h('div', { className: 'workbench-center' },
+                h(Splitter.Panel, { min: 0 }, page, h('div', { className: 'workbench-center', style: page ? { display: 'none' } : undefined },
                     h('div', { className: 'workbench-modes', 'aria-label': '工作区布局' }, ...modeButtons),
                     h(Splitter, { className: 'workbench-content', lazy: true,
                         onResizeEnd: ([a, b]) => { if (a && b) setSplit(a / (a + b) * 100); } },
                         h(Splitter.Panel, { size: chatVisible ? mapVisible ? split + '%' : '100%' : 0,
                             min: chatVisible && mapVisible ? 270 : 0, resizable: chatVisible && mapVisible }, chatVisible && conversation),
                         h(Splitter.Panel, { size: mapVisible ? chatVisible ? (100 - split) + '%' : '100%' : 0,
-                            min: mapVisible && chatVisible ? 420 : 0, resizable: chatVisible && mapVisible }, map)),
-                    !chatVisible && h('div', { className: 'workbench-chat-dock' }, dockReply, composer))),
+                            min: mapVisible && chatVisible ? 420 : 0, resizable: chatVisible && mapVisible }, map)))),
                 h(Splitter.Panel, { size: right, min: right ? 250 : 0, max: 520, resizable: Boolean(right) }, right > 0 && inspector)),
             inspector && compact && mode === 'chat' && h(Drawer, { title: '材料与成果', width: 360, getContainer: false,
                 rootStyle: { position: 'absolute' }, open: drawer, onClose: () => showDrawer(false) }, inspector)),

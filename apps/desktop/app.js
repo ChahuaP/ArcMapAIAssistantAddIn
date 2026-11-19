@@ -158,22 +158,15 @@
         const [viewed, viewResult] = useState(null);
         const [parcel, selectParcel] = useState(null);
         const [settings, showSettings] = useState(false);
-        const [showLog, setShowLog] = useState(false);
+        const [showCenter, setShowCenter] = useState(false);
         const [showFeedback, setShowFeedback] = useState(false);
         const [error, setError] = useState('');
         const [sending, setSending] = useState(false);
         const [coordinates, setCoordinates] = useState([]);
         const [catalog, setCatalog] = useState([]);
-        const [business, showBusiness] = useState('');
         const [tab, setTab] = useState('成果');
         const [mapMode, setMapMode] = useState('chat');
         const [mapMounted, setMapMounted] = useState(false);
-        const mapOpen = mapMode !== 'chat';
-        function showMapWorkspace(show) {
-            setShowLog(false);
-            if (show) setMapMounted(true);
-            setMapMode(show ? 'split' : 'chat');
-        }
         const [mapEditing, setMapEditing] = useState(false);
         const [mapDisplay, setMapDisplay] = useState(null);
         const [mapBackground, setMapBackground] = useState(null);
@@ -266,7 +259,10 @@
             api.imageReferences().then(setImageReferences).catch(fail);
             const callbacks = [
                 api.onMapReferences(setReferences), api.onImageReferences(setImageReferences), api.onState(setState), api.onVoiceCaption(setVoiceReply),
-                api.onSettings(section => showSettings(section || true)), api.onAppearance(setAppearance), api.onDraft(receiveDraft),
+                api.onSettings(section => {
+                    if (section === 'business') { showSettings(false); setShowCenter(true); }
+                    else showSettings(section || true);
+                }), api.onAppearance(setAppearance), api.onDraft(receiveDraft),
                 api.onLauncherFocus(() => document.querySelector('.launcher textarea')?.focus()),
             ];
             const dismiss = event => {
@@ -288,16 +284,6 @@
         const plans = coordinates.filter(entry => entry.kind === 'plan');
         const turns = (state?.tasks || []).slice().reverse();
         const task = turns.at(-1);
-        const [mapReply, setMapReply] = useState(null);
-        const observedTurn = useRef(null);
-        useEffect(() => {
-            if (!state) return;
-            const previous = observedTurn.current;
-            const workspace = state.settings.workspace;
-            if (previous?.workspace !== workspace) setMapReply(null);
-            else if (task?.id && task.id !== previous.id && mapMode === 'map') setMapReply(task.id);
-            observedTurn.current = { workspace, id: task?.id };
-        }, [state?.settings.workspace, task?.id, mapMode]);
         const taskRunning = ['running', 'cancelling'].includes(task?.status);
         const activity = taskRunning && task.visual && state?.settings.showOperation !== false ? task.visual : null;
         const shownMapRuns = useRef(new Set());
@@ -434,12 +420,11 @@
         }
         async function resetConversation(next = {}) {
             setMention(null);
-            setShowLog(false);
+            setShowCenter(false);
             setError('');
             setSending(true);
             try {
                 setState(await api.resetConversation(next));
-                showBusiness('');
             } catch (error) { fail(error); }
             finally { setSending(false); }
         }
@@ -448,6 +433,7 @@
                 prompt: preservePrompt ? draft.prompt : '请办理' + item.title };
             if (preservePrompt) next.unassigned = [...draft.unassigned, ...Object.values(draft.materials).flat(),
                 ...[draft.project, draft.control].filter(Boolean)];
+            if (mapMode === 'map') setMapMode('split');
             return resetConversation(next);
         }
         const ready = Boolean(state?.settings.workspace);
@@ -667,14 +653,14 @@
         const quick = h('main', { className: 'launcher' },
             h('header', { className: 'launcher-head' }, brand(), h('div', { className: 'title-group' },
                 appearance.shortcutRegistered && h('kbd', null, appearance.shortcut.replaceAll('+', ' + ')),
-                button('app', '打开工作台', { type: 'text', onClick: () => api.workbench().catch(fail) }),
+                button('app', '打开智慧治理', { type: 'text', onClick: () => api.workbench().catch(fail) }),
                 iconButton('close', '收起快捷面板', { onClick: () => api.hideLauncher().catch(fail) }))),
             h('div', { className: 'launcher-body' }, h('div', { className: 'launcher-content', ref: launcherContent }, composer,
                 !skill && ready && h('section', { className: 'quick-section' }, h('div', { className: 'section-head' },
-                    h('h2', null, '常用业务'), h(antd.Button, { type: 'link', onClick: () => showBusiness('browse') }, '全部业务')), tiles))),
+                    h('h2', null, '常用业务'), h(antd.Button, { type: 'link', onClick: () => api.workbench('business').catch(fail) }, '全部业务')), tiles))),
             h('footer', { className: 'launcher-footer' },
                 h('span', { className: 'muted' }, ready ? (state.settings.modelConfig?.mode === 'local' ? '本地模型' : state.settings.modelConfig ? '在线模型' : '未配置模型')
-                    : '请在工作台完成首次设置'),
+                    : '请在智慧治理完成首次设置'),
                 h('span', null, h('kbd', null, 'Enter'), ' 发送　', h('kbd', null, 'Esc'), ' 收起')));
         const sidebar = expanded => {
             const nav = (glyph, label, props) => expanded
@@ -682,12 +668,10 @@
                 : iconButton(glyph, label, props);
             return h('aside', { className: 'sidebar' + (expanded ? ' expanded' : '') },
             nav('plus', '新的对话', { type: 'primary', disabled: sending || adding || mapEditing, onClick: () => resetConversation() }),
-            nav('app', '工作台', { className: mapOpen || showLog ? '' : 'rail-current', 'aria-current': mapOpen || showLog ? undefined : 'page',
-                disabled: mapEditing, onClick: () => showMapWorkspace(false) }),
-            nav('map', '地图工作区', { disabled: !ready || (mapOpen && !showLog), 'aria-current': mapOpen && !showLog ? 'page' : undefined, onClick: () => openMap() }),
-            nav('briefcase', '业务中心', { disabled: !ready || mapEditing, onClick: () => showBusiness('browse') }),
-            nav('book', '业务办理日志', { disabled: mapEditing, className: showLog ? 'rail-current' : '',
-                'aria-current': showLog ? 'page' : undefined, onClick: () => setShowLog(true) }),
+            nav('app', '智慧治理', { className: showCenter ? '' : 'rail-current', 'aria-current': showCenter ? undefined : 'page',
+                disabled: mapEditing && showCenter, onClick: () => setShowCenter(false) }),
+            nav('briefcase', '业务中心', { className: showCenter ? 'rail-current' : '', 'aria-current': showCenter ? 'page' : undefined,
+                disabled: !ready || mapEditing, onClick: () => setShowCenter(true) }),
             nav('settings', '设置', { disabled: mapEditing, onClick: () => showSettings(true) }));
         };
         function reply(item) {
@@ -700,11 +684,6 @@
                         : item.layoutReady ? button('layout', '编辑版面', { onClick: () => { setLayoutOpen({ id: item.id }); } })
                             : h('span', { role: 'status' }, item.layoutError || '正在生成版面…')));
         }
-        const dockReply = task && h('section', { className: 'map-reply' },
-            h('button', { type: 'button', className: 'map-reply-toggle', 'aria-controls': 'map-reply-content',
-                'aria-expanded': mapReply === task.id, onClick: () => setMapReply(mapReply === task.id ? null : task.id) },
-                icon('chat'), h('span', null, task.prompt), icon('chevron')),
-            mapReply === task.id && h('div', { id: 'map-reply-content', className: 'map-reply-content' }, reply(task)));
         const conversation = h('section', { className: 'conversation' + (task ? '' : ' conversation-empty'), 'aria-label': '办理对话' },
             task && h('div', { className: 'task-head' }, h('h1', null, turns[0].title),
                 h('div', { className: 'task-head-actions' },
@@ -734,7 +713,7 @@
                     resultTask?.hasReport && resultTask.business && h(ReportPanel, { id: resultTask.id }))));
         async function openMap(item, signal) {
             if (signal?.aborted) return false;
-            setShowLog(false);
+            setShowCenter(false);
             if (item?.map || item?.mapLayers?.length) {
                 try {
                     const groups = { ...item.materials, ...(item.project && { project: [item.project] }),
@@ -839,15 +818,14 @@
             initial: settings, catalog, refresh, plans, initialMarkdown,
             close: () => { setInitialMarkdown(''); showSettings(false); },
             save: configure,
-        }) : h(Workbench, { appearance, saveAppearance, sidebar, conversation, inspector: showLog ? null : inspector, map: mapWorkspace, composer, dockReply,
-            page: showLog ? h(BusinessLog, { revision: state }) : null,
+        }) : h(Workbench, { appearance, saveAppearance, sidebar, conversation, inspector: showCenter ? null : inspector, map: mapWorkspace,
+            page: showCenter ? h(BusinessLog, { revision: state, catalog: h(Business, { catalog, choose }) }) : null,
             mode: mapMode, setMode: mode => { if (mode !== 'chat') setMapMounted(true); setMapMode(mode); },
             activity, ownership, onCancel: takeOver, fail,
             arcgis: () => { if (!mapEditing) showSettings('extensions'); },
             connected: Boolean(state?.arcgis?.host) });
         return h(Theme, { appearance }, layout,
-            showFeedback && h(ConversationFeedback, { close: () => setShowFeedback(false) }),
-            business && h(Business, { catalog, choose, close: () => showBusiness('') }));
+            showFeedback && h(ConversationFeedback, { close: () => setShowFeedback(false) }));
     }
     ReactDOM.createRoot(document.getElementById('app')).render(h(App));
 })();

@@ -122,7 +122,7 @@ svg { flex: none; vertical-align: middle; }
 .material-row small { overflow-wrap: anywhere; }
 .skill-materials, .unassigned { display: grid; gap: 8px; }
 .composer .skill-materials { max-height: none; overflow: visible; }
-.compose-wrap .composer-skill, .workbench-chat-dock .composer-skill { max-height: min(54vh, 520px); overflow: auto; }
+.compose-wrap .composer-skill { max-height: min(54vh, 520px); overflow: auto; }
 .unassigned-material { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .business-suggestion { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 8px 10px; }
 .composer .error { white-space: pre-line; }
@@ -263,8 +263,6 @@ dialog label { display: grid; gap: 5px; }
 .arcgis-panel select { width: 100%; }
 .coordinate-actions, .business-actions, .delivery-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
 .coordinate-actions .ant-tag, .section-head > .ant-tag { margin-inline-end: 0; }
-.business-dialog { display: grid; gap: var(--space-4); width: min(920px, 94vw); }
-.business-dialog:not([open]) { display: none; }
 .skill-cards, .skill-editor { display: grid; gap: var(--space-4); }
 .business-page > button { justify-self: start; }
 .skill-cards { grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); }
@@ -723,15 +721,6 @@ dialog label { display: grid; gap: 5px; }
     border-bottom: 1px solid var(--line); background: var(--panel); }
 .workbench-modes .ant-btn { width: 30px; height: 28px; }
 .workbench-mode-active.ant-btn { background: var(--soft); }
-.workbench-chat-dock { flex: none; padding: var(--space-2); background: var(--panel); border-top: 1px solid var(--line); }
-.map-reply { margin: 0 0 var(--space-2); }
-.map-reply-toggle { display: flex; align-items: center; gap: 8px; width: 100%; padding: 5px 8px; border: 0; color: var(--ink); background: transparent; text-align: start; cursor: pointer; }
-.map-reply-toggle span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.map-reply-toggle svg { flex: none; }
-.map-reply-toggle[aria-expanded="true"] svg:last-child { transform: rotate(180deg); }
-.map-reply-content { max-height: min(30vh, 260px); overflow: auto; overscroll-behavior: contain; }
-.map-reply-content .bubble { margin: 0; max-width: 100%; }
-.workbench-chat-dock .composer textarea { min-height: 36px; max-height: 110px; }
 .workbench-content .welcome .skill-tiles { grid-template-columns: 1fr; }
 .workbench-interaction { display: contents; }
 .workbench-locked .titlebar { app-region: no-drag; -webkit-app-region: no-drag; }

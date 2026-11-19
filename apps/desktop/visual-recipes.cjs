@@ -3,6 +3,12 @@ const recipe = (kind, label, target = '') => ({ kind, label, target });
 function visualRecipe(event) {
     if (event.kind === 'session_event' && event.type === 'tool/call') {
         const labels = {
+            subagent: '正在分派核查子任务',
+            team_task_create: '正在安排团队任务',
+            wait_agent: '正在等待子任务回执',
+            interrupt_agent: '正在中断子任务',
+            web_search: '正在查询公开资料',
+            web_fetch: '正在读取公开网页',
             inspect_current_map: '正在核对当前地图',
             read_current_map_image: '正在查看当前地图画面',
             describe_bound_layers: '正在读取图层信息',

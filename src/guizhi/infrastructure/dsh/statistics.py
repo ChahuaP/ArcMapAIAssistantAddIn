@@ -76,7 +76,7 @@ def verified_square_metres(steps):
 
 
 def correct_equivalents(text, evidence):
-    """Only correct explicit conversions whose left-hand value identifies a measured area."""
+    """Correct equivalent units using verified areas and the application unit definitions."""
     def checked(match):
         source = ALIASES[match["from_unit"].lower()]
         target = ALIASES[match["to_unit"].lower()]
@@ -88,6 +88,8 @@ def correct_equivalents(text, evidence):
         resolution = 0.5 * 10 ** -len(first.partition(".")[2])
         candidates = {round(value / M2_PER_UNIT[target], places) for value in evidence
                       if abs(value / M2_PER_UNIT[source] - float(first)) <= resolution + 1e-10}
+        if not candidates and float(first) == 1 and "=" in match["link"]:
+            candidates.add(round(M2_PER_UNIT[source] / M2_PER_UNIT[target], places))
         if len(candidates) != 1:
             return match[0]
         expected, = candidates

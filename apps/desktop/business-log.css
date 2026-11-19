@@ -11,7 +11,6 @@
 .business-types strong{margin-inline-start:9px;font-variant-numeric:tabular-nums}
 .business-records .ant-pagination{justify-content:flex-end;margin-top:14px}
 .business-pdf .ant-pagination{justify-content:flex-end;margin-bottom:10px}
-.business-detail-dialog .ant-modal-body{max-height:calc(100vh - 166px);overflow:auto;overscroll-behavior:contain;padding-inline-end:6px}
 .business-row-actions{display:flex;gap:2px}
 .business-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(195px,1fr));gap:12px;margin:12px 0 18px}
 .business-facts dt{font-size:12px;color:var(--muted)}
@@ -28,3 +27,5 @@
 .business-pdf-loading{display:flex;align-items:center;justify-content:center;gap:8px;min-height:60px}
 .role-picker{display:grid;gap:8px;margin-top:6px}
 .role-picker .ant-select{width:100%}
+
+.business-catalog,.business-log>.business-records + .business-records{margin-bottom:20px;margin-top:16px}

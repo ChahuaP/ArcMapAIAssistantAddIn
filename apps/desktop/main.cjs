@@ -152,7 +152,7 @@ async function startDesktop(options) {
     const tray = new Tray(nativeImage.createFromPath(path.join(__dirname, 'mark.png')).resize({ width: 24, height: 24 }));
     tray.setToolTip(productName);
     tray.setContextMenu(Menu.buildFromTemplate([
-        { label: '工作台', click: reveal },
+        { label: '智慧治理', click: reveal },
         { label: '快捷面板', click: desktop.openLauncher },
         { label: '显示数字形象', click: desktop.showPortrait },
         { label: '隐藏数字形象', click: () => {
@@ -543,7 +543,7 @@ async function startDesktop(options) {
     }, true);
     bind('workbench', section => {
         reveal();
-        if (['components', 'model'].includes(section)) window.webContents.send('guizhi:settings', section);
+        if (['components', 'model', 'business'].includes(section)) window.webContents.send('guizhi:settings', section);
     });
     bind('workspace', async () => {
         const pick = await dialog.showOpenDialog(window, { properties: ['openDirectory', 'createDirectory'] });
@@ -914,6 +914,7 @@ async function startDesktop(options) {
             if (workspace !== controller.settings.workspace || version !== mapCatalogVersion) throw new Error('地图图层已变更，请重新提交');
             task = { ...task, materials: Object.fromEntries(materials) };
         }
+        let mapPicks = [];
         if (!task.skill) {
             const explicit = [...task.prompt.matchAll(/[@＠]「([^」]+)」/gu)].map(match => match[1]);
             const mentions = new Map(Object.entries(task.mentions || {}));
@@ -942,13 +943,14 @@ async function startDesktop(options) {
                 if (controller.settings.workspace !== workspace || mapCatalogVersion !== version) {
                     throw new Error('地图图层或选区已变更，请重新提交');
                 }
-                task = { ...task, materials: { ...task.materials, inputs: [...new Map(
-                    [...(task.materials?.inputs || []), ...inputs].map(item => [item.file + '#' + item.layer, item])).values()] } };
+                mapPicks = inputs;
             }
         }
         const imageIds = task.images || [];
         if (!Array.isArray(imageIds) || imageIds.length > 4) throw new Error('每轮最多使用 4 张图片');
-        const imageBlocks = imageIds.map(item => {
+        const previousImages = !imageIds.length && controller.tasks.find(turn => turn.images?.length)?.images;
+        const selectedImages = imageIds.length ? imageIds : (previousImages || []).filter(item => imageInputs.has(item.id));
+        const imageBlocks = selectedImages.map(item => {
             if (!imageInputs.has(item?.id)) throw new Error('图片已失效，请重新添加');
             return imageInputs.get(item.id).block;
         });
@@ -969,7 +971,7 @@ async function startDesktop(options) {
             file: path.join(app.getPath('temp'), 'guizhi-map-' + randomUUID() + '.json') };
         const layoutFile = controller.settings.workspace && path.join(controller.settings.workspace, 'map-layout.json');
         const layout = layoutFile && fs.existsSync(layoutFile) ? JSON.parse(fs.readFileSync(layoutFile, 'utf8')) : undefined;
-        const state = controller.submit({ ...task, images, imageBlocks,
+        const state = controller.submit({ ...task, mapPicks, images, imageBlocks,
             mapContext: { layers, scene, sceneFile: sceneCapture?.file, layout } });
         const capture = sceneCapture;
         if (capture) void controller.active.done.finally(() => {

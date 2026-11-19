@@ -11,15 +11,20 @@ const label = { answered: '已答复', succeeded: '已完成', failed: '未完�
 function prepareConversation(tasks, version) {
     if (!tasks.length) throw new Error('本次会话暂无内容');
     const text = tasks.slice().reverse().map((task, index) => {
-        const materials = [task.project, task.control, ...Object.values(task.materials || {}).flat(),
+        const source = tasks.find(turn => turn.id === task.materialTurn) || task;
+        const materials = [source.project, source.control, ...Object.values(source.materials || {}).flat(),
             ...(task.images || [])].filter(Boolean);
         const names = [...new Set(materials.map(item => (item.name || item.file || '').split(/[\\/]/).pop()).filter(Boolean))];
         const steps = (task.progress || []).map(step => [step.label, step.target].filter(Boolean).join(' · '));
         return ['第 ' + (index + 1) + ' 轮 · ' + task.createdAt + ' · ' + (label[task.status] || '未完成'),
             '用户\n' + task.prompt,
             task.response && '小六\n' + task.response,
-            names.length > 0 && '附件名称\n' + names.join('\n'),
+            names.length > 0 && (source === task ? '附件名称\n' : '沿用的附件\n') + names.join('\n'),
             steps.length > 0 && '办理过程\n' + steps.join('\n'),
+            task.dispatch?.id && '调度编号 ' + task.dispatch.id,
+            Number.isSafeInteger(task.dispatch?.elapsedMs) && '办理耗时 ' + task.dispatch.elapsedMs + ' ms',
+            Number.isSafeInteger(task.dispatch?.calls) && '模型调用次数 ' + task.dispatch.calls,
+            task.dispatch?.finishReason && '结束状态 ' + task.dispatch.finishReason,
             task.runId && '运行编号 ' + task.runId,
             task.diagnosticId && '故障编号 ' + task.diagnosticId,
         ].filter(Boolean).join('\n\n');
