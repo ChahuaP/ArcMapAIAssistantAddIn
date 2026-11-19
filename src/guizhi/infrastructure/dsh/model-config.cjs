@@ -60,6 +60,8 @@ function route(config) {
     const id = config.provider !== 'custom' ? config.provider : 'guizhi-' + config.mode;
     // The adapter prefers the registered model's capacity. Unknown models need a conservative pressure threshold.
     const settings = { apiKeyEnv: 'GUIZHI_MODEL_KEY', defaultContextWindow: config.mode === 'local' ? 8192 : 32768,
+        retryPolicy: { mode: 'normal',
+            retryableCodes: ['EMPTY_RESPONSE', 'RATE_LIMIT', 'SERVER', 'TIMEOUT', 'TRANSPORT', 'MALFORMED_RESPONSE'] },
         models: [{ id: config.model, input: ['text', 'image'] }] };
     if (config.provider === 'custom') {
         Object.assign(settings, { api: config.api, baseURL: config.baseUrl,

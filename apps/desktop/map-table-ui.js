@@ -40,7 +40,7 @@ export function AttributeStatistics({ getContainer, source, selected, columns, c
         onCancel: close, footer: h(Button, { onClick: close }, '关闭') },
         h('div', { className: 'map-field-editor' },
             h(Select, { 'aria-label': '统计字段', value: field, options: columns, onChange: setField }),
-            h(Checkbox, { className: 'gis-statistics-selection', checked: only, disabled: !selected.length, onChange: event => setOnly(event.target.checked) }, '仅统计已选要素'),
+            h(Checkbox, { checked: only, disabled: !selected.length, onChange: event => setOnly(event.target.checked) }, '仅统计已选要素'),
             error && h('p', { className: 'error', role: 'alert' }, error),
             !data && !error && h('p', { role: 'status' }, '正在统计…'),
             data && h('dl', { className: 'gis-result-metrics' },
