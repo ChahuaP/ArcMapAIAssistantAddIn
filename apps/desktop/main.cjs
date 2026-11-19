@@ -589,7 +589,7 @@ async function startDesktop(options) {
     });
     bind('materialPaths', (paths, kind) => controller.intake(paths, kind));
     const mapReads = new Set(['describe', 'features', 'table', 'table-complement', 'table-statistics', 'table-unique-values', 'table-feature',
-        'crs-search', 'crs-projection-options', 'raster-preview', 'raster-display', 'categories']);
+        'crs-search', 'crs-projection-options', 'raster-preview', 'raster-display', 'categories', 'topology-issues']);
     bind('map', async (surface, input) => {
         if (surface !== window || !input || !mapReads.has(input.action) &&
                 !['edit', 'edit-sketch', 'edit-transfer', 'tool'].includes(input.action)) {
@@ -614,7 +614,8 @@ async function startDesktop(options) {
             return { ...result, diagnosticId };
         }
         const work = input.operation === 'data.select_by_attribute'
-            ? controller.reader.map(controller.settings.workspace, input) : controller.gis.map(controller.settings.workspace, input);
+            ? controller.reader.map(controller.settings.workspace, input) : controller.gis.map(controller.settings.workspace, input,
+                progress => { if (!window.isDestroyed()) window.webContents.send('guizhi:mapToolProgress', progress); });
         toolJob = work.then(result =>
             ['failed', 'interrupted'].includes(result.status) ? report(result) : result,
         error => report({ status: 'failed', message: error.message,

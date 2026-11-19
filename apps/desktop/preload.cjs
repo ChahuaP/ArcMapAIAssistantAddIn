@@ -18,7 +18,7 @@ api.mapDrop = files => ipcRenderer.invoke('guizhi:mapImport', files.map(file => 
 api.intakeDropped = (files, kind) => ipcRenderer.invoke('guizhi:materialPaths',
     files.map(file => webUtils.getPathForFile(file)).filter(Boolean), kind);
 for (const name of ['state', 'settings', 'speechPartial', 'appearance', 'draft', 'launcherFocus',
-    'portraitVoice', 'voiceStop', 'voiceCaption', 'mapReferences', 'imageReferences', 'mapImportProgress', 'attributeWindowClosed']) {
+    'portraitVoice', 'voiceStop', 'voiceCaption', 'mapReferences', 'imageReferences', 'mapImportProgress', 'mapToolProgress', 'attributeWindowClosed']) {
     api['on' + name[0].toUpperCase() + name.slice(1)] = callback => {
         const listener = (_, payload) => callback(payload);
         ipcRenderer.on('guizhi:' + name, listener);

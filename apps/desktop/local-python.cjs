@@ -43,6 +43,7 @@ class LocalPython {
             try { reply = JSON.parse(line); }
             catch { fail(this.label + '返回了无效结果，请重试'); return; }
             const request = this.pending.get(reply.id);
+            if (reply.progress) { request?.progress?.(reply.progress); return; }
             const error = reply.error ? Object.assign(new Error(reply.error),
                 { code: reply.errorCode, diagnosticMessage: reply.error }) : null;
             if (request) request.finish(error, reply.result);
@@ -54,17 +55,17 @@ class LocalPython {
         return this.request(workspace, { paths, kind });
     }
 
-    map(workspace, map) {
-        return this.request(workspace, { map });
+    map(workspace, map, progress) {
+        return this.request(workspace, { map }, progress);
     }
 
-    request(workspace, payload) {
+    request(workspace, payload, progress) {
         if (this.stopping) return Promise.reject(new Error(this.label + '已停止'));
         this.start();
         return new Promise((resolve, reject) => {
             const id = randomUUID();
             const timer = setTimeout(this.timeout, this.timeoutMs);
-            this.pending.set(id, { finish: (error, result) => {
+            this.pending.set(id, { progress, finish: (error, result) => {
                 this.pending.delete(id);
                 clearTimeout(timer);
                 if (error) reject(error);

@@ -20,6 +20,7 @@ from guizhi.infrastructure.workspace import SOURCE_ROOT, Workspace, supervisor_l
 
 # Set by the dedicated desktop GIS process, scoped to each request.
 resident_gis = ContextVar("resident_gis", default=None)
+resident_progress = ContextVar("resident_progress", default=None)
 
 
 def product_version() -> str:
@@ -62,6 +63,8 @@ def worker(workspace: Workspace, run_id: str, *, resident_cancel=None) -> dict:
     def progress(step, **details):
         ensure_supervised()
         workspace.event(run_id, step, **details)
+        if step == "tool_progress" and (notify := resident_progress.get()):
+            notify(details)
 
     progress("worker_started", pid=os.getpid(), runtime=runtime_identity())
     arguments = (record["task"], record["job"], directory, progress, ensure_supervised)

@@ -255,4 +255,7 @@ def execute(request, job, directory, workspace, progress, check):
                   for item in exc.errors(include_input=False, include_url=False)]
         raise Fault("parameter", "parameter_schema", str(exc), fields=fields) from exc
     ctx = Execution(request, job, directory, workspace, progress, check)
-    return ctx.finish(function(ctx, **dict(params)))
+    progress("tool_progress", phase="processing")
+    output = function(ctx, **dict(params))
+    progress("tool_progress", phase="verifying")
+    return ctx.finish(output)

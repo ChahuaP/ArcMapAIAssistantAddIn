@@ -274,38 +274,82 @@ def explode(ctx, selection: Selection, destination: PartsDestination = "current"
 
 
 def check_topology(ctx):
+    from contextlib import closing
+    import sqlite3
+
     frame = ctx.frames[0]
     geometry = frame.geometry
     empty = geometry.isna() | geometry.is_empty
     invalid = ~empty & ~geometry.is_valid
     polygons = geometry[~empty & ~invalid & geometry.geom_type.isin(["Polygon", "MultiPolygon"])]
-    overlap_pairs = 0
-    if len(polygons):
+    report = ctx.path("topology.sqlite")
+    with closing(sqlite3.connect(report)) as db, db:
+        db.execute("CREATE TABLE issues (kind TEXT, fid INTEGER, peer INTEGER, reason TEXT)")
+        db.executemany("INSERT INTO issues VALUES ('empty', ?, NULL, NULL)", ((int(fid),) for fid in geometry[empty].index))
+        db.executemany("INSERT INTO issues VALUES ('invalid', ?, NULL, ?)",
+                       ((int(fid), shapely.is_valid_reason(shape)) for fid, shape in geometry[invalid].items()))
         shapes = polygons.to_numpy()
+        fids = polygons.index.to_numpy()
         index = shapely.STRtree(shapes)
+        overlap_pairs = 0
         for i, shape in enumerate(shapes):
             ctx.check()
+            if i % 1024 == 0:
+                ctx.progress("tool_progress", phase="topology", completed=i, total=len(shapes))
             candidates = index.query(shape, predicate="intersects")
             candidates = candidates[candidates > i]
-            overlap_pairs += int((shapely.relate_pattern(shape, shapes[candidates], "2********")).sum())
+            hits = candidates[shapely.relate_pattern(shape, shapes[candidates], "2********")]
+            db.executemany("INSERT INTO issues VALUES ('overlap', ?, ?, NULL)",
+                           ((int(fids[i]), int(fids[j])) for j in hits))
+            overlap_pairs += len(hits)
+        db.execute("CREATE INDEX issues_kind ON issues(kind)")
+    ctx.record("topology", report)
+    if len(shapes):
+        ctx.progress("tool_progress", phase="topology", completed=len(shapes), total=len(shapes))
     return {"statistics": {"feature_count": len(frame), "empty_geometry_count": int(empty.sum()),
                            "invalid_geometry_count": int(invalid.sum()), "overlap_pair_count": overlap_pairs},
-            "value": [f"要素 {fid}：{shapely.is_valid_reason(shape)}"
-                      for fid, shape in geometry[invalid].head(30).items()]}
+            "topology": {"issue_count": int(empty.sum() + invalid.sum()) + overlap_pairs}}
 
 
-def repair(ctx, delete_null: bool = False):
+def repair(ctx, delete_null: bool = False, fids: list[StrictInt] | None = None, preserve_overlap_fid: StrictInt | None = None):
     frame = ctx.frames[0]
+    selected = set(fids) if fids is not None else set(frame.index)
+    if fids is not None and (not 1 <= len(fids) <= 500 or not selected.issubset(frame.index)):
+        raise ValueError("请选择当前图层中有效的待修复要素")
+    if preserve_overlap_fid is not None:
+        if fids is None or len(selected) != 1 or preserve_overlap_fid in selected or preserve_overlap_fid not in frame.index:
+            raise ValueError("请选择一个修复要素和一个保留要素")
+        fid, = selected
+        shape, peer = frame.geometry.loc[fid], frame.geometry.loc[preserve_overlap_fid]
+        if any(item is None or not item.is_valid or item.geom_type not in {"Polygon", "MultiPolygon"} or item.has_z
+               for item in (shape, peer)):
+            raise ValueError("仅支持裁除两个有效二维面要素之间的重叠")
+        fixed = shape.difference(peer)
+        if fixed.is_empty or not fixed.is_valid or fixed.geom_type not in {"Polygon", "MultiPolygon"} or fixed.area >= shape.area:
+            raise ValueError("裁除后要素将消失或没有可裁除的重叠，请手动编辑")
+        result = frame.copy()
+        result.at[fid, frame.geometry.name] = fixed
+        ctx.publish(result, preserve_fids=True)
+        return {"statistics": {"feature_count": len(result), "updated": 1},
+                "changeset": {"target_revision": ctx.selection_hashes[0]}}
     repaired, changes, kept = [], [], []
-    for fid, shape in frame.geometry.items():
+    for index, (fid, shape) in enumerate(frame.geometry.items()):
         ctx.check()
-        if shape is None and delete_null:
+        if index % 1024 == 0:
+            ctx.progress("tool_progress", phase="geometry", completed=index, total=len(frame))
+        if fid in selected and (shape is None or shape.is_empty) and delete_null:
             changes.append({"fid": int(fid), "reason": "null", "removed": True})
             continue
-        if shape is not None and not shape.is_valid:
+        if fid in selected and shape is not None and not shape.is_valid:
             if shape.has_z:
                 raise ValueError("Invalid 3D geometry requires a dedicated repair method")
             fixed = shapely.make_valid(shape)
+            family = shape.geom_type.removeprefix("Multi")
+            if fixed.geom_type == "GeometryCollection" and family in MULTIPART:
+                parts = [part for component in fixed.geoms for part in shapely.get_parts(component)
+                         if part.geom_type == family]
+                if parts:
+                    fixed = parts[0] if len(parts) == 1 else MULTIPART[family](parts)
             if fixed.is_empty or fixed.geom_type.replace("Multi", "", 1) != shape.geom_type.replace("Multi", "", 1):
                 raise ValueError("Repair would change geometry family or remove geometry")
             changes.append({"fid": int(fid), "reason": shapely.is_valid_reason(shape),
@@ -317,9 +361,9 @@ def repair(ctx, delete_null: bool = False):
         repaired.append(shape)
     result = frame.loc[kept].copy()
     result.geometry = repaired
-    if not result.geometry.dropna().is_valid.all():
+    if not result.loc[result.index.isin(selected)].geometry.dropna().is_valid.all():
         raise ValueError("Repair output remains invalid")
-    ctx.publish(result, geometry_type=ctx.info[0]["geometry_type"] if result.empty else None)
+    ctx.publish(result, geometry_type=ctx.info[0]["geometry_type"] if result.empty else None, preserve_fids=True)
     change = {"target_revision": ctx.selection_hashes[0], "features": changes}
     ctx.json("changeset.json", change, "changeset")
     return {"changeset": change}

@@ -1,7 +1,7 @@
 """Process GeoTIFF and ERDAS IMAGINE rasters without preserving invalid samples."""
 from contextlib import ExitStack
 from datetime import date
-from math import fsum, isclose
+from math import ceil, fsum, isclose
 from pathlib import Path
 from typing import Literal
 from uuid import uuid4
@@ -88,10 +88,15 @@ def statistics(ctx, observed_on: date | None = None):
     info = metadata(file)
     bands = []
     with rio.open(file) as src:
+        total = sum(ceil(src.height / height) * ceil(src.width / width) for height, width in src.block_shapes)
+        completed = 0
         for index in src.indexes:
             count, minimum, maximum, sums = 0, None, None, []
             for _, window in src.block_windows(index):
                 ctx.check()
+                if completed % 32 == 0:
+                    ctx.progress("tool_progress", phase="raster_statistics", completed=completed, total=total)
+                completed += 1
                 block = src.read(index, window=window, masked=True).compressed().astype("float64")
                 block = block[np.isfinite(block)]
                 if not block.size:

@@ -1,7 +1,7 @@
 import 'ol/ol.css';
 import { BasemapDialog, LocalDataPicker, MapSourceDialog } from './map-source-dialog.js';
 import { attachMeasurement } from './map-measure.js';
-import { MapProcessing, MapResultDialog, MapTool, TOOL_GROUPS, toolError, toolIcon,
+import { MapProcessing, MapResultDialog, MapTool, TopologyPanel, ToolProgress, TOOL_GROUPS, toolError, toolIcon,
     roleLayerPicker, layerMatches, mapLayerMaterial } from './map-processing.js';
 import { geometryProperties } from './map-attribute-tools.js';
 import { useTableWindow } from './map-table-window.js';
@@ -284,6 +284,8 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
     const [analysis, setAnalysis] = useState(null);
     const [tool, setTool] = useState(null);
     const [toolResult, setToolResult] = useState(null);
+    const [topology, setTopology] = useState(null);
+    const [overlapRepair, setOverlapRepair] = useState(null);
     const [count, setCount] = useState(0);
     const partsDraft = useRef(null);
     const [fieldEdit, setFieldEdit] = useState(null);
@@ -1219,6 +1221,11 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         add(fresh);
     }
     function showToolResult(result, input, destination) {
+        if (result.topology) {
+            setTopology({ result, input });
+            setTool(null);
+            return;
+        }
         if (destination && ['geometry.multipart', 'geometry.explode'].includes(tool?.operation)) {
             const [output] = result.layers;
             if (!output || result.layers.length !== 1) throw new Error('没有取得完整的编辑结果');
@@ -1241,6 +1248,38 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
             ? () => (attributes ? replaceAttributes : replace)(input, result.layers[0]) : undefined;
         setTool(null);
         setToolResult({ result, replaceLayer, fromTable: tool?.fromTable });
+    }
+    async function locateTopology(input, row) {
+        const g = graph.current;
+        const id = key(input);
+        const ids = row.peer === null ? [row.fid] : [row.fid, row.peer];
+        try {
+            const slice = await api.map({ action: 'features', ref: input.ref, fids: ids, target,
+                plan: g.byKey.get(id)?.get('displayPlan') });
+            if (graph.current !== g || !layerList.current.some(item => key(item) === id)) return;
+            const extent = createEmpty();
+            for (const item of slice.features) extend(extent, format.readGeometry(item.geometry).getExtent());
+            if (isEmpty(extent)) throw new Error('该要素没有可定位的几何');
+            if (hidden.includes(id)) toggle(id);
+            selectLayer(id);
+            setSelection({ key: id, ids });
+            g.view.fit(extent, { size: g.ol.getSize(), padding: [34, 34, 34, 34], maxZoom: 18 });
+        } catch (error) { fail(error); }
+    }
+    async function repairTopology(input, row, keep) {
+        setBusy(true);
+        try {
+            const result = await api.map({ action: 'tool', operation: 'geometry.repair', refs: [input.ref],
+                parameters: { fids: [keep === row.fid ? row.peer : row.fid], delete_null: row.kind === 'empty',
+                    ...(keep !== undefined && { preserve_overlap_fid: keep }) } });
+            const error = toolError(result);
+            if (error) throw new Error(error);
+            const [output] = result.layers;
+            if (!output) throw new Error('没有生成修复图层');
+            setOverlapRepair(null);
+            setToolResult({ result, replaceLayer: () => { replace(input, output); setTopology(null); } });
+        } catch (error) { fail(error); }
+        finally { setBusy(false); }
     }
     async function saveSelectedLayer() {
         if (busy || !layer || !picked.length) return;
@@ -1911,6 +1950,11 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                             { label: '其他值', color: item.style.classification.other, fillColor: item.style.classification.otherFill }].map(entry => h('li', { key: JSON.stringify(entry.value) },
                             h('span', { className: 'map-swatch', style: classSwatch(item, entry) }),
                             entry.label || (entry.value ?? '空值')))))))),
+            topology && layers.some(item => key(item) === key(topology.input)) && h(TopologyPanel, {
+                key: topology.result.run, report: topology.result, busy: busy || Boolean(edit),
+                close: () => setTopology(null), locate: row => locateTopology(topology.input, row),
+                repair: row => row.kind === 'overlap' ? setOverlapRepair({ row, keep: row.peer }) : repairTopology(topology.input, row),
+            }),
             h('div', { className: 'map-viewport' },
                 h('div', { className: 'geo-map', ref: node, tabIndex: 0, 'aria-label': '交互地图', style: { backgroundColor } }),
                 measure && h('div', { className: 'map-measure-readout', role: 'status' },
@@ -1937,7 +1981,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 !layers.length && !basemap && h(Button, { className: 'map-empty', type: 'default', icon: glyph('add', 30),
                     title: '添加或拖入空间数据', 'aria-label': '添加或拖入空间数据', disabled: busy, onClick: () => setLocalPicker(true) }),
                 (notices.size > 0 || busy) && h('div', { className: 'map-notice', role: 'status' },
-                    busy ? '正在处理地图数据…' :
+                    busy ? (!tool && !analysis && !topology && !importing ? h(ToolProgress, { busy }) : '正在处理地图数据…') :
                         [...notices].map(([message, names]) => h('div', { key: message }, message,
                             names.length > 0 && h('span', { className: 'muted' }, '（' + names.join('、') + '）')))))),
         h('footer', { className: 'map-status' },
@@ -2054,6 +2098,15 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
             close: () => setToolResult(null),
             add: () => { if (edit) stopEdit(); addResultLayers(toolResult.result.layers); setToolResult(null); },
             replace: toolResult.replaceLayer && (() => { toolResult.replaceLayer(); setToolResult(null); }) }), Boolean(toolResult.fromTable)),
+        overlapRepair && topology && h(Modal, { open: true, centered: true, title: '处理重叠',
+            className: 'gis-dialog', rootClassName: 'gis-modal-root', okText: '生成修复结果', cancelText: '取消',
+            confirmLoading: busy, closable: !busy, onCancel: () => { if (!busy) setOverlapRepair(null); },
+            onOk: () => repairTopology(topology.input, overlapRepair.row, overlapRepair.keep) },
+            h('div', { className: 'map-field-editor' },
+                h('label', null, '保留边界的要素', h(Choice, { 'aria-label': '保留边界的要素', value: overlapRepair.keep,
+                    onChange: keep => setOverlapRepair(old => ({ ...old, keep })), disabled: busy,
+                    options: [overlapRepair.row.fid, overlapRepair.row.peer].map(value => ({ value, label: '要素 ' + value })) })),
+                h('p', null, '从另一要素裁除重叠部分，生成结果供确认。'), h(ToolProgress, { busy }))),
         analysis && h(MapProcessing, { ...analysis, layers, entries, components, openComponents, glyph, busy,
             setBusy, close: () => setAnalysis(null), Preview, onAddLayers: addResultLayers }),
         mergeTarget !== null && h(Modal, { open: true, centered: true, title: '合并要素', className: 'gis-dialog',

@@ -403,6 +403,70 @@ function ResultSummary({ result, areaUnit }) {
             : !metrics.length && result.value !== undefined && h('output', null, String(result.value)));
 }
 
+export function ToolProgress({ busy }) {
+    const [progress, setProgress] = useState(null);
+    useEffect(() => {
+        if (!busy) { setProgress(null); return; }
+        return window.guizhi.onMapToolProgress(setProgress);
+    }, [busy]);
+    if (!busy) return null;
+    const measured = progress?.total > 0;
+    const label = ({ processing: '正在处理', verifying: '正在校验成果', topology: '正在检查重叠', geometry: '正在修复几何',
+        overlay: '正在叠加图层', raster_statistics: '正在统计像元' })[progress?.phase] || '正在准备数据';
+    return h('div', { className: 'gis-tool-progress', role: 'status' },
+        h('div', null, h('span', null, label), measured && h('span', null,
+            progress.completed.toLocaleString('zh-CN') + ' / ' + progress.total.toLocaleString('zh-CN'))),
+        h('progress', { 'aria-label': label, ...(measured && { max: progress.total, value: progress.completed }) }));
+}
+
+const topologyKinds = { empty: '空几何', invalid: '无效几何', overlap: '面重叠' };
+function geometryReason(reason) {
+    if (!reason) return '';
+    const type = reason.split('[')[0];
+    return ({ 'Ring Self-intersection': '环自相交', 'Self-intersection': '自相交',
+        'Hole lies outside shell': '内环位于外环之外', 'Nested shells': '外环嵌套', 'Nested holes': '内环嵌套',
+        'Too few points in geometry component': '几何顶点过少', 'IllegalArgumentException: Points of LinearRing do not form a closed linestring': '环未闭合' })[type] || '几何结构无效';
+}
+
+export function TopologyPanel({ report, close, locate, repair, busy }) {
+    const [kind, setKind] = useState('all');
+    const [page, setPage] = useState(0);
+    const [data, setData] = useState(null);
+    const [problem, setProblem] = useState('');
+    useEffect(() => {
+        let current = true;
+        setData(null);
+        setProblem('');
+        window.guizhi.map({ action: 'topology-issues', run: report.run, kind, page }).then(value => {
+            if (current) setData(value);
+        }).catch(error => { if (current) setProblem(window.GuizhiErrorText(error)); });
+        return () => { current = false; };
+    }, [report.run, kind, page]);
+    const counts = report.statistics;
+    return h('section', { className: 'gis-topology-panel', 'aria-label': '拓扑问题' },
+        h('header', null, h('strong', null, '拓扑问题'), h(Button, { size: 'small', type: 'text',
+            'aria-label': '关闭拓扑问题', onClick: close }, window.GuizhiShell.icon('close'))),
+        h(Select, { 'aria-label': '问题类型', value: kind, onChange: value => { setKind(value); setPage(0); },
+            options: [['all', '全部', report.topology.issue_count], ['empty', '空几何', counts.empty_geometry_count],
+                ['invalid', '无效几何', counts.invalid_geometry_count], ['overlap', '面重叠', counts.overlap_pair_count]]
+                .map(([value, label, count]) => ({ value, label: label + ' · ' + count.toLocaleString('zh-CN') })) }),
+        h(ToolProgress, { busy }),
+        problem && h('p', { role: 'alert', className: 'error' }, problem),
+        h('div', { className: 'gis-topology-list', 'aria-busy': !data && !problem },
+            data?.total === 0 && h('p', { className: 'muted' }, '没有此类问题。'),
+            ...((data?.rows || []).map(row => h('article', { key: row.id },
+                h('strong', null, topologyKinds[row.kind] + ' · ' + row.fid + (row.peer !== null ? '、' + row.peer : '')),
+                row.reason && h('span', { className: 'muted', title: row.reason }, geometryReason(row.reason)),
+                h('div', null,
+                    h(Button, { size: 'small', disabled: busy || row.kind === 'empty', onClick: () => locate(row) }, '定位'),
+                    h(Button, { size: 'small', disabled: busy, onClick: () => repair(row) },
+                        row.kind === 'empty' ? '删除空要素' : row.kind === 'overlap' ? '处理重叠' : '修复几何')))))),
+        data?.total > 25 && h('footer', null,
+            h(Button, { size: 'small', disabled: !page, onClick: () => setPage(page - 1) }, '上一页'),
+            h('span', null, (page + 1) + ' / ' + Math.ceil(data.total / 25)),
+            h(Button, { size: 'small', disabled: (page + 1) * 25 >= data.total, onClick: () => setPage(page + 1) }, '下一页')));
+}
+
 export function MapTool({ getContainer, operation, active, lockInput, layers, selection, components, openComponents, glyph, busy, setBusy, close, onResult }) {
     const api = window.guizhi;
     const definition = definitions[operation];
@@ -458,7 +522,7 @@ export function MapTool({ getContainer, operation, active, lockInput, layers, se
                 ...(operation === 'data.merge' && { name: (values.name ?? '合并图层').trim() }) });
             const failure = toolError(output);
             if (failure) { setError(failure); return; }
-            if (output.layers.length || output.selection) onResult(output, inputs[0], form.parameters.destination);
+            if (output.layers.length || output.selection || output.topology) onResult(output, inputs[0], form.parameters.destination);
             if (!output.layers.length) setResult(output);
         } catch (issue) { setError(window.GuizhiErrorText(issue)); }
         finally { setBusy(false); }
@@ -470,6 +534,7 @@ export function MapTool({ getContainer, operation, active, lockInput, layers, se
         closable: !busy, keyboard: !busy, maskClosable: false, onCancel: () => { if (!busy) close(); }, onOk: confirm,
         okText: refine ? '继续筛选' : result ? '关闭' : definition.action, cancelText: result ? '关闭' : '取消', confirmLoading: busy,
         okButtonProps: { disabled: !result && !valid }, cancelButtonProps: { disabled: busy, className: result && !refine ? 'gis-result-cancel' : undefined } },
+        h(ToolProgress, { busy }),
         result ? h('div', { className: 'gis-result-body' }, h(ResultSummary, { result,
             areaUnit: operation === 'vector.area' ? (values.areaUnit || 'square_meters') : undefined }))
             : h('fieldset', { className: 'gis-tool-fields', disabled: busy, 'aria-busy': busy },
@@ -636,6 +701,7 @@ export function MapProcessing({ skill, layers, entries, components, openComponen
         cancelText: offer ? '不加入' : '取消', confirmLoading: busy, okButtonProps: { disabled: !result && !valid },
         cancelButtonProps: { disabled: busy, className: result && !offer ? 'gis-result-cancel' : undefined } },
         h('div', { className: 'map-field-editor', 'aria-busy': busy },
+            h(ToolProgress, { busy }),
             missing.length > 0 && h('div', { className: 'gis-component-message', role: 'status' },
                 '请先安装' + missing.map(kind => window.GuizhiComponentNames[kind]).join('、'),
                 h(Button, { size: 'small', onClick: openComponents }, '打开组件设置')),

@@ -274,6 +274,8 @@ def map_result(workspace, record, title, *, include_steps=False):
               "selection": data.get("selection"), "map": map_data}
     if "value" in data:
         result["value"] = data["value"]
+    if "topology" in data:
+        result["topology"] = data["topology"]
     if band_statistics := data.get("raster", {}).get("band_statistics"):
         statistics["band_statistics"] = band_statistics
     return result
@@ -613,6 +615,17 @@ def features(workspace, payload):
 
 def request(workspace, payload):
     action = payload["action"]
+    if action == "topology-issues":
+        page, kind = payload.get("page"), payload.get("kind")
+        if type(page) is not int or not 0 <= page <= 10_000_000 or kind not in {"all", "empty", "invalid", "overlap"}:
+            raise ValueError("拓扑问题筛选无效")
+        database = read_artifact(workspace, payload["run"], "topology")
+        with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)) as db:
+            where, args = ("", ()) if kind == "all" else (" WHERE kind=?", (kind,))
+            total = db.execute("SELECT count(*) FROM issues" + where, args).fetchone()[0]
+            rows = db.execute("SELECT rowid, kind, fid, peer, reason FROM issues" + where +
+                              " ORDER BY rowid LIMIT 25 OFFSET ?", (*args, page * 25))
+            return {"total": total, "rows": [dict(zip(("id", "kind", "fid", "peer", "reason"), row)) for row in rows]}
     if action in {"mxd-read", "mxd-import", "mxd-write"}:
         from guizhi.infrastructure import map_document
 

@@ -92,9 +92,13 @@ def overlay(ctx, how, polygons=False):
     if how == "intersection":
         order.sort(key=lambda index: shapely.get_dimensions(frames[index].geometry.to_numpy()).min(initial=2))
     left, *rest = [frames[index] for index in order]
-    for other in rest:
+    for completed, other in enumerate(rest):
         ctx.check()
+        if len(rest) > 1:
+            ctx.progress("tool_progress", phase="overlay", completed=completed, total=len(rest))
         left = geopandas.overlay(left, other, how=how, keep_geom_type=True, make_valid=False)
+    if len(rest) > 1:
+        ctx.progress("tool_progress", phase="overlay", completed=len(rest), total=len(rest))
     ctx.publish(left, geometry_type=ctx.info[order[0]]["geometry_type"] if left.empty else None)
 
 
