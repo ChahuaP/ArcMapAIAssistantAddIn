@@ -23,7 +23,8 @@ async function main() {
     const desktop = await startDesktop({ runtime: values.runtime, dsh: values.dsh,
         rendererRuntime: values['renderer-runtime'], userData: values['user-data'],
         installationRoot: values['installation-root'],
-        bundledSpeech: values['bundled-speech'], bundledArcmap: values['bundled-arcmap'], verifyStartup: Boolean(probe) });
+        bundledSpeech: values['bundled-speech'], bundledArcmap: values['bundled-arcmap'],
+        verifyStartup: Boolean(probe), updateStartup: Boolean(updateReady) });
     if ((probe || updateReady) && desktop) {
         const [workbench, launcher, portrait] = await Promise.all([
             desktop.window.webContents.executeJavaScript(`new Promise(resolve => {

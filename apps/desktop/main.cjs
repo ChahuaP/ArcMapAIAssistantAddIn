@@ -237,14 +237,16 @@ async function startDesktop(options) {
     bind('updateCheck', () => updater.check());
     bind('updatePrepare', () => updater.prepare());
     bind('updateCancel', () => updater.cancel());
-    bind('updateApply', async () => {
-        if (toolJob || feedbackSending || controller.active || controller.modelTesting || controller.hostBusy ||
-                controller.skillBusy || components.active.size) {
+    const updateBlocked = () => closing || toolJob || feedbackSending || controller.active ||
+        controller.modelTesting || controller.hostBusy || controller.skillBusy || components.active.size;
+    async function restartForUpdate() {
+        if (updateBlocked()) {
             throw new Error('请在当前操作结束后重启更新');
         }
         await updater.apply();
         app.quit();
-    });
+    }
+    bind('updateApply', restartForUpdate);
     bind('openLink', value => {
         if (typeof value !== 'string' || value.length > 2048) throw new Error('链接无效');
         const url = new URL(value);
@@ -1097,11 +1099,30 @@ async function startDesktop(options) {
         controller.businessLog().remove(id, phrase);
         broadcast(controller.state());
     });
+    const startupUpdate = !options.verifyStartup && !options.updateStartup && updater.state().available;
+    let interacted = false;
+    const stopAutomaticRestart = () => { interacted = true; };
+    if (startupUpdate) {
+        for (const surface of pages.keys()) {
+            surface.webContents.on('before-input-event', stopAutomaticRestart);
+            surface.webContents.on('before-mouse-event', (_, event) => {
+                if (event.type === 'mouseDown' || event.type === 'mouseWheel') stopAutomaticRestart();
+            });
+        }
+    }
     await Promise.all([...pages].map(([surface, url]) => surface.loadURL(url)));
     desktop.registerShortcut();
     if (!options.verifyStartup) {
         if (!controller.settings.workspace || !controller.settings.modelConfig) reveal();
         desktop.showPortrait();
+    }
+    if (startupUpdate) {
+        void (async () => {
+            if ((await updater.check()).phase !== 'offered' || closing) return;
+            if ((await updater.prepare()).phase === 'ready' && !interacted && !updateBlocked()) {
+                await restartForUpdate();
+            }
+        })().catch(error => updater.failure(error));
     }
     return { window, launcher, portrait, tray, controller, speech, arcgis: sync, components,
         updateActivated: () => updater.set('complete') };
