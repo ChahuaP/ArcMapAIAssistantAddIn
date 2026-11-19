@@ -692,10 +692,13 @@ async function startDesktop(options) {
     }
     async function importMapJobs(jobs, issues = []) {
         const layers = [];
-        for (const [completed, [action, item]] of jobs.entries()) {
-            const name = item.name || item.layer || path.basename(item.file);
+        for (const [completed, [action, item, displayName]] of jobs.entries()) {
+            const name = displayName || item.name || item.layer || path.basename(item.file);
             window.webContents.send('guizhi:mapImportProgress', { label: '正在加载 ' + name, total: jobs.length > 1 ? jobs.length : 0, completed });
-            try { layers.push(...await controller.gis.map(controller.settings.workspace, { action, items: [item] })); }
+            try {
+                const imported = await controller.gis.map(controller.settings.workspace, { action, items: [item] });
+                layers.push(...imported.map(layer => displayName ? { ...layer, name: displayName } : layer));
+            }
             catch (error) { issues.push({ name, message: error.message }); }
         }
         if (jobs.length) window.webContents.send('guizhi:mapImportProgress', { label: '正在绘制图层',
@@ -727,7 +730,12 @@ async function startDesktop(options) {
         const jobs = [];
         for (const item of intake.items) {
             if (databases.includes(item)) continue;
-            if (item.kind === 'vector') for (const layer of item.layers) jobs.push(['import', { file: item.file, layer, revision: null }]);
+            if (item.kind === 'vector') for (const layer of item.layers) {
+                const folder = item.bundlePath && path.posix.dirname(item.bundlePath);
+                const archiveName = folder && folder !== '.' ? folder + '/' + layer : null;
+                jobs.push(['import', { file: item.file, layer, revision: null },
+                    archiveName?.length <= 255 ? archiveName : undefined]);
+            }
             else if (item.kind === 'raster') jobs.push(['raster-import', item]);
             else intake.issues.push({ name: item.name, message: '地图支持矢量和影像图层' });
         }

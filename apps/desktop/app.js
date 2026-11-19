@@ -550,8 +550,6 @@
             if (pictures.length) void addImages(api.imageDrop(pictures));
             const materials = files.filter(file => !pictures.includes(file));
             if (!materials.length) return;
-            if (!files.length) return;
-            if (skill) return fail('请把材料拖到对应的业务角色');
             void addMaterials(() => api.intakeDropped(materials, 'any'));
         }
         function freeMaterial(item, index) {

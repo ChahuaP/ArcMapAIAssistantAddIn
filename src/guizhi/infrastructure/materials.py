@@ -123,6 +123,33 @@ def directory_files(folder):
             yield file
 
 
+def zip_name(entry):
+    if entry.flag_bits & 0x800:
+        return entry.filename
+    # Older Windows archivers wrote Chinese filenames without marking their encoding.
+    try:
+        decoded = entry.filename.encode("cp437").decode("gb18030")
+    except UnicodeError:
+        return entry.filename
+    return decoded if any("\u3400" <= char <= "\u9fff" for char in decoded) else entry.filename
+
+
+def restore_archive_index(file):
+    """Regenerate a missing SHX only in the application-owned extracted copy."""
+    if file.suffix.lower() != ".shp":
+        return
+    parts = {item.suffix.lower() for item in file.parent.iterdir()
+             if item.is_file() and item.stem.casefold() == file.stem.casefold()}
+    if ".dbf" not in parts or ".shx" in parts:
+        return
+    saved = pyogrio.get_gdal_config_option("SHAPE_RESTORE_SHX")
+    pyogrio.set_gdal_config_options({"SHAPE_RESTORE_SHX": "YES"})
+    try:
+        pyogrio.read_info(file, force_feature_count=False)
+    finally:
+        pyogrio.set_gdal_config_options({"SHAPE_RESTORE_SHX": saved})
+
+
 def unpack(file, target):
     with ZipFile(file) as archive:
         members = archive.infolist()
@@ -130,7 +157,7 @@ def unpack(file, target):
             raise ValueError("ZIP 超过 1000 项或 2 GB 解压限额")
         seen = set()
         for entry in members:
-            name = entry.filename.rstrip("/")
+            name = zip_name(entry).rstrip("/")
             path = PurePosixPath(name)
             if (not name or path.is_absolute() or "\\" in name or
                     any(part in {"", ".", ".."} or part.endswith((".", " ")) or
@@ -179,6 +206,8 @@ def intake(workspace, paths, kind="any"):
                     issues.append({"name": path.name, "message": "一次最多添加 32 份材料，请分批选择"})
                     break
                 try:
+                    if extracted is not None:
+                        restore_archive_index(file)
                     material = describe(file)
                     if material["kind"] == "model":
                         raise ValueError("请在设置中的影像模型资源添加识别模型")
@@ -186,9 +215,13 @@ def intake(workspace, paths, kind="any"):
                         raise ValueError("材料格式与所选业务角色不符")
                     if grouped:
                         material["bundle"] = path.name
+                    if extracted is not None:
+                        material["bundlePath"] = file.relative_to(extracted).as_posix()
+                        material["name"] = material["bundlePath"]
                     items.append(material)
                 except Exception as error:
-                    issues.append({"name": file.name, "message": str(error)})
+                    issues.append({"name": file.relative_to(extracted).as_posix() if extracted else file.name,
+                                   "message": str(error)})
             if grouped and len(items) == accepted and len(issues) == prior_issues:
                 issues.append({"name": path.name, "message": "没有找到可添加的材料"})
         except Exception as error:
