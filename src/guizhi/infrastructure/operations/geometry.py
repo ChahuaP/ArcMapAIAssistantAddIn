@@ -273,6 +273,27 @@ def explode(ctx, selection: Selection, destination: PartsDestination = "current"
     return publish_parts(ctx, result, selected, destination, family)
 
 
+def check_topology(ctx):
+    frame = ctx.frames[0]
+    geometry = frame.geometry
+    empty = geometry.isna() | geometry.is_empty
+    invalid = ~empty & ~geometry.is_valid
+    polygons = geometry[~empty & ~invalid & geometry.geom_type.isin(["Polygon", "MultiPolygon"])]
+    overlap_pairs = 0
+    if len(polygons):
+        shapes = polygons.to_numpy()
+        index = shapely.STRtree(shapes)
+        for i, shape in enumerate(shapes):
+            ctx.check()
+            candidates = index.query(shape, predicate="intersects")
+            candidates = candidates[candidates > i]
+            overlap_pairs += int((shapely.relate_pattern(shape, shapes[candidates], "2********")).sum())
+    return {"statistics": {"feature_count": len(frame), "empty_geometry_count": int(empty.sum()),
+                           "invalid_geometry_count": int(invalid.sum()), "overlap_pair_count": overlap_pairs},
+            "value": [f"要素 {fid}：{shapely.is_valid_reason(shape)}"
+                      for fid, shape in geometry[invalid].head(30).items()]}
+
+
 def repair(ctx, delete_null: bool = False):
     frame = ctx.frames[0]
     repaired, changes, kept = [], [], []

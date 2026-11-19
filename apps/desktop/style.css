@@ -572,7 +572,7 @@ dialog label:not(.ant-checkbox-wrapper, .ant-radio-wrapper, :has(> input:is([typ
 .map-ribbon { overflow: hidden; flex: none; }
 .ribbon-tabs {
     display: flex; align-items: center; justify-content: space-between; gap: 10px;
-    padding: 7px 10px; background: var(--sub); border-bottom: 1px solid var(--gis-edge);
+    padding: 3px 8px; background: var(--sub); border-bottom: 1px solid var(--gis-edge);
 }
 .ribbon-tabs [role=tablist] { display: flex; gap: 4px; min-width: 0; overflow-x: auto; }
 .ribbon-tabs [role=tab] { flex: none; padding-inline: 10px; border: 1px solid transparent; }
@@ -580,7 +580,7 @@ dialog label:not(.ant-checkbox-wrapper, .ant-radio-wrapper, :has(> input:is([typ
 .ribbon-tabs [aria-selected=true] svg, .ribbon-actions .ant-btn:not(:disabled):not(.ant-btn-primary) svg { color: var(--accent); }
 .ribbon-tools {
     display: flex; gap: 6px; align-items: stretch; overflow-x: auto; overflow-y: hidden;
-    height: 68px; padding: 6px 8px 4px; box-sizing: border-box;
+    height: 58px; padding: 4px 8px 3px; box-sizing: border-box;
 }
 .ribbon-tools::-webkit-scrollbar { height: 4px; }
 .ribbon-tools::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
@@ -721,8 +721,7 @@ dialog label:not(.ant-checkbox-wrapper, .ant-radio-wrapper, :has(> input:is([typ
 .mxd-open-fields > p { margin: 0; }
 .workbench-center { height: 100%; min-height: 0; display: flex; flex-direction: column; }
 .workbench-content { flex: 1; min-height: 0; }
-.workbench-modes { flex: none; display: flex; justify-content: end; gap: 4px; padding: 3px 10px;
-    border-bottom: 1px solid var(--line); background: var(--panel); }
+.workbench-modes { flex: none; display: flex; align-items: center; gap: 4px; }
 .workbench-modes .ant-btn { width: 30px; height: 28px; }
 .workbench-mode-active.ant-btn { background: var(--soft); }
 .workbench-content .welcome .skill-tiles { grid-template-columns: 1fr; }

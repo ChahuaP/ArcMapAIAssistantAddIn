@@ -521,7 +521,7 @@ def register(server, job=None):
     def summarize_layer(role: str, measure: Literal["count", "sum", "area"] = "count",
                         group_by: list[str] | None = None, where: AttributeFilter | None = None,
                         field: str | None = None, offset: int = 0) -> dict:
-        """按任意复合条件统计整个图层或选定范围。group_by 按真实属性字段分组，可同时给出各类别和总计。count 计数，sum 对指定数值字段求和，area 计算逐要素面积之和（平方米），可指定已核实单位的面积字段。每组及合计的 area 提供 square_meters、mu、hectares、square_kilometers 数值。超过 50 组可用 next_offset 翻页。"""
+        """一次扫描完成筛选、分组和汇总。用户要按类别分别统计时，先从图层字段和取值证据确认筛选字段、分组字段及取值，然后用 where 与 group_by 一起提交，无需逐类循环。count 计数，sum 对指定数值字段求和，area 计算逐要素面积之和（平方米），可指定已核实单位的面积字段。返回每组、全部匹配范围的合计和标准面积单位。超过 50 组可用 next_offset 翻页。"""
         if job["skill"]:
             return input_issue("invalid_materials", "请使用本轮所选业务")
         params = {"measure": measure, "group_by": group_by, "field": field, "offset": offset}

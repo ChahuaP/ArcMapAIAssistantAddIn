@@ -37,7 +37,7 @@ MANUAL_OPERATIONS = {
     "data.describe", "vector.area", "vector.buffer", "vector.clip", "vector.intersect",
     "vector.erase", "vector.dissolve", "vector.union", "vector.identity", "vector.symmetric_difference", "vector.update_overlay",
     "vector.spatial_join", "data.copy", "data.merge", "data.select_by_attribute",
-    "data.select_by_location", "data.export_selection", "geometry.create_dataset", "geometry.repair",
+    "data.select_by_location", "data.export_selection", "geometry.create_dataset", "geometry.repair", "geometry.check_topology",
     "geometry.multipart", "geometry.explode",
     "crs.assign", "crs.reproject",
     "table.add_field", "table.delete_field", "flow.unique_values", "flow.calculate",
@@ -302,7 +302,8 @@ def manual_tool(workspace, payload):
         file, name = source(workspace, refs[0])
         revision = material(file, name)["revision"]
         previous = parameters.get("previous")
-        if previous is not None and (not isinstance(previous, dict) or previous.get("revision") != revision):
+        if previous is not None and (not isinstance(previous, dict) or
+                                     previous.get("revision") != map_revision(refs[0], {"revision": revision})):
             raise ValueError("图层版本已变化，请重新选择要素")
         fids = filter_ids(file, name, parameters["where"], mode=parameters.get("mode", "new_selection"),
                           previous=previous["fids"] if previous is not None else None)

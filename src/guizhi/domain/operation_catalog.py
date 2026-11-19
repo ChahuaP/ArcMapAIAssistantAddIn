@@ -59,6 +59,7 @@ CONTRACTS = {
     "geometry.multipart": op("将同一图层中选中的 2 至 500 个要素组合为一个多部件要素，沿用属性来源要素的编号和属性。", "目标图层", "vector"),
     "geometry.explode": op("仅拆分选区中的多部件，各部件继承属性，选中的单部件保持原样。", "待拆分图层", "vector"),
     "geometry.repair": op("检查并修复不合法几何，可按参数剔除空几何。", "待修复图层", "vector"),
+    "geometry.check_topology": op("只读统计空几何、自交等无效几何及同层面内部相交的要素对，返回数量和最多 30 条无效几何示例，不修改地图。", "待检查图层", "statistics values"),
     "map_raster.preview": op("生成可显示的栅格预览图。", "影像", "raster_preview"),
     "raster.statistics": op("读取空间参考、波段、像元统计和无数据像元情况。", "待统计栅格", "statistics count"),
     "raster.clip": op("按面图层限定的范围裁切栅格。", "待裁切栅格 裁切面图层", "raster"),

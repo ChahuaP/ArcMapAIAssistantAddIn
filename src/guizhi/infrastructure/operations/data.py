@@ -11,7 +11,7 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 
 from guizhi.infrastructure.operations.common import (
     Mode, Selection, Unit, compatible, concatenate, distance_in_crs,
-    select, selection_fids, valid,
+    select, selection_fids,
 )
 
 
@@ -133,11 +133,11 @@ def select_by_location(
     crs = frame.crs
     if crs is None or query.crs is None:
         raise ValueError("按位置选择前，请为目标图层和参照图层定义坐标系")
-    for item in ctx.frames:
-        try:
-            valid(item)
-        except ValueError as error:
-            raise ValueError("存在空或无效的几何，请先检查图层") from error
+    for role, item in zip(("待选图层", "参照图层"), ctx.frames, strict=True):
+        missing = item.geometry.isna() | item.geometry.is_empty
+        invalid = ~missing & ~item.geometry.is_valid
+        if missing.any() or invalid.any():
+            raise ValueError(f"{role}含 {int(missing.sum())} 个空几何、{int(invalid.sum())} 个无效几何。请运行「拓扑检查」定位问题。")
     query = query.loc[~query.geometry.is_empty]
     if crs != query.crs and not query.empty:
         from guizhi.infrastructure.crs_options import projection

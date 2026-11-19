@@ -46,6 +46,7 @@ class DesktopController {
         this.runtime = { python: path.join(runtime, 'python', 'python.exe'),
             node: path.join(runtime, 'node', 'node.exe'), runtime: dsh || path.join(runtime, 'dsh') };
         this.reader = new LocalPython(this.runtime.python, cli, '_material-reader', '材料读取', 240_000);
+        this.mapReader = new LocalPython(this.runtime.python, cli, '_material-reader', '地图显示', 240_000);
         this.gis = new LocalPython(this.runtime.python, cli, '_gis-worker', '地图处理', 600_000);
         this.diagnostics = diagnostics;
         this.storage = safeStorage;
@@ -543,7 +544,7 @@ class DesktopController {
     }
 
     async close() {
-        const localProcesses = [this.reader.stop(), this.gis.stop()];
+        const localProcesses = [this.reader.stop(), this.mapReader.stop(), this.gis.stop()];
         const active = this.active;
         this.cancel();
         this.modelTesting?.stop.abort();

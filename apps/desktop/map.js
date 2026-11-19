@@ -282,6 +282,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
     const [tool, setTool] = useState(null);
     const [toolResult, setToolResult] = useState(null);
     const [count, setCount] = useState(0);
+    const partsDraft = useRef(null);
     const [fieldEdit, setFieldEdit] = useState(null);
     const [pasteTarget, setPasteTarget] = useState(null);
     const edits = useRef([]);
@@ -892,6 +893,10 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
             next.set(id, drawing);
             if (hidden.includes(id)) return null;
             if (item.kind === 'raster') {
+                if (!item.crs && target) {
+                    return Promise.resolve({ id, drawing, raster: true,
+                        error: new Error('此影像没有地理参考。可单独按像素浏览，或补齐地理参考后叠加。') });
+                }
                 const bands = item.style?.rasterBands;
                 const rasterStamp = JSON.stringify([target, bands]);
                 let detail = drawing.get('rasterDetail');
@@ -1152,7 +1157,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         }
     }
     async function saveAttribute(fid, field, value) {
-        if (busy) return;
+        if (busy || partsDraft.current) return;
         if (edit) {
             push([{ action: 'update', id: fid, fields: { [field]: value } }]);
             applyDraft();
@@ -1183,13 +1188,8 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         if (destination && ['geometry.multipart', 'geometry.explode'].includes(tool?.operation)) {
             const [output] = result.layers;
             if (!output || result.layers.length !== 1) throw new Error('没有取得完整的编辑结果');
-            stopEdit();
-            if (destination === 'current') {
-                if (mapBasis.current === key(input)) mapBasis.current = key(output);
-                replace(input, output);
-            } else {
-                addResultLayers(result.layers);
-            }
+            partsDraft.current = { input, output, destination };
+            setCount(1);
             setTool(null);
             return;
         }
@@ -1321,6 +1321,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         }
     }, [pendingEdit, active, layer, target, busy, tool, toolResult, viewReady, limited, layerErrors]);
     function stopEdit() {
+        partsDraft.current = null;
         edits.current = [];
         setCount(0);
         setEdit('');
@@ -1328,6 +1329,11 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         setIssue('');
     }
     function undoEdit() {
+        if (partsDraft.current) {
+            partsDraft.current = null;
+            setCount(0);
+            return;
+        }
         if (['draw', 'split'].includes(edit) && drawingPoints > 0) { drawingTool.current?.removeLastPoint(); return; }
         if (!edits.current.length) return;
         const reverted = edits.current.pop();
@@ -1362,7 +1368,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         event.preventDefault();
         if (busy || confirmExit || fieldEdit || event.repeat) return;
         if (key === 'z') undoEdit();
-        else if (edits.current.length) void saveEdit();
+        else if (edits.current.length || partsDraft.current) void saveEdit();
     }
     useEffect(() => {
         if (!edit) return;
@@ -1450,6 +1456,15 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         return merged;
     }
     async function saveEdit() {
+        if (partsDraft.current) {
+            const { input, output, destination } = partsDraft.current;
+            stopEdit();
+            if (destination === 'current') {
+                if (mapBasis.current === key(input)) mapBasis.current = key(output);
+                replace(input, output);
+            } else addResultLayers([output]);
+            return;
+        }
         const merged = pendingChanges();
         if (!merged.size) { stopEdit(); return; }
         setBusy(true);
@@ -1548,7 +1563,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         render: (_, row) => {
             const raw = index ? row.values[value] : row.id;
             return h(AttributeCell, { value: raw, field: value, fid: row.id,
-                disabled: !index || busy, fail, commit: saveAttribute });
+                disabled: !index || busy || Boolean(partsDraft.current), fail, commit: saveAttribute });
         },
     }));
     const draftChanges = edit ? pendingChanges() : new globalThis.Map();
@@ -1559,7 +1574,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
     const countDraft = layer?.count + [...draftChanges.values()].reduce((total, change) =>
         total + Number(change.action === 'add') - Number(change.action === 'delete'), 0);
     const command = (label, onClick, props = {}) => h(Button, { size: 'small', icon: glyph(commandIcons[label]),
-        onClick, ...props }, label);
+        onClick, ...props, disabled: props.disabled || (Boolean(partsDraft.current) && !['撤销', '保存', '退出'].includes(label)) }, label);
     const group = (label, ...items) => h('section', { className: 'ribbon-group', 'aria-label': label },
         h('div', { className: 'ribbon-actions' }, ...items), h('span', null, label));
     function position(onlyActive) {
@@ -1767,7 +1782,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                     style: item.kind === 'raster' ? null : layerSymbol(item.style, palette[(layers.length - index - 1) % palette.length]) })) }),
             result => setIoStatus('已保存 MXD 和配套数据 · ' + result.layers + ' 个图层')),
             { disabled: busy || !layers.length || !viewReady, 'aria-label': '保存地图工程' })),
-            group('图层管理', addLayer(command('添加图层', undefined, { disabled: busy, 'aria-haspopup': 'menu' })),
+            group('图层管理', addLayer(command('添加数据', undefined, { icon: glyph('add'), disabled: busy, 'aria-haspopup': 'menu' })),
                 command('新建图层', () => openTool('geometry.create_dataset')),
                 command('复制图层', () => openTool('data.copy'), { disabled: !layer?.geometry }),
                 command('合并图层', () => openTool('data.merge'), { disabled: layers.filter(item => item.geometry).length < 2 }))] : []),

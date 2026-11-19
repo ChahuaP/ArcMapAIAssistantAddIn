@@ -125,13 +125,14 @@
                     itemSelectedBg: dark ? '#263c55' : '#fff', itemColor: dark ? '#bac8d9' : '#506176' },
                 Tabs: { horizontalItemGutter: 24, inkBarColor: dark ? '#8ec9ff' : '#086ca9' } } } }, children);
     }
-    function Titlebar({ settings, onboarding, back, left, right, arcgis, connected, resize }) {
+    function Titlebar({ settings, onboarding, back, left, right, arcgis, connected, resize, modes }) {
         return h('header', { className: 'titlebar' },
             h('div', { className: 'title-group' },
                 !onboarding && (settings ? iconButton('back', '返回智慧治理', { onClick: back })
                     : iconButton('left', '折叠或展开导航栏', { onClick: left, onKeyDown: resize(0) })),
                 brand(), settings && h('span', { className: 'title-path' }, '设置')),
             !settings && !onboarding && h('div', { className: 'title-group' },
+                modes,
                 button('link', '第三方扩展', { type: 'text', onClick: arcgis,
                     title: connected ? 'ArcGIS 已连接' : '查看第三方扩展' }),
                 right && iconButton('right', '折叠或展开材料与成果', { onClick: right, onKeyDown: resize(1) })));
@@ -211,12 +212,12 @@
         ].map(([value, glyph, label]) => iconButton(glyph, label, { key: value, 'aria-pressed': mode === value,
             className: mode === value ? 'workbench-mode-active' : '', onClick: () => setMode(value) }));
         return h('div', { className: 'desktop-frame' + (locked ? ' workbench-locked' : '') },
-            h('div', { ref: interaction, className: 'workbench-interaction' }, h(Titlebar, { arcgis, connected, left: () => toggle(0), right: inspector && mode === 'chat' && (() => toggle(1)), resize }),
+            h('div', { ref: interaction, className: 'workbench-interaction' }, h(Titlebar, { arcgis, connected, left: () => toggle(0), right: inspector && mode === 'chat' && (() => toggle(1)), resize,
+                modes: !page && h('div', { className: 'workbench-modes', 'aria-label': '工作区布局' }, ...modeButtons) }),
             h(Splitter, { className: 'workbench-panels', lazy: true,
                 onResizeEnd: sizes => persist(sideSizes(sizes)) },
                 h(Splitter.Panel, { size: left, min: left, max: left, resizable: false }, sidebar(left > 56)),
                 h(Splitter.Panel, { min: 0 }, page, h('div', { className: 'workbench-center', style: page ? { display: 'none' } : undefined },
-                    h('div', { className: 'workbench-modes', 'aria-label': '工作区布局' }, ...modeButtons),
                     h(Splitter, { className: 'workbench-content', lazy: true,
                         onResizeEnd: ([a, b]) => { if (a && b) setSplit(a / (a + b) * 100); } },
                         h(Splitter.Panel, { size: chatVisible ? mapVisible ? split + '%' : '100%' : 0,

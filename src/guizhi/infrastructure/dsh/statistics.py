@@ -19,6 +19,14 @@ def statistic_block(step, unit):
         is_area = summary["measure"] == "area"
         has_value = summary["measure"] != "count"
         fields = summary["group_by"]
+        if not fields:
+            total = summary["total"]
+            count = f'{display(total["count"])} 个要素'
+            if is_area:
+                return f'{count}，面积合计 {display(total["area"][unit])} {AREA_LABELS[unit]}。'
+            if has_value:
+                return f'{count}，{summary["field"]}合计 {display(total["value"])}。'
+            return count + "。"
         headers = [*fields, "要素数"]
         if has_value:
             headers.append("面积（" + AREA_LABELS[unit] + "）" if is_area else summary["field"] + "合计")
@@ -109,5 +117,5 @@ def compose_statistics(steps, answer, unit):
         return blocks[0][1] or ""
     for step, block in blocks:
         if block:
-            answer = answer.replace("{{统计:" + step["id"] + "}}", block)
+            answer = answer.replace("{{统计:" + step["id"] + "}}", "\n\n" + block + "\n\n")
     return correct_equivalents(answer, verified_square_metres(steps))

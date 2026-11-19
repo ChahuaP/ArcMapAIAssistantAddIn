@@ -95,6 +95,7 @@ CAPABILITIES = {
     "geometry.multipart": Capability("合并为多部件", edit=True, version="2.0.0"),
     "geometry.explode": Capability("拆分多部件", edit=True, version="2.0.0"),
     "geometry.repair": Capability("修复几何", edit=True),
+    "geometry.check_topology": Capability("拓扑检查"),
     "map_raster.preview": Capability("生成影像预览", kinds=("raster",)),
     "raster.statistics": Capability("栅格信息、波段统计与无数据像元检查", kinds=("raster",)),
     "raster.clip": Capability("按范围裁切栅格", 2, 2, kinds=("raster", "vector")),

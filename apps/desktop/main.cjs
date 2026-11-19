@@ -133,6 +133,7 @@ async function startDesktop(options) {
         installationRoot: options.installationRoot, diagnostics });
     if (!options.verifyStartup) {
         controller.reader.start();
+        controller.mapReader.start();
         controller.gis.start();
         controller.warmModel();
     }
@@ -593,7 +594,10 @@ async function startDesktop(options) {
         }
         if (!controller.settings.workspace) throw new Error('请先选择成果保存位置');
         if (closing) throw new Error('软件正在退出');
-        if (mapReads.has(input.action)) return controller.reader.map(controller.settings.workspace, input);
+        if (mapReads.has(input.action)) {
+            const reader = ['features', 'raster-display', 'raster-preview'].includes(input.action) ? controller.mapReader : controller.reader;
+            return reader.map(controller.settings.workspace, input);
+        }
         if (input.action !== 'tool') return controller.gis.map(controller.settings.workspace, input);
         if (toolJob || controller.active || closing) throw new Error('请等待当前操作结束后再运行工具');
         const started = performance.now();

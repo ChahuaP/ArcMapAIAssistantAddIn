@@ -31,6 +31,7 @@ const tools = [
     { title: '矢量处理', icon: 'layers', tools: [
         tool('vector.buffer', '缓冲分析', 'buffer', '生成缓冲区', ['输入图层', vector]),
         tool('geometry.repair', '修复几何', 'pencil', '修复', ['待修复图层', vector]),
+        tool('geometry.check_topology', '拓扑检查', 'info', '检查', ['待检查图层', vector]),
     ] },
     { title: '叠加分析', icon: 'layers', tools: [
         tool('vector.intersect', '相交', 'intersect', '相交', ['图层一', vector], ['图层二', vector]),
@@ -125,6 +126,7 @@ const skillHints = {
     'permit-history': '用范围叠加比对用地手续与历史地类，按时间区分不同记录。',
 };
 const stats = {
+    empty_geometry_count: '空几何数', invalid_geometry_count: '无效几何数', overlap_pair_count: '重叠要素对',
     project_area_m2: '项目面积（平方米）', covered_area_m2: '重叠面积（平方米）', coverage_ratio: '覆盖率',
     updated: '已计算要素数',
     area_m2: '合并面积（平方米）', file_count: '交付文件数', year_count: '统计年份数', feature_count: '要素数', selected_count: '选中要素数', source_feature_count: '源要素数', part_count: '部件数', row_count: '统计记录数',
@@ -240,7 +242,7 @@ function toolForm(definition, inputs, values, update, selection) {
         const form = attributeTools[id](input, values, update, { field });
         if (id === 'data.select_by_attribute') {
             const selected = Boolean(input && selection?.key === key(input) && selection.ids.length);
-            const mode = selected ? (values.mode || 'select_subset') : 'new_selection';
+            const mode = selected ? (values.mode || 'new_selection') : 'new_selection';
             const modes = { new_selection: '新建选区', select_subset: '在当前选区内筛选',
                 add_to_selection: '添加到当前选区', remove_from_selection: '从当前选区移除' };
             controls.push(field('选择方式', dropdown(mode, options(modes).map(item => ({
@@ -368,6 +370,8 @@ const toolDescription = {
     'vector.symmetric_difference': '保留两个面图层各自未重叠的部分。',
     'vector.spatial_join': '按相交关系把属性连接到目标图层。目标图层的形状保持原样。',
     'data.merge': '把多个图层的要素汇集到一个新图层。',
+    'geometry.repair': '修复自相交等无效几何，生成修复后的图层。',
+    'geometry.check_topology': '检查空几何、无效几何和同一面图层内的重叠。',
     'crs.assign': '设置或覆盖坐标系定义，保留原坐标值和像元。',
     'crs.reproject': '根据源图层匹配可用的内置转换和已保存的自定义方案。',
 };
@@ -392,16 +396,21 @@ function ResultSummary({ result, areaUnit }) {
                 h('dd', null, name === 'area' ? value.toLocaleString('zh-CN', { maximumSignificantDigits: 9 }) : format(value))))),
         result.statistics?.band_statistics?.map(band => h('p', { key: band.band }, '波段 ' + band.band + ' · 有效像元 ' + band.valid_count +
             ' · 无数据像元 ' + band.nodata_count + ' · 最小 ' + (band.min ?? '—') + ' · 最大 ' + (band.max ?? '—') + ' · 平均 ' + (band.mean ?? '—'))),
-        Array.isArray(result.value) ? result.value.length ? h('ul', { className: 'gis-tool-values', 'aria-label': '唯一值' },
+        Array.isArray(result.value) ? result.value.length ? h('ul', { className: 'gis-tool-values',
+            'aria-label': result.statistics?.invalid_geometry_count === undefined ? '唯一值' : '无效几何示例' },
             result.value.map((value, index) => h('li', { key: index }, value === null ? '空值' : value === '' ? '空字符串' : String(value))))
-            : h('p', { className: 'muted' }, '没有找到匹配的值。')
+            : result.statistics?.invalid_geometry_count === undefined && h('p', { className: 'muted' }, '没有找到匹配的值。')
             : !metrics.length && result.value !== undefined && h('output', null, String(result.value)));
 }
 
 export function MapTool({ getContainer, operation, active, lockInput, layers, selection, components, openComponents, glyph, busy, setBusy, close, onResult }) {
     const api = window.guizhi;
     const definition = definitions[operation];
-    const initial = operation === 'geometry.create_dataset' ? { geometry_type: 'polygon' }
+    const crsLayer = layers.find(item => key(item) === active && item.geometry && item.crs) ||
+        layers.find(item => item.geometry && item.crs);
+    const initial = operation === 'geometry.create_dataset' ? { geometry_type: 'polygon', coordinate: crsLayer &&
+        { value: crsLayer.crs.startsWith('EPSG:') ? crsLayer.crs : 'layer:' + key(crsLayer),
+            label: crsLayer.crsName || crsLayer.crs } }
         : operation === 'data.select_by_location' ? { predicate: 'intersect' } : {};
     const [ids, setIds] = useState(() => definition.inputs[0]?.[1](layers.find(item => key(item) === active)) ? [active] : []);
     const [values, setValues] = useState(initial);
@@ -431,7 +440,8 @@ export function MapTool({ getContainer, operation, active, lockInput, layers, se
         (definition.inputs[i] || definition.inputs.at(-1))[1](inputs[i])).every(Boolean);
     const problem = validInputs ? toolInputIssue(operation, inputs, form.parameters) : '';
     const missing = executable.startsWith('raster.') && components?.raster?.installed === false;
-    const valid = validInputs && form.valid && !problem && !missing;
+    const inherit = operation === 'geometry.create_dataset' && crsLayer && values.coordinate?.value === 'layer:' + key(crsLayer);
+    const valid = validInputs && (inherit ? Boolean(values.name?.trim() && values.geometry_type) : form.valid) && !problem && !missing;
     async function run() {
         if (busy || !valid) return;
         setError('');
@@ -441,7 +451,9 @@ export function MapTool({ getContainer, operation, active, lockInput, layers, se
                 if (await api.mapExport(inputs[0].ref, true, undefined, undefined, form.parameters.fields)) close();
                 return;
             }
-            const output = await api.map({ action: 'tool', operation: executable, refs: inputs.map(item => item.ref), parameters: form.parameters,
+            const output = await api.map({ action: 'tool', operation: executable,
+                refs: inherit ? [crsLayer.ref] : inputs.map(item => item.ref),
+                parameters: inherit ? { geometry_type: values.geometry_type } : form.parameters,
                 ...(operation === 'geometry.create_dataset' && { name: values.name.trim() }),
                 ...(operation === 'data.merge' && { name: (values.name ?? '合并图层').trim() }) });
             const failure = toolError(output);
