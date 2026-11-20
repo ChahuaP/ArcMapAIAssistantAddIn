@@ -4,50 +4,6 @@ const h = window.React.createElement;
 const { useState } = window.React;
 const { Modal, Select, Checkbox, Input, Button } = window.antd;
 
-export function LocalDataPicker({ initialFolder, select, close }) {
-    const [listing, setListing] = useState(null);
-    const [address, setAddress] = useState('');
-    const [files, setFiles] = useState([]);
-    const [error, setError] = useState('');
-    const [busy, setBusy] = useState(false);
-    async function browse(folder) {
-        setBusy(true);
-        setError('');
-        try {
-            const result = await window.guizhi.mapBrowse(folder);
-            setListing(result);
-            setAddress(result.directory);
-        } catch (problem) {
-            setError(window.GuizhiErrorText(problem));
-        } finally { setBusy(false); }
-    }
-    window.React.useEffect(() => { void browse(initialFolder); }, []);
-    const navigate = () => { if (!busy) void browse(address.trim()); };
-    return h(Modal, { open: true, centered: true, width: 620, title: '添加数据',
-        className: 'gis-dialog', rootClassName: 'gis-modal-root', okText: '添加', cancelText: '取消',
-        okButtonProps: { disabled: !files.length || busy }, onCancel: close, onOk: () => select(files, listing?.directory) },
-        h('div', { className: 'gis-local-path' },
-            h(Select, { 'aria-label': '磁盘', placeholder: '磁盘', disabled: busy,
-                value: listing?.drives.find(root => listing.directory.toLowerCase().startsWith(root.toLowerCase())),
-                options: listing?.drives.map(value => ({ value })), onChange: browse }),
-            h(Input, { 'aria-label': '文件夹路径', value: address, onChange: event => setAddress(event.target.value), onPressEnter: navigate }),
-            h(Button, { disabled: busy, onClick: navigate }, '转到'),
-            h(Button, { disabled: busy || !listing || listing.directory === listing.up, onClick: () => browse(listing.up) }, '上一级')),
-        h('nav', { className: 'gis-local-places', 'aria-label': '常用位置' },
-            ...((listing?.places || []).map(place => h(Button, { key: place.label, size: 'small', disabled: busy,
-                onClick: () => browse(place.file) }, place.label)))),
-        error && h('p', { className: 'error', role: 'alert' }, error),
-        h('div', { className: 'gis-local-list', 'aria-busy': busy, 'aria-label': '本地数据' },
-            busy ? h('p', { role: 'status' }, '正在读取文件夹…') : listing?.rows.length === 0 &&
-                h('p', { className: 'muted' }, '此文件夹没有可添加的数据。'),
-            ...(!busy && listing?.rows || []).map(row => row.folder
-                ? h(Button, { key: row.file, type: 'text', onClick: () => browse(row.file) }, window.GuizhiShell.icon('folderOpen'), row.name)
-                : h(Checkbox, { key: row.file, checked: files.includes(row.file), disabled: files.length >= 32 && !files.includes(row.file),
-                    onChange: event => setFiles(old => event.target.checked ? [...old, row.file] : old.filter(file => file !== row.file)) }, row.name))),
-        files.length > 0 && h('div', { className: 'gis-local-selection' }, '已选 ' + files.length + ' 项',
-            h(Button, { size: 'small', type: 'text', onClick: () => setFiles([]) }, '清空')));
-}
-
 export function BasemapDialog({ close, apply }) {
     const [kind, setKind] = useState('xyz');
     const [address, setAddress] = useState('');

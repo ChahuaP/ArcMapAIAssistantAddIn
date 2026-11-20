@@ -778,6 +778,7 @@
             }),
             remove: id => {
                 setLayers(old => old.filter(item => mapKey(item) !== id));
+                hideLayers(old => old.filter(item => item !== id));
                 if (activeLayer === id) { setActiveLayer(null); setMapSelection(null); }
             },
             renameLayer: (id, name) => setLayers(old => old.map(item => mapKey(item) === id ? { ...item, name } : item)),

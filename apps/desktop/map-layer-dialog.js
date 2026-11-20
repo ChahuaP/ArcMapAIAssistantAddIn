@@ -202,6 +202,8 @@ export function LayerProperties({ item, color, close, save, glyph, start = 'info
                     { value: 'unique', label: '唯一值分类' }],
                 onChange: mode => update('classification', mode === 'unique'
                     ? { field: '', classes: [], other: '#7d8999', otherFill: '#7d8999' } : undefined) }),
+            polygon && h(Checkbox, { checked: Boolean(style.outlines),
+                onChange: event => update('outlines', event.target.checked) }, '全图显示要素轮廓'),
             classified && h(Classification, { item, style, update, polygon, points, setLoading: setClassificationBusy }),
             !image && h('div', { className: polygon ? 'gis-polygon-symbol' : undefined },
             polygon && h('fieldset', { className: 'gis-symbol-group' },

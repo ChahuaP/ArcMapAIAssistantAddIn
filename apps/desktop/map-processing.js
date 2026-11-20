@@ -266,7 +266,7 @@ function toolForm(definition, inputs, values, update, selection) {
         controls.push(field('输出到', h(Segmented, { value: destination, options: options({ current: '当前图层', new: '新图层' }),
             onChange: value => update('destination', value) })));
         parameters = { fids, destination };
-        valid = fids.length > 0 && fids.every(Number.isSafeInteger);
+        valid = fids.length > 0 && fids.length <= 500 && (destination === 'current' || fids.every(Number.isSafeInteger));
         if (id === 'geometry.multipart') {
             const source = values.attribute_fid ?? fids[0];
             controls.push(field('属性来源', dropdown(source, fids.map(fid => ({ value: fid, label: '要素 ' + fid })),
@@ -484,7 +484,7 @@ export function TopologyPanel({ report, close, locate, busy }) {
             h(Button, { size: 'small', disabled: (page + 1) * 25 >= data.total, onClick: () => setPage(page + 1) }, '下一页')));
 }
 
-export function MapTool({ getContainer, operation, active, lockInput, layers, selection, components, openComponents, glyph, busy, setBusy, close, onResult }) {
+export function MapTool({ getContainer, operation, active, lockInput, layers, selection, components, openComponents, glyph, busy, setBusy, close, onResult, onParts, editingParts }) {
     const api = window.guizhi;
     const definition = definitions[operation];
     const crsLayer = layers.find(item => key(item) === active && item.geometry && item.crs) ||
@@ -519,7 +519,8 @@ export function MapTool({ getContainer, operation, active, lockInput, layers, se
     const minimum = definition.multiple ? 2 : definition.inputs.length;
     const validInputs = inputs.length >= minimum && Array.from({ length: inputs.length }, (_, i) =>
         (definition.inputs[i] || definition.inputs.at(-1))[1](inputs[i])).every(Boolean);
-    const problem = validInputs ? toolInputIssue(operation, inputs, form.parameters) : '';
+    const problem = editingParts && ['geometry.multipart', 'geometry.explode'].includes(operation) && form.parameters.destination === 'new'
+        ? '请先保存当前编辑，再输出到新图层' : validInputs ? toolInputIssue(operation, inputs, form.parameters) : '';
     const missing = executable.startsWith('raster.') && components?.raster?.installed === false;
     const inherit = operation === 'geometry.create_dataset' && crsLayer && values.coordinate?.value === 'layer:' + key(crsLayer);
     const valid = validInputs && (inherit ? Boolean(values.name?.trim() && values.geometry_type) : form.valid) && !problem && !missing;
@@ -530,6 +531,10 @@ export function MapTool({ getContainer, operation, active, lockInput, layers, se
         try {
             if (operation === 'presentation.export_table') {
                 if (await api.mapExport(inputs[0].ref, true, undefined, undefined, form.parameters.fields)) close();
+                return;
+            }
+            if (['geometry.multipart', 'geometry.explode'].includes(operation) && form.parameters.destination === 'current' && onParts) {
+                await onParts(operation, form.parameters);
                 return;
             }
             const output = await api.map({ action: 'tool', operation: executable,

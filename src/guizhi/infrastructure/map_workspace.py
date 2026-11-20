@@ -732,7 +732,11 @@ def request(workspace, payload):
     if action in {"table", "table-complement", "table-statistics", "table-unique-values", "table-feature"}:
         from guizhi.infrastructure import map_attributes
 
-        file, name = source(workspace, payload["ref"])
+        ref = payload["ref"]
+        if ref["artifact"] == "shape_source":
+            entry, file = shape_record(workspace, ref)
+            return map_attributes.shape_attributes(shape_display_file(workspace, ref, file, entry["layer"]), entry["layer"], payload)
+        file, name = source(workspace, ref)
         reader = {"table": map_attributes.table_page, "table-complement": map_attributes.complement,
                   "table-statistics": map_attributes.statistics, "table-unique-values": map_attributes.unique_values,
                   "table-feature": map_attributes.feature_attributes}[action]

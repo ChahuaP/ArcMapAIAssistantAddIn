@@ -49,6 +49,7 @@ class LocalPython {
             if (request) request.finish(error, reply.result);
         });
         this.timeout = () => fail(this.label + '超时，请重试');
+        this.interrupt = () => fail('地图视野已变更', { code: 'view_superseded' });
     }
 
     read(workspace, paths, kind) {

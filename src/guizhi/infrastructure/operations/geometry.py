@@ -210,12 +210,12 @@ def append_stars(ctx, features: list[Star], unit: Unit):
 
 
 def part_family(frame, info):
-    family = info["geometry_type"].removeprefix("Multi")
+    family = info["geometry_type"].split()[0].removeprefix("Multi")
     if family not in MULTIPART or not frame.geom_type.isin({family, "Multi" + family}).all():
-        raise ValueError("请选择同类型的二维点、线或面要素")
+        raise ValueError("请选择同类型的点、线或面要素")
     geometry = frame.geometry
-    if geometry.has_z.any() or geometry.has_m.any():
-        raise ValueError("多部件编辑适用于二维图层")
+    if geometry.has_m.any() or geometry.has_z.nunique() > 1:
+        raise ValueError("要素的坐标维度必须一致，暂不支持量测 M 值")
     if geometry.isna().any() or geometry.is_empty.any() or not geometry.is_valid.all():
         raise ValueError("图层包含空几何或无效几何，请先修复")
     return family

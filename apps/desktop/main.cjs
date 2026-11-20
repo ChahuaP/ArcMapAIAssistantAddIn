@@ -137,6 +137,7 @@ async function startDesktop(options) {
     if (!options.verifyStartup) {
         controller.reader.start();
         controller.mapReader.start();
+        controller.mapLocate.start();
         controller.gis.start();
         controller.warmModel();
     }
@@ -342,6 +343,25 @@ async function startDesktop(options) {
         const data = await controller.reader.map(controller.settings.workspace, { action: 'raster-preview', ref });
         return 'data:image/png;base64,' + data;
     }, true);
+    const viewportQueue = new Map();
+    let viewportActive;
+    async function runViewport() {
+        if (viewportActive || closing) return;
+        const entry = viewportQueue.entries().next().value;
+        if (!entry) return;
+        const [key, job] = entry;
+        viewportQueue.delete(key);
+        viewportActive = { key };
+        try { job.resolve(await controller.mapReader.map(job.workspace, job.input)); }
+        catch (error) {
+            if (error.code === 'view_superseded') job.resolve({ superseded: true });
+            else job.reject(error);
+        } finally {
+            viewportActive = undefined;
+            void runViewport();
+        }
+    }
+
     bind('mapCatalog', async (surface, items, selection, active, hidden) => {
         if (surface !== window || !Array.isArray(items) || items.length > 256 ||
             items.some(item => !item || typeof item.name !== 'string' || !item.name.trim() || item.name.length > 255 ||
@@ -355,6 +375,12 @@ async function startDesktop(options) {
             && selection.ids.every(Number.isSafeInteger) ? selection : undefined;
         mapActive = mapLayers.has(active) ? active : null;
         mapHidden = new Set(Array.isArray(hidden) ? hidden.filter(id => mapLayers.has(id)) : []);
+        const retired = key => !mapLayers.has(key) || mapHidden.has(key);
+        for (const [key, request] of viewportQueue) if (retired(key)) {
+            viewportQueue.delete(key);
+            request.resolve({ superseded: true });
+        }
+        if (viewportActive && retired(viewportActive.key)) controller.mapReader.interrupt?.();
         desktop.notify('mapReferences', knownLayers());
     }, true);
     bind('mapSnapshot', (surface, snapshot) => {
@@ -599,8 +625,24 @@ async function startDesktop(options) {
         }
         if (!controller.settings.workspace) throw new Error('请先选择成果保存位置');
         if (closing) throw new Error('软件正在退出');
+        if (input.action === 'features' && input.interactive === true && !input.fids?.length) {
+            const key = mapKey(input.ref);
+            return new Promise((resolve, reject) => {
+                viewportQueue.get(key)?.resolve({ superseded: true });
+                viewportQueue.set(key, { input, workspace: controller.settings.workspace, resolve, reject });
+                void runViewport();
+            });
+        }
         if (mapReads.has(input.action)) {
-            const reader = ['features', 'raster-display', 'raster-preview'].includes(input.action) ? controller.mapReader : controller.reader;
+            if (input.action === 'features' && input.locate && input.fids?.length === 1 &&
+                    viewportActive?.key === mapKey(input.ref)) {
+                controller.mapReader.interrupt?.();
+            }
+            const heavyAttributes = ['table-statistics', 'table-unique-values', 'table-complement', 'categories'].includes(input.action)
+                || input.action === 'table' && input.order?.length;
+            if (heavyAttributes) return controller.gis.map(controller.settings.workspace, input);
+            const reader = input.action === 'features' && input.fids?.length ? controller.mapLocate :
+                controller.reader;
             return reader.map(controller.settings.workspace, input);
         }
         if (input.action !== 'tool') return controller.gis.map(controller.settings.workspace, input);
@@ -698,32 +740,9 @@ async function startDesktop(options) {
     const coordinateFiles = new Set(['.csv', '.xlsx']);
     const localExtensions = new Set([...formats.vector.extensions, ...formats.raster.extensions, 'zip', 'csv', 'xlsx']
         .map(extension => '.' + extension));
-    let driveList;
     bind('mapBasemap', (surface, config) => {
         if (surface !== window) throw new Error('请从工作台添加底图');
         return basemap.configure(config);
-    }, true);
-    bind('mapBrowse', async (surface, folder) => {
-        if (surface !== window) throw new Error('请从工作台添加数据');
-        const directory = path.resolve(folder || app.getPath('documents'));
-        if ((folder && !path.isAbsolute(folder)) || path.extname(directory).toLowerCase() === '.gdb') {
-            throw new Error('请选择有效的文件夹');
-        }
-        const entries = await fs.promises.readdir(directory, { withFileTypes: true });
-        const rows = entries.flatMap(entry => {
-            const extension = path.extname(entry.name).toLowerCase();
-            const isFolder = entry.isDirectory() && extension !== '.gdb';
-            if (!isFolder && !(localExtensions.has(extension) && (entry.isFile() ||
-                    (entry.isDirectory() && extension === '.gdb')))) return [];
-            return [{ name: entry.name, file: path.join(directory, entry.name), folder: isFolder }];
-        }).sort((a, b) => Number(b.folder) - Number(a.folder) || a.name.localeCompare(b.name, 'zh-CN'));
-        driveList ??= Promise.all('ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map(async letter => {
-            const root = letter + ':\\';
-            try { await fs.promises.access(root); return root; } catch { return null; }
-        })).then(drives => drives.filter(Boolean));
-        const places = Object.entries({ desktop: "桌面", downloads: "下载", documents: "文档", home: "个人文件夹" })
-            .map(([name, label]) => ({ label, file: app.getPath(name) }));
-        return { directory, up: path.dirname(directory), drives: await driveList, places, rows };
     }, true);
     function offerSource(kind, items, details) {
         const id = randomUUID();
@@ -748,8 +767,20 @@ async function startDesktop(options) {
             total: jobs.length, completed: jobs.length });
         return { layers, issues };
     }
-    bind('mapImport', async (surface, paths) => {
+    bind('mapImport', async (surface, paths, database = false) => {
         if (surface !== window) throw new Error('请从工作台添加图层');
+        if (paths === null) {
+            const pick = await dialog.showOpenDialog(window, database
+                ? { title: '选择文件地理数据库', properties: ['openDirectory'] }
+                : { title: '添加数据', properties: ['openFile', 'multiSelections'], filters: [
+                    { name: '空间数据', extensions: [...localExtensions].map(value => value.slice(1)).filter(value => value !== 'gdb') },
+                ] });
+            if (pick.canceled) return { layers: [], issues: [], sources: [] };
+            paths = pick.filePaths;
+            if (database && paths.some(file => path.extname(file).toLowerCase() !== '.gdb')) {
+                throw new Error('请选择以 .gdb 结尾的文件夹');
+            }
+        }
         pendingSources.clear();
         if (!Array.isArray(paths) || !paths.length || paths.length > 32 ||
                 paths.some(file => typeof file !== 'string' || !path.isAbsolute(file))) {
@@ -1086,7 +1117,7 @@ async function startDesktop(options) {
     });
     bind('coordinateRename', input => controller.request('crs-rename', input));
     bind('coordinateRemove', reference => {
-        if (typeof reference !== 'string' || !/^[a-f0-9]{64}@[1-9][0-9]{0,7}$/.test(reference)) {
+        if (typeof reference !== 'string' || !/^[a-f0-9]+@[1-9][0-9]{0,7}$/.test(reference)) {
             throw new Error('请选择有效的坐标系');
         }
         return controller.python('crs-remove', reference);

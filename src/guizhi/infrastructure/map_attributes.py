@@ -22,6 +22,124 @@ def chosen(db, fids):
     db.executemany("INSERT OR IGNORE INTO selected VALUES (?)", ((value,) for value in fids))
 
 
+def shape_page(file, name, payload):
+    """Read a Shapefile attribute page without copying geometries or converting it."""
+    import json
+
+    page = payload["page"]
+    if type(page) is not int or not 0 <= page <= 1_000_000:
+        raise ValueError("属性表页码无效")
+    order, selection, focus = payload.get("order", []), payload.get("selection"), payload.get("focusFid")
+    if selection is not None and (not isinstance(selection, list) or any(type(fid) is not int for fid in selection)):
+        raise ValueError("要素编号无效")
+    if focus is not None and (type(focus) is not int or focus < 0):
+        raise ValueError("要素编号无效")
+    if selection == []:
+        return {"page": 0, "rows": []}
+    frame = None
+    if not order and selection is None:
+        candidate = page if focus is None else focus // 50
+        trial = pyogrio.read_dataframe(file, layer=name, read_geometry=False, fid_as_index=True,
+                                      skip_features=candidate * 50, max_features=50)
+        if focus is None or focus in trial.index:
+            page, frame = candidate, trial
+    if frame is None and not order and selection is not None:
+        ids = sorted(set(selection))
+        if focus in ids:
+            page = ids.index(focus) // 50
+        chosen = ids[page * 50:(page + 1) * 50]
+        if not chosen:
+            return {"page": page, "rows": []}
+        frame = pyogrio.read_dataframe(file, layer=name, read_geometry=False, fid_as_index=True, fids=chosen)
+    if frame is None:
+        # SQL is evaluated by GDAL against the source DBF. Project FID explicitly because
+        # a SQL result can have its own row numbering.
+        fields = set(pyogrio.read_info(file, layer=name)["fields"])
+        if not isinstance(order, list) or len(order) > 5 or any(
+            not isinstance(item, dict) or item.get("field") not in {*fields, "fid"} or
+            item.get("direction") not in {"ascend", "descend"} for item in order
+        ):
+            raise ValueError("排序字段无效，最多选择五个字段")
+        alias = "guizhi_source_fid"
+        while alias in fields:
+            alias += "_"
+        sorting = ", ".join([f'{("FID" if row["field"] == "fid" else identifier(row["field"]))} '
+                             f'{"DESC" if row["direction"] == "descend" else "ASC"}' for row in order] + ["FID"])
+        condition = " WHERE FID IN (" + ",".join(map(str, selection)) + ")" if selection is not None else ""
+        statement = f"SELECT FID AS {alias}, * FROM {identifier(name)}{condition} ORDER BY {sorting}"
+        if focus is not None:
+            indexes = pyogrio.read_dataframe(file, read_geometry=False, sql=statement.replace(", *", "", 1),
+                                             sql_dialect="OGRSQL")[alias]
+            matches = indexes.index[indexes == focus]
+            if len(matches):
+                page = int(matches[0]) // 50
+        frame = pyogrio.read_dataframe(file, read_geometry=False, sql=statement, sql_dialect="OGRSQL",
+                                      skip_features=page * 50, max_features=50).set_index(alias)
+    safe = frame.map(lambda value: str(value) if type(value) is int and abs(value) > 2**53 - 1 else value)
+    values = json.loads(safe.to_json(orient="records", date_format="iso", force_ascii=False))
+    return {"page": page, "rows": [{"id": int(fid), "values": row} for fid, row in zip(frame.index, values, strict=True)]}
+
+
+def shape_attributes(file, name, payload):
+    """Run attribute queries against a Shapefile's DBF through GDAL."""
+    import json
+
+    action = payload["action"]
+    if action == "table":
+        return shape_page(file, name, payload)
+    if action == "table-feature":
+        fid = payload.get("fid")
+        if type(fid) is not int or fid < 0:
+            raise ValueError("要素编号无效")
+        frame = pyogrio.read_dataframe(file, layer=name, fids=[fid], fid_as_index=True)
+        if frame.empty:
+            raise ValueError("要素已不存在")
+        geometry = frame.geometry.iloc[0]
+        data = frame.drop(columns=frame.geometry.name)
+        safe = data.map(lambda value: str(value) if type(value) is int and abs(value) > 2**53 - 1 else value)
+        values = json.loads(safe.to_json(orient="records", date_format="iso", force_ascii=False))
+        return {"attributes": values[0], "geometryType": geometry.geom_type if geometry is not None else None}
+
+    table = identifier(name)
+    selected = payload.get("selection")
+    if selected is not None and (not isinstance(selected, list) or any(type(fid) is not int for fid in selected)):
+        raise ValueError("要素编号无效")
+
+    def read(statement):
+        return pyogrio.read_dataframe(file, read_geometry=False, sql=statement, sql_dialect="SQLITE")
+
+    if action == "table-complement":
+        selected = selected if selected is not None else payload.get("fids")
+        if not isinstance(selected, list) or any(type(fid) is not int for fid in selected):
+            raise ValueError("要素编号无效")
+        condition = " WHERE ROWID NOT IN (" + ",".join(map(str, selected)) + ")" if selected else ""
+        return [int(value) for value in read(f"SELECT ROWID AS source_fid FROM {table}{condition} ORDER BY ROWID").iloc[:, 0]]
+
+    info = pyogrio.read_info(file, layer=name)
+    fields = dict(zip(info["fields"], info["dtypes"], strict=True))
+    field = payload.get("field")
+    if not isinstance(field, str) or field not in fields and not (field == "fid" and action == "table-statistics"):
+        raise ValueError("请选择有效的属性字段")
+    column = "ROWID" if field == "fid" else identifier(field)
+    if action == "table-statistics":
+        numeric = field == "fid" or str(fields[field]).startswith(("int", "uint", "float"))
+        metrics = f", min({column}), max({column}), sum(1.0 * {column}), avg({column})" if numeric else ""
+        condition = (" WHERE ROWID IN (" + ",".join(map(str, selected)) + ")") if selected is not None else ""
+        result = read(f"SELECT count(*),count({column}),count(DISTINCT {column}){metrics} FROM {table}{condition}")
+        return dict(zip(("count", "valid", "distinct", "min", "max", "sum", "mean"),
+                        json.loads(result.to_json(orient="values"))[0]))
+    term, page = payload.get("query", ""), payload.get("page", 0)
+    if not isinstance(term, str) or len(term) > 200 or "\x00" in term or type(page) is not int or not 0 <= page <= 100_000:
+        raise ValueError("唯一值搜索参数无效")
+    literal = "'" + term.replace("'", "''") + "'"
+    condition = (f" WHERE instr(lower(CAST({column} AS TEXT)), lower({literal})) > 0 OR "
+                 f"({column} IS NULL AND {int(term.casefold() in {'空值', 'null'})})") if term else ""
+    found = read(f"SELECT DISTINCT {column} FROM {table}{condition} ORDER BY {column} LIMIT 51 OFFSET {page * 50}")
+    found = found.map(lambda value: str(value) if type(value) is int and abs(value) > 2**53 - 1 else value)
+    return {"values": [row[0] for row in json.loads(found.head(50).to_json(orient="values", date_format="iso"))],
+            "more": len(found) > 50}
+
+
 def table_page(file, name, payload):
     page = payload["page"]
     if type(page) is not int or not 0 <= page <= 1_000_000:

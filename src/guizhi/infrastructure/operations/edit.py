@@ -23,9 +23,9 @@ class Change(BaseModel):
 def editable(frame, info):
     if frame.crs is None:
         raise ValueError("请先为图层定义坐标系")
-    if frame.geometry.has_z.any() or frame.geometry.has_m.any():
-        raise ValueError("地图编辑适用于二维图层")
-    kind = info["geometry_type"]
+    if frame.geometry.has_m.any():
+        raise ValueError("当前工具无法保留量测 M 值")
+    kind = info["geometry_type"].split()[0]
     if kind.removeprefix("Multi") not in {"Point", "LineString", "Polygon"}:
         raise ValueError("请选择点、线或面图层")
     return kind
@@ -45,9 +45,9 @@ def changes(ctx, changes: Annotated[list[Change], Field(min_length=1, max_length
     if frame.crs is None:
         raise ValueError("请先为图层定义坐标系")
     geom_type = ctx.info[0]["geometry_type"]
-    expect_z = frame.geometry.has_z.any()
+    expect_z = frame.geometry.has_z.any() or " Z" in geom_type
     has_measure = frame.geometry.has_m.any()
-    expected = geom_type.removeprefix("Multi")
+    expected = geom_type.split()[0].removeprefix("Multi")
     seen = set()
     additions = []
     for change in changes:
@@ -120,9 +120,13 @@ def transfer_rows(ctx, selection):
         raise ValueError("请选择 1 至 500 个要素")
     selected = source.loc[fids]
     geom = selected.geometry.array
+    target_z = target.geometry.has_z.any() or " Z" in target_info["geometry_type"]
+    if any(shape.has_z != target_z for shape in geom if shape is not None):
+        raise ValueError("源要素和目标图层的高程维度必须一致")
     if source.crs != target.crs:
         transform = projection(source.crs, target.crs, selected.total_bounds)
-        geom = shapely.transform(geom, lambda x, y: transform.transform(x, y, errcheck=True), interleaved=False)
+        geom = shapely.transform(geom, lambda x, y, z=None: transform.transform(x, y, z, errcheck=True),
+                                 interleaved=False, include_z=target_z)
 
     target_fields = dict(zip(target_info["fields"], target_info["dtypes"], strict=True))
     source_fields = {name.casefold(): (name, kind) for name, kind in zip(source_info["fields"], source_info["dtypes"], strict=True)}
