@@ -192,13 +192,13 @@ def raster_plan_pipeline(workspace, reference, source, extent):
 
     plan = TransformPlan.model_validate(get_plan(workspace, reference)["plan"])
     if plan.dimension != 2:
-        raise ValueError("栅格投影转换需要二维方案")
+        raise ValueError("栅格投影需要二维方案")
     expected, target, _ = converter(plan, workspace.root)
     if not source.equals(expected, ignore_axis_order=True):
-        raise ValueError("源图层坐标系与转换方案不一致")
+        raise ValueError("源图层坐标系与投影方案不一致")
     area = extent if plan.area_kind == "source" else geographic_bounds(area_of_interest(source, extent))
     if not within_area(area, plan.area):
-        raise ValueError("栅格范围超出转换方案的适用范围")
+        raise ValueError("栅格范围超出投影方案的适用范围")
 
     tokens = pipeline_tokens(plan, workspace.root)
     groups = [list(group) for separator, group in groupby(tokens, lambda token: token == "+step") if not separator]
@@ -225,7 +225,7 @@ def raster_plan_pipeline(workspace, reference, source, extent):
 def reproject_raster(ctx, target_crs, resampling, resolution, plan):
     from guizhi.infrastructure.operations.raster_backend import Resampling, Window, calculate_default_transform, rio, warp
 
-    from guizhi.infrastructure.crs_options import describe_crs, projection, resolve_definition
+    from guizhi.infrastructure.crs_options import projection, projection_summary, resolve_definition
 
     out = ctx.path("result.tif")
     source = ctx.rasters[0]
@@ -259,13 +259,13 @@ def reproject_raster(ctx, target_crs, resampling, resolution, plan):
     result = deliver(ctx, out, {"type": "reproject", "source_crs": source_crs.to_wkt(),
                                 "resampling": resampling, "coordinate_operation": pipeline, "plan": plan})
     return {**result, "statistics": {**result["statistics"],
-            "projection": {"source": describe_crs(source_crs), "target": describe_crs(target)}}}
+            "projection": projection_summary(source_crs, target, pipeline if not plan else None)}}
 
 
 def reproject(ctx, target_crs: str | None = None, resampling: Literal["nearest", "bilinear", "cubic"] = "nearest",
               resolution: tuple[float, float] | None = None, plan: str | None = None):
     if bool(target_crs) == bool(plan):
-        raise ValueError("请选择目标坐标系或已验证的转换方案")
+        raise ValueError("请选择目标坐标系或已验证的投影方案")
     if resolution is not None and any(not np.isfinite(value) or value <= 0 for value in resolution):
         raise ValueError("Target resolution must contain two positive finite numbers")
     return reproject_raster(ctx, target_crs, resampling, resolution, plan)

@@ -5,10 +5,10 @@
     const { Titlebar, button, icon, productName } = window.GuizhiShell;
     const { ModelForm, Workspace, errorText } = window.GuizhiModel;
     const sections = [
-        ['model', 'server', '模式与模型'], ['voice', 'mic', '语音与音色'],
-        ['crs', 'globe', '坐标系与转换'], ['appearance', 'sun', '外观与交互'],
-        ['storage', 'folder', '成果与存储'], ['skills', 'briefcase', '业务管理'],
-        ['components', 'layers', '按需组件'], ['extensions', 'link', '第三方扩展'], ['about', 'info', '关于与诊断'],
+        ['model', 'server', '模式与模型'], ['voice', 'mic', '语言与音色'],
+        ['crs', 'globe', '坐标与投影'], ['appearance', 'sun', '外观与交互'],
+        ['storage', 'folder', '成果与存储'], ['skills', 'briefcase', '业务与工具'],
+        ['components', 'layers', '组件与扩展'], ['about', 'info', '关于与诊断'],
     ];
     const themes = [{ value: 'system', label: '跟随系统' }, { value: 'light', label: '明亮' },
         { value: 'dark', label: '暗色' }];
@@ -105,7 +105,7 @@
             finally { setBusy(false); }
         }
         useEffect(() => { void refresh(); }, []);
-        const statuses = { off: '关闭', disabled: '未启用', verified: '可用', failed: '检查失败', ready: '组件就绪',
+        const statuses = { off: '关闭', disabled: '未启用', verified: '可用', failed: '检查失败', ready: '模块就绪',
             configured: '待检查', missing: '未配置', connected: '已连接', waiting: '等待连接',
             unavailable: '扩展未就绪', registered: '已注册', unregistered: '未注册' };
         const tones = { verified: 'success', ready: 'success', connected: 'success', registered: 'success',
@@ -148,8 +148,14 @@
 
     window.GuizhiSettings = function Settings({ state, appearance, saveAppearance, save, close, entries, setEntries,
         initial, catalog, refresh, plans, initialMarkdown }) {
-        const [section, select] = useState(typeof initial === 'string' ? initial : state.settings.workspace ? 'model' : 'storage');
-        useEffect(() => { if (typeof initial === 'string') select(initial); }, [initial]);
+        const sectionId = id => id === 'extensions' ? 'components' : id;
+        const [section, select] = useState(typeof initial === 'string' ? sectionId(initial) : state.settings.workspace ? 'model' : 'storage');
+        const [moduleTab, setModuleTab] = useState(initial === 'extensions' ? 'extensions' : 'modules');
+        useEffect(() => {
+            if (typeof initial !== 'string') return;
+            select(sectionId(initial));
+            if (initial === 'components' || initial === 'extensions') setModuleTab(initial === 'extensions' ? 'extensions' : 'modules');
+        }, [initial]);
         const [value, change] = useState({ ...state.settings, modelConfig: state.settings.modelConfig || window.GuizhiModel.initial(), key: '' });
         const [error, setError] = useState('');
         const [saving, setSaving] = useState(false);
@@ -192,16 +198,19 @@
             skills: () => h(window.GuizhiBusiness.Business, { catalog, refresh, plans, initialMarkdown, manage: true }),
             components: () => {
                 const available = state.components || {};
-                return Object.entries(window.GuizhiComponentNames).filter(([id]) => available[id]).map(([id, label]) =>
+                const tabs = h(antd.Segmented, { key: 'modules-nav', 'aria-label': '组件与扩展',
+                    options: [{ value: 'modules', label: '功能模块' }, { value: 'extensions', label: '第三方扩展' }],
+                    value: moduleTab, onChange: setModuleTab });
+                if (moduleTab === 'extensions') return [tabs, h(window.GuizhiArcgisExtension, { key: 'extension', sync: state.arcgis })];
+                return [tabs, ...Object.entries(window.GuizhiComponentNames).filter(([id]) => available[id]).map(([id, label]) =>
                     h('section', { className: 'settings-card', key: id },
                         h('div', { className: 'section-head' }, h('h2', null, label),
                             h(antd.Tag, { color: available[id].installed ? 'success' : undefined },
                                 available[id].installed ? '已安装' : '未安装')),
                         id === 'imagery' && !available.raster?.installed
-                            ? h('p', { className: 'muted' }, '请先安装栅格处理组件。')
-                            : h(window.GuizhiComponentActions, { kind: id, component: available[id] })));
+                            ? h('p', { className: 'muted' }, '请先安装栅格处理模块。')
+                            : h(window.GuizhiComponentActions, { kind: id, component: available[id] })))];
             },
-            extensions: () => h(window.GuizhiArcgisExtension, { sync: state.arcgis }),
             about: () => h(About, { state }),
         };
         const current = sections.find(([id]) => id === section);

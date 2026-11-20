@@ -5,8 +5,8 @@
     const names = { ocr: '文档 OCR', raster: '栅格处理', imagery: '专业影像识别' };
     window.GuizhiComponentNames = names;
     window.GuizhiComponentLink = function ComponentLink({ message, open }) {
-        return /请先在「设置 → 按需组件」安装/.test(message || '') &&
-            button('settings', '打开按需组件', { onClick: open });
+        return /请先在「设置 → 功能模块」安装/.test(message || '') &&
+            button('settings', '打开功能模块', { onClick: open });
     };
 
     window.GuizhiComponentActions = function ComponentActions({ kind, component }) {
@@ -32,7 +32,7 @@
                     onClick: () => void window.guizhi.componentCancel(kind),
                 })),
             progress !== undefined && h('p', { role: 'status', className: 'muted' },
-                progress === 'installing' ? '正在校验并安装组件…' : '正在下载 · ' + progress + '%'),
+                progress === 'installing' ? '正在校验并安装模块…' : '正在下载 · ' + progress + '%'),
             error && h('p', { role: 'alert', className: 'error' }, error));
     };
 })();

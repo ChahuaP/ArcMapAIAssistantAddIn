@@ -227,7 +227,7 @@ def apply_plan(frame, entry, root):
         raise ValueError("Layer CRS does not match the selected transformation source")
     has_z = shapely.has_z(frame.geometry).any()
     if plan.dimension == 2 and has_z:
-        raise ValueError("请选择三维转换方案处理带 Z 坐标的材料")
+        raise ValueError("请选择三维投影方案处理带 Z 坐标的材料")
     if plan.dimension == 3 and not np.isfinite(shapely.get_coordinates(frame.geometry.array, include_z=True)).all():
         raise ValueError("三维转换要求每个顶点都含有效 Z 坐标")
     result = frame.copy()

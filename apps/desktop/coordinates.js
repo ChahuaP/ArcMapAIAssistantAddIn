@@ -7,10 +7,10 @@
     const ref = entry => entry.id + '@' + entry.revision;
     const latest = (entries, kind) => [...new Map(entries.filter(item => item.kind === kind)
         .slice().reverse().map(item => [item.id, item])).values()].sort((a, b) => a.title.localeCompare(b.title, 'zh-CN'));
-    const modes = { official: '标准转换', 'similarity-2d': '二维相似',
+    const modes = { official: '标准投影', 'similarity-2d': '二维相似',
         'affine-2d': '二维仿射', 'similarity-3d': '三维相似' };
     const methodHelp = {
-        official: '按所选坐标系和控制点位置，从本机标准库（PROJ）查找适用的转换，再用至少 3 对实测点核验。',
+        official: '按所选坐标系和控制点位置，从本机标准库（PROJ）查找适用的投影，再用至少 3 对实测点核验。',
         'similarity-2d': '根据平移、旋转和统一缩放拟合地方坐标。两份数据须使用线性坐标（如米）。至少用 4 对点拟合，另留 3 对点核验。',
         'affine-2d': '可沿不同方向缩放，并处理倾斜变形。两份数据须使用线性坐标（如米）。至少用 5 对点拟合，另留 3 对点核验。',
         'similarity-3d': '两份数据须同为三维地心坐标，或同为三维工程坐标，且每个点都有 Z 坐标。至少用 5 对点拟合，另留 3 对点核验。',
@@ -25,16 +25,16 @@
         const range = (label, low, high) => label + ' ' + precision(low) + '～' + precision(high);
         return kind === 'geographic'
             ? range('经度', xmin, xmax) + '，' + range('纬度', ymin, ymax) + '（度）'
-            : range('X', xmin, xmax) + '，' + range('Y', ymin, ymax) + '（转换前坐标）';
+            : range('X', xmin, xmax) + '，' + range('Y', ymin, ymax) + '（投影前坐标）';
     }
 
     function ControlPointGuide() {
         return h('details', { className: 'coordinate-guide' },
             h('summary', null, '查看控制点示例'),
-            help('例如，两个点图层都用 point_id 存点号，P01 在两边代表同一个界址点。转换前图层用 role 标记拟合点和检查点。'),
+            help('例如，两个点图层都用 point_id 存点号，P01 在两边代表同一个界址点。投影前图层用 role 标记拟合点和检查点。'),
             h('table', null, h('thead', null, h('tr', null,
-                h('th', { scope: 'col' }, '转换前点号'), h('th', { scope: 'col' }, '转换后点号'),
-                h('th', { scope: 'col' }, '转换前图层的用途'))),
+                h('th', { scope: 'col' }, '投影前点号'), h('th', { scope: 'col' }, '投影后点号'),
+                h('th', { scope: 'col' }, '投影前图层的用途'))),
                 h('tbody', null, ...[['P01', 'fit（拟合）'], ['P02', 'check（检查）']].map(([id, role]) =>
                     h('tr', { key: id }, h('td', null, id), h('td', null, id), h('td', null, role))))),
             help('点号在各自图层中须唯一且非空。坐标取自各自图层的点几何。两边的记录顺序可以不同，系统只配对两边都有的点号。'));
@@ -86,18 +86,18 @@
             tolerance > 0 && tolerance <= 1000;
         const previewResult = preview?.metrics;
         return h('div', { className: 'coordinate-wizard' },
-            h('div', { className: 'section-head' }, h('h2', null, '创建转换方案'),
-                button('back', '返回转换方案', { type: 'text', disabled: busy, onClick: back })),
+            h('div', { className: 'section-head' }, h('h2', null, '创建投影方案'),
+                button('back', '返回投影方案', { type: 'text', disabled: busy, onClick: back })),
             h('fieldset', { disabled: busy },
-                help('从自定义坐标系库选择转换前、后的坐标系，两项须与下面两份点图层标注的坐标系对应。'),
+                help('从自定义坐标系库选择投影前、后的坐标系，两项须与下面两份点图层标注的坐标系对应。'),
                 h('div', { className: 'setting-fields' },
-                    field('转换前坐标系', select(input.source, definitionOptions, source => patch({ source, operation: '' }))),
-                    field('转换后坐标系', select(input.target, definitionOptions, target => patch({ target, operation: '' }))),
-                    h('div', null, field('转换方法', select(input.method, Object.entries(modes), method => patch({ method, operation: '' }))),
+                    field('投影前坐标系', select(input.source, definitionOptions, source => patch({ source, operation: '' }))),
+                    field('投影后坐标系', select(input.target, definitionOptions, target => patch({ target, operation: '' }))),
+                    h('div', null, field('投影方法', select(input.method, Object.entries(modes), method => patch({ method, operation: '' }))),
                         input.method && help(methodHelp[input.method])),
                     h('div', null, field('允许的最大误差（米）', h('input', { type: 'number', min: 0.001, max: 1000, step: 'any',
                         value: input.tolerance, onChange: event => patch({ tolerance: event.target.value }) })),
-                        help('比较转换结果与已知目标点的位置。所有检查点的误差都在限值内时才能保存。')),
+                        help('比较投影结果与已知目标点的位置。所有检查点的误差都在限值内时才能保存。')),
                     field('方案名称', h('input', { value: input.title, maxLength: 120,
                         onChange: event => patch({ title: event.target.value }) })),
                     plans.length > 0 && field('方案版本', h('select', { value: input.replace,
@@ -105,9 +105,9 @@
                         ...plans.map(item => h('option', { key: ref(item), value: ref(item) }, '更新 ' + item.title))))),
                 h('div', { className: 'coordinate-controls' },
                     h('h3', null, '配对控制点'),
-                    help('准备同一批实地位置在转换前、后的两份单点图层，例如同一批界址点在两套坐标系下的数据。支持 SHP、GeoPackage 或 GeoJSON，每份最多 2,000 个点，且须带坐标系定义。'),
+                    help('准备同一批实地位置在投影前、后的两份单点图层，例如同一批界址点在两套坐标系下的数据。支持 SHP、GeoPackage 或 GeoJSON，每份最多 2,000 个点，且须带坐标系定义。'),
                     h('div', { className: 'setting-fields' },
-                        ...[['source', '转换前', sourceFile], ['target', '转换后', targetFile]].map(([side, label, item]) =>
+                        ...[['source', '投影前', sourceFile], ['target', '投影后', targetFile]].map(([side, label, item]) =>
                             h(CoordinateFile, { key: side, label: label + '点文件', layerLabel: label + '点图层',
                                 item, busy, change: value => chooseFile(side, value),
                                 pick: () => perform(async () => {
@@ -118,11 +118,11 @@
                 button('layers', '读取点号字段', { disabled: !allFiles || busy, onClick: inspect }),
                 choices && h(React.Fragment, null,
                     h('div', { className: 'setting-fields' },
-                        field('转换前点号字段', select(input.source_key, choices.source_fields.map(name => [name, name]),
+                        field('投影前点号字段', select(input.source_key, choices.source_fields.map(name => [name, name]),
                             source_key => patch({ source_key }))),
-                        field('转换后点号字段', select(input.target_key, choices.target_fields.map(name => [name, name]),
+                        field('投影后点号字段', select(input.target_key, choices.target_fields.map(name => [name, name]),
                             target_key => patch({ target_key }))),
-                        choices.check_fields.length > 0 && field('转换前图层的用途字段', h('select', { value: input.check_field,
+                        choices.check_fields.length > 0 && field('投影前图层的用途字段', h('select', { value: input.check_field,
                             onChange: event => patch({ check_field: event.target.value }) },
                             h('option', { value: '' }, input.method === 'official' ? '全部配对点用于核验' : '自动留出检查点'),
                             ...choices.check_fields.map(name => h('option', { key: name, value: name }, name))))),
@@ -131,10 +131,10 @@
                         : '用途字段中的「拟合」或 fit 用来求参数，「检查」或 check 用来独立核验。留空时由系统自动划分。'),
                     !choices.matches.length && help('请在两份图层中分别选择存放同一组点号的字段，字段名称可以不同。')),
                 preview?.operations?.length > 0 && h('div', null,
-                    field('候选标准转换', select(input.operation,
+                    field('候选标准投影', select(input.operation,
                         preview.operations.map(item => [item.id, item.name + ' · 标称精度 ' + item.accuracy_m + ' 米']),
                         operation => setInput(old => ({ ...old, operation })))),
-                    help('找到多种适用的标准转换。选定一项后，再核验实际误差。')),
+                    help('找到多种适用的标准投影。选定一项后，再核验实际误差。')),
                 h('div', { className: 'business-actions' },
                     button('server', '核验误差', { disabled: !ready || busy || preview?.status === 'choose' && !input.operation, loading: busy,
                         onClick: () => perform(async () => setPreview(await api.coordinateSolve(payload('preview')))) }),
@@ -143,8 +143,8 @@
                             await api.coordinateSolve({ ...payload('save'), token: preview.token });
                             await done();
                         }) }))),
-            preview?.status === 'unavailable' && h('p', { role: 'status' }, '本机标准库中没有适用于这两个坐标系和控制点区域的可用转换。请核对坐标系，或用地方控制点拟合。'),
-            preview?.missing_grids?.length > 0 && help('部分候选转换需要补充格网文件 ' + preview.missing_grids.join('、')),
+            preview?.status === 'unavailable' && h('p', { role: 'status' }, '本机标准库中没有适用于这两个坐标系和控制点区域的可用投影。请核对坐标系，或用地方控制点拟合。'),
+            preview?.missing_grids?.length > 0 && help('部分候选投影需要补充格网文件 ' + preview.missing_grids.join('、')),
             previewResult && h('div', { className: 'coordinate-result' },
                 h('strong', { className: preview.status === 'failed' ? 'error' : '' },
                     preview.status === 'verified' ? '误差核验通过' : '检查点误差超过限值'),
@@ -204,15 +204,15 @@
             (item.pipeline || item.area) && h('details', null, h('summary', null, '详情'),
                 item.area && h('small', null, '适用范围 ' + areaText(item.area, 'geographic')),
                 item.pipeline && h('pre', null, item.pipeline)));
-        return h('section', { className: 'coordinate-controls', 'aria-label': '内置转换方案' },
+        return h('section', { className: 'coordinate-controls', 'aria-label': '内置投影方案' },
             h('div', { className: 'coordinate-library-pair' },
                 choice('源坐标系', source, setSource), choice('目标坐标系', target, setTarget)),
             (state.error || error) && h('p', { className: 'error', role: 'alert' }, state.error || error),
-            state.loading && h('p', { role: 'status' }, '正在查询转换方案…'),
+            state.loading && h('p', { role: 'status' }, '正在查询投影方案…'),
             result?.same && help('源坐标系与目标坐标系相同。'),
-            result && !result.same && !result.available.length && !result.requiresGrids.length && help('没有适用的标准转换。'),
+            result && !result.same && !result.available.length && !result.requiresGrids.length && help('没有适用的标准投影。'),
             result && !result.same && result.requiresGrids.length > 0 && !result.bestAvailable &&
-                help('优先转换缺少格网。办理时仍需按数据范围核验可用方案。'),
+                help('优先投影缺少格网。办理时仍需按数据范围核验可用方案。'),
             ...(result?.available || []).map((item, index) => render(item, true, index)),
             ...(result?.requiresGrids || []).map((item, index) => render(item, false, index)));
     }
@@ -249,24 +249,24 @@
         } });
         return h('div', { className: 'coordinate-page' },
             h(antd.Tabs, { animated: false, className: 'coordinate-tabs', activeKey: tab,
-                items: [{ key: 'definition', label: '坐标系' }, { key: 'plan', label: '转换方案' }],
+                items: [{ key: 'definition', label: '坐标系' }, { key: 'plan', label: '投影方案' }],
                 onChange: value => { setTab(value); setError(''); } }),
             h(antd.Segmented, { 'aria-label': '来源', value: origin, onChange: setOrigin,
                 options: [{ label: '全部', value: 'all' }, { label: '内置', value: 'built-in' }, { label: '自定义', value: 'custom' }] }),
             tab === 'definition' && h(antd.Input, { className: 'coordinate-library-search', allowClear: true,
                 'aria-label': '搜索坐标系', placeholder: '搜索名称或 EPSG 编号', value: query, onChange: event => setQuery(event.target.value) }),
             origin !== 'built-in' && (tab === 'definition' ? h('div', { className: 'coordinate-controls' },
-                help('从地图数据读取坐标系定义并保存到库中，供地图工具和转换方案选用。当前地图的显示坐标系在「地图 → 地图属性」中设置。'),
+                help('从地图数据读取坐标系定义并保存到库中，供地图工具和投影方案选用。当前地图的显示坐标系在「地图 → 地图属性」中设置。'),
                 h(CoordinateFile, { label: '数据文件', action: '从数据导入', layerLabel: '读取坐标系的图层',
                     item: file, busy, change: setFile, pick: () => perform(async () => {
                         const picked = await api.coordinateFile('definition');
                         if (picked) await importFile(picked);
                     }) }),
-                help('可直接选择带坐标系定义的 SHP、GeoPackage、GeoJSON、GeoTIFF 或 IMG。SHP 需和同名的 .prj 放在同一文件夹。GeoTIFF 和 IMG 需要栅格处理组件。'),
+                help('可直接选择带坐标系定义的 SHP、GeoPackage、GeoJSON、GeoTIFF 或 IMG。SHP 需和同名的 .prj 放在同一文件夹。GeoTIFF 和 IMG 需要栅格处理模块。'),
                 file && button('folder', '导入坐标系', { disabled: busy || !file.layer, onClick: () => perform(() => importFile(file)) })) :
                 h('div', { className: 'coordinate-controls' },
-                    help('转换方案记录转换方向、适用范围和核验误差。保存后，可在「分析 → 坐标系 → 投影转换」中选用。'),
-                    button('plus', '创建转换方案', { disabled: busy || !definitions.length, onClick: () => setWizard(true) }),
+                    help('投影方案记录投影方向、适用范围和核验误差。保存后，可在「分析 → 坐标系 → 投影」中选用。'),
+                    button('plus', '创建投影方案', { disabled: busy || !definitions.length, onClick: () => setWizard(true) }),
                     !definitions.length && help('创建自定义方案前，请先导入控制点数据所用的坐标系。'))),
             origin !== 'custom' && tab === 'definition' && h('section', { className: 'coordinate-controls', 'aria-label': '内置坐标系' },
                 builtIn.loading && h('p', { role: 'status' }, '正在读取内置坐标系…'),
@@ -287,7 +287,7 @@
                         h('div', { className: 'coordinate-actions' }, h(antd.Tag, null, '自定义 · v' + entry.revision),
                             button('layers', '重命名', { type: 'text', disabled: busy, onClick: () => { setEditing(ref(entry)); setTitle(entry.title); } }),
                             !entry.plan && h(antd.Popconfirm, { title: '删除「' + entry.title + '」？',
-                                description: '已有任务和已保存的转换方案仍可追溯。',
+                                description: '已有任务和已保存的投影方案仍可追溯。',
                                 okText: '删除', cancelText: '取消', okButtonProps: { danger: true },
                                 onConfirm: () => perform(async () => { setEntries(await api.coordinateRemove(ref(entry))); setEditing(null); }) },
                                 button('trash', '删除', { type: 'text', danger: true, disabled: busy })))),
@@ -303,7 +303,7 @@
                             ' · ' + (entry.plan.grids.map(grid => grid.name).join('、') || '无需格网')),
                         h('pre', null, technical)));
             }),
-            origin === 'custom' && !list.length && help(tab === 'definition' ? '没有匹配的自定义坐标系。' : '暂无自定义转换方案。'),
+            origin === 'custom' && !list.length && help(tab === 'definition' ? '没有匹配的自定义坐标系。' : '暂无自定义投影方案。'),
             error && h('p', { role: 'alert', className: 'error' }, error));
     };
 })();

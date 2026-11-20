@@ -3,7 +3,7 @@ from pyproj import CRS
 
 from guizhi.infrastructure.coordinates import apply_plan
 from guizhi.infrastructure.crs_catalog import get, get_plan
-from guizhi.infrastructure.crs_options import describe_crs, projection, resolve_definition
+from guizhi.infrastructure.crs_options import describe_crs, projection, projection_summary, resolve_definition
 
 
 def assign(ctx, definition: str):
@@ -45,10 +45,11 @@ def reproject(ctx, definition: str | None = None, plan: str | None = None):
     import shapely
 
     if bool(definition) == bool(plan):
-        raise ValueError("请选择目标坐标系或已验证的转换方案")
+        raise ValueError("请选择目标坐标系或已验证的投影方案")
     frame = ctx.frames[0]
     if frame.crs is None:
         raise ValueError("请先为源图层定义实际坐标系")
+    pipeline = None
     if plan:
         entry = get_plan(ctx.workspace, plan)
         converted = apply_plan(frame, entry, ctx.workspace.root)
@@ -60,8 +61,9 @@ def reproject(ctx, definition: str | None = None, plan: str | None = None):
             raise ValueError("目标与源图层的坐标系相同，请选择不同的目标坐标系")
         present = frame.geometry.notna() & ~frame.geometry.is_empty
         tx = projection(frame.crs, target, frame.total_bounds if present.any() else None)
+        pipeline = tx.definition
         converted = frame.set_geometry(shapely.transform(frame.geometry.array,
             lambda x, y, z=None: tx.transform(x, y, z, errcheck=True), interleaved=False, include_z=None))
     ctx.publish(converted.set_crs(target, allow_override=True), geometry_type=ctx.info[0]["geometry_type"], preserve_fids=True)
-    return {"statistics": {"projection": {"source": describe_crs(frame.crs), "target": describe_crs(target)},
+    return {"statistics": {"projection": projection_summary(frame.crs, target, pipeline),
                            "feature_count": len(converted)}}

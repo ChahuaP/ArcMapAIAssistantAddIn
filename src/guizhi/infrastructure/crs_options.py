@@ -1,7 +1,7 @@
 """Shared EPSG choices and layer coordinate metadata."""
 from functools import lru_cache
 
-from pyproj import CRS, network
+from pyproj import CRS, Transformer, network
 from pyproj.aoi import AreaOfInterest
 from pyproj.database import query_crs_info
 from pyproj.exceptions import ProjError
@@ -57,7 +57,7 @@ def area_of_interest(source, extent):
     # Undo the projection in the source datum before testing the transformation's area.
     local = TransformerGroup(source, source.geodetic_crs, always_xy=True, allow_ballpark=False)
     if not local.best_available or not local.transformers:
-        raise ValueError("无法从图层坐标系确定转换范围，请选择已验证的转换方案")
+        raise ValueError("无法从图层坐标系确定投影适用范围，请选择已验证的投影方案")
     west, south, east, north = local.transformers[0].transform_bounds(*extent, errcheck=True)
     if not (-180 <= west <= 180 and -180 <= east <= 180 and -90 <= south <= north <= 90):
         raise ValueError("图层坐标超出坐标系适用范围，请检查图层坐标系")
@@ -69,16 +69,35 @@ def standard_transformers(source, target, area=None, *, always_xy=True):
     return TransformerGroup(source, target, always_xy=always_xy, allow_ballpark=False, area_of_interest=area)
 
 
+def china_geographic_approximation(source, target):
+    # EPSG:4326 is an ensemble and has no epoch. Keep this regional, 2D
+    # GIS operation separate from authoritative, higher-accuracy datum plans.
+    if {source.to_epsg(), target.to_epsg()} == {4326, 4490}:
+        return CRS.from_epsg(4490).area_of_use.bounds
+    return None
+
+
 def automatic_projection(source, target, area, *, always_xy=True):
     group = standard_transformers(source, target, area, always_xy=always_xy)
     if not group.best_available or not group.transformers:
-        raise ValueError("缺少可靠的坐标转换或所需格网，请选择已验证的转换方案")
+        china = china_geographic_approximation(source, target)
+        if china:
+            if area is None or not within_area(geographic_bounds(area), china):
+                raise ValueError("WGS 84 与 CGCS2000 的内置近似投影限中国范围，请选择已验证的投影方案")
+            return Transformer.from_pipeline("+proj=noop")
+        raise ValueError("缺少可靠的投影或所需格网，请选择已验证的投影方案")
     return group.transformers[0]
 
 
 def projection(source, target, extent, *, always_xy=True):
     return automatic_projection(source, target, area_of_interest(source, extent), always_xy=always_xy)
 
+
+def projection_summary(source, target, pipeline=None):
+    result = {"source": describe_crs(source), "target": describe_crs(target)}
+    if pipeline is not None and "proj=noop" in pipeline and china_geographic_approximation(source, target):
+        result["method"] = "中国范围近似投影（用于二维地图叠加和一般展示，未标定测绘精度）"
+    return result
 
 def within_area(bounds, outer):
     west, south, east, north = bounds
@@ -139,8 +158,9 @@ def projection_options(workspace, layer, query):
                 operation.transform_bounds(*extent, errcheck=True)
         except (ProjError, ValueError):
             continue
+        approximate = china_geographic_approximation(source, target) and "proj=noop" in operation.definition
         rows.append(({**item, "outsideArea": outside,
-                      "plans": [{"value": "automatic", "label": "自动匹配（PROJ）"}]}, target))
+                      "plans": [{"value": "automatic", "label": "中国范围近似投影" if approximate else "自动匹配（PROJ）"}]}, target))
 
     for entry in entries:
         if entry["kind"] != "plan":
@@ -221,4 +241,10 @@ def library_transforms(workspace, source_ref, target_ref):
     unavailable = [{**details(operation),
                     "grids": [grid.short_name for grid in operation.grids if not grid.available]}
                    for operation in group.unavailable_operations]
+    china = china_geographic_approximation(source, target)
+    if not available and china:
+        available.append({"name": "WGS 84 与 CGCS2000 · 中国范围近似投影",
+                          "accuracy": None, "area": list(china),
+                          "areaLabel": "中国范围 · 用于二维地图叠加和一般展示",
+                          "pipeline": "+proj=noop"})
     return {"same": False, "available": available, "requiresGrids": unavailable, "bestAvailable": group.best_available}

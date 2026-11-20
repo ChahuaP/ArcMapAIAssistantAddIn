@@ -232,10 +232,10 @@ function CoordinateTools({ layer, display, setDisplay, entries, openTool, fail, 
             value: display?.value, onChange: (value, item) => setDisplay(value ? item : null) }),
         layer && h('div', { className: 'map-coordinate-actions' },
             h(Button, { onClick: () => openTool('crs.assign') }, '定义坐标系'),
-            h(Button, { disabled: !layer.crs, onClick: () => openTool('crs.reproject') }, '投影转换')),
+            h(Button, { disabled: !layer.crs, onClick: () => openTool('crs.reproject') }, '投影')),
         display && layer?.crs && layer.kind !== 'raster' && plans.length > 0 &&
-            h(Choice, { value: displayPlan || undefined, placeholder: '为该图层选择显示转换',
-                'aria-label': '显示转换方案', allowClear: true, onChange: setDisplayPlan,
+            h(Choice, { value: displayPlan || undefined, placeholder: '为该图层选择显示投影',
+                'aria-label': '显示投影方案', allowClear: true, onChange: setDisplayPlan,
                 options: plans.map(entry => ({ value: entry.id + '@' + entry.revision, label: entry.title })) }));
 }
 

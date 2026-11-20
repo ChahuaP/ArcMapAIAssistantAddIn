@@ -21,5 +21,5 @@ def require(kind):
     installed = not paths or any((path / "component.json").is_file()
                                  for path in paths if path.name.startswith(kind + "-"))
     if not installed or find_spec(module) is None:
-        raise Fault("environment", "component_required", f"请先在「设置 → 按需组件」安装{title}组件。",
+        raise Fault("environment", "component_required", f"请先在「设置 → 功能模块」安装{title}组件。",
                     component=kind)

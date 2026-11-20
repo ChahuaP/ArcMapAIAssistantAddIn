@@ -108,7 +108,7 @@
                         ...(asr ? {} : { voice: next === current.tts ? current.voice : '' }) }),
                         current.component?.progress !== undefined),
                     missing && (asr || value.asr !== 'local') && h('div', { className: 'speech-component' },
-                        h('p', { className: 'muted' }, '使用本机语音前，请先安装语音组件。'),
+                        h('p', { className: 'muted' }, '使用本机语音前，请先安装语音模块。'),
                         h(window.GuizhiComponentActions, { kind: 'speech', component: current.component })),
                     select(asr ? '麦克风' : '播放设备', value[device], byKind(asr ? 'audioinput' : 'audiooutput', value[device]),
                         next => update(device, next)),

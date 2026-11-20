@@ -45,7 +45,7 @@ const tools = [
         tool('vector.spatial_join', '空间连接', 'spatialJoin', '连接', ['目标图层', vector], ['提供属性的图层', vector]),
     ] },
     { title: '坐标系', icon: 'globe', tools: [
-        tool('crs.reproject', '投影转换', 'globe', '转换', ['图层', spatial]),
+        tool('crs.reproject', '投影', 'globe', '运行', ['图层', spatial]),
         tool('crs.assign', '定义坐标系', 'target', '定义', ['图层', spatial]),
     ] },
     { title: '栅格处理', icon: 'grid', tools: [
@@ -213,7 +213,7 @@ function ProjectionChoice({ layer, value, onPick }) {
         })),
         value?.target.outsideArea && value.plan === 'automatic' &&
             h('p', { className: 'gis-tool-description', role: 'status' }, '图层超出该坐标系的标称适用范围，请确认项目要求。'),
-        choices.length > 0 && field('转换方案', dropdown(value.plan, choices,
+        choices.length > 0 && field('投影方案', dropdown(value.plan, choices,
             plan => onPick({ target: value.target, plan }))),
         error && h('p', { className: 'error', role: 'alert' }, error));
 }
@@ -409,7 +409,9 @@ function ResultSummary({ result, areaUnit }) {
         metrics.push(['area', result.statistics.area[areaUnit]]);
         labels.area = '总面积（' + areaUnits[areaUnit] + '）';
     }
+    const projection = result.statistics?.projection;
     return h(window.React.Fragment, null,
+        projection?.method && h('p', null, projection.method),
         metrics.length > 0 && h('dl', { className: 'gis-result-metrics', role: 'status' },
             metrics.map(([name, value]) => h('div', { key: name }, h('dt', null, labels[name]),
                 h('dd', null, name === 'area' ? value.toLocaleString('zh-CN', { maximumSignificantDigits: 9 }) : format(value))))),
@@ -563,8 +565,8 @@ export function MapTool({ getContainer, operation, active, lockInput, layers, se
             toolDescription[operation] && h('p', { className: 'gis-tool-description' }, toolDescription[operation]),
             definition.multiple && h('p', { className: 'gis-tool-description' }, '选择两个或更多图层。'),
             ...[...selectors, ...form.controls].map((control, index) => h(window.React.Fragment, { key: index }, control)),
-            missing && h('div', { className: 'gis-component-message' }, '请先安装栅格处理组件',
-                h(Button, { size: 'small', onClick: openComponents }, '打开组件设置')),
+            missing && h('div', { className: 'gis-component-message' }, '请先安装栅格处理模块',
+                h(Button, { size: 'small', onClick: openComponents }, '打开模块设置')),
             (error || problem) && h('p', { className: 'error', role: 'alert' }, error || problem)));
 }
 
@@ -726,7 +728,7 @@ export function MapProcessing({ skill, layers, entries, components, openComponen
             h(ToolProgress, { busy }),
             missing.length > 0 && h('div', { className: 'gis-component-message', role: 'status' },
                 '请先安装' + missing.map(kind => window.GuizhiComponentNames[kind]).join('、'),
-                h(Button, { size: 'small', onClick: openComponents }, '打开组件设置')),
+                h(Button, { size: 'small', onClick: openComponents }, '打开模块设置')),
             result ? h(window.React.Fragment, null,
                 metrics.length > 0 && h('dl', { className: 'gis-result-metrics', role: 'status' },
                     ...metrics.map(([name, value]) => h('div', { key: name }, h('dt', null, stats[name]), h('dd', null, metric(name, value))))),

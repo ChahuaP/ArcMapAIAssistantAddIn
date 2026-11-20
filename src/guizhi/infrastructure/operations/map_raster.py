@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from guizhi.infrastructure.operations import raster
-from pyproj.transformer import TransformerGroup
+from guizhi.infrastructure.crs_options import projection
 
 
 def image_preview(file, target=None, bands=None, viewport=None, *, metadata_only=False, appearance=None):
@@ -22,11 +22,9 @@ def image_preview(file, target=None, bands=None, viewport=None, *, metadata_only
             destination = raster.CRS.from_user_input(target)
             origin = raster.CRS.from_user_input(source.crs)
             if not origin.equals(destination, ignore_axis_order=True):
-                group = TransformerGroup(origin, destination, always_xy=True, allow_ballpark=False)
-                if not group.best_available or not group.transformers:
-                    raise ValueError("影像缺少可靠的坐标转换或所需格网")
+                operation = projection(origin, destination, source.bounds)
                 options = {"crs": destination.to_wkt(),
-                           "warp_extras": {"COORDINATE_OPERATION": group.transformers[0].definition}}
+                           "warp_extras": {"COORDINATE_OPERATION": operation.definition}}
         warped = options or source.transform.b or source.transform.d or (source.crs and source.transform.e > 0)
         with (WarpedVRT(source, resampling=Resampling.nearest, **options) if warped else nullcontext(source)) as src:
             transform = src.transform if src.crs or src.transform.e < 0 else from_origin(0, 0, 1, 1)

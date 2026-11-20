@@ -42,15 +42,15 @@ class Components {
     }
 
     async install(kind, archive) {
-        if (!Object.hasOwn(this.entries, kind)) throw new Error('该组件不可用');
+        if (!Object.hasOwn(this.entries, kind)) throw new Error('该模块不可用');
         if (this.installed(kind)) return;
-        if (kind === 'imagery' && !this.installed('raster')) throw new Error('请先安装栅格处理组件');
-        if (this.progress.has(kind)) throw new Error('该组件正在安装');
+        if (kind === 'imagery' && !this.installed('raster')) throw new Error('请先安装栅格处理模块');
+        if (this.progress.has(kind)) throw new Error('该模块正在安装');
         const entry = this.entries[kind];
         const target = this.target(kind, entry);
         const root = path.dirname(target);
         fs.mkdirSync(root, { recursive: true });
-        if (fs.realpathSync(root).toLowerCase() !== root.toLowerCase()) throw new Error('组件目录不能指向其他位置');
+        if (fs.realpathSync(root).toLowerCase() !== root.toLowerCase()) throw new Error('模块目录不能指向其他位置');
         const temp = path.join(root, randomUUID() + '.download');
         const stop = new AbortController();
         this.active.set(kind, stop);
@@ -61,22 +61,22 @@ class Components {
                 const url = new URL(entry.file, origin);
                 const signal = AbortSignal.any([stop.signal, AbortSignal.timeout(900_000)]);
                 const response = await fetch(url, { signal, redirect: 'error' });
-                if (response.status === 404) throw new Error('服务器上没有本版本的组件包，请选择同版本离线包');
-                if (!response.ok || !response.body) throw new Error('组件下载失败（HTTP ' + response.status + '），可选择同版本离线包');
+                if (response.status === 404) throw new Error('服务器上没有本版本的模块包，请选择同版本离线包');
+                if (!response.ok || !response.body) throw new Error('模块下载失败（HTTP ' + response.status + '），可选择同版本离线包');
                 const length = response.headers.get('content-length');
-                if (length !== null && Number(length) !== entry.size) throw new Error('服务器组件包大小与版本清单不一致');
+                if (length !== null && Number(length) !== entry.size) throw new Error('服务器模块包大小与版本清单不一致');
                 let bytes = 0;
                 let percent = 0;
                 const count = new Transform({ transform: (chunk, _, done) => {
                     bytes += chunk.length;
-                    if (bytes > entry.size) return done(new Error('组件下载大小异常'));
+                    if (bytes > entry.size) return done(new Error('模块下载大小异常'));
                     const next = Math.floor(bytes * 100 / entry.size);
                     if (next > percent) this.update(kind, percent = next);
                     done(null, chunk);
                 } });
                 await pipeline(Readable.fromWeb(response.body), count, fs.createWriteStream(temp, { flags: 'wx' }), { signal });
                 signal.throwIfAborted();
-                if (bytes !== entry.size) throw new Error('组件下载不完整，请重新下载或选择离线包');
+                if (bytes !== entry.size) throw new Error('模块下载不完整，请重新下载或选择离线包');
                 archive = temp;
                 stage = 'install';
                 this.update(kind, 'installing');
@@ -87,9 +87,9 @@ class Components {
             if (stop.signal.aborted) return;
             const detail = String(error.stderr || error.message).trim();
             if (stage === 'download') throw new Error(/\p{Script=Han}/u.test(detail)
-                ? detail : '无法连接组件服务器，请检查网络连接或选择同版本离线包');
-            throw new Error(detail.match(/组件包校验失败[^\r\n]*/u)?.[0] ||
-                '组件已下载，解包安装失败。请检查磁盘空间及安装目录的访问权限');
+                ? detail : '无法连接模块服务器，请检查网络连接或选择同版本离线包');
+            throw new Error(detail.match(/模块包校验失败[^\r\n]*/u)?.[0] ||
+                '模块已下载，解包安装失败。请检查磁盘空间及安装目录的访问权限');
         } finally {
             try { fs.rmSync(temp, { force: true }); }
             finally {

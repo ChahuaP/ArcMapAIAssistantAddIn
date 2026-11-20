@@ -621,7 +621,7 @@
                     ...freeInputs.map(freeMaterial)),
                 missingComponents.length > 0 && h('div', { className: 'section-head' },
                     h('span', null, '需安装：' + missingComponents.map(kind => window.GuizhiComponentNames[kind]).join('、')),
-                    button('settings', '打开按需组件', { onClick: openComponents })),
+                    button('settings', '打开功能模块', { onClick: openComponents })),
                 h(RoleMaterials, { roles: skill.materials, materials: draft.materials,
                     change: value => {
                         if (shared.current.materials === draft.materials) update('materials', value);

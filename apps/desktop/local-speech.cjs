@@ -12,7 +12,7 @@ class LocalSpeechRuntime {
     }
 
     verify(location, kind) {
-        if (!location) throw new Error('本机语音组件未安装');
+        if (!location) throw new Error('本机语音模块未安装');
         const root = this.externalPath(location);
         const identity = path.join(root, 'identity.json');
         if (!fs.existsSync(identity) || !fs.existsSync(path.join(root, 'engine', 'sherpa_onnx'))) {
@@ -62,7 +62,7 @@ class LocalSpeechRuntime {
             child.on('error', reject);
             child.on('close', code => {
                 if (code === 0) resolve(Buffer.concat(chunks));
-                else reject(new Error('本地语音执行失败' + (error.includes('ModuleNotFoundError') ? '，请检查运行组件' : '')));
+                else reject(new Error('本地语音执行失败' + (error.includes('ModuleNotFoundError') ? '，请检查运行模块' : '')));
             });
             child.stdin.end(data);
         });

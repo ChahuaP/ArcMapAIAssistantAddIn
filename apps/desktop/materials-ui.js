@@ -45,7 +45,7 @@
             item.layers.length > 1 && h('select', { 'aria-label': name + '图层', value: item.layer,
                 onChange: event => change({ ...item, layer: event.target.value }) },
                 h('option', { value: '' }, '选择图层'), ...item.layers.map(layer => h('option', { key: layer }, layer))),
-            item.layer && plans.length > 0 && h('select', { 'aria-label': name + '坐标转换',
+            item.layer && plans.length > 0 && h('select', { 'aria-label': name + '坐标投影',
                 value: item.plan || '', onChange: event => change({ ...item, plan: event.target.value }) },
                 h('option', { value: '' }, '沿用坐标'), ...plans.map(plan => {
                     const id = plan.id + '@' + plan.revision;

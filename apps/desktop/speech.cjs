@@ -345,7 +345,7 @@ class SpeechController {
         const provider = input[kind];
         if (provider === 'off') return { provider };
         if (provider === 'local') {
-            if (!this.bundledLocalRoot) throw new Error('本机语音组件未安装');
+            if (!this.bundledLocalRoot) throw new Error('本机语音模块未安装');
             return { provider };
         }
         const form = input[kind + 'Profile'] || {};

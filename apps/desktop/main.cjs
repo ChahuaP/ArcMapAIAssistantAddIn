@@ -583,25 +583,25 @@ async function startDesktop(options) {
     });
     bind('componentInstall', async (surface, kind, method) => {
         if (surface !== window || !Object.hasOwn(components.entries, kind) || !['download', 'offline'].includes(method)) {
-            throw new Error('组件安装请求无效');
+            throw new Error('模块安装请求无效');
         }
         let archive;
         if (method === 'offline') {
             const pick = await dialog.showOpenDialog(window, { properties: ['openFile'],
-                filters: [{ name: '离线组件包', extensions: ['zip'] }] });
+                filters: [{ name: '离线模块包', extensions: ['zip'] }] });
             if (pick.canceled) return;
             archive = pick.filePaths[0];
         }
         await components.install(kind, archive);
     }, true);
     bind('componentCancel', (surface, kind) => {
-        if (surface !== window || !Object.hasOwn(components.entries, kind)) throw new Error('组件安装请求无效');
+        if (surface !== window || !Object.hasOwn(components.entries, kind)) throw new Error('模块安装请求无效');
         components.cancel(kind);
     }, true);
     bind('arcgisInstall', async () => {
         const source = bridge();
         const file = source && path.join(path.dirname(source), 'Guizhi.esriaddin');
-        if (!file || !fs.existsSync(file)) throw new Error('请先安装 ArcGIS 组件');
+        if (!file || !fs.existsSync(file)) throw new Error('请先安装 ArcGIS 模块');
         if (await shell.openPath(file)) throw new Error('无法打开 ArcGIS 扩展安装程序');
     });
     bind('arcgisConfigure', carrier => sync.configure(carrier));

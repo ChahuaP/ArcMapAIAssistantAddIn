@@ -211,7 +211,7 @@ def grids_for(pipeline, workspace):
 def solve(workspace, payload):
     action = payload.get("action")
     if action not in {"inspect", "preview", "save"}:
-        raise ValueError("请选择坐标转换操作")
+        raise ValueError("请选择坐标投影操作")
     materials = [payload[key] for key in ("source_points", "target_points")]
     loaded = [points(item["file"], item.get("layer")) for item in materials]
     (left, left_ref), (right, right_ref) = loaded
