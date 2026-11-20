@@ -38,7 +38,7 @@ function checkedArtifact(record, step, parse = false) {
 }
 
 class DesktopController {
-    constructor({ userData, runtime, dsh, safeStorage, externalPath, onChange, bundledArcmap, installationRoot, diagnostics }) {
+    constructor({ userData, runtime, dsh, safeStorage, externalPath, onChange, installationRoot, diagnostics }) {
         this.file = path.join(userData, 'settings.json');
         this.historyFile = path.join(userData, 'desktop-conversation.json');
         fs.mkdirSync(userData, { recursive: true });
@@ -51,7 +51,6 @@ class DesktopController {
         this.gis = new LocalPython(this.runtime.python, cli, '_gis-worker', '地图处理', 600_000);
         this.diagnostics = diagnostics;
         this.storage = safeStorage;
-        this.bundledArcmap = bundledArcmap;
         this.installationRoot = installationRoot;
         this.externalPath = externalPath;
         this.onChange = onChange;
@@ -100,9 +99,9 @@ class DesktopController {
     }
 
     state() {
-        const { workspace, modelConfig, showOperation, screenHighlight, carrier, encryptedKey, modelVision } = this.settings;
+        const { workspace, modelConfig, showOperation, screenHighlight, encryptedKey, modelVision } = this.settings;
         return { settings: { workspace, modelConfig, showOperation, screenHighlight,
-            operator: this.settings.operator || '', carrier: carrier || 'none', modelVision: Boolean(modelVision), keyConfigured: Boolean(modelConfig && encryptedKey) },
+            operator: this.settings.operator || '', modelVision: Boolean(modelVision), keyConfigured: Boolean(modelConfig && encryptedKey) },
             tasks: this.tasks, busy: Boolean(this.active || this.delivery), delivery: this.delivery };
     }
 
@@ -151,7 +150,7 @@ class DesktopController {
     }
 
     configure(input) {
-        if (this.active || this.modelTesting || this.skillBusy || this.hostBusy) throw new Error('请先结束当前任务');
+        if (this.active || this.modelTesting || this.skillBusy) throw new Error('请先结束当前任务');
         const name = typeof input.operator === 'string' ? input.operator.trim() : '';
         if (!this.settings.workspace && !name) throw new Error('请输入姓名');
         if (name.length > 60 || /[\r\n]/.test(name)) throw new Error('姓名最多填写 60 个字');
@@ -163,7 +162,7 @@ class DesktopController {
             encryptedKey = this.storage.encryptString(key).toString('base64');
         }
         const settings = { workspace, operator: name || this.settings.operator, modelConfig: config, showOperation: input.showOperation !== false,
-            screenHighlight: input.screenHighlight !== false, carrier: this.settings.carrier, modelVision: input.modelVision === true, encryptedKey };
+            screenHighlight: input.screenHighlight !== false, modelVision: input.modelVision === true, encryptedKey };
         save(this.file, settings);
         const changedWorkspace = workspace !== this.settings.workspace;
         this.settings = settings;
@@ -179,8 +178,7 @@ class DesktopController {
         try {
             const result = await exec(this.runtime.python, ['-I', '-B', cli, '--workspace',
                 this.settings.workspace, command, ...args], {
-                windowsHide: true, timeout: command === 'map' ? 600_000 : ['skill-trial', 'skill-publish', 'material-intake', 'crs-solve', 'crs-define',
-                    'arcgis-capture', 'arcgis-revision'].includes(command) ? 240000 : command === 'arcgis-stage' ? 95000 : 30000,
+                windowsHide: true, timeout: ['map', 'knowledge'].includes(command) ? 600_000 : ['skill-trial', 'skill-publish', 'material-intake', 'crs-solve', 'crs-define'].includes(command) ? 240000 : 30000,
                 maxBuffer: 8 << 20 });
             return JSON.parse(result.stdout);
         } catch (error) {
@@ -223,13 +221,6 @@ class DesktopController {
             throw error;
         }
     }
-
-    selectCarrier(carrier) {
-        const settings = { ...this.settings, carrier };
-        save(this.file, settings);
-        this.settings = settings;
-    }
-
 
     submit({ prompt, project, control, skill, materials = {}, skillParameters, parameterText, mentions, mapPicks = [], images = [], imageBlocks = [], dialogue = false, mapContext }) {
         if (!this.settings.workspace) throw new Error('请先选择成果保存位置');
@@ -306,8 +297,6 @@ class DesktopController {
         } }).then(receipt => this.complete(task, receipt), error => this.complete(task, {
             status: stop.signal.aborted ? 'cancelled' : 'failed', error: error.message, error_code: error.code,
         }));
-        try { if (suppliedMaterials) this.onStarted?.(task); }
-        catch (error) { console.error('ArcGIS display:', error.message); }
         return this.state();
     }
 
@@ -460,10 +449,6 @@ class DesktopController {
             }
             if (this.tasks.includes(task)) this.persist();
             this.onChange(this.state());
-            if (current && status === 'succeeded') {
-                try { this.onCompleted?.(task, this.tasks[1]?.id); }
-                catch (error) { console.error('ArcGIS publication:', error.message); }
-            }
         }
     }
 

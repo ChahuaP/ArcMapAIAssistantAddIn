@@ -58,12 +58,11 @@
             }));
     }
 
-    function AddMenu({ skill, host, busy, add }) {
+    function AddMenu({ skill, busy, add }) {
         const items = [
             !skill && { key: 'file', label: '添加文件', icon: icon('paperclip') },
             !skill && { key: 'folder', label: '添加文件夹', icon: icon('folder') },
             { key: 'image', label: '添加图片', icon: icon('image') },
-            window.GuizhiArcgisMaterialItems(host),
         ].filter(Boolean);
         return h(Dropdown, { trigger: ['click'], placement: 'topLeft', menu: { items, onClick: ({ key }) => add(key) } },
             iconButton('plus', '添加', { disabled: busy, 'aria-haspopup': 'menu' }));

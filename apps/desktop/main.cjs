@@ -11,7 +11,6 @@ const { createShell } = require('./shell.cjs');
 const { productName } = require('./brand.js');
 const { listModels, checkModelConnection, testModel } = require('./model-service.cjs');
 const { formats, materialBindings } = require('./materials.cjs');
-const { ArcGisSync } = require('./arcgis-sync.cjs');
 const { DiagnosticsUpload } = require('./diagnostics-upload.cjs');
 const { prepareConversation, uploadConversation } = require('./conversation-feedback.cjs');
 const { conversationRetentionDays } = require('./conversation-schema.cjs');
@@ -41,7 +40,7 @@ async function startDesktop(options) {
         'materials-ui.js', 'skill-editor.js',
         'style.css', 'theme.css', 'mark.svg', 'luhe-banner.png', 'model-form.js', 'onboarding.js',
         'portrait.html', 'portrait.css', 'portrait.js', 'task-commands.js', 'speech-settings.js',
-        'speech-audio.js', 'voice-input.js', 'arcgis-extension.js', 'markdown.js', 'messages.js',
+        'knowledge-settings.js', 'speech-audio.js', 'voice-input.js', 'markdown.js', 'messages.js',
         'component-actions.js', 'business-log.js', 'business-log.css', 'composer-media.js'];
     const files = new Map(localFiles.map(name => ['/' + name, path.join(__dirname, name)]));
     files.set('/map.js', path.join(rendererRuntime, 'map.js'));
@@ -76,7 +75,6 @@ async function startDesktop(options) {
     const workbenchUrl = origin + '/index.html';
     const launcherUrl = workbenchUrl + '?surface=launcher';
     const portraitUrl = origin + '/portrait.html';
-    let sync;
     let attributeWindow;
     let draft = {};
     const imageInputs = new Map();
@@ -105,10 +103,6 @@ async function startDesktop(options) {
         speech.bundledLocalRoot = options.bundledSpeech || components.installed('speech');
         broadcast(controller.state());
     });
-    function bridge() {
-        const bundled = path.join(__dirname, '../../packaging/arcgis/ArcMapBridge.exe');
-        return options.bundledArcmap || (fs.existsSync(bundled) ? bundled : undefined);
-    }
     const speech = new SpeechController({ userData: app.getPath('userData'), storage: safeStorage,
         local: new LocalSpeechRuntime(python, externalPath),
         bundledLocalRoot: options.bundledSpeech || components.installed('speech'),
@@ -118,7 +112,7 @@ async function startDesktop(options) {
     const withSpeech = state => {
         const available = components.state();
         return { ...state, speech: { ...speech.state(), component: available.speech }, voiceReply,
-            appearance: desktop.appearance(), arcgis: sync?.state(),
+            appearance: desktop.appearance(),
             components: available, update: updater.state(), version };
     };
     function setVoiceReply(value) {
@@ -132,7 +126,7 @@ async function startDesktop(options) {
         desktop.notify('state', withSpeech(state));
     }
     const controller = new DesktopController({ userData: app.getPath('userData'), runtime, dsh,
-        safeStorage, externalPath, onChange: broadcast, bundledArcmap: bridge(),
+        safeStorage, externalPath, onChange: broadcast,
         installationRoot: options.installationRoot, diagnostics });
     if (!options.verifyStartup) {
         controller.reader.start();
@@ -141,10 +135,6 @@ async function startDesktop(options) {
         controller.gis.start();
         controller.warmModel();
     }
-    const hostRoot = process.env.GUIZHI_ARCGIS_HOSTS || path.join(process.env.LOCALAPPDATA, 'Guizhi', 'ArcGIS', 'hosts');
-    sync = new ArcGisSync(controller, hostRoot, app.getPath('documents'), () => broadcast(controller.state()));
-    controller.onStarted = task => sync.started(task);
-    controller.onCompleted = (task, previousTask) => sync.completed(task, previousTask);
     const partition = portrait.webContents.session;
     partition.setPermissionRequestHandler((source, permission, callback, details) => callback(
         ((source === portrait.webContents && source.getURL() === portraitUrl) ||
@@ -184,7 +174,6 @@ async function startDesktop(options) {
         if (closing) return;
         closing = true;
         desktop.close();
-        sync.close();
         speech.cancel();
         void Promise.allSettled([controller.gis.stop(), toolJob, feedbackSending]).then(() => {
             diagnostics.close();
@@ -234,12 +223,38 @@ async function startDesktop(options) {
             return withSurface ? handler(surface, ...args) : handler(...args);
         });
     }
+    let knowledgeBusy = false;
+    bind('knowledge', async (surface, action, value) => {
+        if (surface !== window || !['list', 'model', 'import', 'delete', 'edit', 'export', 'test'].includes(action)) {
+            throw new Error('资料操作无效');
+        }
+        if (knowledgeBusy) throw new Error('资料库正在处理，请稍候');
+        knowledgeBusy = true;
+        try {
+            if (action === 'import') {
+                const selection = await dialog.showOpenDialog(window, { properties: ['openFile'], filters: [
+                    { name: '知识资料', extensions: ['pdf', 'docx', 'txt', 'md'] }] });
+                if (selection.canceled) return null;
+                value = { region: value?.region, version: value?.version, start: value?.start, end: value?.end,
+                    file: externalPath(selection.filePaths[0]) };
+            }
+            if (action === 'export') {
+                const list = await controller.request('knowledge', { action: 'list' });
+                const document = list.documents.find(item => item.id === value);
+                if (!document) throw new Error('资料已删除');
+                const pick = await dialog.showSaveDialog(window, { defaultPath: document.name });
+                if (pick.canceled) return null;
+                value = { id: document.id, file: externalPath(pick.filePath) };
+            }
+            return await controller.request('knowledge', { action, value });
+        } finally { knowledgeBusy = false; }
+    }, true);
     bind('state', () => withSpeech(controller.state()));
     bind('updateCheck', () => updater.check());
     bind('updatePrepare', () => updater.prepare());
     bind('updateCancel', () => updater.cancel());
-    const updateBlocked = () => closing || toolJob || feedbackSending || controller.active ||
-        controller.modelTesting || controller.hostBusy || controller.skillBusy || components.active.size;
+    const updateBlocked = () => closing || toolJob || feedbackSending || knowledgeBusy || controller.active ||
+        controller.modelTesting || controller.skillBusy || components.active.size;
     async function restartForUpdate() {
         if (updateBlocked()) {
             throw new Error('请在当前操作结束后重启更新');
@@ -472,7 +487,6 @@ async function startDesktop(options) {
             portrait.webContents.send('guizhi:voiceStop');
         }
         modelCheck = undefined;
-        sync.refresh();
         broadcast(state);
         return withSpeech(state);
     });
@@ -520,7 +534,6 @@ async function startDesktop(options) {
         return { model: { mode: config?.mode, name: config?.model, state: config ? 'configured' : 'missing', ...modelCheck },
             upload: diagnostics.state(),
             voice: { asr: speech.diagnostic('asr'), tts: speech.diagnostic('tts') },
-            bridge: Boolean(sync.bridge && fs.existsSync(sync.bridge)),
             workspace,
             shortcut: { registered: appearance.shortcutRegistered, value: appearance.shortcut } };
     }, true);
@@ -598,15 +611,6 @@ async function startDesktop(options) {
         if (surface !== window || !Object.hasOwn(components.entries, kind)) throw new Error('模块安装请求无效');
         components.cancel(kind);
     }, true);
-    bind('arcgisInstall', async () => {
-        const source = bridge();
-        const file = source && path.join(path.dirname(source), 'Guizhi.esriaddin');
-        if (!file || !fs.existsSync(file)) throw new Error('请先安装 ArcGIS 模块');
-        if (await shell.openPath(file)) throw new Error('无法打开 ArcGIS 扩展安装程序');
-    });
-    bind('arcgisConfigure', carrier => sync.configure(carrier));
-    bind('arcgisRetry', id => sync.retry(id));
-    bind('arcgisCapture', (index, selected) => sync.capture(index, selected));
     bind('material', async (kind = 'any', folder = false) => {
         if (kind !== 'any' && !Object.hasOwn(formats, kind)) throw new Error('材料格式无效');
         const groups = kind === 'any' ? Object.values(formats) : [formats[kind]];
@@ -687,54 +691,6 @@ async function startDesktop(options) {
         const business = await controller.mapBusiness({ id, startedAt, materials: display, output });
         broadcast(controller.state());
         return { ...output, business };
-    }, true);
-    let currentMxd;
-    function requireMxdBridge() {
-        const executable = bridge();
-        if (!executable) throw new Error('本版缺少 MXD 桥接程序，请使用正式安装包');
-        return executable;
-    }
-    bind('mxdRead', async surface => {
-        if (surface !== window) throw new Error('请在地图工作区打开 MXD');
-        const executable = requireMxdBridge();
-        const pick = await dialog.showOpenDialog(window, { properties: ['openFile'], filters: [{ name: 'ArcGIS 地图工程', extensions: ['mxd'] }] });
-        if (pick.canceled) return null;
-        const source = externalPath(pick.filePaths[0]);
-        const manifest = await controller.request('map', { action: 'mxd-read', bridge: executable, source });
-        currentMxd = { source, manifest, workspace: controller.settings.workspace };
-        return { name: path.basename(source, '.mxd'), frames: manifest.frames.map(frame => ({
-            name: frame.name, count: frame.layers.length,
-            missing: frame.layers.filter(item => !item.valid && (item.source || item.workspace && item.dataset)).length,
-            unsupported: frame.layers.filter(item => item.kind === 'unsupported' ||
-                !(item.source || item.workspace && item.dataset)).length,
-        })) };
-    }, true);
-    bind('mxdImport', async (surface, index, relocate) => {
-        if (surface !== window || !currentMxd || currentMxd.workspace !== controller.settings.workspace ||
-                !Number.isInteger(index) || !currentMxd.manifest.frames[index]) throw new Error('请先打开 MXD 并选择数据框');
-        const { source, manifest } = currentMxd;
-        let search;
-        if (relocate) {
-            const pick = await dialog.showOpenDialog(window, { properties: ['openDirectory'] });
-            if (pick.canceled) return null;
-            search = externalPath(pick.filePaths[0]);
-        }
-        return controller.request('map', { action: 'mxd-import', source, frame: manifest.frames[index], search });
-    }, true);
-    bind('mxdWrite', async (surface, input) => {
-        if (surface !== window || !Array.isArray(input?.layers) || input.layers.length > 256 ||
-                input.layers.some(item => !mapLayers.has(mapKey(item.ref)))) throw new Error('请从地图工作区保存有效图层');
-        const executable = requireMxdBridge();
-        const pick = await dialog.showSaveDialog(window, { defaultPath: '地图工程.mxd',
-            filters: [{ name: 'ArcGIS 地图工程', extensions: ['mxd'] }] });
-        if (pick.canceled) return null;
-        const output = externalPath(pick.filePath);
-        const relative = path.relative(path.join(controller.settings.workspace, 'runs'), output);
-        if (!path.isAbsolute(relative) && relative.split(path.sep)[0] !== '..') throw new Error('请选择独立的地图工程保存位置');
-        const result = await controller.request('map', { action: 'mxd-write', bridge: executable, output,
-            name: path.basename(output, '.mxd'), layers: input.layers, crs: input.crs, bounds: input.bounds, background: input.background });
-        shell.showItemInFolder(output);
-        return result;
     }, true);
     const pendingSources = new Map();
     const coordinateFiles = new Set(['.csv', '.xlsx']);
@@ -1162,7 +1118,7 @@ async function startDesktop(options) {
             }
         })().catch(error => updater.failure(error));
     }
-    return { window, launcher, portrait, tray, controller, speech, arcgis: sync, components,
+    return { window, launcher, portrait, tray, controller, speech, components,
         updateActivated: () => updater.set('complete') };
 }
 

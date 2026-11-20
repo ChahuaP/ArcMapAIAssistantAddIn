@@ -81,7 +81,7 @@ def verify_runtimes(runtime, desktop, dsh):
             "electron": desktop_identity["electron"], "dsh": json_file(dsh / "package.json")["dependencies"]}
 
 
-def build(stage, runtime, desktop, dsh, speech, arcmap, addin, tree, commit):
+def build(stage, runtime, desktop, dsh, speech, tree, commit):
     dependencies = verify_runtimes(runtime, desktop, dsh)
     version = (SOURCE / "VERSION").read_text(encoding="ascii").strip()
     if not re.fullmatch(VERSION, version) or not re.fullmatch(r"[a-f0-9]{40}", tree):
@@ -141,13 +141,6 @@ def build(stage, runtime, desktop, dsh, speech, arcmap, addin, tree, commit):
                 if checksum(speech / "models" / mode / item["file"]) != item["sha256"]:
                     raise ValueError("Local speech asset differs from its pinned checksum")
         components["speech"] = create(speech, archives / f"Guizhi-{version}-speech.zip")
-    if not arcmap or not addin or not all((arcmap / name).is_file() for name in ("ArcMapBridge.exe", "ArcMapBridge.build")):
-        raise ValueError("The release requires the verified ArcGIS Desktop bridge and add-in")
-    for file in arcmap.iterdir():
-        if file.is_file() and (file.suffix.lower() in {".exe", ".dll"} or
-                               file.name in {"ArcMapBridge.exe.config", "ArcMapBridge.build"}):
-            copy_file(file, core / "packaging/arcgis" / file.name)
-    copy_file(addin, core / "packaging/arcgis/Guizhi.esriaddin")
     (core / "packaging/components.json").write_text(json.dumps(components, sort_keys=True), encoding="utf-8")
     hashes = {name: checksum(file) for name, file in files(payload)}
     boot = {name: checksum(file) for name, file in files(bootstrap)}
@@ -165,16 +158,13 @@ def main():
     parser = argparse.ArgumentParser()
     for item in ("stage", "runtime", "desktop", "dsh"):
         parser.add_argument("--" + item, required=True, type=absolute)
-    for item in ("speech", "arcmap"):
-        parser.add_argument("--" + item, type=absolute)
-    parser.add_argument("--addin", type=Path)
+    parser.add_argument("--speech", type=absolute)
     parser.add_argument("--tree", required=True)
     parser.add_argument("--commit")
     args = parser.parse_args()
     if args.stage.is_relative_to(SOURCE) or SOURCE.is_relative_to(args.stage):
         raise ValueError("Installer staging must be outside source")
-    print(json.dumps(build(args.stage, args.runtime, args.desktop, args.dsh, args.speech, args.arcmap,
-                           args.addin, args.tree, args.commit)))
+    print(json.dumps(build(args.stage, args.runtime, args.desktop, args.dsh, args.speech, args.tree, args.commit)))
 
 
 if __name__ == "__main__":

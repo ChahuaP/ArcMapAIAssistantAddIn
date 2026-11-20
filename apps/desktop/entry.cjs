@@ -11,7 +11,7 @@ async function main() {
     const { values } = parseArgs({ args: process.argv.slice(2), options: {
         runtime: { type: 'string' }, dsh: { type: 'string' },
         'renderer-runtime': { type: 'string' }, 'user-data': { type: 'string' },
-        'bundled-speech': { type: 'string' }, 'bundled-arcmap': { type: 'string' },
+        'bundled-speech': { type: 'string' },
         'installation-root': { type: 'string' },
         'verify-startup': { type: 'string' }, 'update-ready': { type: 'string' },
     } });
@@ -23,7 +23,7 @@ async function main() {
     const desktop = await startDesktop({ runtime: values.runtime, dsh: values.dsh,
         rendererRuntime: values['renderer-runtime'], userData: values['user-data'],
         installationRoot: values['installation-root'],
-        bundledSpeech: values['bundled-speech'], bundledArcmap: values['bundled-arcmap'],
+        bundledSpeech: values['bundled-speech'],
         verifyStartup: Boolean(probe), updateStartup: Boolean(updateReady) });
     if ((probe || updateReady) && desktop) {
         const [workbench, launcher, portrait] = await Promise.all([

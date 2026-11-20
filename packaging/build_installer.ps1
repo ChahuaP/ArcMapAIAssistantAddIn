@@ -7,8 +7,6 @@ param(
     [Parameter(Mandatory)][string]$SourceTree,
     [string]$SourceCommit,
     [string]$SpeechRuntime,
-    [string]$ArcmapRuntime,
-    [string]$ArcmapAddin,
     [string]$ReleaseRoot,
     [string]$CompilerPath,
     [string]$BuildPython = 'python',
@@ -23,8 +21,6 @@ $arguments = @('--stage', $stage, '--runtime', (Assert-ExternalBuildPath $Runtim
     '--dsh', (Assert-ExternalBuildPath $DshRuntime $repo), '--tree', $SourceTree)
 if ($SourceCommit) { $arguments += @('--commit', $SourceCommit) }
 if ($SpeechRuntime) { $arguments += @('--speech', (Assert-ExternalBuildPath $SpeechRuntime $repo)) }
-if ($ArcmapRuntime) { $arguments += @('--arcmap', (Assert-ExternalBuildPath $ArcmapRuntime $repo)) }
-if ($ArcmapAddin) { $arguments += @('--addin', (Assert-ExternalBuildPath $ArcmapAddin $repo)) }
 if (!$StageOnly) {
     $out = Assert-ExternalBuildPath $ReleaseRoot $repo
     if ($stage -eq $out -or $stage.StartsWith($out + '\', 'OrdinalIgnoreCase') -or $out.StartsWith($stage + '\', 'OrdinalIgnoreCase')) {

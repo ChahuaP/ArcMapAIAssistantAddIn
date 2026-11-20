@@ -8,7 +8,7 @@
         ['model', 'server', '模式与模型'], ['voice', 'mic', '语言与音色'],
         ['crs', 'globe', '坐标与投影'], ['appearance', 'sun', '外观与交互'],
         ['storage', 'folder', '成果与存储'], ['skills', 'briefcase', '业务与工具'],
-        ['components', 'layers', '组件与扩展'], ['about', 'info', '关于与诊断'],
+        ['components', 'layers', '组件与扩展'], ['knowledge', 'file', '知识与资料'], ['about', 'info', '关于与诊断'],
     ];
     const themes = [{ value: 'system', label: '跟随系统' }, { value: 'light', label: '明亮' },
         { value: 'dark', label: '暗色' }];
@@ -118,9 +118,6 @@
             return row(title, item.state, item.state !== 'off' &&
                 details(window.GuizhiSpeechNames[item.provider], item.at && new Date(item.at).toLocaleString()));
         };
-        const host = state.arcgis.host;
-        const arcgis = state.settings.carrier === 'none' ? 'disabled' : host ? 'connected' :
-            report?.bridge && state.arcgis.installed ? 'waiting' : 'unavailable';
         return [card('产品信息', h('div', { className: 'about-product' },
             h('p', { className: 'about-name' }, productName),
             h('p', { lang: 'en', className: 'muted' }, 'Smart Business Governance System for the Liuhe Branch of the Nanjing Municipal Bureau of Planning and Natural Resources'),
@@ -133,7 +130,6 @@
                     report.model.name, report.model.detail && errorText(report.model.detail),
                     report.model.at && new Date(report.model.at).toLocaleString())),
                 voiceRow('asr', '语音识别'), voiceRow('tts', '语音回答'),
-                row('ArcGIS', arcgis, host ? 'ArcGIS Desktop ' + host.version : ''),
                 row('全局快捷键', report.shortcut.registered ? 'registered' : 'unregistered', report.shortcut.value),
                 row('成果位置', report.workspace.state, details(report.workspace.path, report.workspace.detail))),
             error && h('p', { role: 'alert', className: 'error' }, error)),
@@ -148,13 +144,10 @@
 
     window.GuizhiSettings = function Settings({ state, appearance, saveAppearance, save, close, entries, setEntries,
         initial, catalog, refresh, plans, initialMarkdown }) {
-        const sectionId = id => id === 'extensions' ? 'components' : id;
-        const [section, select] = useState(typeof initial === 'string' ? sectionId(initial) : state.settings.workspace ? 'model' : 'storage');
-        const [moduleTab, setModuleTab] = useState(initial === 'extensions' ? 'extensions' : 'modules');
+        const [section, select] = useState(typeof initial === 'string' ? initial : state.settings.workspace ? 'model' : 'storage');
         useEffect(() => {
             if (typeof initial !== 'string') return;
-            select(sectionId(initial));
-            if (initial === 'components' || initial === 'extensions') setModuleTab(initial === 'extensions' ? 'extensions' : 'modules');
+            select(initial);
         }, [initial]);
         const [value, change] = useState({ ...state.settings, modelConfig: state.settings.modelConfig || window.GuizhiModel.initial(), key: '' });
         const [error, setError] = useState('');
@@ -198,19 +191,16 @@
             skills: () => h(window.GuizhiBusiness.Business, { catalog, refresh, plans, initialMarkdown, manage: true }),
             components: () => {
                 const available = state.components || {};
-                const tabs = h(antd.Segmented, { key: 'modules-nav', 'aria-label': '组件与扩展',
-                    options: [{ value: 'modules', label: '功能模块' }, { value: 'extensions', label: '第三方扩展' }],
-                    value: moduleTab, onChange: setModuleTab });
-                if (moduleTab === 'extensions') return [tabs, h(window.GuizhiArcgisExtension, { key: 'extension', sync: state.arcgis })];
-                return [tabs, ...Object.entries(window.GuizhiComponentNames).filter(([id]) => available[id]).map(([id, label]) =>
+                return Object.entries(window.GuizhiComponentNames).filter(([id]) => available[id]).map(([id, label]) =>
                     h('section', { className: 'settings-card', key: id },
                         h('div', { className: 'section-head' }, h('h2', null, label),
                             h(antd.Tag, { color: available[id].installed ? 'success' : undefined },
                                 available[id].installed ? '已安装' : '未安装')),
                         id === 'imagery' && !available.raster?.installed
                             ? h('p', { className: 'muted' }, '请先安装栅格处理模块。')
-                            : h(window.GuizhiComponentActions, { kind: id, component: available[id] })))];
+                            : h(window.GuizhiComponentActions, { kind: id, component: available[id] })));
             },
+            knowledge: () => h(window.GuizhiKnowledge),
             about: () => h(About, { state }),
         };
         const current = sections.find(([id]) => id === section);

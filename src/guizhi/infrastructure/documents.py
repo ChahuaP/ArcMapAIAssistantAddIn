@@ -84,7 +84,10 @@ def sheet_fragments(path, check):
 
 
 def read_text_data(path):
-    raw = path.read_bytes()
+    return decode_text_data(path.read_bytes(), path.suffix)
+
+
+def decode_text_data(raw, suffix):
     try:
         encoding = "utf-16" if raw.startswith((b"\xff\xfe", b"\xfe\xff")) else "utf-8-sig"
         text = raw.decode(encoding)
@@ -92,9 +95,9 @@ def read_text_data(path):
         try:
             text = raw.decode("gb18030")
         except UnicodeDecodeError as error:
-            raise ValueError(f"{path.suffix[1:].upper()} 编码无法识别，请另存为 UTF-8 后添加") from error
+            raise ValueError(f"{suffix[1:].upper()} 编码无法识别，请另存为 UTF-8 后添加") from error
     if "\0" in text:
-        raise ValueError(f"{path.suffix[1:].upper()} 含有无效的文本字符，请另存为 UTF-8 后添加")
+        raise ValueError(f"{suffix[1:].upper()} 含有无效的文本字符，请另存为 UTF-8 后添加")
     return text
 
 

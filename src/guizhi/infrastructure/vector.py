@@ -120,7 +120,6 @@ def digest(path: Path) -> str:
 
 def source_files(path):
     if path.suffix.lower() == ".gdb":
-        from guizhi.infrastructure.arcmap import file_stamps
 
         parts = [path / name for name, _, _ in file_stamps(path)]
         if not path.is_dir() or not parts or any(file.resolve() != file for file in parts):
@@ -269,7 +268,6 @@ def import_layer(source_path, layer, directory, filename, job_id, ensure_supervi
     snapshot = directory / "artifacts" / filename
     originals = []
     if source.suffix.lower() == ".gdb":
-        from guizhi.infrastructure.arcmap import file_stamps
 
         before = file_stamps(source)
         if expected_source_revision and source_revision(source_files(source)) != expected_source_revision:
@@ -360,3 +358,10 @@ def inventory(task: dict, job: dict, directory: Path, progress, ensure_supervise
         "export_layer": "inventory",
         "runtime": {"gdal": pyogrio.__gdal_version_string__, "pyogrio": pyogrio.__version__},
     }
+
+
+def file_stamps(source):
+    files = (source.iterdir() if source.is_dir() else
+             (file for file in source.parent.iterdir() if file.stem == source.stem))
+    return sorted((file.name, stat.st_size, stat.st_mtime_ns)
+                  for file in files if file.suffix.lower() != ".lock" and file.is_file() for stat in [file.stat()])

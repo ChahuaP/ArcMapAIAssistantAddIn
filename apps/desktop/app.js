@@ -526,13 +526,6 @@
             if (key === 'image') return addImages(api.addImages());
             if (key === 'file') return addMaterials(() => api.material());
             if (key === 'folder') return addMaterials(() => api.material('any', true));
-            const [, layer, scope] = key.split(':');
-            setAdding(true);
-            try {
-                const item = await api.arcgisCapture(Number(layer), scope === 'selection');
-                if (shared.current === draft) setDraft(current => withMaterials(current, [item]));
-            } catch (error) { fail(error); }
-            finally { setAdding(false); }
         }
         function paste(event) {
             const pictures = Array.from(event.clipboardData?.files || []).filter(file => file.type.startsWith('image/'));
@@ -635,7 +628,7 @@
                 })),
                 ...freeInputs.map(freeMaterial)),
             h('div', { className: 'compose-actions' },
-                h(AddMenu, { skill, host: state?.arcgis.host, busy: busy || adding, add: addFromMenu }),
+                h(AddMenu, { skill, busy: busy || adding, add: addFromMenu }),
                 h('span', { className: 'spacer' }),
                 iconButton('mic', '语音对话', { onClick: () => {
                     if (!launcher && state?.speech.asr === 'off') showSettings('voice');
@@ -787,15 +780,6 @@
             entries: coordinates, catalog, components: state.components, openComponents,
             display: mapDisplay, setDisplay: setMapDisplay, background: mapBackground, setBackground: setMapBackground,
             styleLayer: (id, style) => setLayers(old => old.map(item => mapKey(item) === id ? { ...item, style } : item)),
-            importFrame: ({ layers: items, frame }) => {
-                setLayers(items);
-                setActiveLayer(mapKey(items[0]));
-                setMapSelection(null);
-                hideLayers(items.filter(item => !item.visible).map(mapKey));
-                setMapDisplay(frame.crs ? { wkt: frame.crs, units: frame.units, metresPerUnit: frame.metresPerUnit,
-                    label: frame.crsName || frame.name, bounds: frame.bounds } : null);
-                setMapBackground(frame.background);
-            },
             fail, activity: state.settings.screenHighlight !== false ? activity : null,
             requestedLayout: layoutReady && task?.id === layoutReady.id && !task.layoutImage && !task.layoutError && task.layout
                 ? { taskId: task.id, layout: task.layout, signal: layoutReady.signal } : null,
@@ -821,8 +805,7 @@
             page: showCenter ? h(BusinessLog, { revision: state, catalog: h(Business, { catalog, choose }) }) : null,
             mode: mapMode, setMode: mode => { if (mode !== 'chat') setMapMounted(true); setMapMode(mode); },
             activity, ownership, onCancel: takeOver, fail,
-            arcgis: () => { if (!mapEditing) showSettings('extensions'); },
-            connected: Boolean(state?.arcgis?.host) });
+            openModules: () => { if (!mapEditing) showSettings('components'); } });
         return h(Theme, { appearance }, layout,
             showFeedback && h(ConversationFeedback, { close: () => setShowFeedback(false) }));
     }

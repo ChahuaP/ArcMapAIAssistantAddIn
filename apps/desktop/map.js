@@ -7,7 +7,7 @@ import { geometryProperties } from './map-attribute-tools.js';
 import { useTableWindow } from './map-table-window.js';
 import { AttributeSort, AttributeStatistics, AttributeCell } from './map-table-ui.js';
 import { MapLayout, amendLayout, drawMapLayers, mapCanvas, mapImage, sheetSize } from './map-layout.js';
-import { LayerProperties, MapProperties, MxdOpen, categoryValue, classifyLayer, defaultMapBackground, layerSymbol, opacity, symbol } from './map-layer-dialog.js';
+import { LayerProperties, MapProperties, categoryValue, classifyLayer, defaultMapBackground, layerSymbol, opacity, symbol } from './map-layer-dialog.js';
 import Map from 'ol/Map.js';
 import { defaults as defaultInteractions } from 'ol/interaction/defaults.js';
 import MouseWheelZoom from 'ol/interaction/MouseWheelZoom.js';
@@ -240,7 +240,7 @@ function CoordinateTools({ layer, display, setDisplay, entries, openTool, fail, 
 }
 
 function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer, active, hidden, toggle, entries, catalog, components,
-    openComponents, display, setDisplay, background, setBackground, styleLayer, importFrame, fail, activity,
+    openComponents, display, setDisplay, background, setBackground, styleLayer, fail, activity,
     requestedLayout, openLayout, onLayout, onLayoutSettled, mapActions, onMapActions, selection, setSelection, replace, replaceLayers, editing }) {
     const node = useRef(null);
     const graph = useRef(null);
@@ -248,7 +248,6 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
     const [mapProperties, setMapProperties] = useState(null);
     const [layout, setLayout] = useState(null);
     const [layoutDraft, setLayoutDraft] = useState(null);
-    const [document, setDocument] = useState(null);
     const cursorLabel = useRef(null);
     const scaleLabel = useRef(null);
     const [viewReady, setViewReady] = useState(false);
@@ -310,7 +309,6 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
     useEffect(() => { editing(Boolean(edit) || busy); return () => editing(false); }, [Boolean(edit), busy]);
     const [issue, setIssue] = useState('');
     const [layerErrors, setLayerErrors] = useState([]);
-    const [locateMxd, setLocateMxd] = useState(null);
     const [table, setTable] = useState(null);
     const [tableLayer, setTableLayer] = useState(null);
     const [tableRequest, requestTable] = useState({ page: 0 });
@@ -668,19 +666,6 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
             setImportIssues(issues);
         } catch (error) { setIoStatus(window.GuizhiErrorText(error)); }
         finally { setBusy(false); setImporting(null); }
-    }
-
-    async function mxd(job, accept) {
-        setBusy(true);
-        setIssue('');
-        setIoStatus('');
-        try {
-            const result = await job;
-            if (result) accept(result);
-        } catch (error) {
-            const text = String(error?.message || error).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '');
-            setIoStatus('地图工程操作失败。' + text);
-        } finally { setBusy(false); }
     }
 
     useEffect(() => {
@@ -1882,15 +1867,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                     setLayerErrors([]); setExpandedLegends({}); setIoStatus(''); setIssue('');
                 },
             }), { disabled: busy || Boolean(edit) || (!layers.length && !basemap && !display) }), command('地图属性', () => setMapProperties({ display, plan: displayPlans[active] }), { disabled: busy }))],
-        数据: [...(!edit ? [group('地图工程', command('打开', () => mxd(api.mxdRead(), value => { setLocateMxd(null); setDocument(value); }),
-            { disabled: busy, 'aria-label': '打开地图工程' }),
-            command('保存', () => mxd(api.mxdWrite({ crs: target, bounds: graph.current?.view.calculateExtent(graph.current.ol.getSize()),
-                background: backgroundColor,
-                layers: [...layers].reverse().map((item, index) => ({ ref: item.ref, name: item.name, visible: !hidden.includes(key(item)), opacity: opacity(item.style?.opacity ?? item.opacity),
-                    style: item.kind === 'raster' ? null : layerSymbol(item.style, palette[(layers.length - index - 1) % palette.length]) })) }),
-            result => setIoStatus('已保存 MXD 和配套数据 · ' + result.layers + ' 个图层')),
-            { disabled: busy || !layers.length || !viewReady, 'aria-label': '保存地图工程' })),
-            group('图层管理', command('添加数据', () => load(api.mapImport(null)), { icon: glyph('add'), disabled: busy }),
+        数据: [...(!edit ? [group('图层管理', command('添加数据', () => load(api.mapImport(null)), { icon: glyph('add'), disabled: busy }),
                 command('添加数据库', () => load(api.mapImport(null, true)), { icon: glyph('layers'), disabled: busy }),
                 command('添加底图', () => setBasemapDialog(true), { icon: glyph('globe'), disabled: busy }),
                 command('新建图层', () => openTool('geometry.create_dataset')),
@@ -2114,25 +2091,6 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                     .finally(() => onLayoutSettled(jobId));
             } : undefined,
             busy, close: () => setLayout(null), exportImage }),
-        document && h(MxdOpen, { document, busy, glyph, locateAvailable: locateMxd, close: () => setDocument(null),
-            open: (frame, locate) => mxd(api.mxdImport(frame, locate), result => {
-                if (result.layers.length) {
-                    graph.current.fitNeeded = true;
-                    graph.current.initialExtent = result.frame.bounds;
-                    mapBasis.current = null;
-                    setDisplayPlans({});
-                    setLayerErrors([]);
-                    setExpandedLegends({});
-                    setTable(null);
-                    importFrame(result);
-                    setDocument(null);
-                }
-                setImportIssues(result.layers.length ? result.issues : []);
-                if (!result.layers.length && result.issues.length) {
-                    setLocateMxd(result.issues.some(item => item.missing) ? frame : null);
-                    setIoStatus('未能加载图层。' + [...new Set(result.issues.map(item => window.GuizhiErrorText(item.message)))].join('。'));
-                }
-            }), issue: ioStatus }),
         importIssues.length > 0 && h(Modal, { open: true, centered: true, title: '未加载的图层', className: 'gis-dialog',
             rootClassName: 'gis-modal-root', onCancel: () => setImportIssues([]), footer: h(Button, {
                 onClick: () => setImportIssues([]), type: 'primary' }, '关闭') },

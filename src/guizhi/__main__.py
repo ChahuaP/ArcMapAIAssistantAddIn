@@ -95,15 +95,7 @@ def main() -> int:
     commands.add_parser("platform-contract", help="Read the local platform connector contract")
     commands.add_parser("platform-handoff", help="Describe verified local artifacts for handoff").add_argument(
         "request", type=Path)
-    live = commands.add_parser("arcgis-stage")
-    live.add_argument("bridge", type=Path)
-    live.add_argument("request", type=Path)
-    commands.add_parser("arcgis-capture").add_argument("request", type=Path)
-    commands.add_parser("arcgis-revision").add_argument("database", type=Path)
-    notify = commands.add_parser("arcgis-notify")
-    notify.add_argument("pid", type=int)
-    notify.add_argument("window", type=int)
-    commands.add_parser("arcgis-view").add_argument("bridge", type=Path)
+    commands.add_parser("knowledge").add_argument("request", type=Path)
     commands.add_parser("_dispatch-replay").add_argument("request", type=Path)
     args = parser.parse_args()
     if args.workspace is None and args.command not in {"_material-reader", "_gis-worker"}:
@@ -176,20 +168,10 @@ def main() -> int:
                       else prepare(args.workspace, json.loads(args.request.read_text(encoding="utf-8-sig"))))
             print(json.dumps(result))
             return 0
-        if args.command in {"arcgis-stage", "arcgis-capture", "arcgis-revision", "arcgis-notify", "arcgis-view"}:
-            from guizhi.infrastructure import arcgis_live
-
-            if args.command == "arcgis-view":
-                result = arcgis_live.view(args.workspace, args.bridge)
-            elif args.command == "arcgis-notify":
-                result = arcgis_live.notify(args.pid, args.window)
-            elif args.command == "arcgis-revision":
-                result = {"revision": arcgis_live.revision(args.database)}
-            else:
-                payload = json.loads(args.request.read_text(encoding="utf-8-sig"))
-                result = (arcgis_live.prepare(args.workspace, args.bridge, payload) if args.command == "arcgis-stage"
-                          else arcgis_live.capture(args.workspace, payload))
-            print(json.dumps(result))
+        if args.command == "knowledge":
+            from guizhi.infrastructure.knowledge import manage
+            request = json.loads(args.request.read_text(encoding="utf-8-sig"))
+            print(json.dumps(manage(args.workspace, request["action"], request.get("value"))))
             return 0
         if args.command == "_dispatch-replay":
             from guizhi.application.dispatch import replay

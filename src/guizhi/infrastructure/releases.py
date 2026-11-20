@@ -12,8 +12,7 @@ from guizhi.infrastructure.vector import digest
 from guizhi.infrastructure.workspace import SOURCE_ROOT, supervisor_lock
 
 ROOT_FILES = {".gitattributes", ".gitignore", "LICENSE", "VERSION", "requirements.txt", "requirements.lock"}
-ROOT_DIRS = {"src", "apps", "resources", "packaging", "operation_catalog", "shared_runtime", "arcmap_runtime_py2",
-             "ArcMapAIAssistantAddIn", "ArcMapBridgeExternal"}
+ROOT_DIRS = {"src", "apps", "resources", "packaging", "operation_catalog", "shared_runtime"}
 BANNED_DIRS = {".git", "test", "tests", "fixtures", "docs", "quality", "build", "bin", "obj", "out", "dist",
                "node_modules", "__pycache__"}
 BANNED_SUFFIXES = {".pyc", ".pyo", ".exe", ".dll", ".pdb", ".log", ".db", ".esriaddin"}

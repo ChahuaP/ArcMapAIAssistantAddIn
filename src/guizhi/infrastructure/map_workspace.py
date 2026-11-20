@@ -626,11 +626,6 @@ def request(workspace, payload):
             rows = db.execute("SELECT rowid, kind, fid, peer, reason FROM issues" + where +
                               " ORDER BY rowid LIMIT 25 OFFSET ?", (*args, page * 25))
             return {"total": total, "rows": [dict(zip(("id", "kind", "fid", "peer", "reason"), row)) for row in rows]}
-    if action in {"mxd-read", "mxd-import", "mxd-write"}:
-        from guizhi.infrastructure import map_document
-
-        return {"mxd-read": map_document.read_document, "mxd-import": map_document.import_frame,
-                "mxd-write": map_document.write_document}[action](workspace, payload)
     if action == "xy-fields":
         from guizhi.infrastructure.operations.xy import table_headers
 

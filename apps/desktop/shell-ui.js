@@ -126,7 +126,7 @@
                     itemSelectedBg: dark ? '#263c55' : '#fff', itemColor: dark ? '#bac8d9' : '#506176' },
                 Tabs: { horizontalItemGutter: 24, inkBarColor: dark ? '#8ec9ff' : '#086ca9' } } } }, children);
     }
-    function Titlebar({ settings, onboarding, back, left, right, arcgis, connected, resize, modes }) {
+    function Titlebar({ settings, onboarding, back, left, right, openModules, resize, modes }) {
         return h('header', { className: 'titlebar' },
             h('div', { className: 'title-group' },
                 !onboarding && (settings ? iconButton('back', '返回智慧治理', { onClick: back })
@@ -134,13 +134,12 @@
                 brand(), settings && h('span', { className: 'title-path' }, '设置')),
             !settings && !onboarding && h('div', { className: 'title-group' },
                 modes,
-                button('link', '第三方扩展', { type: 'text', onClick: arcgis,
-                    title: connected ? 'ArcGIS 已连接' : '查看第三方扩展' }),
+                button('layers', '功能模块', { type: 'text', onClick: openModules }),
                 right && iconButton('right', '折叠或展开材料与成果', { onClick: right, onKeyDown: resize(1) })));
     }
 
     function Workbench({ appearance, saveAppearance, sidebar, conversation, inspector, map,
-        mode, setMode, activity, ownership, onCancel, arcgis, connected, fail, page }) {
+        mode, setMode, activity, ownership, onCancel, openModules, fail, page }) {
         const [width, setWidth] = useState(innerWidth);
         const [panels, setPanels] = useState(appearance.panels);
         const [drawer, showDrawer] = useState(false);
@@ -213,7 +212,7 @@
         ].map(([value, glyph, label]) => iconButton(glyph, label, { key: value, 'aria-pressed': mode === value,
             className: mode === value ? 'workbench-mode-active' : '', onClick: () => setMode(value) }));
         return h('div', { className: 'desktop-frame' + (locked ? ' workbench-locked' : '') },
-            h('div', { ref: interaction, className: 'workbench-interaction' }, h(Titlebar, { arcgis, connected, left: () => toggle(0), right: inspector && mode === 'chat' && (() => toggle(1)), resize,
+            h('div', { ref: interaction, className: 'workbench-interaction' }, h(Titlebar, { openModules, left: () => toggle(0), right: inspector && mode === 'chat' && (() => toggle(1)), resize,
                 modes: !page && h('div', { className: 'workbench-modes', 'aria-label': '工作区布局' }, ...modeButtons) }),
             h(Splitter, { className: 'workbench-panels', lazy: true,
                 onResizeEnd: sizes => persist(sideSizes(sizes)) },

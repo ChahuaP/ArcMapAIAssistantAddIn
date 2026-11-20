@@ -229,7 +229,7 @@ dialog label:not(.ant-checkbox-wrapper, .ant-radio-wrapper, :has(> input:is([typ
 .voice-settings { padding: var(--space-3) var(--space-4); border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
 .voice-settings summary { cursor: pointer; font-weight: 600; }
 .voice-settings[open] .voice-fields { margin-top: var(--space-3); }
-.coordinate-page, .coordinate-wizard, .arcgis-jobs, .arcgis-panel, .business-page, .diagnostic-list {
+.coordinate-page, .coordinate-wizard, .business-page, .diagnostic-list {
     display: grid; gap: var(--space-4); width: 100%; min-width: 0;
 }
 .coordinate-page { justify-items: start; }
@@ -260,10 +260,9 @@ dialog label:not(.ant-checkbox-wrapper, .ant-radio-wrapper, :has(> input:is([typ
 .coordinate-wizard fieldset { min-width: 0; display: grid; gap: var(--space-4); margin: 0; padding: 0; border: 0; }
 .coordinate-wizard fieldset > button { justify-self: start; }
 .coordinate-wizard label, .coordinate-file label { display: grid; gap: var(--space-2); min-width: 0; }
-.coordinate-record, .coordinate-result, .arcgis-job { display: grid; min-width: 0; gap: var(--space-2); padding: var(--space-4);
+.coordinate-record, .coordinate-result { display: grid; min-width: 0; gap: var(--space-2); padding: var(--space-4);
     border: 1px solid var(--line); border-radius: 10px; background: var(--sub); }
 .coordinate-record pre { max-height: 150px; overflow: auto; overflow-wrap: anywhere; white-space: pre-wrap; }
-.arcgis-panel select { width: 100%; }
 .coordinate-actions, .business-actions, .delivery-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
 .coordinate-actions .ant-tag, .section-head > .ant-tag { margin-inline-end: 0; }
 .skill-cards, .skill-editor { display: grid; gap: var(--space-4); }
@@ -731,10 +730,6 @@ dialog label:not(.ant-checkbox-wrapper, .ant-radio-wrapper, :has(> input:is([typ
 .gis-dialog .role-material > button { justify-self: start; }
 .reply-image { display: block; max-width: 100%; max-height: 440px; object-fit: contain; border-radius: 8px; }
 
-.mxd-open-fields { display: grid; gap: 8px; }
-.mxd-open-fields:empty { display: none; }
-.mxd-open-fields > label { display: grid; gap: 4px; }
-.mxd-open-fields > p { margin: 0; }
 .workbench-center { height: 100%; min-height: 0; display: flex; flex-direction: column; }
 .workbench-content { flex: 1; min-height: 0; }
 .workbench-modes { flex: none; display: flex; align-items: center; gap: 4px; }
