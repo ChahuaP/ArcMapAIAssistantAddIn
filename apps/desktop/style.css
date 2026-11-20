@@ -236,6 +236,10 @@ dialog label:not(.ant-checkbox-wrapper, .ant-radio-wrapper, :has(> input:is([typ
 .coordinate-tabs, .coordinate-record { width: 100%; }
 .coordinate-controls, .coordinate-guide[open] { display: grid; justify-items: start; width: 100%; gap: var(--space-2); min-width: 0; }
 .coordinate-controls h3 { margin: 0; }
+.coordinate-library-search { width: min(100%, 360px); }
+.coordinate-library-pair { display: grid; width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); }
+.coordinate-library-pair label { display: grid; gap: var(--space-2); min-width: 0; }
+@media (max-width: 700px) { .coordinate-library-pair { grid-template-columns: 1fr; } }
 .coordinate-help { margin: 0; line-height: 1.55; overflow-wrap: anywhere; }
 .coordinate-wizard label + .coordinate-help { margin-top: var(--space-2); }
 .coordinate-guide { width: 100%; }
@@ -587,7 +591,7 @@ dialog label:not(.ant-checkbox-wrapper, .ant-radio-wrapper, :has(> input:is([typ
 .ribbon-tabs [role=tablist] { display: flex; gap: 4px; min-width: 0; overflow-x: auto; }
 .ribbon-tabs [role=tab] { flex: none; padding-inline: 10px; border: 1px solid transparent; }
 .ribbon-tabs [aria-selected=true] { background: var(--soft); color: var(--ink); border-color: var(--gis-edge); font-weight: 600; }
-.ribbon-tabs [aria-selected=true] svg, .ribbon-actions .ant-btn:not(:disabled):not(.ant-btn-primary) svg { color: var(--accent); }
+.ribbon-tabs svg, .ribbon-actions svg { color: inherit; }
 .ribbon-tools {
     display: flex; gap: 10px; align-items: stretch; overflow-x: auto; overflow-y: hidden;
     height: 66px; padding: 5px 10px 5px; box-sizing: border-box;

@@ -28,6 +28,7 @@
         paperclip: 'm20 11-8 8a5 5 0 0 1-7-7l9-9a3.5 3.5 0 0 1 5 5l-9 9a2 2 0 0 1-3-3l8-8',
         clock: 'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0zM12 7v5l3 2',
         history: 'M3 6v5h5m-5 0a9 9 0 1 1 3 8m6-12v5l3 2',
+        mapReset: 'M4 11a8 8 0 1 1 2 6m-2-11v5h5m1 2 3 2 3-2m-3 2v4',
         refresh: 'M20 4v5h-5M4 20v-5h5M20 9A8 8 0 0 0 6 6m-2 9a8 8 0 0 0 14 3',
         file: 'M6 3h7l5 5v13H6zm7 0v6h5M9 13h6m-6 4h6',
         image: 'M3 4h18v16H3zM3 17l5-5 4 4 4-6 5 5M9 8h.1',

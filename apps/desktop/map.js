@@ -49,7 +49,7 @@ const commandIcons = {
     全图: 'extent', 定位图层: 'target', 放大: 'zoomIn', 缩小: 'zoomOut', 清除选择: 'clear',
     按属性选择: toolIcon('data.select_by_attribute'), 按位置选择: toolIcon('data.select_by_location'), 添加图层: 'add',
     添加字段: toolIcon('table.add_field'), 删除字段: toolIcon('table.delete_field'), 新建图层: toolIcon('geometry.create_dataset'),
-    复制图层: toolIcon('data.copy'), 合并图层: toolIcon('data.merge'), 地图属性: 'settings',
+    复制图层: toolIcon('data.copy'), 合并图层: toolIcon('data.merge'), 地图属性: 'settings', 重置地图: 'mapReset', 点选: 'select',
     编辑图层: 'pencil', 选择: 'select', 绘制: 'pencil', 编辑顶点: 'node', 移动: 'move',
     完成绘制: 'check', 撤销绘制点: 'undo', 编辑属性: 'table', 删除要素: 'trash',
     撤销: 'undo', 退出: 'close', 识别要素: 'info', 框选: 'box',

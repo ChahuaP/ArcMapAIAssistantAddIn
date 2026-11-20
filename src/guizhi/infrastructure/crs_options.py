@@ -64,8 +64,13 @@ def area_of_interest(source, extent):
     return AreaOfInterest(west, south, east, north)
 
 
+def standard_transformers(source, target, area=None, *, always_xy=True):
+    network.set_network_enabled(False)
+    return TransformerGroup(source, target, always_xy=always_xy, allow_ballpark=False, area_of_interest=area)
+
+
 def automatic_projection(source, target, area, *, always_xy=True):
-    group = TransformerGroup(source, target, always_xy=always_xy, allow_ballpark=False, area_of_interest=area)
+    group = standard_transformers(source, target, area, always_xy=always_xy)
     if not group.best_available or not group.transformers:
         raise ValueError("缺少可靠的坐标转换或所需格网，请选择已验证的转换方案")
     return group.transformers[0]
@@ -192,3 +197,28 @@ def coordinate_options(text):
         if len(result) == 30:
             break
     return result
+
+
+
+def library_definitions(query):
+    return [{**row, **describe_crs(row["value"])} for row in coordinate_options(query)]
+
+
+def library_transforms(workspace, source_ref, target_ref):
+    source, target = (resolve_definition(workspace, reference) for reference in (source_ref, target_ref))
+    if source.equals(target, ignore_axis_order=True):
+        return {"same": True, "available": [], "requiresGrids": []}
+    group = standard_transformers(source, target)
+
+    def details(operation):
+        area = operation.area_of_use
+        return {"name": getattr(operation, "description", None) or operation.name,
+                "accuracy": operation.accuracy if operation.accuracy >= 0 else None,
+                "area": list(area.bounds) if area else None,
+                "areaLabel": area.name if area else None}
+
+    available = [{**details(operation), "pipeline": operation.definition} for operation in group.transformers]
+    unavailable = [{**details(operation),
+                    "grids": [grid.short_name for grid in operation.grids if not grid.available]}
+                   for operation in group.unavailable_operations]
+    return {"same": False, "available": available, "requiresGrids": unavailable, "bestAvailable": group.best_available}

@@ -1,6 +1,6 @@
 (() => {
     const h = React.createElement;
-    const { useState } = React;
+    const { useEffect, useState } = React;
     const api = window.guizhi;
     const { button } = window.GuizhiShell;
     const { errorText } = window.GuizhiModel;
@@ -155,9 +155,74 @@
             error && h('p', { role: 'alert', className: 'error' }, error));
     }
 
+    function useStandardCoordinates(query) {
+        const [state, setState] = useState({ rows: [], loading: true, error: '' });
+        useEffect(() => {
+            let active = true;
+            setState(previous => ({ ...previous, loading: true, error: '' }));
+            const timer = setTimeout(async () => {
+                try {
+                    const rows = await api.map({ action: 'crs-library', query });
+                    if (active) setState({ rows, loading: false, error: '' });
+                } catch (error) {
+                    if (active) setState({ rows: [], loading: false, error: errorText(error) });
+                }
+            }, query ? 180 : 0);
+            return () => { active = false; clearTimeout(timer); };
+        }, [query]);
+        return state;
+    }
+
+    function StandardTransformations({ definitions }) {
+        const [query, search] = useState('');
+        const { rows, loading, error } = useStandardCoordinates(query);
+        const [source, setSource] = useState({ value: 'EPSG:4490', label: 'CGCS2000 · EPSG:4490' });
+        const [target, setTarget] = useState({ value: 'EPSG:4548', label: 'CGCS2000 / 117°E · EPSG:4548' });
+        const [state, setState] = useState({ loading: true });
+        useEffect(() => {
+            let active = true;
+            setState({ loading: true });
+            api.map({ action: 'crs-library-transforms', source: source.value, target: target.value }).then(result => {
+                if (active) setState({ result, loading: false });
+            }).catch(error => { if (active) setState({ error: errorText(error), loading: false }); });
+            return () => { active = false; };
+        }, [source.value, target.value]);
+        const options = [...definitions.filter(entry => entry.title.toLowerCase().includes(query.toLowerCase()))
+            .map(entry => ({ value: ref(entry), label: entry.title })),
+            ...rows.map(({ value, label }) => ({ value, label }))];
+        const choice = (label, value, setter) => field(label, h(antd.Select, {
+            'aria-label': label, labelInValue: true, showSearch: true, filterOption: false, onSearch: search,
+            value, options, loading, onChange: next => { setter(next); search(''); },
+        }));
+        const result = state.result;
+        const render = (item, available, index) => h('article', { className: 'coordinate-record',
+            key: (available ? 'available-' : 'grid-') + index },
+            h('div', { className: 'section-head' }, h('strong', null, item.name),
+                h(antd.Tag, { color: available ? undefined : 'orange' }, available ? '可用' : '缺少格网')),
+            h('small', null, [item.areaLabel, item.accuracy !== null && '精度 ' + precision(item.accuracy) + ' 米',
+                !available && item.grids.join('、')].filter(Boolean).join(' · ')),
+            (item.pipeline || item.area) && h('details', null, h('summary', null, '详情'),
+                item.area && h('small', null, '适用范围 ' + areaText(item.area, 'geographic')),
+                item.pipeline && h('pre', null, item.pipeline)));
+        return h('section', { className: 'coordinate-controls', 'aria-label': '内置转换方案' },
+            h('div', { className: 'coordinate-library-pair' },
+                choice('源坐标系', source, setSource), choice('目标坐标系', target, setTarget)),
+            (state.error || error) && h('p', { className: 'error', role: 'alert' }, state.error || error),
+            state.loading && h('p', { role: 'status' }, '正在查询转换方案…'),
+            result?.same && help('源坐标系与目标坐标系相同。'),
+            result && !result.same && !result.available.length && !result.requiresGrids.length && help('没有适用的标准转换。'),
+            result && !result.same && result.requiresGrids.length > 0 && !result.bestAvailable &&
+                help('优先转换缺少格网。办理时仍需按数据范围核验可用方案。'),
+            ...(result?.available || []).map((item, index) => render(item, true, index)),
+            ...(result?.requiresGrids || []).map((item, index) => render(item, false, index)));
+    }
+
     window.GuizhiCoordinates = function Coordinates({ entries, setEntries }) {
         const [tab, setTab] = useState('definition');
         const [wizard, setWizard] = useState(false);
+        const [origin, setOrigin] = useState('all');
+        const [query, setQuery] = useState('');
+        const builtIn = useStandardCoordinates(query);
         const [file, setFile] = useState(null);
         const [editing, setEditing] = useState(null);
         const [title, setTitle] = useState('');
@@ -177,15 +242,20 @@
             setEntries(await api.importCoordinate(item.file, item.layer));
             setFile(null);
         };
-        const list = tab === 'definition' ? definitions : plans;
+        const list = tab === 'definition' ? definitions.filter(entry =>
+            entry.title.toLowerCase().includes(query.toLowerCase()) || (entry.definition.authority || '').toLowerCase().includes(query.toLowerCase())) : plans;
         if (wizard) return h(PlanWizard, { definitions, plans, back: () => setWizard(false), done: async () => {
             await refresh(); setWizard(false);
         } });
         return h('div', { className: 'coordinate-page' },
             h(antd.Tabs, { animated: false, className: 'coordinate-tabs', activeKey: tab,
-                items: [{ key: 'definition', label: '自定义坐标系库' }, { key: 'plan', label: '转换方案' }],
+                items: [{ key: 'definition', label: '坐标系' }, { key: 'plan', label: '转换方案' }],
                 onChange: value => { setTab(value); setError(''); } }),
-            tab === 'definition' ? h('div', { className: 'coordinate-controls' },
+            h(antd.Segmented, { 'aria-label': '来源', value: origin, onChange: setOrigin,
+                options: [{ label: '全部', value: 'all' }, { label: '内置', value: 'built-in' }, { label: '自定义', value: 'custom' }] }),
+            tab === 'definition' && h(antd.Input, { className: 'coordinate-library-search', allowClear: true,
+                'aria-label': '搜索坐标系', placeholder: '搜索名称或 EPSG 编号', value: query, onChange: event => setQuery(event.target.value) }),
+            origin !== 'built-in' && (tab === 'definition' ? h('div', { className: 'coordinate-controls' },
                 help('从地图数据读取坐标系定义并保存到库中，供地图工具和转换方案选用。当前地图的显示坐标系在「地图 → 地图属性」中设置。'),
                 h(CoordinateFile, { label: '数据文件', action: '从数据导入', layerLabel: '读取坐标系的图层',
                     item: file, busy, change: setFile, pick: () => perform(async () => {
@@ -197,8 +267,16 @@
                 h('div', { className: 'coordinate-controls' },
                     help('转换方案记录转换方向、适用范围和核验误差。保存后，可在「分析 → 坐标系 → 投影转换」中选用。'),
                     button('plus', '创建转换方案', { disabled: busy || !definitions.length, onClick: () => setWizard(true) }),
-                    !definitions.length && help('创建方案前，请先从转换前、后的数据中导入坐标系。')),
-            ...list.map(entry => {
+                    !definitions.length && help('创建自定义方案前，请先导入控制点数据所用的坐标系。'))),
+            origin !== 'custom' && tab === 'definition' && h('section', { className: 'coordinate-controls', 'aria-label': '内置坐标系' },
+                builtIn.loading && h('p', { role: 'status' }, '正在读取内置坐标系…'),
+                builtIn.error && h('p', { className: 'error', role: 'alert' }, builtIn.error),
+                !builtIn.loading && !builtIn.error && !builtIn.rows.length && help('没有匹配的内置坐标系。'),
+                ...builtIn.rows.map(row => h('article', { className: 'coordinate-record', key: row.value },
+                    h('div', { className: 'section-head' }, h('strong', null, row.name), h(antd.Tag, null, '内置')),
+                    h('small', null, [row.value, row.kind, row.unit].filter(Boolean).join(' · '))))),
+            origin !== 'custom' && tab === 'plan' && h(StandardTransformations, { definitions }),
+            ...(origin === 'built-in' ? [] : list).map(entry => {
                 const technical = entry.plan ? entry.plan.pipeline : entry.definition.original;
                 const summary = entry.plan
                     ? [entry.source.name + ' → ' + entry.target.name, '最大检查误差 ' + precision(Math.max(...entry.residuals_m)) + ' m',
@@ -206,7 +284,7 @@
                     : [entry.definition.name, ...entry.definition.axes.map(axis => axis.unit), entry.source_file?.split(/[\\/]/).at(-1)];
                 return h('article', { className: 'coordinate-record', key: ref(entry) },
                     h('div', { className: 'section-head' }, h('strong', null, entry.title),
-                        h('div', { className: 'coordinate-actions' }, h(antd.Tag, null, 'v' + entry.revision),
+                        h('div', { className: 'coordinate-actions' }, h(antd.Tag, null, '自定义 · v' + entry.revision),
                             button('layers', '重命名', { type: 'text', disabled: busy, onClick: () => { setEditing(ref(entry)); setTitle(entry.title); } }),
                             !entry.plan && h(antd.Popconfirm, { title: '删除「' + entry.title + '」？',
                                 description: '已有任务和已保存的转换方案仍可追溯。',
@@ -225,7 +303,7 @@
                             ' · ' + (entry.plan.grids.map(grid => grid.name).join('、') || '无需格网')),
                         h('pre', null, technical)));
             }),
-            !list.length && help(tab === 'definition' ? '库中暂无自定义坐标系。' : '暂无已保存的转换方案。'),
+            origin === 'custom' && !list.length && help(tab === 'definition' ? '没有匹配的自定义坐标系。' : '暂无自定义转换方案。'),
             error && h('p', { role: 'alert', className: 'error' }, error));
     };
 })();

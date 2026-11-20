@@ -741,6 +741,12 @@ def request(workspace, payload):
                   "table-statistics": map_attributes.statistics, "table-unique-values": map_attributes.unique_values,
                   "table-feature": map_attributes.feature_attributes}[action]
         return reader(file, name, payload)
+    if action in {"crs-library", "crs-library-transforms"}:
+        from guizhi.infrastructure.crs_options import library_definitions, library_transforms
+
+        if action == "crs-library":
+            return library_definitions(str(payload.get("query", ""))[:120])
+        return library_transforms(workspace, payload["source"], payload["target"])
     if action in {"crs-search", "crs-projection-options"}:
         from guizhi.infrastructure.crs_options import coordinate_options, projection_options
 
