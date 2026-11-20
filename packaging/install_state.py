@@ -103,6 +103,8 @@ def descriptor(root, entry):
             not release.startswith(manifest["build"] + "-")):
         raise ValueError("安装版本与组件清单不匹配")
     check = set(REQUIRED)
+    if "core/packaging/arcgis/ArcMapBridge.exe" in manifest["files"]:
+        check.update({"core/packaging/arcgis/ArcMapBridge.exe", "core/packaging/arcgis/ArcMapBridge.build"})
     if "speech" in selected:
         check.add("speech/identity.json")
     for name in sorted(check):
