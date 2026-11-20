@@ -261,7 +261,7 @@ function toolForm(definition, inputs, values, update, selection) {
             epsg: number(values.coordinate?.value.slice(5)) };
         valid = Boolean(values.name?.trim() && values.geometry_type && Number.isInteger(parameters.epsg) && parameters.epsg > 0);
     } else if (id === 'geometry.multipart' || id === 'geometry.explode') {
-        const fids = selection?.key === key(input) ? selection.ids : [];
+        const fids = selection && selection.key === key(input) ? selection.ids : [];
         const destination = values.destination ?? 'current';
         controls.push(field('输出到', h(Segmented, { value: destination, options: options({ current: '当前图层', new: '新图层' }),
             onChange: value => update('destination', value) })));
@@ -277,7 +277,7 @@ function toolForm(definition, inputs, values, update, selection) {
     } else if (id === 'geometry.repair') {
         const repairInvalid = values.repairInvalid ?? true;
         const deleteNull = values.deleteNull ?? false;
-        const ids = selection?.key === key(input) ? selection.ids : [];
+        const ids = selection && selection.key === key(input) ? selection.ids : [];
         const canCut = polygon(input) && ids.length === 2 && ids.every(Number.isSafeInteger);
         const cut = canCut && values.cutOverlap;
         controls.push(h(Checkbox, { checked: repairInvalid && !cut, disabled: cut,
@@ -512,16 +512,17 @@ export function MapTool({ getContainer, operation, active, lockInput, layers, se
         if (!index && lockInput) return h('div', { className: 'gis-tool-field' },
             h('span', null, '编辑图层'), h('strong', null, inputs[0]?.name),
             ['geometry.multipart', 'geometry.explode'].includes(operation) &&
-                h('span', null, '已选 ' + (selection?.key === active ? selection.ids.length : 0) + ' 个要素'));
+                h('span', null, '已选 ' + (selection && selection.key === active ? selection.ids.length : 0) + ' 个要素'));
         return pickLayer(name, index, layers.filter(item => accepts(item) &&
             (definition.multiple || !ids.some((id, slot) => slot !== index && key(item) === id))));
     });
-    const form = toolForm(definition, inputs, values, update, selection);
     const executable = operation.startsWith('crs.') && raster(inputs[0]) ? operation.replace('crs.', 'raster.') : operation;
     const minimum = definition.multiple ? 2 : definition.inputs.length;
     const validInputs = inputs.length >= minimum && Array.from({ length: inputs.length }, (_, i) =>
         (definition.inputs[i] || definition.inputs.at(-1))[1](inputs[i])).every(Boolean);
-    const problem = editingParts && ['geometry.multipart', 'geometry.explode'].includes(operation) && form.parameters.destination === 'new'
+    const form = validInputs ? toolForm(definition, inputs, values, update, selection) : null;
+    const inputHint = !validInputs && (layers.length ? '请选择所需图层。' : '请先添加图层。');
+    const problem = editingParts && ['geometry.multipart', 'geometry.explode'].includes(operation) && form?.parameters.destination === 'new'
         ? '请先保存当前编辑，再输出到新图层' : validInputs ? toolInputIssue(operation, inputs, form.parameters) : '';
     const missing = executable.startsWith('raster.') && components?.raster?.installed === false;
     const inherit = operation === 'geometry.create_dataset' && crsLayer && values.coordinate?.value === 'layer:' + key(crsLayer);
@@ -563,8 +564,9 @@ export function MapTool({ getContainer, operation, active, lockInput, layers, se
             areaUnit: operation === 'vector.area' ? (values.areaUnit || 'square_meters') : undefined }))
             : h('fieldset', { className: 'gis-tool-fields', disabled: busy, 'aria-busy': busy },
             toolDescription[operation] && h('p', { className: 'gis-tool-description' }, toolDescription[operation]),
+            inputHint ? h('p', { className: 'gis-tool-description', role: 'status' }, inputHint) :
             definition.multiple && h('p', { className: 'gis-tool-description' }, '选择两个或更多图层。'),
-            ...[...selectors, ...form.controls].map((control, index) => h(window.React.Fragment, { key: index }, control)),
+            ...[...selectors, ...(form?.controls || [])].map((control, index) => h(window.React.Fragment, { key: index }, control)),
             missing && h('div', { className: 'gis-component-message' }, '请先安装栅格处理模块',
                 h(Button, { size: 'small', onClick: openComponents }, '打开模块设置')),
             (error || problem) && h('p', { className: 'error', role: 'alert' }, error || problem)));

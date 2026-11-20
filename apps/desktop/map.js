@@ -710,7 +710,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         select.on('select', event => {
             const layer = activeRef.current;
             const changed = event.selected.map(item => item.getId());
-            const previous = selectionRef.current?.key === layer ? selectionRef.current.ids : [];
+            const previous = selectionRef.current && selectionRef.current.key === layer ? selectionRef.current.ids : [];
             const added = shiftKeyOnly(event.mapBrowserEvent);
             const removed = subtract(event.mapBrowserEvent);
             const ids = removed ? previous.filter(id => !event.deselected.some(item => item.getId() === id))
@@ -736,7 +736,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                     const bounds = geometry.getExtent();
                     return bounds[0] >= extent[0] && bounds[1] >= extent[1] && bounds[2] <= extent[2] && bounds[3] <= extent[3];
                 }).map(item => item.getId()));
-            const previous = selectionRef.current?.key === layer ? selectionRef.current.ids : [];
+            const previous = selectionRef.current && selectionRef.current.key === layer ? selectionRef.current.ids : [];
             const ids = subtract(event.mapBrowserEvent) ? previous.filter(id => !hits.has(id)) :
                 shiftKeyOnly(event.mapBrowserEvent) ? [...new Set([...previous, ...hits])] : [...hits];
             setSelection({ key: layer, ids });
@@ -1137,8 +1137,8 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
     useEffect(() => {
         if (graph.current) void restoreSelection(graph.current, selection).catch(fail);
     }, [selection]);
-    const picked = selection?.key === active ? selection.ids : [];
-    const selectedRows = tableFilter === 'selected' && selection?.key === active ? selection.ids : undefined;
+    const picked = selection && selection.key === active ? selection.ids : [];
+    const selectedRows = tableFilter === 'selected' && selection && selection.key === active ? selection.ids : undefined;
     const emptyFilter = tableFilter === 'selected' && !selectedRows;
     useEffect(() => { setPage(0); setTableFilter('all'); setTableDialog(null); }, [active]);
     useEffect(() => {
@@ -2046,9 +2046,9 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 h(antd.Segmented, { size: 'small', 'aria-label': '显示要素', value: tableFilter,
                     options: [{ label: '全部', value: 'all' }, { label: '已选', value: 'selected' }],
                     onChange: value => { setTableFilter(value); setPage(0); } })))),
-        tableDialog?.kind === 'sort' && tableWindow.present(h(AttributeSort, { getContainer: tableWindow.container, columns: tableFields, order: cellOrder,
+        layer && tableDialog?.kind === 'sort' && tableWindow.present(h(AttributeSort, { getContainer: tableWindow.container, columns: tableFields, order: cellOrder,
             close: () => setTableDialog(null), apply: order => { setPage(0); setSort({ key: active, order }); } })),
-        tableDialog?.kind === 'stats' && tableWindow.present(h(AttributeStatistics, { getContainer: tableWindow.container, columns: tableFields, source: layer.ref,
+        layer && tableDialog?.kind === 'stats' && tableWindow.present(h(AttributeStatistics, { getContainer: tableWindow.container, columns: tableFields, source: layer.ref,
             selected: picked, close: () => setTableDialog(null) })),
         drawHeight && h(Modal, { open: true, centered: true, title: '设置新要素高程',
             onCancel: () => setDrawHeight(null), okText: '确定', cancelText: '取消',
