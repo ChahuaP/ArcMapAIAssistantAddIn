@@ -117,7 +117,7 @@ def supervise(workspace: Workspace, run_id: str, cancel_requested: Callable[[], 
     with subprocess.Popen(
         command, cwd=workspace.directory(run_id),
         stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="utf-8",
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="utf-8", errors="backslashreplace",
     ) as process:
         try:
             while True:

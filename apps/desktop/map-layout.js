@@ -131,7 +131,8 @@ export function MapLayout({ initial, busy, close, exportImage, draw, change, sou
     const element = name => {
         const box = value.positions[name];
         const style = { left: box.x * 100 + '%', top: box.y * 100 + '%', width: box.width * 100 + '%', height: box.height * 100 + '%' };
-        return h('div', { key: name, className: 'gis-paper-element', style, tabIndex: 0, 'aria-label': items[name],
+        return h('div', { key: name, className: 'gis-paper-element', tabIndex: 0, 'aria-label': items[name],
+            style: { ...style, zIndex: active === name && !name.startsWith('frame') ? 3 : name.startsWith('frame') ? 1 : 2 },
             'aria-selected': active === name, role: 'option', onFocus: () => setActive(name),
             onPointerDown: event => start(event, name, Boolean(event.target.closest('.gis-paper-resize'))),
             onKeyDown: event => nudge(event, name) },

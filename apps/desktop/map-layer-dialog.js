@@ -182,7 +182,7 @@ export function LayerProperties({ item, color, close, save, glyph, start = 'info
                     onChange: count => {
                         update('rasterBands', count === 1 ? [rasterBands[0]]
                             : (item.displayBands?.length === 3 ? item.displayBands : [1, 2, Math.min(item.bands, 3)]));
-                        if (count === 3 && rasterAppearance.stretch === 'natural')
+                        if ((count === 3 && rasterAppearance.stretch === 'natural') || (count === 1 && rasterAppearance.stretch === 'linked'))
                             update('rasterAppearance', { ...rasterAppearance, stretch: 'percent' });
                     } })),
                 ...(rasterBands.length === 3 ? ['红色通道', '绿色通道', '蓝色通道'] : ['灰度波段']).map((label, index) =>
@@ -190,7 +190,8 @@ export function LayerProperties({ item, color, close, save, glyph, start = 'info
                         onChange: band => update('rasterBands', rasterBands.map((current, i) => i === index ? band : current)) }))),
                 field('拉伸方式', h(Select, { 'aria-label': '拉伸方式', value: rasterAppearance.stretch,
                     options: [{ value: 'percent', label: '百分比裁剪（2%–98%）' }, { value: 'raw', label: '无拉伸' },
-                        ...(rasterBands.length === 1 ? [{ value: 'natural', label: '自然断点（5 级）' }] : [])],
+                        ...(rasterBands.length === 1 ? [{ value: 'natural', label: '自然断点（5 级）' }] :
+                            [{ value: 'linked', label: '统一 RGB 拉伸（保留色彩比例）' }])],
                     onChange: stretch => update('rasterAppearance', { ...rasterAppearance, stretch }) })),
                 field('伽马校正', h(InputNumber, { 'aria-label': '伽马校正', min: .1, max: 5, step: .1,
                     value: rasterAppearance.gamma, onChange: gamma => {

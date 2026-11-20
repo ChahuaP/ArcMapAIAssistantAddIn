@@ -33,6 +33,9 @@ export function LocalDataPicker({ initialFolder, select, close }) {
             h(Input, { 'aria-label': '文件夹路径', value: address, onChange: event => setAddress(event.target.value), onPressEnter: navigate }),
             h(Button, { disabled: busy, onClick: navigate }, '转到'),
             h(Button, { disabled: busy || !listing || listing.directory === listing.up, onClick: () => browse(listing.up) }, '上一级')),
+        h('nav', { className: 'gis-local-places', 'aria-label': '常用位置' },
+            ...((listing?.places || []).map(place => h(Button, { key: place.label, size: 'small', disabled: busy,
+                onClick: () => browse(place.file) }, place.label)))),
         error && h('p', { className: 'error', role: 'alert' }, error),
         h('div', { className: 'gis-local-list', 'aria-busy': busy, 'aria-label': '本地数据' },
             busy ? h('p', { role: 'status' }, '正在读取文件夹…') : listing?.rows.length === 0 &&

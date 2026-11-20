@@ -721,7 +721,9 @@ async function startDesktop(options) {
             const root = letter + ':\\';
             try { await fs.promises.access(root); return root; } catch { return null; }
         })).then(drives => drives.filter(Boolean));
-        return { directory, up: path.dirname(directory), drives: await driveList, rows };
+        const places = Object.entries({ desktop: "桌面", downloads: "下载", documents: "文档", home: "个人文件夹" })
+            .map(([name, label]) => ({ label, file: app.getPath(name) }));
+        return { directory, up: path.dirname(directory), drives: await driveList, places, rows };
     }, true);
     function offerSource(kind, items, details) {
         const id = randomUUID();
@@ -737,7 +739,10 @@ async function startDesktop(options) {
                 const imported = await controller.gis.map(controller.settings.workspace, { action, items: [item] });
                 layers.push(...imported.map(layer => displayName ? { ...layer, name: displayName } : layer));
             }
-            catch (error) { issues.push({ name, message: error.message }); }
+            catch (error) {
+                const database = path.extname(item.file).toLowerCase() === '.gdb';
+                issues.push({ name, message: database ? '读取地理数据库图层失败：' + error.message : error.message });
+            }
         }
         if (jobs.length) window.webContents.send('guizhi:mapImportProgress', { label: '正在绘制图层',
             total: jobs.length, completed: jobs.length });
@@ -768,7 +773,9 @@ async function startDesktop(options) {
             else if (item.kind === 'raster') jobs.push(['raster-import', item]);
             else intake.issues.push({ name: item.name, message: '地图支持矢量和影像图层' });
         }
-        const result = await importMapJobs(jobs, intake.issues);
+        const issues = intake.issues.map(issue => path.extname(issue.name).toLowerCase() === '.gdb'
+            ? { ...issue, message: '无法列出地理数据库图层：' + issue.message } : issue);
+        const result = await importMapJobs(jobs, issues);
         if (databases.length) sources.push(offerSource('gdb', databases, {
             databases: databases.map(item => ({ name: item.name, layers: item.layers })),
         }));
@@ -817,7 +824,7 @@ async function startDesktop(options) {
         const item = mapLayers.get(mapKey(ref));
         if (!item) throw new Error('请选择地图中的图层');
         const raster = item.kind === 'raster';
-        const filters = table && !raster ? [{ name: '属性表', extensions: ['csv'] }]
+        const filters = table && !raster ? [{ name: 'Excel 工作簿', extensions: ['xlsx'] }, { name: 'CSV 属性表', extensions: ['csv'] }]
             : raster ? [{ name: 'GeoTIFF', extensions: ['tif'] }, { name: 'JPEG 影像', extensions: ['jpg'] }]
                 : [{ name: 'SHP 成果包', extensions: ['zip'] }, { name: 'Shapefile', extensions: ['shp'] },
                     { name: 'GeoPackage', extensions: ['gpkg'] },
@@ -832,7 +839,7 @@ async function startDesktop(options) {
                 !path.isAbsolute(relative) && relative.split(path.sep)[0] !== '..') throw new Error('请选择有效的导出位置与格式');
         const result = await controller.request('map', { action: 'export', ref, output, format: extension,
             ...(extension === 'kml' && { name: item.name, style, pointIcon }),
-            ...(extension === 'csv' && { fields }) });
+            ...(['csv', 'xlsx'].includes(extension) && { fields }) });
         shell.showItemInFolder(output);
         return result;
     }, true);

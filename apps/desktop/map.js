@@ -61,13 +61,13 @@ const tabIcons = { 地图: 'map', 数据: 'layers', 编辑: 'pencil', 分析: 'a
 
 const roles = { project: '项目范围', coverage: '重叠范围' };
 const key = item => item.ref.run + ':' + item.ref.artifact;
-function rasterDetailBounds(item, view) {
+function rasterDetailBounds(item, view, resolution) {
     if (!view || !item.bounds || Math.max(item.width, item.height) <= 960) return null;
     const [x1, y1, x2, y2] = item.bounds;
     const bounds = [Math.max(x1, view[0]), Math.max(y1, view[1]), Math.min(x2, view[2]), Math.min(y2, view[3])];
     if (bounds[0] >= bounds[2] || bounds[1] >= bounds[3]) return null;
-    const fraction = Math.max((bounds[2] - bounds[0]) / (x2 - x1), (bounds[3] - bounds[1]) / (y2 - y1));
-    return fraction <= .5 ? bounds : null;
+    const overviewPixel = Math.max(x2 - x1, y2 - y1) / 960;
+    return resolution > 0 && resolution < overviewPixel ? bounds : null;
 }
 const projection = (code, units) => getProjection(code || 'local') || new Projection({ code: code || 'local', units: units || 'm' });
 const fillColor = (color, percent) => color + Math.round(percent * 255 / 100).toString(16).padStart(2, '0');
@@ -333,7 +333,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
     function closeTable() { setTable(null); setTableDialog(null); }
     const tableVisible = Boolean(table && layer && layer.kind !== 'raster');
     const tableWindow = useTableWindow(tableVisible, layer?.name, closeTable, fail);
-    const geometryFamily = item => item?.geometry?.replace(/^Multi/, '');
+    const geometryFamily = item => item?.geometry?.split(' ')[0].replace(/^Multi/, '');
     const pasteSource = clipboard && layers.find(item => key(item) === clipboard.key);
     const pasteTargets = pasteSource ? layers.filter(item => key(item) !== clipboard.key && item.crs &&
         geometryFamily(item) === clipboard.kind) : [];
@@ -400,6 +400,10 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
     function openManualLayout(id) {
         const size = graph.current?.ol.getSize();
         const config = amendLayout(null, layoutDraft || { title: layer?.name || '地图' });
+        config.frames = Object.fromEntries(Object.entries(config.frames).map(([name, frame]) => {
+            const available = frame.layers?.filter(id => layers.some(item => key(item) === id));
+            return [name, { ...frame, layers: available?.length ? available : undefined }];
+        }));
         config.viewBounds = viewReady && size?.every(value => value > 0) ? graph.current.view.calculateExtent(size) : undefined;
         setLayout({ key: id, config });
     }
@@ -442,7 +446,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 if (item.kind === 'raster') {
                     const appearance = item.style?.rasterAppearance;
                     const stamp = JSON.stringify([target, item.style?.rasterBands, appearance]);
-                    const windowed = options.opacity === 1 && rasterDetailBounds({ ...item, bounds: previous?.get('dataExtent') || item.bounds }, bounds);
+                    const windowed = bounds && options.opacity === 1 && rasterDetailBounds({ ...item, bounds: previous?.get('dataExtent') || item.bounds }, bounds, Math.max((bounds[2] - bounds[0]) / size[0], (bounds[3] - bounds[1]) / size[1]));
                     const oldSource = previous?.get('rasterStamp') === stamp && previous.getSource();
                     if (oldSource && !windowed) return [new ImageLayer({ ...options, source: oldSource })];
                     if (oldSource && windowed) options.extent = item.bounds;
@@ -705,9 +709,13 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         clearCursor();
         if (scaleLabel.current) scaleLabel.current.textContent = '1 : —';
         if (units === 'm' || units === 'degrees') ol.addControl(new ScaleLine({ units: 'metric' }));
+        const selectionDrawing = id => {
+            const draft = partsDraft.current;
+            return draft && key(draft.input) === id ? draft.draftLayer : graph.current?.byKey.get(id);
+        };
         const selectable = () => !identifying.current && !selectionMode.current.measure && !selectionMode.current.busy &&
             (!selectionMode.current.edit || selectionMode.current.edit === 'select') &&
-            Boolean(graph.current?.byKey.get(activeRef.current) instanceof VectorLayer && graph.current.byKey.get(activeRef.current).getVisible() && !graph.current.byKey.get(activeRef.current).get('coverage'));
+            Boolean(selectionDrawing(activeRef.current) instanceof VectorLayer && selectionDrawing(activeRef.current).getVisible() && !selectionDrawing(activeRef.current).get('coverage'));
         const subtract = event => event.originalEvent.ctrlKey && !event.originalEvent.shiftKey;
         const select = new Select({ condition: event => selectable() && !selectionMode.current.boxSelect &&
             (selectionMode.current.edit === 'select' || selectionMode.current.pointSelect) && singleClick(event),
@@ -734,7 +742,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         box.on('boxstart', event => { boxStart = event.mapBrowserEvent.pixel; });
         box.on('boxend', event => {
             const layer = activeRef.current;
-            const drawing = graph.current?.byKey.get(layer);
+            const drawing = selectionDrawing(layer);
             if (!(drawing instanceof VectorLayer) || !drawing.getVisible()) return;
             const extent = box.getGeometry().getExtent();
             const end = event.mapBrowserEvent.pixel;
@@ -938,7 +946,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 const rasterStamp = JSON.stringify([target, bands, appearance]);
                 let detail = drawing.get('rasterDetail');
                 if (drawing.get('rasterStamp') === rasterStamp) {
-                    const extent = rasterDetailBounds({ ...item, bounds: drawing.get('dataExtent') || item.bounds }, bbox);
+                    const extent = rasterDetailBounds({ ...item, bounds: drawing.get('dataExtent') || item.bounds }, bbox, state.view.getResolution());
                     if (!extent) {
                         detail?.setVisible(false);
                         return Promise.resolve({ id, drawing, raster: true });
@@ -1116,7 +1124,8 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         const request = state.selectionRequest = (state.selectionRequest || 0) + 1;
         const summarySource = state.summaryHighlight.getSource();
         summarySource.clear();
-        const drawing = selected && state.byKey.get(selected.key);
+        const draft = partsDraft.current;
+        const drawing = selected && (draft && key(draft.input) === selected.key ? draft.draftLayer : state.byKey.get(selected.key));
         const source = drawing instanceof VectorLayer && drawing.getVisible() && drawing.getSource();
         const collection = state.select.getFeatures();
         if (!collection.getLength() && !source) return;
@@ -1249,12 +1258,20 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
             const drawing = g.byKey.get(key(input));
             const preview = await api.map({ action: 'features', ref: output.ref, target,
                 bbox: g.view.calculateExtent(g.ol.getSize()) });
-            const draftLayer = preview.overview ? coverageLayer(preview.overview, palette[0])
-                : layerFor(preview.features, palette[0]);
+            const color = symbol(input.style, palette[layers.indexOf(input) % palette.length] || palette[0]).color;
+            const draftLayer = preview.overview ? coverageLayer(preview.overview, color)
+                : layerFor(preview.features, color);
+            if (!preview.overview) draftLayer.setStyle(drawing.getStyle());
+            draftLayer.setOpacity(drawing.getOpacity());
+            draftLayer.set('pickKey', key(input));
+            draftLayer.set('coverage', Boolean(preview.overview));
             draftLayer.setZIndex(drawing.getZIndex() + 1);
             if (destination === 'current') { drawing.setVisible(false); drawing.get('coverage')?.setVisible(false); }
             g.ol.addLayer(draftLayer);
             partsDraft.current = { input, output, destination, draftLayer, drawing };
+            setSelection(null);
+            setBoxSelect(false);
+            setEdit('select');
             setCount(1);
             setTool(null);
             return;
@@ -1314,8 +1331,10 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
     }, h(Button, { size: 'small', icon: glyph(icon), disabled: busy,
         'aria-label': accessibleName, title: accessibleName }, title, glyph('chevron', 13))));
 
-    const editable = Boolean(layer?.crs && !hidden.includes(active) &&
-        /^(Multi)?(Point|LineString|Polygon)$/.test(layer.geometry));
+    const editReason = !layer ? '请先选择图层' : !layer.crs ? '请先定义图层坐标系' :
+        hidden.includes(active) ? '请先显示图层' : !/^(Point|LineString|Polygon)$/.test(geometryFamily(layer)) ?
+            '当前几何类型无法编辑' : !viewReady ? '图层正在加载' : '';
+    const editable = !editReason;
     function push(changes) {
         edits.current.push({ changes, selected: selectionRef.current });
         setCount(edits.current.length);
@@ -1350,7 +1369,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         const state = graph.current;
         const drawing = state.byKey.get(active);
         const source = drawing?.getSource();
-        if (!source || state.fitNeeded) return;
+        if (!source || state.fitNeeded) { setIssue('图层正在加载，请在地图显示后进入编辑。'); return; }
         if (drawing.get('clipped')) {
             setBusy(true);
             try {
@@ -1369,7 +1388,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 return;
             } finally { setBusy(false); }
         }
-        original.current = new globalThis.Map(source.getFeatures().map(item => {
+        original.current = new globalThis.Map(source.getFeatures().filter(item => item.getGeometry()).map(item => {
             const properties = item.getProperties();
             delete properties[item.getGeometryName()];
             return [item.getId(), { id: item.getId(), geometry: format.writeGeometryObject(item.getGeometry()), properties }];
@@ -1659,7 +1678,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
     const countDraft = layer?.count + [...draftChanges.values()].reduce((total, change) =>
         total + Number(change.action === 'add') - Number(change.action === 'delete'), 0);
     const command = (label, onClick, props = {}) => h(Button, { size: 'small', icon: glyph(commandIcons[label]),
-        onClick, ...props, disabled: props.disabled || (Boolean(partsDraft.current) && !['撤销', '保存', '退出'].includes(label)) }, label);
+        onClick, ...props, disabled: props.disabled || (Boolean(partsDraft.current) && !['点选', '框选', '撤销', '保存', '退出'].includes(label)) }, label);
     const group = (label, ...items) => h('section', { className: 'ribbon-group', 'aria-label': label },
         h('div', { className: 'ribbon-actions' }, ...items), h('span', null, label));
     function position(onlyActive) {
@@ -1689,7 +1708,7 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         group('提交', command('撤销', undoEdit, { disabled: busy || !(count || drawingPoints), title: 'Ctrl+Z', 'aria-keyshortcuts': 'Control+Z' }),
         command('保存', saveEdit, { disabled: busy || !count, loading: busy, type: 'primary', title: 'Ctrl+S', 'aria-keyshortcuts': 'Control+S' }),
         command('退出', () => count ? setConfirmExit(true) : leaveEdit(), { disabled: busy })),
-    ] : [group('图层编辑', command('编辑图层', startEdit, { disabled: !editable || busy || !viewReady || Boolean(pendingEdit) }))];
+    ] : [group('图层编辑', command('编辑图层', startEdit, { disabled: !editable || busy || Boolean(pendingEdit), title: editReason || '编辑图层' }))];
     const partsReady = !busy && !count && edit === 'select';
     function openPartsTool(operation) {
         if (!partsReady) return;
@@ -1706,33 +1725,30 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
         draggedLayer.current = null;
         setDropEdge(null);
     }
-    function layerDrop(event, id, drop) {
-        const source = draggedLayer.current;
-        if (!source) return;
-        event.preventDefault();
-        event.stopPropagation();
-        if (!canReorder || source === id) { if (drop) endLayerDrag(); else setDropEdge(null); return; }
-        const bounds = event.currentTarget.getBoundingClientRect();
-        const before = event.clientY < bounds.top + bounds.height / 2;
-        if (drop) {
-            reorder(source, id, before);
-            endLayerDrag();
-        } else {
-            event.dataTransfer.dropEffect = 'move';
-            setDropEdge(old => old?.id === id && old.before === before ? old : { id, before });
-        }
+    function layerDrop(event, commit = false) {
+        const drag = draggedLayer.current;
+        if (!drag || drag.pointer !== event.pointerId) return;
+        const row = globalThis.document.elementFromPoint(event.clientX, event.clientY)?.closest('[data-layer-order-id]');
+        const target = row?.dataset.layerOrderId;
+        if (canReorder && target && target !== drag.source) {
+            const bounds = row.getBoundingClientRect();
+            const before = event.clientY < bounds.top + bounds.height / 2;
+            if (commit) reorder(drag.source, target, before);
+            else setDropEdge(old => old?.id === target && old.before === before ? old : { id: target, before });
+        } else if (!commit) setDropEdge(null);
+        if (commit) endLayerDrag();
     }
     function layerHandle(item) {
         const id = key(item);
-        return h('button', { type: 'button', className: 'map-layer-grip', disabled: !canReorder, draggable: canReorder,
+        return h('button', { type: 'button', className: 'map-layer-grip', disabled: !canReorder,
             title: '拖动排序，或按上下方向键', 'aria-label': '调整' + item.name + '的顺序', 'aria-keyshortcuts': 'ArrowUp ArrowDown',
-            onDragStart: event => {
-                draggedLayer.current = id;
-                event.dataTransfer.effectAllowed = 'move';
-                event.dataTransfer.setData('application/x-guizhi-layer', id);
-                const row = event.currentTarget.closest('.map-layer-row');
-                event.dataTransfer.setDragImage(row, 12, event.clientY - row.getBoundingClientRect().top);
-            }, onDragEnd: endLayerDrag,
+            onPointerDown: event => {
+                if (!canReorder || event.button !== 0) return;
+                draggedLayer.current = { source: id, pointer: event.pointerId };
+                event.currentTarget.setPointerCapture(event.pointerId);
+            },
+            onPointerMove: event => layerDrop(event), onPointerUp: event => layerDrop(event, true),
+            onPointerCancel: endLayerDrag, onLostPointerCapture: endLayerDrag,
             onKeyDown: event => {
                 if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
                 event.preventDefault();
@@ -1948,13 +1964,9 @@ function WorkspaceMap({ layers, add, remove, moveLayer, renameLayer, selectLayer
                 ...layers.map((item, index) => showLayer(item) &&
                     h('div', { className: 'map-layer-entry', key: key(item),
                         'data-drop-edge': dropEdge?.id === key(item) ? (dropEdge.before ? 'before' : 'after') : undefined,
-                        onDragOver: event => layerDrop(event, key(item), false), onDrop: event => layerDrop(event, key(item), true),
-                        onDragLeave: event => {
-                            if (draggedLayer.current && !event.currentTarget.contains(event.relatedTarget)) {
-                                setDropEdge(old => old?.id === key(item) ? null : old);
-                            }
-                        } },
-                    h('div', { className: 'map-layer-row', 'data-ai-focus': focused(item) ? 'true' : undefined },
+                    },
+                    h('div', { className: 'map-layer-row', 'data-layer-order-id': key(item),
+                        'data-ai-focus': focused(item) ? 'true' : undefined },
                     layerHandle(item),
                     h('input', { type: 'checkbox', 'aria-label': '显示 ' + item.name, checked: !hidden.includes(key(item)), disabled: Boolean(edit) || busy,
                         onChange: () => toggle(key(item)) }),

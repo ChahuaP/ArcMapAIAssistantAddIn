@@ -1,5 +1,9 @@
 """Parameter meanings supplement the JSON schema generated from executor signatures."""
 PARAMETERS = {
+    "group_field": "用于分组的真实属性字段名，每个唯一值生成一个 KML。",
+    "naming": "sequence 按字段值排序后以 1、2、3 命名；group 用分组值命名。",
+    "sequence": "在第一列生成从 1 开始的行序号。",
+    "total_fields": "需要在最后一行求和的数值字段列表，必须包含在 fields 中。",
     "action": "地图操作种类。", "all_touched": "是否保留与裁切边界接触的所有像元。",
     "approval_source": "审批手续信息来源。", "approved_status": "认定为已批准的状态值。",
     "area_field": "可选的已有面积字段，以平方米计。", "as_of": "用于判定有效性的基准日期。",
@@ -61,6 +65,9 @@ RUN_INPUTS = {
 }
 
 OVERRIDES = {
+    ("presentation.export_table", "name"): "成果文件名，不包含扩展名或目录。",
+    ("presentation.export_grouped_kml", "style"): "可选，使用地图图层的符号样式及分类颜色。",
+    ("presentation.export_grouped_kml", "name"): "成果 ZIP 文件名称，不包含扩展名或目录。",
     ("xy.points", "x_field"): "源表的横坐标字段，地理坐标系对应经度。",
     ("xy.points", "y_field"): "源表的纵坐标字段，地理坐标系对应纬度。",
     ("xy.points", "source_crs"): "坐标值本身使用的二维地理或投影坐标系，例如 EPSG:4490；单位与该坐标系一致。",

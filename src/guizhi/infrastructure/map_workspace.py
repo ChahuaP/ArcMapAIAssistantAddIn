@@ -793,9 +793,9 @@ def export_layer(workspace, payload):
         file, name = source(workspace, ref)
         if extension in {"zip", "shp"}:
             return package_layer(workspace, file, output, name)
-        if extension == "csv":
+        if extension in {"csv", "xlsx"}:
             record = successful(run_operation(workspace.root, {"operation": "presentation.export_table",
-                "inputs": [material(file, name)], "parameters": {"fields": payload.get("fields")}}))
+                "inputs": [material(file, name)], "parameters": {"fields": payload.get("fields"), "format": extension}}))
             copyfile(read_artifact(workspace, record["id"], "table"), output)
         elif extension == "kml":
             from guizhi.infrastructure.map_kml import export_kml

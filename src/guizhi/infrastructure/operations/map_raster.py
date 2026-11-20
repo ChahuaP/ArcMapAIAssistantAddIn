@@ -94,6 +94,10 @@ def stretch_limits(file, modified, bands, mode):
         scale = min(1, 480 / max(src.width, src.height))
         sample = src.read(list(bands), out_shape=(len(bands), max(1, round(src.height * scale)),
                                                   max(1, round(src.width * scale))), masked=True)
+        if mode == "linked":
+            valid = (~np.ma.getmaskarray(sample) & np.isfinite(sample.data)).all(axis=0)
+            common = tuple(np.percentile(sample.data[:, valid], [2, 98])) if valid.any() else ()
+            return [common] * len(bands)
         result = []
         for band in sample:
             values = band.compressed()
@@ -115,7 +119,7 @@ def render(src, window, bands, file, appearance, detailed):
     appearance = appearance or {}
     mode = appearance.get("stretch", "percent")
     gamma = appearance.get("gamma", 1)
-    if mode not in {"percent", "raw", "natural"} or type(gamma) not in {float, int} or not .1 <= gamma <= 5:
+    if mode not in {"percent", "linked", "raw", "natural"} or type(gamma) not in {float, int} or not .1 <= gamma <= 5:
         raise ValueError("请选择有效的拉伸方式和伽马值")
     if mode == "natural" and len(bands) != 1:
         raise ValueError("自然断点分级适用于单波段")

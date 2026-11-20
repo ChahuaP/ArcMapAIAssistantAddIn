@@ -215,7 +215,9 @@ def execute(ctx, specification: dict):
         ctx.json("map-actions.json", actions, "map_actions")
     for kind, (run_id, checksum) in outputs.items():
         src = read_artifact(ctx.workspace, run_id, kind)
-        output = ctx.path(kind + src.suffix)
+        producer = records[next(step.id for step in steps if records[step.id]["id"] == run_id)]
+        named = producer["task"]["operation"] in {"presentation.export_table", "presentation.export_grouped_kml"}
+        output = ctx.path(src.name if named and not ctx.path(src.name).exists() else kind + src.suffix)
         shutil.copyfile(src, output)
         if ctx.record(kind, output)["sha256"] != checksum:
             raise ValueError("Published workflow artifact failed checksum verification")
